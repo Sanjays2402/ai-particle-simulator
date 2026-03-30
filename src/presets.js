@@ -212,4 +212,120 @@ target.set(
 const lum = 0.35 + Math.sin(time * controls.pulseRate + t * 10) * 0.2;
 color.setHSL(0.45 + t * 0.2, 0.9, lum);`,
   },
+  // === NEW PRESETS ===
+  {
+    id: 'tornado',
+    name: 'Tornado',
+    description: 'A spiraling funnel shape',
+    emoji: '🌪️',
+    code: `addControl('spin', 'Spin Speed', 0.5, 6, 3);
+addControl('width', 'Funnel Width', 0.5, 4, 2);
+setInfo('Tornado', 'A spiraling funnel shape');
+
+const t = i / count;
+const y = (t - 0.2) * 12;
+const funnelR = (0.2 + t * t) * controls.width;
+const angle = t * 30 + time * controls.spin + Math.sin(i * 127.1) * 0.3;
+const wobble = Math.sin(time * 2 + y * 0.5) * 0.3;
+target.set(
+  Math.cos(angle) * funnelR + wobble,
+  y,
+  Math.sin(angle) * funnelR + Math.cos(time * 1.5 + y * 0.5) * 0.3
+);
+color.setHSL(0.55 + t * 0.05, 0.5 + t * 0.4, 0.25 + t * 0.45);`,
+  },
+  {
+    id: 'lightning',
+    name: 'Lightning',
+    description: 'Branching lightning bolt shape',
+    emoji: '⚡',
+    code: `addControl('branches', 'Branches', 2, 8, 4);
+addControl('jitter', 'Jitter', 0.5, 4, 2);
+setInfo('Lightning', 'Branching lightning bolt');
+
+const branchCount = Math.floor(controls.branches);
+const branch = i % branchCount;
+const t = (i / count);
+const bAngle = (branch / branchCount) * Math.PI * 2;
+const y = (t - 0.5) * 14;
+const seed1 = Math.sin(i * 127.1 + branch * 17.3);
+const seed2 = Math.cos(i * 311.7 + branch * 23.7);
+const flicker = Math.sin(time * 8 + branch * 3) * 0.5 + 0.5;
+const jit = controls.jitter * seed1 * (1 - Math.abs(t - 0.5) * 1.5) * flicker;
+const jit2 = controls.jitter * seed2 * (1 - Math.abs(t - 0.5) * 1.5) * flicker;
+target.set(
+  Math.cos(bAngle) * 0.5 + jit,
+  y,
+  Math.sin(bAngle) * 0.5 + jit2
+);
+const brightness = 0.4 + flicker * 0.5;
+color.setHSL(0.17 + seed1 * 0.05, 0.9, brightness);`,
+  },
+  {
+    id: 'sound-wave',
+    name: 'Sound Wave',
+    description: '3D waveform visualization',
+    emoji: '🎵',
+    code: `addControl('freq', 'Frequency', 1, 10, 4);
+addControl('amp', 'Amplitude', 0.5, 4, 2);
+setInfo('Sound Wave', '3D waveform visualization');
+
+const gridW = Math.ceil(Math.sqrt(count));
+const gx = (i % gridW) / gridW;
+const gz = Math.floor(i / gridW) / gridW;
+const x = (gx - 0.5) * 14;
+const z = (gz - 0.5) * 14;
+const d = Math.sqrt(x * x + z * z);
+const wave = Math.sin(d * controls.freq - time * 3) * controls.amp * Math.exp(-d * 0.1);
+const wave2 = Math.cos(d * controls.freq * 0.7 - time * 2) * controls.amp * 0.3;
+target.set(x, wave + wave2, z);
+const h = 0.6 + wave * 0.05;
+color.setHSL(h, 0.85, 0.35 + Math.abs(wave) * 0.15);`,
+  },
+  {
+    id: 'neural-network',
+    name: 'Neural Network',
+    description: 'Nodes and connections pulsing',
+    emoji: '🕸️',
+    code: `addControl('layers', 'Layers', 2, 8, 5);
+addControl('pulse', 'Pulse', 0.5, 4, 1.5);
+setInfo('Neural Network', 'Nodes and connections pulsing');
+
+const layerCount = Math.floor(controls.layers);
+const layer = i % layerCount;
+const nodeInLayer = Math.floor(i / layerCount);
+const nodesPerLayer = Math.ceil(count / layerCount);
+const nt = nodeInLayer / nodesPerLayer;
+const layerX = (layer / (layerCount - 1) - 0.5) * 10;
+const angle = nt * Math.PI * 2;
+const layerR = 2 + Math.sin(layer * 1.5) * 1;
+const y = Math.sin(angle) * layerR;
+const z = Math.cos(angle) * layerR;
+const pulseV = Math.sin(time * controls.pulse + layer * 0.8 + nt * 6) * 0.3;
+target.set(layerX + pulseV, y + pulseV * 0.5, z);
+const signal = 0.5 + Math.sin(time * controls.pulse * 2 + layer * 1.2) * 0.4;
+color.setHSL(0.55 + layer * 0.06, 0.8, 0.25 + signal * 0.4);`,
+  },
+  {
+    id: 'fibonacci-spiral',
+    name: 'Fibonacci Spiral',
+    description: 'Golden ratio spiral with sunflower seed pattern',
+    emoji: '🌻',
+    code: `addControl('spread', 'Spread', 0.5, 5, 2);
+addControl('twist', 'Twist', 0, 2, 0.5);
+setInfo('Fibonacci Spiral', 'Golden ratio sunflower pattern');
+
+const golden = 2.399963229728653;
+const t = i / count;
+const r = Math.sqrt(t) * 6 * controls.spread;
+const theta = i * golden + time * controls.twist;
+const y = Math.sin(r * 0.5 + time) * 0.5;
+target.set(
+  Math.cos(theta) * r,
+  y,
+  Math.sin(theta) * r
+);
+const h = (t * 0.3 + 0.1 + time * 0.02) % 1.0;
+color.setHSL(h, 0.85, 0.35 + t * 0.35);`,
+  },
 ]

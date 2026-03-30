@@ -1,7 +1,11 @@
+import { useRef, useEffect } from 'react'
 import { useStore } from '../store'
+import { presets } from '../presets'
 
 export default function TopBar({ onSettings }) {
-  const { playing, setPlaying, loadRandom } = useStore()
+  const { playing, setPlaying, loadRandom, mouseAttract, setMouseAttract, audioReactive, setAudioReactive } = useStore()
+  const audioCtxRef = useRef(null)
+  const streamRef = useRef(null)
 
   const handleFullscreen = () => {
     if (document.fullscreenElement) document.exitFullscreen()
@@ -20,6 +24,92 @@ export default function TopBar({ onSettings }) {
     URL.revokeObjectURL(url)
   }
 
+  const handleScreenshot = () => {
+    const canvas = document.querySelector('#particle-canvas canvas')
+    if (!canvas) return
+    const { infoTitle, currentPreset } = useStore.getState()
+    const name = (infoTitle || currentPreset || 'particles').replace(/\s+/g, '-').toLowerCase()
+    const ts = Date.now()
+    const link = document.createElement('a')
+    link.download = `particle-${name}-${ts}.png`
+    link.href = canvas.toDataURL('image/png')
+    link.click()
+  }
+
+  const handleShare = () => {
+    const { particleFnSource, currentPreset, particleCount, speed, glowIntensity, visualStyle, theme } = useStore.getState()
+    const data = { code: particleFnSource, preset: currentPreset, count: particleCount, speed, glow: glowIntensity, style: visualStyle, theme }
+    const json = JSON.stringify(data)
+    const hash = btoa(encodeURIComponent(json))
+    const url = `${window.location.origin}${window.location.pathname}#share=${hash}`
+    navigator.clipboard.writeText(url).then(() => {
+      const notif = document.getElementById('perf-notif')
+      if (notif) { notif.textContent = '🔗 URL copied to clipboard!'; notif.style.opacity = '1'; setTimeout(() => notif.style.opacity = '0', 2000) }
+    }).catch(() => {
+      window.prompt('Share URL:', url)
+    })
+  }
+
+  const handleMic = async () => {
+    if (audioReactive) {
+      // Stop
+      setAudioReactive(false)
+      useStore.getState().setAudioLevel(0)
+      if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null }
+      if (audioCtxRef.current) { audioCtxRef.current.close(); audioCtxRef.current = null }
+      return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      streamRef.current = stream
+      const ctx = new AudioContext()
+      audioCtxRef.current = ctx
+      const src = ctx.createMediaStreamSource(stream)
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 256
+      src.connect(analyser)
+      const data = new Uint8Array(analyser.frequencyBinCount)
+      setAudioReactive(true)
+      const poll = () => {
+        if (!audioCtxRef.current) return
+        analyser.getByteFrequencyData(data)
+        let sum = 0
+        for (let i = 0; i < data.length; i++) sum += data[i]
+        const avg = sum / data.length / 255
+        useStore.getState().setAudioLevel(avg)
+        requestAnimationFrame(poll)
+      }
+      poll()
+    } catch (e) {
+      console.error('Mic access denied:', e)
+    }
+  }
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e) => {
+      // Don't capture when typing in inputs
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
+      const { setPlaying, playing, loadRandom, loadPreset, nextPreset, prevPreset } = useStore.getState()
+      switch (e.code) {
+        case 'Space': e.preventDefault(); setPlaying(!playing); break
+        case 'KeyR': loadRandom(); break
+        case 'KeyF': handleFullscreen(); break
+        case 'KeyS': handleScreenshot(); break
+        case 'ArrowLeft': e.preventDefault(); prevPreset(); break
+        case 'ArrowRight': e.preventDefault(); nextPreset(); break
+        case 'Digit1': case 'Digit2': case 'Digit3': case 'Digit4': case 'Digit5':
+        case 'Digit6': case 'Digit7': case 'Digit8': case 'Digit9': case 'Digit0': {
+          const num = e.code === 'Digit0' ? 9 : parseInt(e.code.slice(5)) - 1
+          if (num < presets.length) loadPreset(presets[num].id)
+          break
+        }
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
   return (
     <div className="h-12 flex items-center justify-between px-4 border-b"
       style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border)' }}>
@@ -29,17 +119,20 @@ export default function TopBar({ onSettings }) {
         </div>
       </div>
       <div className="flex items-center gap-1">
-        <Btn onClick={() => setPlaying(!playing)} title={playing ? 'Pause' : 'Play'}>
+        <Btn onClick={() => setPlaying(!playing)} title={playing ? 'Pause (Space)' : 'Play (Space)'}>
           {playing ? '⏸' : '▶️'}
         </Btn>
         <Btn onClick={() => {
-          // Reset camera by remounting canvas - simple approach
           const { loadPreset, currentPreset, loadCustomCode, particleFnSource, infoTitle, infoDesc } = useStore.getState()
           if (currentPreset) loadPreset(currentPreset)
           else loadCustomCode(particleFnSource, infoTitle, infoDesc)
         }} title="Reset Camera">⟲</Btn>
-        <Btn onClick={handleFullscreen} title="Fullscreen">⛶</Btn>
-        <Btn onClick={loadRandom} title="Random Preset">🎲</Btn>
+        <Btn onClick={handleFullscreen} title="Fullscreen (F)">⛶</Btn>
+        <Btn onClick={loadRandom} title="Random Preset (R)">🎲</Btn>
+        <Btn onClick={() => setMouseAttract(!mouseAttract)} title="Mouse Attract" active={mouseAttract}>🧲</Btn>
+        <Btn onClick={handleScreenshot} title="Screenshot (S)">📷</Btn>
+        <Btn onClick={handleShare} title="Share URL">🔗</Btn>
+        <Btn onClick={handleMic} title="Sound Reactivity" active={audioReactive}>🎤</Btn>
         <Btn onClick={handleExport} title="Export HTML">⬇</Btn>
         <Btn onClick={onSettings} title="Settings">⚙</Btn>
       </div>
@@ -47,13 +140,17 @@ export default function TopBar({ onSettings }) {
   )
 }
 
-function Btn({ children, onClick, title }) {
+function Btn({ children, onClick, title, active }) {
   return (
     <button
       onClick={onClick}
       title={title}
       className="w-9 h-9 flex items-center justify-center rounded-lg text-sm transition-all hover:scale-105"
-      style={{ background: 'var(--bg-tertiary)', color: 'var(--text-primary)' }}
+      style={{
+        background: active ? 'rgba(0,255,136,0.2)' : 'var(--bg-tertiary)',
+        color: active ? 'var(--neon)' : 'var(--text-primary)',
+        border: active ? '1px solid var(--neon)' : '1px solid transparent',
+      }}
     >
       {children}
     </button>
@@ -90,7 +187,6 @@ const controlValues={};
 const addControl=(id,label,min,max,initial)=>{controlValues[id]=initial};
 const setInfo=()=>{};
 const particleFn=new Function('i','count','target','color','time','THREE','addControl','setInfo','controls',${JSON.stringify(code)});
-// Run setup
 try{const _t=new THREE.Vector3(),_c=new THREE.Color();particleFn(0,COUNT,_t,_c,0,THREE,addControl,setInfo,controlValues)}catch(e){}
 
 const _target=new THREE.Vector3(),_color=new THREE.Color();

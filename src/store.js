@@ -1,12 +1,23 @@
 import { create } from 'zustand'
 import { presets } from './presets'
 
+const THEMES = {
+  neon:       { neon: '#00ff88', hueShift: 0 },
+  cyberpunk:  { neon: '#ff00ff', hueShift: 300 },
+  ocean:      { neon: '#00d4ff', hueShift: 200 },
+  fire:       { neon: '#ff6600', hueShift: 30 },
+  monochrome: { neon: '#cccccc', hueShift: 0, saturation: 0 },
+  rainbow:    { neon: '#ff00ff', hueShift: -1 }, // -1 = cycle
+}
+
+export { THEMES }
+
 export const useStore = create((set, get) => ({
   // Particle settings
   particleCount: 20000,
   speed: 1.0,
   glowIntensity: 0.3,
-  visualStyle: 'sparkle', // sparkle | plasma | blob | ring
+  visualStyle: 'sparkle',
 
   // Simulation state
   playing: true,
@@ -17,8 +28,17 @@ export const useStore = create((set, get) => ({
   infoDesc: '',
 
   // Dynamic controls from addControl()
-  dynamicControls: [], // [{id, label, min, max, value}]
-  dynamicValues: {},   // {id: value}
+  dynamicControls: [],
+  dynamicValues: {},
+
+  // New features
+  mouseAttract: false,
+  attractStrength: 2.0,
+  theme: 'neon',
+  trails: false,
+  performanceMode: false,
+  audioReactive: false,
+  audioLevel: 0,
 
   // AI settings
   aiApiKey: localStorage.getItem('ai-api-key') || '',
@@ -35,6 +55,18 @@ export const useStore = create((set, get) => ({
   setVisualStyle: (v) => set({ visualStyle: v }),
   setPlaying: (v) => set({ playing: v }),
   setPrompt: (v) => set({ prompt: v }),
+  setMouseAttract: (v) => set({ mouseAttract: v }),
+  setAttractStrength: (v) => set({ attractStrength: v }),
+  setTrails: (v) => set({ trails: v }),
+  setPerformanceMode: (v) => set({ performanceMode: v, ...(v ? { particleCount: Math.min(get().particleCount, 10000) } : {}) }),
+  setAudioReactive: (v) => set({ audioReactive: v }),
+  setAudioLevel: (v) => set({ audioLevel: v }),
+
+  setTheme: (t) => {
+    set({ theme: t })
+    const theme = THEMES[t]
+    if (theme) document.documentElement.style.setProperty('--neon', theme.neon)
+  },
 
   setAiSettings: (key, baseUrl, model) => {
     localStorage.setItem('ai-api-key', key)
@@ -80,6 +112,20 @@ export const useStore = create((set, get) => ({
     get().loadPreset(presets[idx].id)
   },
 
+  nextPreset: () => {
+    const { currentPreset } = get()
+    const idx = presets.findIndex(p => p.id === currentPreset)
+    const next = (idx + 1) % presets.length
+    get().loadPreset(presets[next].id)
+  },
+
+  prevPreset: () => {
+    const { currentPreset } = get()
+    const idx = presets.findIndex(p => p.id === currentPreset)
+    const prev = (idx - 1 + presets.length) % presets.length
+    get().loadPreset(presets[prev].id)
+  },
+
   generateFromPrompt: async () => {
     const { prompt, aiApiKey, aiBaseUrl, aiModel } = get()
     if (!prompt.trim()) return
@@ -108,7 +154,6 @@ export const useStore = create((set, get) => ({
       if (!res.ok) throw new Error(`API error: ${res.status}`)
       const data = await res.json()
       let code = data.choices?.[0]?.message?.content || ''
-      // Extract code from markdown fences
       const match = code.match(/```(?:javascript|js)?\n([\s\S]*?)```/)
       if (match) code = match[1]
       code = code.trim()
@@ -122,7 +167,6 @@ export const useStore = create((set, get) => ({
   },
 }))
 
-// Compile particle function from source code string
 function compileParticleFn(code) {
   const controls = []
   let title = ''
@@ -133,7 +177,6 @@ function compileParticleFn(code) {
   }
   const setInfo = (t, d) => { title = t; description = d }
 
-  // Execute the setup portion to collect controls and info
   try {
     const setupFn = new Function(
       'addControl', 'setInfo', 'THREE',
@@ -141,11 +184,8 @@ function compileParticleFn(code) {
     )
     const THREE = await_THREE()
     setupFn(addControl, setInfo, THREE)
-  } catch (e) {
-    // Setup may fail if code has runtime particle logic mixed in, that's ok
-  }
+  } catch (e) {}
 
-  // Build the per-particle function
   try {
     const fn = new Function(
       'i', 'count', 'target', 'color', 'time', 'THREE', 'addControl', 'setInfo', 'controls',
@@ -159,7 +199,6 @@ function compileParticleFn(code) {
 }
 
 function await_THREE() {
-  // Provide a minimal THREE namespace for setup phase
   return {
     Vector3: class { constructor(x,y,z){this.x=x||0;this.y=y||0;this.z=z||0} set(x,y,z){this.x=x;this.y=y;this.z=z;return this} },
     Color: class { constructor(){this.r=1;this.g=1;this.b=1} setHSL(h,s,l){this.r=h;this.g=s;this.b=l;return this} set(){return this} setRGB(r,g,b){this.r=r;this.g=g;this.b=b;return this} },
