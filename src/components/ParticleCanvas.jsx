@@ -32,12 +32,18 @@ function Particles() {
     }
   }, [particleFnSource])
 
-  // Build geometry
+  // Build geometry - scatter initially so bloom doesn't overexpose
   const { positions, colors } = useMemo(() => {
     const pos = new Float32Array(particleCount * 3)
     const col = new Float32Array(particleCount * 3)
-    for (let i = 0; i < particleCount * 3; i++) {
-      col[i] = 1
+    for (let i = 0; i < particleCount; i++) {
+      const i3 = i * 3
+      pos[i3] = (Math.random() - 0.5) * 20
+      pos[i3 + 1] = (Math.random() - 0.5) * 20
+      pos[i3 + 2] = (Math.random() - 0.5) * 20
+      col[i3] = 0.1
+      col[i3 + 1] = 0.1
+      col[i3 + 2] = 0.1
     }
     return { positions: pos, colors: col }
   }, [particleCount])
@@ -102,13 +108,14 @@ function Particles() {
         />
       </bufferGeometry>
       <pointsMaterial
-        size={pointSize}
+        size={pointSize * 0.25}
         sizeAttenuation
         vertexColors
         transparent
-        opacity={0.85}
+        opacity={0.2}
         blending={THREE.AdditiveBlending}
         depthWrite={false}
+        toneMapped={false}
       />
     </points>
   )
@@ -133,10 +140,11 @@ export default function ParticleCanvas() {
       />
       <EffectComposer>
         <Bloom
-          intensity={glowIntensity}
-          luminanceThreshold={0.1}
-          luminanceSmoothing={0.9}
-          radius={0.8}
+          intensity={glowIntensity * 0.6}
+          luminanceThreshold={0.8}
+          luminanceSmoothing={0.4}
+          radius={0.3}
+          mipmapBlur
         />
       </EffectComposer>
     </Canvas>

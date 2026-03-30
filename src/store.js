@@ -5,7 +5,7 @@ export const useStore = create((set, get) => ({
   // Particle settings
   particleCount: 20000,
   speed: 1.0,
-  glowIntensity: 1.5,
+  glowIntensity: 0.3,
   visualStyle: 'sparkle', // sparkle | plasma | blob | ring
 
   // Simulation state
