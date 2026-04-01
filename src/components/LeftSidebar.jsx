@@ -25,6 +25,11 @@ export default function LeftSidebar() {
     trails, setTrails,
     performanceMode, setPerformanceMode,
     theme, setTheme,
+    gravityEnabled, setGravityEnabled,
+    gravityStrength, setGravityStrength,
+    collisionsEnabled, setCollisionsEnabled,
+    forceFieldType, setForceFieldType,
+    forceFieldStrength, setForceFieldStrength,
   } = useStore()
 
   return (
@@ -50,6 +55,48 @@ export default function LeftSidebar() {
           <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Performance Mode</span>
           <Toggle value={performanceMode} onChange={setPerformanceMode} />
         </div>
+      </Section>
+
+      {/* Physics Engine */}
+      <Section title="Physics Engine">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Gravity</span>
+          <Toggle value={gravityEnabled} onChange={setGravityEnabled} />
+        </div>
+        {gravityEnabled && (
+          <Slider label="Gravity Strength" value={gravityStrength} min={0} max={2} step={0.1}
+            onChange={setGravityStrength} display={v => v.toFixed(1)} />
+        )}
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Collisions</span>
+          <Toggle value={collisionsEnabled} onChange={setCollisionsEnabled} />
+        </div>
+
+        <div className="mt-2 mb-1">
+          <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Force Field</span>
+        </div>
+        <div className="flex gap-1.5 flex-wrap mb-2">
+          {[
+            { id: 'attractor', label: '🧲 Attract', color: '#00ff88' },
+            { id: 'repulsor', label: '💥 Repulse', color: '#ff4444' },
+            { id: 'vortex', label: '🌀 Vortex', color: '#8844ff' },
+            { id: 'turbulence', label: '💨 Turb.', color: '#ffaa00' },
+          ].map(ff => (
+            <button key={ff.id}
+              onClick={() => setForceFieldType(forceFieldType === ff.id ? null : ff.id)}
+              className="px-2 py-1 rounded-md text-xs font-medium transition-all"
+              style={{
+                background: forceFieldType === ff.id ? ff.color : 'var(--bg-tertiary)',
+                color: forceFieldType === ff.id ? '#0a0a0f' : 'var(--text-secondary)',
+                border: forceFieldType === ff.id ? `1px solid ${ff.color}` : '1px solid transparent',
+              }}
+            >{ff.label}</button>
+          ))}
+        </div>
+        {forceFieldType && (
+          <Slider label="Field Strength" value={forceFieldStrength} min={0} max={5} step={0.1}
+            onChange={setForceFieldStrength} display={v => v.toFixed(1)} />
+        )}
       </Section>
 
       {/* Visual Style */}

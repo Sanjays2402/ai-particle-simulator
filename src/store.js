@@ -40,6 +40,13 @@ export const useStore = create((set, get) => ({
   audioReactive: false,
   audioLevel: 0,
 
+  // Physics engine
+  gravityEnabled: false,
+  gravityStrength: 0.5,
+  collisionsEnabled: false,
+  forceFieldType: null, // 'attractor' | 'repulsor' | 'vortex' | 'turbulence' | null
+  forceFieldStrength: 1.0,
+
   // AI settings
   aiApiKey: localStorage.getItem('ai-api-key') || '',
   aiBaseUrl: localStorage.getItem('ai-base-url') || 'https://api.openai.com/v1',
@@ -61,6 +68,11 @@ export const useStore = create((set, get) => ({
   setPerformanceMode: (v) => set({ performanceMode: v, ...(v ? { particleCount: Math.min(get().particleCount, 10000) } : {}) }),
   setAudioReactive: (v) => set({ audioReactive: v }),
   setAudioLevel: (v) => set({ audioLevel: v }),
+  setGravityEnabled: (v) => set({ gravityEnabled: v }),
+  setGravityStrength: (v) => set({ gravityStrength: v }),
+  setCollisionsEnabled: (v) => set({ collisionsEnabled: v }),
+  setForceFieldType: (v) => set({ forceFieldType: v }),
+  setForceFieldStrength: (v) => set({ forceFieldStrength: v }),
 
   setTheme: (t) => {
     set({ theme: t })
@@ -83,6 +95,14 @@ export const useStore = create((set, get) => ({
     const preset = presets.find(p => p.id === presetId)
     if (!preset) return
     const { fn, controls, title, description } = compileParticleFn(preset.code)
+    const physicsState = {}
+    if (preset.physics) {
+      physicsState.gravityEnabled = !!preset.physics.gravity
+      if (preset.physics.gravityStrength !== undefined) physicsState.gravityStrength = preset.physics.gravityStrength
+      physicsState.collisionsEnabled = !!preset.physics.collisions
+      physicsState.forceFieldType = preset.physics.forceField || null
+      if (preset.physics.forceFieldStrength !== undefined) physicsState.forceFieldStrength = preset.physics.forceFieldStrength
+    }
     set({
       currentPreset: presetId,
       particleFn: fn,
@@ -91,6 +111,7 @@ export const useStore = create((set, get) => ({
       dynamicValues: Object.fromEntries(controls.map(c => [c.id, c.value])),
       infoTitle: title || preset.name,
       infoDesc: description || preset.description,
+      ...physicsState,
     })
   },
 

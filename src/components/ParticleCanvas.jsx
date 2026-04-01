@@ -75,6 +75,8 @@ function Particles() {
 
   const timeRef = useRef(0)
   const errorRef = useRef(null)
+  const velocitiesRef = useRef(null)
+  const prevCountRef = useRef(0)
 
   const _target = useMemo(() => new THREE.Vector3(), [])
   const _color = useMemo(() => new THREE.Color(), [])
@@ -126,9 +128,35 @@ function Particles() {
     const t = timeRef.current
     const noop = () => {}
     const dv = useStore.getState().dynamicValues
-    const { mouseAttract, attractStrength, theme, audioLevel } = useStore.getState()
+    const { mouseAttract, attractStrength, theme, audioLevel,
+            gravityEnabled, gravityStrength, collisionsEnabled,
+            forceFieldType, forceFieldStrength } = useStore.getState()
     const themeData = THEMES[theme]
     const mousePos = window.__mousePos
+
+    // Ensure velocity array exists
+    if (!velocitiesRef.current || prevCountRef.current !== particleCount) {
+      velocitiesRef.current = new Float32Array(particleCount * 3)
+      prevCountRef.current = particleCount
+    }
+    const vel = velocitiesRef.current
+    const physicsActive = gravityEnabled || collisionsEnabled || forceFieldType
+    const dt = Math.min(delta, 0.05) // cap delta
+
+    // Spatial hash for collisions
+    let cellMap = null
+    if (collisionsEnabled) {
+      cellMap = {}
+      for (let idx = 0; idx < particleCount; idx++) {
+        const i3 = idx * 3
+        const cx = Math.floor(posArr[i3]) 
+        const cy = Math.floor(posArr[i3 + 1])
+        const cz = Math.floor(posArr[i3 + 2])
+        const key = (cx * 73856093 ^ cy * 19349663 ^ cz * 83492791) | 0
+        if (!cellMap[key]) cellMap[key] = []
+        cellMap[key].push(idx)
+      }
+    }
 
     for (let idx = 0; idx < particleCount; idx++) {
       _target.set(0, 0, 0)
@@ -138,6 +166,84 @@ function Particles() {
       } catch (e) {
         if (!errorRef.current) { errorRef.current = e.message; console.error('Runtime error:', e) }
         break
+      }
+
+      const i3 = idx * 3
+
+      // Physics: apply forces to velocity, then modify position
+      if (physicsActive) {
+        // Gravity
+        if (gravityEnabled) {
+          vel[i3 + 1] -= gravityStrength * 9.8 * dt
+        }
+
+        // Force fields
+        if (forceFieldType) {
+          const px = _target.x, py = _target.y, pz = _target.z
+          const dist = Math.sqrt(px * px + py * py + pz * pz) + 0.01
+          const radius = 10
+          if (dist < radius) {
+            const strength = forceFieldStrength * dt
+            if (forceFieldType === 'attractor') {
+              vel[i3]     -= (px / dist) * strength * 3
+              vel[i3 + 1] -= (py / dist) * strength * 3
+              vel[i3 + 2] -= (pz / dist) * strength * 3
+            } else if (forceFieldType === 'repulsor') {
+              vel[i3]     += (px / dist) * strength * 3
+              vel[i3 + 1] += (py / dist) * strength * 3
+              vel[i3 + 2] += (pz / dist) * strength * 3
+            } else if (forceFieldType === 'vortex') {
+              vel[i3]     += (-pz / dist) * strength * 4
+              vel[i3 + 1] += 0
+              vel[i3 + 2] += (px / dist) * strength * 4
+            } else if (forceFieldType === 'turbulence') {
+              vel[i3]     += Math.sin(py * 3 + t * 2) * strength * 5
+              vel[i3 + 1] += Math.cos(pz * 3 + t * 1.7) * strength * 5
+              vel[i3 + 2] += Math.sin(px * 3 + t * 2.3) * strength * 5
+            }
+          }
+        }
+
+        // Collisions - repel nearby particles
+        if (collisionsEnabled && cellMap) {
+          const cx = Math.floor(_target.x)
+          const cy = Math.floor(_target.y)
+          const cz = Math.floor(_target.z)
+          const key = (cx * 73856093 ^ cy * 19349663 ^ cz * 83492791) | 0
+          const neighbors = cellMap[key]
+          if (neighbors && neighbors.length > 1) {
+            for (let n = 0; n < neighbors.length; n++) {
+              const other = neighbors[n]
+              if (other === idx) continue
+              const o3 = other * 3
+              const dx = _target.x - posArr[o3]
+              const dy = _target.y - posArr[o3 + 1]
+              const dz = _target.z - posArr[o3 + 2]
+              const d2 = dx * dx + dy * dy + dz * dz
+              if (d2 < 0.25 && d2 > 0.0001) {
+                const d = Math.sqrt(d2)
+                const repulse = 0.5 * dt / d
+                vel[i3]     += dx * repulse
+                vel[i3 + 1] += dy * repulse
+                vel[i3 + 2] += dz * repulse
+              }
+            }
+          }
+        }
+
+        // Damping
+        vel[i3] *= 0.99; vel[i3 + 1] *= 0.99; vel[i3 + 2] *= 0.99
+
+        // Apply velocity to position
+        _target.x += vel[i3] * dt
+        _target.y += vel[i3 + 1] * dt
+        _target.z += vel[i3 + 2] * dt
+
+        // Floor bounce
+        if (gravityEnabled && _target.y < 0) {
+          _target.y = -_target.y * 0.3
+          vel[i3 + 1] = -vel[i3 + 1] * 0.7
+        }
       }
 
       // Mouse attraction
@@ -164,22 +270,18 @@ function Particles() {
 
       // Theme color transform
       if (themeData && themeData.hueShift !== 0) {
-        // Read HSL, shift hue
         const r = _color.r, g = _color.g, b = _color.b
         if (themeData.saturation === 0) {
           const lum = 0.299 * r + 0.587 * g + 0.114 * b
           _color.setRGB(lum, lum, lum)
         } else if (themeData.hueShift === -1) {
-          // Rainbow: shift by particle index + time
           const hShift = (idx / particleCount + t * 0.1) % 1.0
-          // Approximate: convert current color hue shift
           _color.offsetHSL(hShift, 0, 0)
         } else {
           _color.offsetHSL(themeData.hueShift / 360, 0, 0)
         }
       }
 
-      const i3 = idx * 3
       posArr[i3] = _target.x; posArr[i3 + 1] = _target.y; posArr[i3 + 2] = _target.z
       colArr[i3] = _color.r; colArr[i3 + 1] = _color.g; colArr[i3 + 2] = _color.b
     }
@@ -230,6 +332,30 @@ function TrailEffect() {
   return null
 }
 
+function ForceFieldVisual() {
+  const meshRef = useRef()
+  const forceFieldType = useStore(s => s.forceFieldType)
+  const forceFieldStrength = useStore(s => s.forceFieldStrength)
+
+  useFrame((_, delta) => {
+    if (!meshRef.current) return
+    meshRef.current.rotation.y += delta * 0.5
+    meshRef.current.rotation.x += delta * 0.3
+  })
+
+  if (!forceFieldType) return null
+
+  const colorMap = { attractor: '#00ff88', repulsor: '#ff4444', vortex: '#8844ff', turbulence: '#ffaa00' }
+  const col = colorMap[forceFieldType] || '#00ff88'
+
+  return (
+    <mesh ref={meshRef} position={[0, 0, 0]}>
+      <sphereGeometry args={[0.5, 16, 16]} />
+      <meshBasicMaterial color={col} transparent opacity={0.15 + forceFieldStrength * 0.05} wireframe />
+    </mesh>
+  )
+}
+
 export default function ParticleCanvas() {
   const glowIntensity = useStore(s => s.glowIntensity)
   const trails = useStore(s => s.trails)
@@ -276,6 +402,7 @@ export default function ParticleCanvas() {
         <color attach="background" args={['#0a0a0f']} />
         <Particles />
         <MouseAttractor />
+        <ForceFieldVisual />
         {trails && <TrailEffect />}
         <OrbitControls enableDamping dampingFactor={0.05} rotateSpeed={0.5} zoomSpeed={0.8} />
         <EffectComposer>

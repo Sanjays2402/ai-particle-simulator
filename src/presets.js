@@ -328,4 +328,68 @@ target.set(
 const h = (t * 0.3 + 0.1 + time * 0.02) % 1.0;
 color.setHSL(h, 0.85, 0.35 + t * 0.35);`,
   },
+  // === PHYSICS PRESETS ===
+  {
+    id: 'rain',
+    name: 'Rain',
+    description: 'Raindrops falling with gravity and bouncing off the ground',
+    emoji: '💧',
+    physics: { gravity: true, gravityStrength: 1.0 },
+    code: `setInfo('Rain', 'Raindrops falling from the sky');
+addControl('wind', 'Wind', -2, 2, 0.3);
+
+const t = i / count;
+const x = (Math.sin(i * 127.1) * 0.5) * 16 - 8;
+const z = (Math.cos(i * 311.7) * 0.5) * 16 - 8;
+const y = ((t * 20 + time * 2) % 16) - 2;
+const windOff = Math.sin(time * 0.5) * controls.wind;
+target.set(x + windOff, y, z);
+color.setHSL(0.58, 0.6, 0.4 + t * 0.3);`,
+  },
+  {
+    id: 'atom',
+    name: 'Atom',
+    description: 'Electrons orbiting a nucleus with orbital mechanics',
+    emoji: '⚛️',
+    physics: { forceField: 'attractor', forceFieldStrength: 0.3 },
+    code: `setInfo('Atom', 'Electrons orbiting a nucleus');
+addControl('orbitSpeed', 'Orbit Speed', 0.5, 5, 2);
+addControl('shells', 'Shells', 1, 5, 3);
+
+const shellCount = Math.floor(controls.shells);
+const shell = i % shellCount;
+const r = 1.5 + shell * 1.8;
+const particlesInShell = Math.ceil(count / shellCount);
+const idx = Math.floor(i / shellCount);
+const nt = idx / particlesInShell;
+const inclination = (shell * 0.4) + Math.sin(i * 73.1) * 0.2;
+const angle = nt * Math.PI * 2 + time * controls.orbitSpeed * (1 + shell * 0.3);
+const ci = Math.cos(inclination);
+const si = Math.sin(inclination);
+const x = Math.cos(angle) * r;
+const y = Math.sin(angle) * r * si;
+const z = Math.sin(angle) * r * ci;
+target.set(x, y, z);
+const hue = 0.55 + shell * 0.12;
+color.setHSL(hue, 0.9, 0.5 + Math.sin(angle + time) * 0.15);`,
+  },
+  {
+    id: 'billiards',
+    name: 'Billiards',
+    description: 'Particles bouncing on a flat plane like billiard balls',
+    emoji: '🎱',
+    physics: { collisions: true },
+    code: `setInfo('Billiards', 'Particles bouncing off each other on a flat plane');
+addControl('energy', 'Energy', 0.5, 4, 1.5);
+
+const t = i / count;
+const angle = Math.sin(i * 127.1) * Math.PI * 2;
+const dist = Math.sqrt(t) * 6;
+const spd = controls.energy;
+const x = Math.cos(angle + time * 0.3 * spd) * dist;
+const z = Math.sin(angle + time * 0.3 * spd) * dist;
+target.set(x, 0.1, z);
+const hue = (i * 0.618033988) % 1.0;
+color.setHSL(hue, 0.85, 0.45);`,
+  },
 ]
