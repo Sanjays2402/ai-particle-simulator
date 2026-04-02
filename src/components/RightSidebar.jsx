@@ -4,18 +4,28 @@ export default function RightSidebar() {
   const { dynamicControls, dynamicValues, setDynamicValue, infoTitle, infoDesc } = useStore()
 
   return (
-    <div className="w-64 flex flex-col overflow-y-auto shrink-0"
-      style={{ background: 'var(--bg-glass)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderLeft: '1px solid var(--border)' }}>
-      
+    <div style={{
+      width: 260,
+      display: 'flex',
+      flexDirection: 'column',
+      overflowY: 'auto',
+      flexShrink: 0,
+      background: 'rgba(8,8,14,0.9)',
+      backdropFilter: 'blur(20px)',
+      WebkitBackdropFilter: 'blur(20px)',
+      borderLeft: '1px solid rgba(255,255,255,0.04)',
+    }}>
       {/* Info Panel */}
-      <div className="p-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-        <h3 className="text-xs font-semibold uppercase tracking-wider mb-2"
-          style={{ color: 'var(--text-secondary)', fontSize: 11, letterSpacing: '0.05em' }}>Info</h3>
-        <h2 className="text-lg font-bold mb-1" style={{ color: 'var(--accent)' }}>
+      <div style={{ padding: '14px 16px', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+        <h3 style={{
+          fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
+          letterSpacing: '0.08em', color: '#5a5a70', marginBottom: 12,
+        }}>Info</h3>
+        <h2 style={{ fontSize: 17, fontWeight: 600, color: '#eeeef0', marginBottom: 4, letterSpacing: '-0.02em' }}>
           {infoTitle || 'No simulation'}
         </h2>
         {infoDesc && (
-          <p className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+          <p style={{ fontSize: 13, lineHeight: 1.5, color: '#7a7a90' }}>
             {infoDesc}
           </p>
         )}
@@ -23,14 +33,16 @@ export default function RightSidebar() {
 
       {/* Dynamic Controls */}
       {dynamicControls.length > 0 && (
-        <div className="p-4">
-          <h3 className="text-xs font-semibold uppercase tracking-wider mb-3"
-            style={{ color: 'var(--text-secondary)', fontSize: 11, letterSpacing: '0.05em' }}>Controls</h3>
+        <div style={{ padding: '14px 16px' }}>
+          <h3 style={{
+            fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
+            letterSpacing: '0.08em', color: '#5a5a70', marginBottom: 12,
+          }}>Controls</h3>
           {dynamicControls.map(c => (
-            <div key={c.id} className="mb-4">
-              <div className="flex justify-between text-xs mb-1.5">
-                <span style={{ color: 'var(--text-secondary)' }}>{c.label}</span>
-                <span style={{ color: 'var(--accent)' }}>
+            <div key={c.id} style={{ marginBottom: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
+                <span style={{ color: '#7a7a90' }}>{c.label}</span>
+                <span style={{ color: '#6366f1', fontWeight: 500 }}>
                   {(dynamicValues[c.id] ?? c.value).toFixed(1)}
                 </span>
               </div>
@@ -40,7 +52,7 @@ export default function RightSidebar() {
                 step={(c.max - c.min) / 100}
                 value={dynamicValues[c.id] ?? c.value}
                 onChange={e => setDynamicValue(c.id, parseFloat(e.target.value))}
-                className="w-full"
+                style={{ width: '100%' }}
               />
             </div>
           ))}
@@ -48,8 +60,10 @@ export default function RightSidebar() {
       )}
 
       {dynamicControls.length === 0 && (
-        <div className="p-4 flex-1 flex items-center justify-center">
-          <p className="text-xs text-center" style={{ color: 'var(--text-secondary)' }}>
+        <div style={{
+          padding: 16, flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <p style={{ fontSize: 13, textAlign: 'center', color: '#4a4a60' }}>
             Dynamic controls will appear here when the simulation uses addControl()
           </p>
         </div>

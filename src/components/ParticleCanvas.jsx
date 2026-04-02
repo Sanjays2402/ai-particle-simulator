@@ -423,7 +423,7 @@ export default function ParticleCanvas() {
       <Canvas
         camera={{ position: [0, 5, 15], fov: 60 }}
         gl={{ antialias: true, alpha: false, preserveDrawingBuffer: true }}
-        style={{ background: '#0a0a0f' }}
+        style={{ background: '#050508' }}
         id="particle-canvas"
       >
         <color attach="background" args={['#0a0a0f']} />

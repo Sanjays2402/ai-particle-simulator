@@ -4,7 +4,7 @@ import { presets } from '../presets'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring']
 const THEME_LIST = [
-  { id: 'neon', name: 'Neon', color: '#00ff88' },
+  { id: 'neon', name: 'Neon', color: '#6366f1' },
   { id: 'cyberpunk', name: 'Cyberpunk', color: '#ff00ff' },
   { id: 'ocean', name: 'Ocean', color: '#00d4ff' },
   { id: 'fire', name: 'Fire', color: '#ff6600' },
@@ -33,10 +33,17 @@ export default function LeftSidebar() {
   } = useStore()
 
   return (
-    <div className="w-72 flex flex-col overflow-y-auto shrink-0"
-      style={{ background: 'var(--bg-glass)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRight: '1px solid var(--border)' }}>
-      
-      {/* System Core */}
+    <div style={{
+      width: 280,
+      display: 'flex',
+      flexDirection: 'column',
+      overflowY: 'auto',
+      flexShrink: 0,
+      background: 'rgba(8,8,14,0.9)',
+      backdropFilter: 'blur(20px)',
+      WebkitBackdropFilter: 'blur(20px)',
+      borderRight: '1px solid rgba(255,255,255,0.04)',
+    }}>
       <Section title="System Core">
         <Slider label="Particles" value={particleCount} min={1000} max={performanceMode ? 10000 : 50000} step={1000}
           onChange={setParticleCount} display={v => `${(v/1000).toFixed(0)}K`} />
@@ -46,49 +53,41 @@ export default function LeftSidebar() {
           onChange={setGlowIntensity} display={v => v.toFixed(1)} />
         <Slider label="Attract Str." value={attractStrength} min={0} max={10} step={0.5}
           onChange={setAttractStrength} display={v => v.toFixed(1)} />
-        
-        <div className="flex items-center justify-between mt-2 mb-1">
-          <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Trails</span>
-          <Toggle value={trails} onChange={setTrails} />
-        </div>
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Performance Mode</span>
-          <Toggle value={performanceMode} onChange={setPerformanceMode} />
-        </div>
+
+        <ToggleRow label="Trails" value={trails} onChange={setTrails} />
+        <ToggleRow label="Performance Mode" value={performanceMode} onChange={setPerformanceMode} />
       </Section>
 
-      {/* Physics Engine */}
       <Section title="Physics Engine">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Gravity</span>
-          <Toggle value={gravityEnabled} onChange={setGravityEnabled} />
-        </div>
+        <ToggleRow label="Gravity" value={gravityEnabled} onChange={setGravityEnabled} />
         {gravityEnabled && (
           <Slider label="Gravity Strength" value={gravityStrength} min={0} max={2} step={0.1}
             onChange={setGravityStrength} display={v => v.toFixed(1)} />
         )}
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Collisions</span>
-          <Toggle value={collisionsEnabled} onChange={setCollisionsEnabled} />
-        </div>
+        <ToggleRow label="Collisions" value={collisionsEnabled} onChange={setCollisionsEnabled} />
 
-        <div className="mt-2 mb-1">
-          <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Force Field</span>
+        <div style={{ marginTop: 8, marginBottom: 6 }}>
+          <span style={{ fontSize: 12, color: '#7a7a90' }}>Force Field</span>
         </div>
-        <div className="flex gap-1.5 flex-wrap mb-2">
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
           {[
-            { id: 'attractor', label: '🧲 Attract', color: '#00ff88' },
-            { id: 'repulsor', label: '💥 Repulse', color: '#ff4444' },
-            { id: 'vortex', label: '🌀 Vortex', color: '#8844ff' },
-            { id: 'turbulence', label: '💨 Turb.', color: '#ffaa00' },
+            { id: 'attractor', label: '🧲 Attract', color: '#6366f1' },
+            { id: 'repulsor', label: '💥 Repulse', color: '#ef4444' },
+            { id: 'vortex', label: '🌀 Vortex', color: '#8b5cf6' },
+            { id: 'turbulence', label: '💨 Turb.', color: '#f59e0b' },
           ].map(ff => (
             <button key={ff.id}
               onClick={() => setForceFieldType(forceFieldType === ff.id ? null : ff.id)}
-              className="px-2 py-1 rounded-md text-xs font-medium transition-all"
               style={{
-                background: forceFieldType === ff.id ? `${ff.color}22` : 'var(--bg-tertiary)',
-                color: forceFieldType === ff.id ? ff.color : 'var(--text-secondary)',
-                border: forceFieldType === ff.id ? `1px solid ${ff.color}55` : '1px solid rgba(255,255,255,0.05)',
+                padding: '5px 10px',
+                borderRadius: 6,
+                fontSize: 11,
+                fontWeight: 500,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease-out',
+                background: forceFieldType === ff.id ? `${ff.color}18` : 'rgba(255,255,255,0.04)',
+                color: forceFieldType === ff.id ? ff.color : '#7a7a90',
+                border: forceFieldType === ff.id ? `1px solid ${ff.color}40` : '1px solid rgba(255,255,255,0.04)',
               }}
             >{ff.label}</button>
           ))}
@@ -99,37 +98,49 @@ export default function LeftSidebar() {
         )}
       </Section>
 
-      {/* Visual Style */}
       <Section title="Visual Style">
-        <div className="flex gap-2 flex-wrap">
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {STYLES.map(s => (
             <button key={s} onClick={() => setVisualStyle(s)}
-              className="px-3 py-1.5 rounded-md text-xs font-medium capitalize transition-all"
               style={{
-                background: visualStyle === s ? 'rgba(99,102,241,0.1)' : 'var(--bg-tertiary)',
-                color: visualStyle === s ? 'var(--accent)' : 'var(--text-secondary)',
-                border: visualStyle === s ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.05)',
+                padding: '10px 14px',
+                borderRadius: 6,
+                fontSize: 12,
+                fontWeight: 500,
+                textTransform: 'capitalize',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease-out',
+                background: visualStyle === s ? '#6366f1' : 'rgba(255,255,255,0.04)',
+                color: visualStyle === s ? '#ffffff' : '#7a7a90',
+                border: visualStyle === s ? '1px solid rgba(99,102,241,0.4)' : '1px solid rgba(255,255,255,0.04)',
               }}
             >{s}</button>
           ))}
         </div>
       </Section>
 
-      {/* Color Theme */}
       <Section title="Theme">
-        <div className="flex gap-2 flex-wrap">
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {THEME_LIST.map(t => (
             <button key={t.id} onClick={() => setTheme(t.id)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all"
               style={{
-                background: theme === t.id ? 'rgba(255,255,255,0.08)' : 'var(--bg-tertiary)',
-                border: theme === t.id ? `1px solid ${t.color.startsWith('linear') ? 'rgba(255,255,255,0.2)' : t.color + '55'}` : '1px solid rgba(255,255,255,0.05)',
-                color: 'var(--text-secondary)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 10px',
+                borderRadius: 6,
+                fontSize: 12,
+                fontWeight: 500,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease-out',
+                background: theme === t.id ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.04)',
+                border: theme === t.id ? `1px solid ${t.color.startsWith('linear') ? 'rgba(255,255,255,0.2)' : t.color + '40'}` : '1px solid rgba(255,255,255,0.04)',
+                color: '#7a7a90',
               }}
             >
               <span style={{
-                display: 'inline-block', width: 10, height: 10, borderRadius: '50%',
-                background: t.color,
+                display: 'inline-block', width: 6, height: 6, borderRadius: '50%',
+                background: t.color, flexShrink: 0,
               }} />
               {t.name}
             </button>
@@ -137,44 +148,97 @@ export default function LeftSidebar() {
         </div>
       </Section>
 
-      {/* Shape Presets */}
       <Section title="Shape Presets">
-        <div className="flex flex-col gap-1">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           {presets.map(p => (
             <button key={p.id} onClick={() => loadPreset(p.id)}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-left text-sm transition-all"
               style={{
-                background: currentPreset === p.id ? 'rgba(99,102,241,0.1)' : 'transparent',
-                color: currentPreset === p.id ? 'var(--accent)' : 'var(--text-secondary)',
-                border: currentPreset === p.id ? '1px solid rgba(99,102,241,0.3)' : '1px solid transparent',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '10px 12px',
+                borderRadius: 8,
+                textAlign: 'left',
+                fontSize: 13,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease-out',
+                background: currentPreset === p.id ? 'rgba(99,102,241,0.08)' : 'transparent',
+                color: currentPreset === p.id ? '#818cf8' : '#7a7a90',
+                border: currentPreset === p.id ? '1px solid rgba(99,102,241,0.2)' : '1px solid transparent',
+              }}
+              onMouseEnter={e => {
+                if (currentPreset !== p.id) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
+              }}
+              onMouseLeave={e => {
+                if (currentPreset !== p.id) e.currentTarget.style.background = 'transparent'
               }}
             >
-              <span>{p.emoji}</span>
+              <span style={{ fontSize: 16 }}>{p.emoji}</span>
               <span>{p.name}</span>
             </button>
           ))}
         </div>
       </Section>
 
-      {/* Smart Text Engine */}
       <Section title="Smart Text Engine">
         {!aiApiKey && (
-          <p className="text-xs mb-2" style={{ color: 'var(--text-secondary)' }}>
+          <p style={{ fontSize: 12, color: '#7a7a90', marginBottom: 8 }}>
             Configure API key in ⚙ Settings to enable AI generation
           </p>
         )}
         <textarea value={prompt} onChange={e => setPrompt(e.target.value)}
           placeholder="Describe a particle effect..." rows={3}
-          className="w-full rounded-lg p-3 text-sm resize-none outline-none"
-          style={{ background: 'rgba(255,255,255,0.03)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
+          style={{
+            width: '100%',
+            borderRadius: 8,
+            padding: 12,
+            fontSize: 13,
+            resize: 'none',
+            outline: 'none',
+            fontFamily: 'inherit',
+            background: 'rgba(255,255,255,0.03)',
+            color: '#eeeef0',
+            border: '1px solid rgba(255,255,255,0.06)',
+            transition: 'all 0.15s ease-out',
+          }}
+          onFocus={e => {
+            e.target.style.borderColor = 'rgba(99,102,241,0.4)'
+            e.target.style.boxShadow = '0 0 0 3px rgba(99,102,241,0.1)'
+          }}
+          onBlur={e => {
+            e.target.style.borderColor = 'rgba(255,255,255,0.06)'
+            e.target.style.boxShadow = 'none'
+          }}
         />
         <button onClick={generateFromPrompt} disabled={aiLoading || !prompt.trim()}
-          className="w-full mt-2 py-2 rounded-lg text-sm font-semibold transition-all disabled:opacity-40"
-          style={{ background: 'var(--accent)', color: '#ffffff' }}
+          style={{
+            width: '100%',
+            marginTop: 8,
+            padding: '10px 0',
+            borderRadius: 8,
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: aiLoading || !prompt.trim() ? 'not-allowed' : 'pointer',
+            transition: 'all 0.15s ease-out',
+            background: '#6366f1',
+            color: '#ffffff',
+            border: 'none',
+            opacity: aiLoading || !prompt.trim() ? 0.4 : 1,
+          }}
+          onMouseEnter={e => {
+            if (!aiLoading && prompt.trim()) {
+              e.currentTarget.style.background = '#818cf8'
+              e.currentTarget.style.boxShadow = '0 0 20px rgba(99,102,241,0.3)'
+            }
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = '#6366f1'
+            e.currentTarget.style.boxShadow = 'none'
+          }}
         >
           {aiLoading ? '⏳ Generating...' : '✦ Generate'}
         </button>
-        {aiError && <p className="text-xs mt-2 text-red-400">{aiError}</p>}
+        {aiError && <p style={{ fontSize: 12, marginTop: 8, color: '#ef4444' }}>{aiError}</p>}
       </Section>
     </div>
   )
@@ -182,8 +246,15 @@ export default function LeftSidebar() {
 
 function Section({ title, children }) {
   return (
-    <div className="p-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-      <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-secondary)', fontSize: 11, letterSpacing: '0.05em' }}>{title}</h3>
+    <div style={{ padding: '14px 16px', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+      <h3 style={{
+        fontSize: 11,
+        fontWeight: 600,
+        textTransform: 'uppercase',
+        letterSpacing: '0.08em',
+        color: '#5a5a70',
+        marginBottom: 12,
+      }}>{title}</h3>
       {children}
     </div>
   )
@@ -191,13 +262,22 @@ function Section({ title, children }) {
 
 function Slider({ label, value, min, max, step, onChange, display }) {
   return (
-    <div className="mb-3">
-      <div className="flex justify-between text-xs mb-1.5">
-        <span style={{ color: 'var(--text-secondary)' }}>{label}</span>
-        <span style={{ color: 'var(--accent)' }}>{display ? display(value) : value}</span>
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
+        <span style={{ color: '#7a7a90' }}>{label}</span>
+        <span style={{ color: '#6366f1', fontWeight: 500 }}>{display ? display(value) : value}</span>
       </div>
       <input type="range" min={min} max={max} step={step} value={value}
-        onChange={e => onChange(parseFloat(e.target.value))} className="w-full" />
+        onChange={e => onChange(parseFloat(e.target.value))} style={{ width: '100%' }} />
+    </div>
+  )
+}
+
+function ToggleRow({ label, value, onChange }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+      <span style={{ fontSize: 12, color: '#7a7a90' }}>{label}</span>
+      <Toggle value={value} onChange={onChange} />
     </div>
   )
 }
@@ -205,11 +285,28 @@ function Slider({ label, value, min, max, step, onChange, display }) {
 function Toggle({ value, onChange }) {
   return (
     <button onClick={() => onChange(!value)}
-      className="w-9 h-5 rounded-full transition-all relative"
-      style={{ background: value ? 'var(--accent)' : 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}
+      style={{
+        width: 36,
+        height: 20,
+        borderRadius: 10,
+        position: 'relative',
+        cursor: 'pointer',
+        transition: 'all 0.15s ease-out',
+        background: value ? '#6366f1' : 'rgba(255,255,255,0.08)',
+        border: 'none',
+        flexShrink: 0,
+      }}
     >
-      <div className="w-3.5 h-3.5 rounded-full absolute top-0.5 transition-all"
-        style={{ left: value ? 18 : 2, background: value ? '#0a0a0f' : 'var(--text-secondary)' }} />
+      <div style={{
+        width: 14,
+        height: 14,
+        borderRadius: '50%',
+        position: 'absolute',
+        top: 3,
+        left: value ? 19 : 3,
+        transition: 'all 0.15s ease-out',
+        background: value ? '#ffffff' : '#7a7a90',
+      }} />
     </button>
   )
 }

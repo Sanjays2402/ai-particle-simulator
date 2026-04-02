@@ -52,7 +52,6 @@ export default function TopBar({ onSettings }) {
 
   const handleMic = async () => {
     if (audioReactive) {
-      // Stop
       setAudioReactive(false)
       useStore.getState().setAudioLevel(0)
       if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null }
@@ -85,10 +84,8 @@ export default function TopBar({ onSettings }) {
     }
   }
 
-  // Keyboard shortcuts
   useEffect(() => {
     const handler = (e) => {
-      // Don't capture when typing in inputs
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
       const { setPlaying, playing, loadRandom, loadPreset, nextPreset, prevPreset } = useStore.getState()
       switch (e.code) {
@@ -111,14 +108,31 @@ export default function TopBar({ onSettings }) {
   }, [])
 
   return (
-    <div className="h-12 flex items-center justify-between px-4 sticky top-0 z-20"
-      style={{ background: 'rgba(10,10,15,0.8)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', borderBottom: '1px solid var(--border)' }}>
-      <div className="flex items-center gap-2">
-        <div className="text-lg font-bold tracking-tight" style={{ color: 'var(--accent)', letterSpacing: '-0.02em' }}>
+    <div style={{
+      height: 48,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '0 16px',
+      position: 'sticky',
+      top: 0,
+      zIndex: 20,
+      background: 'rgba(6,6,10,0.85)',
+      backdropFilter: 'blur(16px)',
+      WebkitBackdropFilter: 'blur(16px)',
+      borderBottom: '1px solid rgba(255,255,255,0.04)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{
+          fontSize: 15,
+          fontWeight: 600,
+          letterSpacing: '-0.02em',
+          color: '#eeeef0',
+        }}>
           ✦ Particle Simulator
-        </div>
+        </span>
       </div>
-      <div className="flex items-center gap-1">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         <Btn onClick={() => setPlaying(!playing)} title={playing ? 'Pause (Space)' : 'Play (Space)'}>
           {playing ? '⏸' : '▶️'}
         </Btn>
@@ -149,18 +163,26 @@ function RecordBtn({ isRecording, onClick }) {
     <button
       onClick={onClick}
       title={isRecording ? 'Stop Recording' : 'Record'}
-      className="w-9 h-9 flex items-center justify-center rounded-lg text-sm transition-all hover:scale-105"
       style={{
-        background: isRecording ? 'rgba(248,81,73,0.15)' : 'rgba(255,255,255,0.04)',
-        border: isRecording ? '1px solid #f85149' : '1px solid rgba(255,255,255,0.06)',
+        width: 32,
+        height: 32,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 8,
+        fontSize: 13,
+        cursor: 'pointer',
+        transition: 'all 0.15s ease-out',
+        background: isRecording ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.04)',
+        border: isRecording ? '1px solid rgba(239,68,68,0.25)' : '1px solid rgba(255,255,255,0.06)',
       }}
     >
       <span style={{
         display: 'inline-block',
-        width: isRecording ? 12 : 14,
-        height: isRecording ? 12 : 14,
+        width: isRecording ? 10 : 12,
+        height: isRecording ? 10 : 12,
         borderRadius: isRecording ? 2 : '50%',
-        background: '#f85149',
+        background: '#ef4444',
         animation: isRecording ? 'pulse-rec 1s ease-in-out infinite' : 'none',
       }} />
       <style>{`@keyframes pulse-rec { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }`}</style>
@@ -173,12 +195,31 @@ function Btn({ children, onClick, title, active }) {
     <button
       onClick={onClick}
       title={title}
-      className="w-9 h-9 flex items-center justify-center rounded-lg text-sm transition-all hover:scale-105"
       style={{
-        background: active ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)',
-        color: active ? 'var(--accent)' : 'var(--text-primary)',
-        border: active ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.06)',
-        ...(active ? {} : {}),
+        width: 32,
+        height: 32,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 8,
+        fontSize: 13,
+        cursor: 'pointer',
+        transition: 'all 0.15s ease-out',
+        background: active ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.04)',
+        color: active ? '#6366f1' : '#eeeef0',
+        border: active ? '1px solid rgba(99,102,241,0.25)' : '1px solid rgba(255,255,255,0.06)',
+      }}
+      onMouseEnter={e => {
+        if (!active) {
+          e.currentTarget.style.background = 'rgba(255,255,255,0.08)'
+          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'
+        }
+      }}
+      onMouseLeave={e => {
+        if (!active) {
+          e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
+          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)'
+        }
       }}
     >
       {children}
@@ -189,7 +230,7 @@ function Btn({ children, onClick, title, active }) {
 function generateExportHTML(code, title, count, glow) {
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>${title || 'Particle Simulation'}</title>
-<style>*{margin:0;padding:0}body{background:#0a0a0f;overflow:hidden}canvas{display:block}</style>
+<style>*{margin:0;padding:0}body{background:#050508;overflow:hidden}canvas{display:block}</style>
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"><\/script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js"><\/script>
 </head><body><script>

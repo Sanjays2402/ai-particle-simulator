@@ -15,7 +15,6 @@ export default function Timeline() {
   const currentTime = ((replayFrame / 10) || 0).toFixed(1)
   const totalTime = ((totalFrames / 10) || 0).toFixed(1)
 
-  // Auto-advance replay frames
   useEffect(() => {
     if (!isReplaying) {
       if (intervalRef.current) clearInterval(intervalRef.current)
@@ -43,9 +42,7 @@ export default function Timeline() {
     const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
     const frame = Math.floor(pct * (totalFrames - 1))
     setReplayFrame(frame)
-    if (!isReplaying) {
-      enterReplay()
-    }
+    if (!isReplaying) enterReplay()
   }, [totalFrames, isReplaying])
 
   if (totalFrames === 0) return null
@@ -53,95 +50,105 @@ export default function Timeline() {
   const progress = totalFrames > 1 ? (replayFrame / (totalFrames - 1)) * 100 : 0
 
   return (
-    <div className="h-14 flex items-center gap-3 px-4 border-t shrink-0"
-      style={{ background: 'var(--bg-glass)', backdropFilter: 'var(--glass-blur)', borderColor: 'var(--border)' }}>
-      
-      {/* Play/Pause Replay */}
-      <button
-        onClick={() => isReplaying ? setIsReplaying(false) : enterReplay()}
-        className="w-8 h-8 flex items-center justify-center rounded-md text-xs"
-        style={{ background: 'var(--bg-tertiary)', color: 'var(--text-primary)' }}
+    <div style={{
+      height: 52,
+      display: 'flex',
+      alignItems: 'center',
+      gap: 12,
+      padding: '0 16px',
+      flexShrink: 0,
+      background: 'rgba(8,8,14,0.9)',
+      backdropFilter: 'blur(20px)',
+      WebkitBackdropFilter: 'blur(20px)',
+      borderTop: '1px solid rgba(255,255,255,0.04)',
+    }}>
+      {/* Play/Pause */}
+      <button onClick={() => isReplaying ? setIsReplaying(false) : enterReplay()}
         title={isReplaying ? 'Pause Replay' : 'Play Replay'}
-      >
+        style={{
+          width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          borderRadius: 8, fontSize: 12, cursor: 'pointer', transition: 'all 0.15s ease-out',
+          background: 'rgba(255,255,255,0.04)', color: '#eeeef0', border: '1px solid rgba(255,255,255,0.06)',
+        }}>
         {isReplaying ? '⏸' : '▶'}
       </button>
 
       {/* Time */}
-      <span className="text-xs font-mono shrink-0" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>
+      <span style={{
+        fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: '#7a7a90',
+        minWidth: 70, flexShrink: 0,
+      }}>
         {currentTime}s / {totalTime}s
       </span>
 
       {/* Progress Bar */}
-      <div
-        ref={barRef}
-        onClick={handleBarClick}
-        className="flex-1 h-2 rounded-full cursor-pointer relative"
-        style={{ background: 'var(--bg-tertiary)' }}
-      >
-        <div
-          className="h-full rounded-full transition-all"
-          style={{
-            width: `${progress}%`,
-            background: 'linear-gradient(90deg, var(--accent), var(--accent-light))',
-          }}
-        />
-        <div
-          className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full"
-          style={{
-            left: `calc(${progress}% - 6px)`,
-            background: 'var(--accent)',
-            boxShadow: '0 0 8px rgba(99,102,241,0.5)',
-          }}
-        />
+      <div ref={barRef} onClick={handleBarClick}
+        style={{
+          flex: 1, height: 3, borderRadius: 2, cursor: 'pointer', position: 'relative',
+          background: 'rgba(255,255,255,0.06)',
+        }}>
+        <div style={{
+          height: '100%', borderRadius: 2,
+          width: `${progress}%`,
+          background: 'linear-gradient(90deg, #6366f1, #818cf8)',
+          transition: 'width 0.1s ease-out',
+        }} />
+        <div style={{
+          position: 'absolute', top: '50%', transform: 'translateY(-50%)',
+          left: `calc(${progress}% - 5px)`,
+          width: 10, height: 10, borderRadius: '50%',
+          background: '#6366f1',
+          boxShadow: '0 0 10px rgba(99,102,241,0.4)',
+        }} />
       </div>
 
       {/* Speed */}
       {[0.5, 1, 2].map(s => (
-        <button
-          key={s}
-          onClick={() => setReplaySpeed(s)}
-          className="px-2 py-1 rounded text-xs font-medium"
+        <button key={s} onClick={() => setReplaySpeed(s)}
           style={{
-            background: replaySpeed === s ? 'var(--neon)' : 'var(--bg-tertiary)',
-            color: replaySpeed === s ? '#0a0a0f' : 'var(--text-secondary)',
-          }}
-        >
+            padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 500,
+            cursor: 'pointer', transition: 'all 0.15s ease-out',
+            background: replaySpeed === s ? '#6366f1' : 'rgba(255,255,255,0.04)',
+            color: replaySpeed === s ? '#ffffff' : '#7a7a90',
+            border: 'none',
+          }}>
           {s}x
         </button>
       ))}
 
       {/* Loop */}
-      <button
-        onClick={() => setReplayLoop(!replayLoop)}
-        className="w-8 h-8 flex items-center justify-center rounded-md text-xs"
+      <button onClick={() => setReplayLoop(!replayLoop)} title="Loop"
         style={{
-          background: replayLoop ? 'rgba(0,255,136,0.15)' : 'var(--bg-tertiary)',
-          color: replayLoop ? 'var(--neon)' : 'var(--text-secondary)',
-          border: replayLoop ? '1px solid rgba(0,255,136,0.3)' : '1px solid transparent',
-        }}
-        title="Loop"
-      >
+          width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          borderRadius: 8, fontSize: 12, cursor: 'pointer', transition: 'all 0.15s ease-out',
+          background: replayLoop ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.04)',
+          color: replayLoop ? '#6366f1' : '#7a7a90',
+          border: replayLoop ? '1px solid rgba(99,102,241,0.25)' : '1px solid rgba(255,255,255,0.06)',
+        }}>
         🔁
       </button>
 
-      {/* Exit Replay */}
+      {/* Exit */}
       {isReplaying && (
-        <button
-          onClick={() => { exitReplay(); setPlaying(true); }}
-          className="px-3 py-1 rounded-md text-xs font-medium"
-          style={{ background: 'rgba(248,81,73,0.15)', color: '#f85149', border: '1px solid rgba(248,81,73,0.3)' }}
-        >
+        <button onClick={() => { exitReplay(); setPlaying(true) }}
+          style={{
+            padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 500,
+            cursor: 'pointer', transition: 'all 0.15s ease-out',
+            background: 'rgba(239,68,68,0.12)', color: '#ef4444',
+            border: '1px solid rgba(239,68,68,0.25)',
+          }}>
           Exit
         </button>
       )}
 
       {/* Clear */}
-      <button
-        onClick={clearRecording}
-        className="w-8 h-8 flex items-center justify-center rounded-md text-xs"
-        style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}
-        title="Clear Recording"
-      >
+      <button onClick={clearRecording} title="Clear Recording"
+        style={{
+          width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          borderRadius: 8, fontSize: 12, cursor: 'pointer', transition: 'all 0.15s ease-out',
+          background: 'rgba(255,255,255,0.04)', color: '#7a7a90',
+          border: '1px solid rgba(255,255,255,0.06)',
+        }}>
         🗑
       </button>
     </div>

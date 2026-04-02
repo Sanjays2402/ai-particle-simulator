@@ -13,28 +13,39 @@ export default function SettingsModal({ onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)' }}
-      onClick={onClose}>
-      <div className="w-96 rounded-2xl p-6" onClick={e => e.stopPropagation()}
-        style={{ background: 'var(--bg-glass)', backdropFilter: 'var(--glass-blur-strong)', border: '1px solid var(--border)' }}>
-        <h2 className="text-lg font-bold mb-4" style={{ color: 'var(--accent)' }}>
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 50,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(0,0,0,0.6)',
+      backdropFilter: 'blur(8px)',
+      WebkitBackdropFilter: 'blur(8px)',
+    }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: 384,
+        borderRadius: 16,
+        padding: 24,
+        background: 'rgba(12,12,20,0.95)',
+        backdropFilter: 'blur(30px)',
+        WebkitBackdropFilter: 'blur(30px)',
+        border: '1px solid rgba(255,255,255,0.08)',
+      }}>
+        <h2 style={{ fontSize: 18, fontWeight: 600, color: '#eeeef0', marginBottom: 20, letterSpacing: '-0.02em' }}>
           ⚙ AI Settings
         </h2>
         <Field label="API Base URL" value={url} onChange={setUrl} placeholder="https://api.openai.com/v1" />
         <Field label="API Key" value={key} onChange={setKey} placeholder="sk-..." type="password" />
         <Field label="Model" value={model} onChange={setModel} placeholder="gpt-4o-mini" />
-        <div className="flex gap-2 mt-5">
-          <button onClick={onClose}
-            className="flex-1 py-2 rounded-lg text-sm font-medium"
-            style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}>
-            Cancel
-          </button>
-          <button onClick={save}
-            className="flex-1 py-2 rounded-lg text-sm font-semibold"
-            style={{ background: 'var(--accent)', color: '#ffffff' }}>
-            Save
-          </button>
+        <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
+          <button onClick={onClose} style={{
+            flex: 1, padding: '10px 0', borderRadius: 8, fontSize: 13, fontWeight: 500,
+            background: 'rgba(255,255,255,0.04)', color: '#7a7a90', border: '1px solid rgba(255,255,255,0.06)',
+            cursor: 'pointer', transition: 'all 0.15s ease-out',
+          }}>Cancel</button>
+          <button onClick={save} style={{
+            flex: 1, padding: '10px 0', borderRadius: 8, fontSize: 13, fontWeight: 600,
+            background: '#6366f1', color: '#ffffff', border: 'none',
+            cursor: 'pointer', transition: 'all 0.15s ease-out',
+          }}>Save</button>
         </div>
       </div>
     </div>
@@ -43,8 +54,8 @@ export default function SettingsModal({ onClose }) {
 
 function Field({ label, value, onChange, placeholder, type = 'text' }) {
   return (
-    <div className="mb-3">
-      <label className="text-xs font-medium block mb-1" style={{ color: 'var(--text-secondary)' }}>
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: '#7a7a90', marginBottom: 6 }}>
         {label}
       </label>
       <input
@@ -52,11 +63,25 @@ function Field({ label, value, onChange, placeholder, type = 'text' }) {
         value={value}
         onChange={e => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full px-3 py-2 rounded-lg text-sm outline-none"
         style={{
-          background: 'var(--bg-tertiary)',
-          color: 'var(--text-primary)',
-          border: '1px solid var(--border)',
+          width: '100%',
+          padding: '8px 12px',
+          borderRadius: 8,
+          fontSize: 13,
+          outline: 'none',
+          fontFamily: 'inherit',
+          background: 'rgba(255,255,255,0.04)',
+          color: '#eeeef0',
+          border: '1px solid rgba(255,255,255,0.06)',
+          transition: 'all 0.15s ease-out',
+        }}
+        onFocus={e => {
+          e.target.style.borderColor = 'rgba(99,102,241,0.4)'
+          e.target.style.boxShadow = '0 0 0 3px rgba(99,102,241,0.1)'
+        }}
+        onBlur={e => {
+          e.target.style.borderColor = 'rgba(255,255,255,0.06)'
+          e.target.style.boxShadow = 'none'
         }}
       />
     </div>
