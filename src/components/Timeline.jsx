@@ -54,7 +54,7 @@ export default function Timeline() {
 
   return (
     <div className="h-14 flex items-center gap-3 px-4 border-t shrink-0"
-      style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border)' }}>
+      style={{ background: 'var(--bg-glass)', backdropFilter: 'var(--glass-blur)', borderColor: 'var(--border)' }}>
       
       {/* Play/Pause Replay */}
       <button
@@ -82,15 +82,15 @@ export default function Timeline() {
           className="h-full rounded-full transition-all"
           style={{
             width: `${progress}%`,
-            background: 'linear-gradient(90deg, var(--neon), #00ccff)',
+            background: 'linear-gradient(90deg, var(--accent), var(--accent-light))',
           }}
         />
         <div
           className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full"
           style={{
             left: `calc(${progress}% - 6px)`,
-            background: 'var(--neon)',
-            boxShadow: '0 0 8px rgba(0,255,136,0.5)',
+            background: 'var(--accent)',
+            boxShadow: '0 0 8px rgba(99,102,241,0.5)',
           }}
         />
       </div>

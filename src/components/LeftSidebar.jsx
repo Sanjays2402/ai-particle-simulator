@@ -33,8 +33,8 @@ export default function LeftSidebar() {
   } = useStore()
 
   return (
-    <div className="w-72 flex flex-col overflow-y-auto border-r shrink-0"
-      style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border)' }}>
+    <div className="w-72 flex flex-col overflow-y-auto shrink-0"
+      style={{ background: 'var(--bg-glass)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRight: '1px solid var(--border)' }}>
       
       {/* System Core */}
       <Section title="System Core">
@@ -86,9 +86,9 @@ export default function LeftSidebar() {
               onClick={() => setForceFieldType(forceFieldType === ff.id ? null : ff.id)}
               className="px-2 py-1 rounded-md text-xs font-medium transition-all"
               style={{
-                background: forceFieldType === ff.id ? ff.color : 'var(--bg-tertiary)',
-                color: forceFieldType === ff.id ? '#0a0a0f' : 'var(--text-secondary)',
-                border: forceFieldType === ff.id ? `1px solid ${ff.color}` : '1px solid transparent',
+                background: forceFieldType === ff.id ? `${ff.color}22` : 'var(--bg-tertiary)',
+                color: forceFieldType === ff.id ? ff.color : 'var(--text-secondary)',
+                border: forceFieldType === ff.id ? `1px solid ${ff.color}55` : '1px solid rgba(255,255,255,0.05)',
               }}
             >{ff.label}</button>
           ))}
@@ -106,8 +106,9 @@ export default function LeftSidebar() {
             <button key={s} onClick={() => setVisualStyle(s)}
               className="px-3 py-1.5 rounded-md text-xs font-medium capitalize transition-all"
               style={{
-                background: visualStyle === s ? 'var(--neon)' : 'var(--bg-tertiary)',
-                color: visualStyle === s ? '#0a0a0f' : 'var(--text-secondary)',
+                background: visualStyle === s ? 'rgba(99,102,241,0.1)' : 'var(--bg-tertiary)',
+                color: visualStyle === s ? 'var(--accent)' : 'var(--text-secondary)',
+                border: visualStyle === s ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.05)',
               }}
             >{s}</button>
           ))}
@@ -121,8 +122,8 @@ export default function LeftSidebar() {
             <button key={t.id} onClick={() => setTheme(t.id)}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all"
               style={{
-                background: theme === t.id ? 'rgba(255,255,255,0.1)' : 'var(--bg-tertiary)',
-                border: theme === t.id ? `1px solid ${t.color.startsWith('linear') ? '#fff' : t.color}` : '1px solid transparent',
+                background: theme === t.id ? 'rgba(255,255,255,0.08)' : 'var(--bg-tertiary)',
+                border: theme === t.id ? `1px solid ${t.color.startsWith('linear') ? 'rgba(255,255,255,0.2)' : t.color + '55'}` : '1px solid rgba(255,255,255,0.05)',
                 color: 'var(--text-secondary)',
               }}
             >
@@ -143,9 +144,9 @@ export default function LeftSidebar() {
             <button key={p.id} onClick={() => loadPreset(p.id)}
               className="flex items-center gap-2 px-3 py-2 rounded-lg text-left text-sm transition-all"
               style={{
-                background: currentPreset === p.id ? 'rgba(0,255,136,0.1)' : 'transparent',
-                color: currentPreset === p.id ? 'var(--neon)' : 'var(--text-secondary)',
-                border: currentPreset === p.id ? '1px solid rgba(0,255,136,0.3)' : '1px solid transparent',
+                background: currentPreset === p.id ? 'rgba(99,102,241,0.1)' : 'transparent',
+                color: currentPreset === p.id ? 'var(--accent)' : 'var(--text-secondary)',
+                border: currentPreset === p.id ? '1px solid rgba(99,102,241,0.3)' : '1px solid transparent',
               }}
             >
               <span>{p.emoji}</span>
@@ -165,11 +166,11 @@ export default function LeftSidebar() {
         <textarea value={prompt} onChange={e => setPrompt(e.target.value)}
           placeholder="Describe a particle effect..." rows={3}
           className="w-full rounded-lg p-3 text-sm resize-none outline-none"
-          style={{ background: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
+          style={{ background: 'rgba(255,255,255,0.03)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
         />
         <button onClick={generateFromPrompt} disabled={aiLoading || !prompt.trim()}
           className="w-full mt-2 py-2 rounded-lg text-sm font-semibold transition-all disabled:opacity-40"
-          style={{ background: 'var(--neon)', color: '#0a0a0f' }}
+          style={{ background: 'var(--accent)', color: '#ffffff' }}
         >
           {aiLoading ? '⏳ Generating...' : '✦ Generate'}
         </button>
@@ -181,8 +182,8 @@ export default function LeftSidebar() {
 
 function Section({ title, children }) {
   return (
-    <div className="p-4 border-b" style={{ borderColor: 'var(--border)' }}>
-      <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-secondary)' }}>{title}</h3>
+    <div className="p-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+      <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-secondary)', fontSize: 11, letterSpacing: '0.05em' }}>{title}</h3>
       {children}
     </div>
   )
@@ -193,7 +194,7 @@ function Slider({ label, value, min, max, step, onChange, display }) {
     <div className="mb-3">
       <div className="flex justify-between text-xs mb-1.5">
         <span style={{ color: 'var(--text-secondary)' }}>{label}</span>
-        <span style={{ color: 'var(--neon)' }}>{display ? display(value) : value}</span>
+        <span style={{ color: 'var(--accent)' }}>{display ? display(value) : value}</span>
       </div>
       <input type="range" min={min} max={max} step={step} value={value}
         onChange={e => onChange(parseFloat(e.target.value))} className="w-full" />
@@ -205,7 +206,7 @@ function Toggle({ value, onChange }) {
   return (
     <button onClick={() => onChange(!value)}
       className="w-9 h-5 rounded-full transition-all relative"
-      style={{ background: value ? 'var(--neon)' : 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
+      style={{ background: value ? 'var(--accent)' : 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}
     >
       <div className="w-3.5 h-3.5 rounded-full absolute top-0.5 transition-all"
         style={{ left: value ? 18 : 2, background: value ? '#0a0a0f' : 'var(--text-secondary)' }} />

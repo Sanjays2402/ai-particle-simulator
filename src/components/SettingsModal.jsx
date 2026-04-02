@@ -14,11 +14,11 @@ export default function SettingsModal({ onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.7)' }}
+      style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)' }}
       onClick={onClose}>
       <div className="w-96 rounded-2xl p-6" onClick={e => e.stopPropagation()}
-        style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-        <h2 className="text-lg font-bold mb-4" style={{ color: 'var(--neon)' }}>
+        style={{ background: 'var(--bg-glass)', backdropFilter: 'var(--glass-blur-strong)', border: '1px solid var(--border)' }}>
+        <h2 className="text-lg font-bold mb-4" style={{ color: 'var(--accent)' }}>
           ⚙ AI Settings
         </h2>
         <Field label="API Base URL" value={url} onChange={setUrl} placeholder="https://api.openai.com/v1" />
@@ -32,7 +32,7 @@ export default function SettingsModal({ onClose }) {
           </button>
           <button onClick={save}
             className="flex-1 py-2 rounded-lg text-sm font-semibold"
-            style={{ background: 'var(--neon)', color: '#0a0a0f' }}>
+            style={{ background: 'var(--accent)', color: '#ffffff' }}>
             Save
           </button>
         </div>

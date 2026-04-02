@@ -111,10 +111,10 @@ export default function TopBar({ onSettings }) {
   }, [])
 
   return (
-    <div className="h-12 flex items-center justify-between px-4 border-b"
-      style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border)' }}>
+    <div className="h-12 flex items-center justify-between px-4 sticky top-0 z-20"
+      style={{ background: 'rgba(10,10,15,0.8)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', borderBottom: '1px solid var(--border)' }}>
       <div className="flex items-center gap-2">
-        <div className="text-lg font-bold tracking-tight" style={{ color: 'var(--neon)' }}>
+        <div className="text-lg font-bold tracking-tight" style={{ color: 'var(--accent)', letterSpacing: '-0.02em' }}>
           ✦ Particle Simulator
         </div>
       </div>
@@ -151,8 +151,8 @@ function RecordBtn({ isRecording, onClick }) {
       title={isRecording ? 'Stop Recording' : 'Record'}
       className="w-9 h-9 flex items-center justify-center rounded-lg text-sm transition-all hover:scale-105"
       style={{
-        background: isRecording ? 'rgba(248,81,73,0.2)' : 'var(--bg-tertiary)',
-        border: isRecording ? '1px solid #f85149' : '1px solid transparent',
+        background: isRecording ? 'rgba(248,81,73,0.15)' : 'rgba(255,255,255,0.04)',
+        border: isRecording ? '1px solid #f85149' : '1px solid rgba(255,255,255,0.06)',
       }}
     >
       <span style={{
@@ -175,9 +175,10 @@ function Btn({ children, onClick, title, active }) {
       title={title}
       className="w-9 h-9 flex items-center justify-center rounded-lg text-sm transition-all hover:scale-105"
       style={{
-        background: active ? 'rgba(0,255,136,0.2)' : 'var(--bg-tertiary)',
-        color: active ? 'var(--neon)' : 'var(--text-primary)',
-        border: active ? '1px solid var(--neon)' : '1px solid transparent',
+        background: active ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)',
+        color: active ? 'var(--accent)' : 'var(--text-primary)',
+        border: active ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.06)',
+        ...(active ? {} : {}),
       }}
     >
       {children}
