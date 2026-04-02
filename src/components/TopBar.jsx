@@ -3,7 +3,7 @@ import { useStore } from '../store'
 import { presets } from '../presets'
 
 export default function TopBar({ onSettings }) {
-  const { playing, setPlaying, loadRandom, mouseAttract, setMouseAttract, audioReactive, setAudioReactive } = useStore()
+  const { playing, setPlaying, loadRandom, mouseAttract, setMouseAttract, audioReactive, setAudioReactive, isRecording, startRecording, stopRecording, recordingBuffer, enterReplay, isReplaying } = useStore()
   const audioCtxRef = useRef(null)
   const streamRef = useRef(null)
 
@@ -122,6 +122,10 @@ export default function TopBar({ onSettings }) {
         <Btn onClick={() => setPlaying(!playing)} title={playing ? 'Pause (Space)' : 'Play (Space)'}>
           {playing ? '⏸' : '▶️'}
         </Btn>
+        <RecordBtn isRecording={isRecording} onClick={() => isRecording ? stopRecording() : startRecording()} />
+        {recordingBuffer.length > 0 && !isReplaying && (
+          <Btn onClick={enterReplay} title="Enter Replay">🔁</Btn>
+        )}
         <Btn onClick={() => {
           const { loadPreset, currentPreset, loadCustomCode, particleFnSource, infoTitle, infoDesc } = useStore.getState()
           if (currentPreset) loadPreset(currentPreset)
@@ -137,6 +141,30 @@ export default function TopBar({ onSettings }) {
         <Btn onClick={onSettings} title="Settings">⚙</Btn>
       </div>
     </div>
+  )
+}
+
+function RecordBtn({ isRecording, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      title={isRecording ? 'Stop Recording' : 'Record'}
+      className="w-9 h-9 flex items-center justify-center rounded-lg text-sm transition-all hover:scale-105"
+      style={{
+        background: isRecording ? 'rgba(248,81,73,0.2)' : 'var(--bg-tertiary)',
+        border: isRecording ? '1px solid #f85149' : '1px solid transparent',
+      }}
+    >
+      <span style={{
+        display: 'inline-block',
+        width: isRecording ? 12 : 14,
+        height: isRecording ? 12 : 14,
+        borderRadius: isRecording ? 2 : '50%',
+        background: '#f85149',
+        animation: isRecording ? 'pulse-rec 1s ease-in-out infinite' : 'none',
+      }} />
+      <style>{`@keyframes pulse-rec { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }`}</style>
+    </button>
   )
 }
 

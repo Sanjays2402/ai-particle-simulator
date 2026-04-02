@@ -5,6 +5,7 @@ import TopBar from './components/TopBar'
 import LeftSidebar from './components/LeftSidebar'
 import RightSidebar from './components/RightSidebar'
 import PresetCarousel from './components/PresetCarousel'
+import Timeline from './components/Timeline'
 import SettingsModal from './components/SettingsModal'
 
 export default function App() {
@@ -48,6 +49,7 @@ export default function App() {
         </div>
         <RightSidebar />
       </div>
+      <Timeline />
       <PresetCarousel />
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
     </div>

@@ -47,6 +47,33 @@ export const useStore = create((set, get) => ({
   forceFieldType: null, // 'attractor' | 'repulsor' | 'vortex' | 'turbulence' | null
   forceFieldStrength: 1.0,
 
+  // Recording & Replay
+  isRecording: false,
+  recordingBuffer: [],
+  recordingStartTime: null,
+  isReplaying: false,
+  replayFrame: 0,
+  replaySpeed: 1,
+  replayLoop: false,
+  gifProgress: null, // null | { current, total } | 'done'
+
+  setIsRecording: (v) => set({ isRecording: v }),
+  setRecordingStartTime: (v) => set({ recordingStartTime: v }),
+  addRecordingFrame: (frame) => set(s => ({
+    recordingBuffer: [...s.recordingBuffer, frame]
+  })),
+  clearRecording: () => set({ recordingBuffer: [], recordingStartTime: null, isReplaying: false, replayFrame: 0 }),
+  setIsReplaying: (v) => set({ isReplaying: v }),
+  setReplayFrame: (v) => set({ replayFrame: v }),
+  setReplaySpeed: (v) => set({ replaySpeed: v }),
+  setReplayLoop: (v) => set({ replayLoop: v }),
+  setGifProgress: (v) => set({ gifProgress: v }),
+
+  startRecording: () => set({ isRecording: true, recordingBuffer: [], recordingStartTime: Date.now(), isReplaying: false }),
+  stopRecording: () => set({ isRecording: false }),
+  enterReplay: () => set(s => s.recordingBuffer.length > 0 ? { isReplaying: true, replayFrame: 0, playing: false } : {}),
+  exitReplay: () => set({ isReplaying: false, playing: true }),
+
   // AI settings
   aiApiKey: localStorage.getItem('ai-api-key') || '',
   aiBaseUrl: localStorage.getItem('ai-base-url') || 'https://api.openai.com/v1',

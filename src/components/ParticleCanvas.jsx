@@ -287,6 +287,33 @@ function Particles() {
     }
     geo.attributes.position.needsUpdate = true
     geo.attributes.color.needsUpdate = true
+
+    // Recording: capture snapshot every ~100ms (every 6 frames)
+    const store = useStore.getState()
+    if (store.isRecording && store.recordingBuffer.length < 300) {
+      if (!this._recFrameCount) this._recFrameCount = 0
+      this._recFrameCount++
+      if (this._recFrameCount % 6 === 0) {
+        store.addRecordingFrame({
+          positions: new Float32Array(posArr),
+          colors: new Float32Array(colArr),
+        })
+      }
+    } else if (!store.isRecording) {
+      this._recFrameCount = 0
+    }
+
+    // Replay: override positions/colors from buffer
+    if (store.isReplaying && store.recordingBuffer.length > 0) {
+      const frame = store.recordingBuffer[Math.min(store.replayFrame, store.recordingBuffer.length - 1)]
+      if (frame) {
+        const len = Math.min(frame.positions.length, posArr.length)
+        posArr.set(frame.positions.subarray(0, len))
+        colArr.set(frame.colors.subarray(0, len))
+        geo.attributes.position.needsUpdate = true
+        geo.attributes.color.needsUpdate = true
+      }
+    }
   })
 
   return (
