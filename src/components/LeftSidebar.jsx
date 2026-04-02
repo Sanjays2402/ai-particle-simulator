@@ -30,6 +30,9 @@ export default function LeftSidebar() {
     collisionsEnabled, setCollisionsEnabled,
     forceFieldType, setForceFieldType,
     forceFieldStrength, setForceFieldStrength,
+    favoritedPresets, toggleFavorite,
+    presetSearch, setPresetSearch,
+    showFavoritesOnly, setShowFavoritesOnly,
   } = useStore()
 
   return (
@@ -149,8 +152,42 @@ export default function LeftSidebar() {
       </Section>
 
       <Section title="Shape Presets">
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10, alignItems: 'center' }}>
+          <div style={{ position: 'relative', flex: 1 }}>
+            <input
+              type="text"
+              value={presetSearch}
+              onChange={e => setPresetSearch(e.target.value)}
+              placeholder="Search presets..."
+              style={{
+                width: '100%', padding: '6px 28px 6px 10px', borderRadius: 6, fontSize: 12,
+                background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
+                color: '#eeeef0', outline: 'none', transition: 'all 0.15s ease-out',
+              }}
+              onFocus={e => e.target.style.borderColor = 'rgba(99,102,241,0.4)'}
+              onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.06)'}
+            />
+            {presetSearch && (
+              <button onClick={() => setPresetSearch('')}
+                style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
+                  background: 'none', border: 'none', color: '#7a7a90', cursor: 'pointer', fontSize: 12 }}>✕</button>
+            )}
+          </div>
+          <button onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
+            style={{
+              padding: '5px 10px', borderRadius: 6, fontSize: 11, fontWeight: 500, cursor: 'pointer',
+              background: showFavoritesOnly ? 'rgba(245,158,11,0.12)' : 'rgba(255,255,255,0.04)',
+              color: showFavoritesOnly ? '#f59e0b' : '#7a7a90',
+              border: showFavoritesOnly ? '1px solid rgba(245,158,11,0.25)' : '1px solid rgba(255,255,255,0.06)',
+              transition: 'all 0.15s ease-out', whiteSpace: 'nowrap',
+            }}>★ Favs</button>
+        </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {presets.map(p => (
+          {presets.filter(p => {
+            const matchSearch = !presetSearch || p.name.toLowerCase().includes(presetSearch.toLowerCase())
+            const matchFav = !showFavoritesOnly || favoritedPresets.includes(p.id)
+            return matchSearch && matchFav
+          }).map(p => (
             <button key={p.id} onClick={() => loadPreset(p.id)}
               style={{
                 display: 'flex',
@@ -174,7 +211,12 @@ export default function LeftSidebar() {
               }}
             >
               <span style={{ fontSize: 16 }}>{p.emoji}</span>
-              <span>{p.name}</span>
+              <span style={{ flex: 1 }}>{p.name}</span>
+              <span onClick={e => { e.stopPropagation(); toggleFavorite(p.id); }}
+                style={{ fontSize: 14, cursor: 'pointer', color: favoritedPresets.includes(p.id) ? '#f59e0b' : '#4a4a60',
+                  transition: 'color 0.15s ease-out' }}>
+                {favoritedPresets.includes(p.id) ? '★' : '☆'}
+              </span>
             </button>
           ))}
         </div>

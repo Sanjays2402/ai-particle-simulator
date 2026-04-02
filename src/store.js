@@ -74,6 +74,36 @@ export const useStore = create((set, get) => ({
   enterReplay: () => set(s => s.recordingBuffer.length > 0 ? { isReplaying: true, replayFrame: 0, playing: false } : {}),
   exitReplay: () => set({ isReplaying: false, playing: true }),
 
+  // Favorites & Search
+  favoritedPresets: JSON.parse(localStorage.getItem('favorite-presets') || '[]'),
+  presetSearch: '',
+  showFavoritesOnly: false,
+
+  toggleFavorite: (id) => set(s => {
+    const favs = s.favoritedPresets.includes(id)
+      ? s.favoritedPresets.filter(f => f !== id)
+      : [...s.favoritedPresets, id]
+    localStorage.setItem('favorite-presets', JSON.stringify(favs))
+    return { favoritedPresets: favs }
+  }),
+  setPresetSearch: (v) => set({ presetSearch: v }),
+  setShowFavoritesOnly: (v) => set({ showFavoritesOnly: v }),
+
+  // Preset thumbnails
+  capturePresetThumbnail: (presetId) => {
+    try {
+      const canvas = document.querySelector('#particle-canvas canvas')
+      if (!canvas) return
+      const tmpCanvas = document.createElement('canvas')
+      tmpCanvas.width = 120
+      tmpCanvas.height = 80
+      const ctx = tmpCanvas.getContext('2d')
+      ctx.drawImage(canvas, 0, 0, 120, 80)
+      const dataUrl = tmpCanvas.toDataURL('image/jpeg', 0.5)
+      localStorage.setItem(`preset-thumb-${presetId}`, dataUrl)
+    } catch (e) { console.warn('Thumbnail capture failed:', e) }
+  },
+
   // AI settings
   aiApiKey: localStorage.getItem('ai-api-key') || '',
   aiBaseUrl: localStorage.getItem('ai-base-url') || 'https://api.openai.com/v1',
@@ -140,6 +170,7 @@ export const useStore = create((set, get) => ({
       infoDesc: description || preset.description,
       ...physicsState,
     })
+    setTimeout(() => get().capturePresetThumbnail(presetId), 2000)
   },
 
   loadCustomCode: (code, title, description) => {
