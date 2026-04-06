@@ -383,6 +383,27 @@ function ForceFieldVisual() {
   )
 }
 
+function CameraControls() {
+  const orbitSpeed = useStore(s => s.orbitSpeed)
+  const autoRotate = useStore(s => s.autoRotate)
+  const autoRotateSpeed = useStore(s => s.autoRotateSpeed)
+  const minDistance = useStore(s => s.minDistance)
+  const maxDistance = useStore(s => s.maxDistance)
+
+  return (
+    <OrbitControls
+      enableDamping
+      dampingFactor={0.05}
+      rotateSpeed={orbitSpeed}
+      zoomSpeed={0.8}
+      autoRotate={autoRotate}
+      autoRotateSpeed={autoRotateSpeed}
+      minDistance={minDistance}
+      maxDistance={maxDistance}
+    />
+  )
+}
+
 export default function ParticleCanvas() {
   const glowIntensity = useStore(s => s.glowIntensity)
   const trails = useStore(s => s.trails)
@@ -431,7 +452,7 @@ export default function ParticleCanvas() {
         <MouseAttractor />
         <ForceFieldVisual />
         {trails && <TrailEffect />}
-        <OrbitControls enableDamping dampingFactor={0.05} rotateSpeed={0.5} zoomSpeed={0.8} />
+        <CameraControls />
         <EffectComposer>
           <Bloom intensity={glowIntensity * 0.6} luminanceThreshold={0.8} luminanceSmoothing={0.4} radius={0.3} mipmapBlur />
         </EffectComposer>

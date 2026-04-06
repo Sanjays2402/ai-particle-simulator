@@ -328,6 +328,110 @@ target.set(
 const h = (t * 0.3 + 0.1 + time * 0.02) % 1.0;
 color.setHSL(h, 0.85, 0.35 + t * 0.35);`,
   },
+  // === GALLERY PRESETS (fire, snow, nebula, sparkle) ===
+  {
+    id: 'fire',
+    name: 'Fire',
+    description: 'Roaring flames rising into the air',
+    emoji: '🔥',
+    code: `addControl('intensity', 'Intensity', 0.5, 4, 2);
+addControl('width', 'Width', 1, 6, 3);
+setInfo('Fire', 'Roaring flames rising into the air');
+
+const t = i / count;
+const seed1 = Math.sin(i * 127.1) * 0.5;
+const seed2 = Math.cos(i * 311.7) * 0.5;
+const seed3 = Math.sin(i * 73.1) * 0.5;
+const life = (t * 4 + time * 1.5) % 4;
+const height = life * controls.intensity;
+const spread = (1 - life / 4) * controls.width * 0.5;
+const flicker = Math.sin(time * 8 + i * 0.1) * 0.3;
+target.set(
+  seed1 * spread + flicker * spread * 0.3,
+  height - 2,
+  seed2 * spread + seed3 * 0.2
+);
+const fade = Math.max(0, 1 - life / 4);
+const h = 0.05 - life * 0.015;
+color.setHSL(Math.max(0, h), 1.0, 0.25 + fade * 0.45);`,
+  },
+  {
+    id: 'snow',
+    name: 'Snow',
+    description: 'Gentle snowflakes drifting down',
+    emoji: '❄️',
+    code: `addControl('wind', 'Wind', -2, 2, 0.5);
+addControl('density', 'Density', 1, 4, 2);
+setInfo('Snow', 'Gentle snowflakes drifting down');
+
+const t = i / count;
+const seed1 = Math.sin(i * 127.1) * 0.5;
+const seed2 = Math.cos(i * 311.7) * 0.5;
+const seed3 = Math.sin(i * 73.1) * 0.5;
+const fall = ((t * 20 + time * 0.5 + seed3 * 3) % 14) - 4;
+const drift = Math.sin(time * 0.7 + i * 0.01) * 0.5 * controls.wind;
+const sway = Math.sin(time * 1.2 + seed1 * 10) * 0.3;
+const area = controls.density * 4;
+target.set(
+  seed1 * area * 2 + drift + sway,
+  4 - fall,
+  seed2 * area * 2
+);
+const brightness = 0.7 + seed3 * 0.15;
+color.setHSL(0.58, 0.08, brightness);`,
+  },
+  {
+    id: 'nebula',
+    name: 'Nebula',
+    description: 'A swirling cosmic nebula cloud',
+    emoji: '🌫️',
+    code: `addControl('turbulence', 'Turbulence', 0.5, 4, 1.5);
+addControl('scale', 'Scale', 1, 8, 4);
+setInfo('Nebula', 'A swirling cosmic nebula cloud');
+
+const t = i / count;
+const seed1 = Math.sin(i * 127.1) * 0.5;
+const seed2 = Math.cos(i * 311.7) * 0.5;
+const seed3 = Math.sin(i * 73.1) * 0.5;
+const seed4 = Math.cos(i * 43.7) * 0.5;
+const s = controls.scale;
+const turb = controls.turbulence;
+const baseX = seed1 * s;
+const baseY = seed2 * s * 0.6;
+const baseZ = seed3 * s;
+const swirl = Math.sin(baseX * 0.5 + time * 0.2) * turb;
+const drift = Math.cos(baseZ * 0.5 + time * 0.15) * turb;
+const pulse = Math.sin(time * 0.3 + t * 6) * 0.2;
+target.set(
+  baseX + swirl + Math.sin(time * 0.1 + seed4 * 4) * 0.5,
+  baseY + drift * 0.5 + pulse,
+  baseZ + drift + Math.cos(time * 0.15 + seed1 * 3) * 0.4
+);
+const h = (0.7 + seed1 * 0.2 + Math.sin(time * 0.1) * 0.05) % 1.0;
+color.setHSL(h, 0.6 + seed2 * 0.3, 0.2 + Math.abs(seed3) * 0.35);`,
+  },
+  {
+    id: 'sparkle',
+    name: 'Sparkle',
+    description: 'Twinkling glitter particles in all directions',
+    emoji: '✨',
+    code: `addControl('spread', 'Spread', 1, 8, 4);
+addControl('twinkle', 'Twinkle Speed', 1, 10, 5);
+setInfo('Sparkle', 'Twinkling glitter particles');
+
+const t = i / count;
+const phi = Math.acos(1 - 2 * t);
+const theta = Math.PI * (1 + Math.sqrt(5)) * i;
+const r = controls.spread * (0.3 + Math.abs(Math.sin(i * 127.1)) * 0.7);
+target.set(
+  Math.sin(phi) * Math.cos(theta) * r,
+  Math.sin(phi) * Math.sin(theta) * r,
+  Math.cos(phi) * r
+);
+const twinkle = Math.sin(time * controls.twinkle + i * 1.7) * 0.5 + 0.5;
+const hue = (i * 0.618033988 + time * 0.02) % 1.0;
+color.setHSL(hue, 0.7 + twinkle * 0.3, 0.15 + twinkle * 0.55);`,
+  },
   // === PHYSICS PRESETS ===
   {
     id: 'rain',

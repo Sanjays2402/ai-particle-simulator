@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useStore, THEMES } from '../store'
 import { presets } from '../presets'
+import { GifEncoder } from '../lib/gifEncoder'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring']
 const THEME_LIST = [
@@ -25,6 +26,12 @@ export default function LeftSidebar() {
     trails, setTrails,
     performanceMode, setPerformanceMode,
     theme, setTheme,
+    orbitSpeed, setOrbitSpeed,
+    autoRotate, setAutoRotate,
+    autoRotateSpeed, setAutoRotateSpeed,
+    minDistance, setMinDistance,
+    maxDistance, setMaxDistance,
+    isExportingGif, gifProgress,
     gravityEnabled, setGravityEnabled,
     gravityStrength, setGravityStrength,
     collisionsEnabled, setCollisionsEnabled,
@@ -34,6 +41,54 @@ export default function LeftSidebar() {
     presetSearch, setPresetSearch,
     showFavoritesOnly, setShowFavoritesOnly,
   } = useStore()
+
+  const exportGif = async () => {
+    const canvas = document.querySelector('#particle-canvas canvas')
+    if (!canvas) return
+    const store = useStore.getState()
+    store.isExportingGif = true
+    useStore.setState({ isExportingGif: true, gifProgress: null })
+
+    const w = Math.min(canvas.width, 480)
+    const h = Math.round(w * (canvas.height / canvas.width))
+    const tmpCanvas = document.createElement('canvas')
+    tmpCanvas.width = w
+    tmpCanvas.height = h
+    const ctx = tmpCanvas.getContext('2d', { willReadFrequently: true })
+
+    const fps = 10
+    const duration = 3
+    const totalFrames = fps * duration
+    const frameDelay = 1000 / fps
+    const frames = []
+
+    // Capture frames over 3 seconds
+    for (let f = 0; f < totalFrames; f++) {
+      await new Promise(r => setTimeout(r, frameDelay))
+      ctx.drawImage(canvas, 0, 0, w, h)
+      frames.push(ctx.getImageData(0, 0, w, h))
+    }
+
+    // Encode GIF
+    const encoder = new GifEncoder(w, h, Math.round(frameDelay))
+    frames.forEach(f => encoder.addFrame(f))
+    useStore.setState({ gifProgress: { current: 0, total: totalFrames } })
+    const bytes = encoder.encode((current, total) => {
+      useStore.setState({ gifProgress: { current, total } })
+    })
+
+    // Download
+    const blob = new Blob([bytes], { type: 'image/gif' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    const name = (store.infoTitle || 'particles').replace(/\s+/g, '-').toLowerCase()
+    a.download = `particle-${name}-${Date.now()}.gif`
+    a.click()
+    URL.revokeObjectURL(url)
+
+    useStore.setState({ isExportingGif: false, gifProgress: null })
+  }
 
   return (
     <div style={{
@@ -59,6 +114,51 @@ export default function LeftSidebar() {
 
         <ToggleRow label="Trails" value={trails} onChange={setTrails} />
         <ToggleRow label="Performance Mode" value={performanceMode} onChange={setPerformanceMode} />
+        {performanceMode && (
+          <p style={{ fontSize: 11, color: '#f59e0b', marginTop: 4 }}>⚡ Particle count reduced 50%</p>
+        )}
+      </Section>
+
+      <Section title="Camera">
+        <Slider label="Orbit Speed" value={orbitSpeed} min={0.1} max={2} step={0.1}
+          onChange={setOrbitSpeed} display={v => v.toFixed(1)} />
+        <ToggleRow label="Auto-Rotate" value={autoRotate} onChange={setAutoRotate} />
+        {autoRotate && (
+          <Slider label="Rotate Speed" value={autoRotateSpeed} min={0.5} max={10} step={0.5}
+            onChange={setAutoRotateSpeed} display={v => v.toFixed(1)} />
+        )}
+        <Slider label="Min Zoom" value={minDistance} min={1} max={20} step={1}
+          onChange={setMinDistance} display={v => `${v}`} />
+        <Slider label="Max Zoom" value={maxDistance} min={20} max={100} step={5}
+          onChange={setMaxDistance} display={v => `${v}`} />
+      </Section>
+
+      <Section title="Export">
+        <button
+          onClick={() => {
+            if (isExportingGif) return
+            exportGif()
+          }}
+          disabled={isExportingGif}
+          style={{
+            width: '100%',
+            padding: '10px 0',
+            borderRadius: 8,
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: isExportingGif ? 'not-allowed' : 'pointer',
+            transition: 'all 0.15s ease-out',
+            background: isExportingGif ? 'rgba(255,255,255,0.04)' : '#6366f1',
+            color: isExportingGif ? '#7a7a90' : '#ffffff',
+            border: 'none',
+          }}
+        >
+          {isExportingGif
+            ? gifProgress
+              ? `🎬 Encoding... ${gifProgress.current}/${gifProgress.total}`
+              : '🎬 Capturing...'
+            : '🎬 Export as GIF (3s)'}
+        </button>
       </Section>
 
       <Section title="Physics Engine">

@@ -31,6 +31,13 @@ export const useStore = create((set, get) => ({
   dynamicControls: [],
   dynamicValues: {},
 
+  // Camera controls
+  orbitSpeed: 0.5,
+  autoRotate: false,
+  autoRotateSpeed: 2.0,
+  minDistance: 3,
+  maxDistance: 50,
+
   // New features
   mouseAttract: false,
   attractStrength: 2.0,
@@ -56,6 +63,7 @@ export const useStore = create((set, get) => ({
   replaySpeed: 1,
   replayLoop: false,
   gifProgress: null, // null | { current, total } | 'done'
+  isExportingGif: false,
 
   setIsRecording: (v) => set({ isRecording: v }),
   setRecordingStartTime: (v) => set({ recordingStartTime: v }),
@@ -122,7 +130,20 @@ export const useStore = create((set, get) => ({
   setMouseAttract: (v) => set({ mouseAttract: v }),
   setAttractStrength: (v) => set({ attractStrength: v }),
   setTrails: (v) => set({ trails: v }),
-  setPerformanceMode: (v) => set({ performanceMode: v, ...(v ? { particleCount: Math.min(get().particleCount, 10000) } : {}) }),
+  setOrbitSpeed: (v) => set({ orbitSpeed: v }),
+  setAutoRotate: (v) => set({ autoRotate: v }),
+  setAutoRotateSpeed: (v) => set({ autoRotateSpeed: v }),
+  setMinDistance: (v) => set({ minDistance: v }),
+  setMaxDistance: (v) => set({ maxDistance: v }),
+  setPerformanceMode: (v) => {
+    const current = get().particleCount
+    if (v) {
+      set({ performanceMode: true, _savedParticleCount: current, particleCount: Math.max(1000, Math.floor(current / 2)) })
+    } else {
+      const saved = get()._savedParticleCount
+      set({ performanceMode: false, particleCount: saved || current })
+    }
+  },
   setAudioReactive: (v) => set({ audioReactive: v }),
   setAudioLevel: (v) => set({ audioLevel: v }),
   setGravityEnabled: (v) => set({ gravityEnabled: v }),
