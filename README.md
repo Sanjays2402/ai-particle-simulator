@@ -1,5 +1,10 @@
 # ✦ AI Particle Simulator
 
+[![Live Demo](https://img.shields.io/badge/demo-live-brightgreen)](https://sanjays2402.github.io/ai-particle-simulator)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![React](https://img.shields.io/badge/React-18-61dafb)](https://react.dev)
+[![Three.js](https://img.shields.io/badge/Three.js-r160-black)](https://threejs.org)
+
 A real-time 3D particle system generator powered by AI. Describe what you want, and watch 20,000+ particles come to life.
 
 ![Spiral Galaxy](screenshots/galaxy.png)
@@ -10,6 +15,9 @@ A real-time 3D particle system generator powered by AI. Describe what you want, 
 - **🤖 AI Text-to-Particles** — Describe any effect and AI generates the simulation code
 - **🎛️ Dynamic Controls** — AI-generated sliders for real-time parameter tweaking
 - **✨ Visual Styles** — Sparkle, Plasma, Blob, Ring particle rendering modes
+- **🖱️ Mouse Interaction** — Particles react to cursor movement in real-time
+- **🎵 Sound Reactivity** — Particles respond to audio input
+- **📸 Screenshots** — Capture your creations with one click
 - **📥 Export** — Download as standalone HTML or React component code
 - **⚡ 60fps Performance** — Optimized for 20K+ particles with zero garbage collection
 
@@ -33,6 +41,20 @@ npm install
 npm run dev
 ```
 
+Open [http://localhost:5173](http://localhost:5173) to see it in action.
+
+## ⌨️ Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Space` | Play / Pause simulation |
+| `R` | Reset to default view |
+| `S` | Take screenshot |
+| `1-9` | Switch between presets |
+| `T` | Toggle trail effect |
+| `M` | Toggle mouse interaction |
+| `F` | Toggle fullscreen |
+
 ## 🤖 AI Integration
 
 To use the AI text-to-particle feature:
@@ -44,13 +66,31 @@ To use the AI text-to-particle feature:
 
 Works with any OpenAI-compatible API (OpenAI, Anthropic via proxy, local models, etc.)
 
+### Example Prompts
+
+- *"A spiral galaxy with blue and purple stars orbiting a bright center"*
+- *"DNA double helix rotating slowly with glowing green nucleotides"*
+- *"Rain falling through fog with splashes on an invisible surface"*
+- *"Fireflies in a forest at night, flickering randomly"*
+
 ## 🛠️ Tech Stack
 
-- **React 18** + **Vite**
-- **Three.js** + **React Three Fiber** + **Drei** + **Postprocessing**
-- **Tailwind CSS**
-- **Zustand** for state management
+- **React 18** + **Vite** — Fast dev/build toolchain
+- **Three.js** + **React Three Fiber** + **Drei** — 3D rendering
+- **Postprocessing** — Bloom, chromatic aberration effects
+- **Tailwind CSS** — Styling
+- **Zustand** — State management
+
+## 🤝 Contributing
+
+Contributions are welcome! Feel free to open issues or submit PRs.
+
+1. Fork the repo
+2. Create your feature branch (`git checkout -b feat/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feat/amazing-feature`)
+5. Open a Pull Request
 
 ## 📄 License
 
-MIT
+MIT — see [LICENSE](LICENSE) for details.
