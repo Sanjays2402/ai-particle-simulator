@@ -432,6 +432,36 @@ const twinkle = Math.sin(time * controls.twinkle + i * 1.7) * 0.5 + 0.5;
 const hue = (i * 0.618033988 + time * 0.02) % 1.0;
 color.setHSL(hue, 0.7 + twinkle * 0.3, 0.15 + twinkle * 0.55);`,
   },
+  {
+    id: 'black-hole',
+    name: 'Black Hole',
+    description: 'Accretion disk swirling around a gravitational singularity',
+    emoji: '🕳️',
+    code: `addControl('diskRadius', 'Disk Radius', 2, 10, 6);
+addControl('warpSpeed', 'Warp Speed', 0.5, 5, 2);
+addControl('thickness', 'Disk Thickness', 0.1, 1.5, 0.4);
+setInfo('Black Hole', 'Accretion disk around a singularity');
+
+const t = i / count;
+const golden = 2.399963229728653;
+const theta = i * golden + time * controls.warpSpeed * (0.3 + (1.0 - t) * 2.0);
+const minR = 1.2;
+const maxR = controls.diskRadius;
+const r = minR + Math.sqrt(t) * (maxR - minR);
+const invR = 1.0 / Math.max(r, 0.5);
+const warp = Math.sin(theta * 3 + time * 1.5) * 0.15 * invR;
+const diskY = (Math.sin(i * 127.1) * 0.5) * controls.thickness * (r / maxR);
+const tilt = 0.35;
+const x = Math.cos(theta) * r;
+const flatZ = Math.sin(theta) * r;
+const y = diskY + flatZ * Math.sin(tilt) + warp;
+const z = flatZ * Math.cos(tilt);
+target.set(x, y, z);
+const temp = 1.0 - (r - minR) / (maxR - minR);
+const hue = 0.05 + temp * 0.12;
+const lum = 0.15 + temp * 0.55 + Math.sin(time * 3 + i * 0.5) * 0.05 * temp;
+color.setHSL(hue, 0.8 + temp * 0.2, Math.min(lum, 0.85));`,
+  },
   // === PHYSICS PRESETS ===
   {
     id: 'rain',
