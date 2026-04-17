@@ -526,4 +526,27 @@ target.set(x, 0.1, z);
 const hue = (i * 0.618033988) % 1.0;
 color.setHSL(hue, 0.85, 0.45);`,
   },
+  {
+    id: 'aurora-borealis',
+    name: 'Aurora Borealis',
+    description: 'Shimmering northern lights dancing across the sky',
+    emoji: '🌌',
+    code: `addControl('waveHeight', 'Wave Height', 1, 6, 3);
+addControl('shimmer', 'Shimmer', 0.1, 3, 1.2);
+addControl('spread', 'Spread', 4, 16, 10);
+setInfo('Aurora Borealis', 'Shimmering northern lights dancing across the sky');
+
+const t = i / count;
+const x = (t - 0.5) * controls.spread * 2;
+const wave1 = Math.sin(x * 0.5 + time * 0.8) * controls.waveHeight;
+const wave2 = Math.cos(x * 0.3 - time * 0.5) * controls.waveHeight * 0.5;
+const noise = Math.sin(i * 73.1 + time * controls.shimmer) * 0.4;
+const verticalT = (Math.sin(i * 41.3) * 0.5 + 0.5);
+const y = wave1 + wave2 + verticalT * 4 - 2 + noise;
+const z = Math.sin(x * 0.7 + time * 0.3) * 2 + (Math.cos(i * 13.7) * 0.5) * 1.5;
+target.set(x, y, z);
+const hue = 0.33 + Math.sin(x * 0.2 + time * 0.4) * 0.15 + verticalT * 0.1;
+const light = 0.35 + verticalT * 0.4 + Math.sin(i * 17.3 + time * 2) * 0.1;
+color.setHSL(hue, 0.85, light);`,
+  },
 ]
