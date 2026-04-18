@@ -549,4 +549,59 @@ const hue = 0.33 + Math.sin(x * 0.2 + time * 0.4) * 0.15 + verticalT * 0.1;
 const light = 0.35 + verticalT * 0.4 + Math.sin(i * 17.3 + time * 2) * 0.1;
 color.setHSL(hue, 0.85, light);`,
   },
+  {
+    id: 'solar-flare',
+    name: 'Solar Flare',
+    description: 'A raging sun with erupting plasma arcs and corona',
+    emoji: '☀️',
+    code: `addControl('flareIntensity', 'Flare Intensity', 0.5, 4, 2);
+addControl('coronaSize', 'Corona Size', 1, 5, 2.5);
+addControl('turbulence', 'Turbulence', 0.1, 3, 1.2);
+setInfo('Solar Flare', 'A raging sun with erupting plasma arcs and corona');
+
+const t = i / count;
+const isFlare = (i % 10) >= 7;
+
+if (!isFlare) {
+  const phi = Math.acos(1 - 2 * ((i * 0.6180339887) % 1));
+  const theta = i * 2.399963229;
+  const pulse = 1 + Math.sin(time * 1.5 + i * 0.1) * 0.05 * controls.turbulence;
+  const r = 2.2 * pulse;
+  const bump = Math.sin(phi * 8 + time * 0.7) * Math.cos(theta * 6 - time * 0.5) * 0.15 * controls.turbulence;
+  const rr = r + bump;
+  target.set(
+    Math.sin(phi) * Math.cos(theta) * rr,
+    Math.cos(phi) * rr,
+    Math.sin(phi) * Math.sin(theta) * rr
+  );
+  const heat = 0.5 + Math.sin(phi * 5 + theta * 3 + time) * 0.5;
+  const hue = 0.08 + heat * 0.07;
+  color.setHSL(hue, 1.0, 0.45 + heat * 0.25);
+} else {
+  const flareIdx = Math.floor(i / 10);
+  const flarePhase = (time * 0.4 + flareIdx * 0.618) % 1.0;
+  const arcT = (i * 0.1) % 1.0;
+  const a1 = flareIdx * 1.7;
+  const a2 = flareIdx * 2.3 + 1.1;
+  const p1x = Math.cos(a1) * Math.sin(a2) * 2.2;
+  const p1y = Math.cos(a2) * 2.2;
+  const p1z = Math.sin(a1) * Math.sin(a2) * 2.2;
+  const p2x = -p1x + Math.sin(flareIdx * 3.7) * 1.5;
+  const p2y = -p1y + Math.cos(flareIdx * 1.9) * 1.5;
+  const p2z = -p1z + Math.sin(flareIdx * 5.1) * 1.5;
+  const lerp = arcT;
+  const mx = (p1x + p2x) * 0.5;
+  const my = (p1y + p2y) * 0.5 + controls.flareIntensity * 2.5 * flarePhase;
+  const mz = (p1z + p2z) * 0.5;
+  const bx = (1 - lerp) * (1 - lerp) * p1x + 2 * (1 - lerp) * lerp * mx + lerp * lerp * p2x;
+  const by = (1 - lerp) * (1 - lerp) * p1y + 2 * (1 - lerp) * lerp * my + lerp * lerp * p2y;
+  const bz = (1 - lerp) * (1 - lerp) * p1z + 2 * (1 - lerp) * lerp * mz + lerp * lerp * p2z;
+  const wisp = Math.sin(i * 31.7 + time * 3) * 0.15 * controls.coronaSize;
+  target.set(bx + wisp, by + wisp * 0.7, bz + wisp);
+  const tipHeat = Math.sin(lerp * Math.PI);
+  const hue = 0.02 + tipHeat * 0.08;
+  const light = 0.45 + tipHeat * 0.45 * (1 - flarePhase);
+  color.setHSL(hue, 0.95 - tipHeat * 0.3, light);
+}`,
+  },
 ]
