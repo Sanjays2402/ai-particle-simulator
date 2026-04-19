@@ -474,26 +474,30 @@ function Toggle({ value, onChange }) {
   return (
     <button onClick={() => onChange(!value)}
       style={{
-        width: 36,
-        height: 20,
-        borderRadius: 10,
+        width: 38,
+        height: 22,
+        borderRadius: 999,
         position: 'relative',
         cursor: 'pointer',
-        transition: 'all 0.15s ease-out',
-        background: value ? '#6366f1' : 'rgba(255,255,255,0.08)',
-        border: 'none',
+        transition: 'all 0.22s cubic-bezier(0.2,0.8,0.2,1)',
+        background: value
+          ? 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)'
+          : 'rgba(255,255,255,0.06)',
+        border: value ? '1px solid rgba(168,85,247,0.5)' : '1px solid rgba(255,255,255,0.07)',
+        boxShadow: value ? '0 0 14px rgba(168,85,247,0.45), inset 0 1px 0 rgba(255,255,255,0.15)' : 'inset 0 1px 0 rgba(255,255,255,0.03)',
         flexShrink: 0,
       }}
     >
       <div style={{
-        width: 14,
-        height: 14,
+        width: 16,
+        height: 16,
         borderRadius: '50%',
         position: 'absolute',
-        top: 3,
+        top: 2,
         left: value ? 19 : 3,
-        transition: 'all 0.15s ease-out',
-        background: value ? '#ffffff' : '#7a7a90',
+        background: '#ffffff',
+        transition: 'all 0.22s cubic-bezier(0.2,0.8,0.2,1)',
+        boxShadow: value ? '0 2px 6px rgba(0,0,0,0.35), 0 0 0 0 rgba(168,85,247,0.4)' : '0 2px 4px rgba(0,0,0,0.35)',
       }} />
     </button>
   )
