@@ -23,7 +23,7 @@ function FPSCounter() {
         lastTime.current = now
         if (ref.current) {
           const count = useStore.getState().particleCount
-          ref.current.textContent = `${fpsRef.current} FPS | ${(count / 1000).toFixed(0)}K particles`
+          ref.current.innerHTML = `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#a855f7;box-shadow:0 0 8px #a855f7"></span> ${fpsRef.current} FPS · ${(count / 1000).toFixed(0)}K PARTICLES`
         }
       }
       raf = requestAnimationFrame(update)
@@ -458,16 +458,32 @@ export default function ParticleCanvas() {
         </EffectComposer>
       </Canvas>
 
-      {/* FPS Overlay */}
+      {/* Floating HUD */}
       <div ref={fpsRef}
         style={{
-          position: 'absolute', top: 8, right: 8,
-          fontFamily: 'monospace', fontSize: 11,
-          color: 'var(--neon)', background: 'rgba(0,0,0,0.5)',
-          padding: '4px 8px', borderRadius: 4, pointerEvents: 'none',
+          position: 'absolute', bottom: audioReactive ? 36 : 12, right: 12,
+          fontFamily: 'JetBrains Mono, monospace', fontSize: 11,
+          fontWeight: 500,
+          color: '#e9d5ff',
+          background: 'linear-gradient(135deg, rgba(139,92,246,0.14) 0%, rgba(236,72,153,0.10) 100%)',
+          backdropFilter: 'blur(16px) saturate(140%)',
+          WebkitBackdropFilter: 'blur(16px) saturate(140%)',
+          border: '1px solid rgba(168,85,247,0.28)',
+          padding: '7px 12px', borderRadius: 10, pointerEvents: 'none',
+          boxShadow: '0 6px 20px rgba(0,0,0,0.35), 0 0 20px rgba(168,85,247,0.12), inset 0 1px 0 rgba(255,255,255,0.08)',
           zIndex: 10,
+          letterSpacing: '0.02em',
+          fontVariantNumeric: 'tabular-nums',
+          display: 'flex', alignItems: 'center', gap: 8,
         }}
-      >60 FPS | 20K</div>
+      >
+        <span style={{
+          display: 'inline-block', width: 6, height: 6, borderRadius: '50%',
+          background: '#a855f7', boxShadow: '0 0 8px #a855f7',
+          animation: 'hud-pulse 2s ease-in-out infinite',
+        }} />
+        60 FPS · 20K PARTICLES
+      </div>
 
       {/* Performance notification */}
       <div id="perf-notif"
