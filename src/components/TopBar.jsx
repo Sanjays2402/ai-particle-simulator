@@ -150,6 +150,7 @@ export default function TopBar({ onSettings }) {
         </span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         <Btn onClick={() => setPlaying(!playing)} title={playing ? 'Pause (Space)' : 'Play (Space)'}>
           {playing ? <Pause size={14} strokeWidth={2.2} /> : <Play size={14} strokeWidth={2.2} />}
         </Btn>
@@ -162,14 +163,18 @@ export default function TopBar({ onSettings }) {
           if (currentPreset) loadPreset(currentPreset)
           else loadCustomCode(particleFnSource, infoTitle, infoDesc)
         }} title="Reset Camera"><RotateCcw size={14} strokeWidth={2.2} /></Btn>
+        <Divider />
         <Btn onClick={handleFullscreen} title="Fullscreen (F)"><Maximize2 size={14} strokeWidth={2.2} /></Btn>
         <Btn onClick={loadRandom} title="Random Preset (R)"><Shuffle size={14} strokeWidth={2.2} /></Btn>
         <Btn onClick={() => setMouseAttract(!mouseAttract)} title="Mouse Attract" active={mouseAttract}><Magnet size={14} strokeWidth={2.2} /></Btn>
+        <Btn onClick={handleMic} title="Sound Reactivity" active={audioReactive}><Mic size={14} strokeWidth={2.2} /></Btn>
+        <Divider />
         <Btn onClick={handleScreenshot} title="Screenshot (S)"><Camera size={14} strokeWidth={2.2} /></Btn>
         <Btn onClick={handleShare} title="Share URL"><Link2 size={14} strokeWidth={2.2} /></Btn>
-        <Btn onClick={handleMic} title="Sound Reactivity" active={audioReactive}><Mic size={14} strokeWidth={2.2} /></Btn>
         <Btn onClick={handleExport} title="Export HTML"><Download size={14} strokeWidth={2.2} /></Btn>
+        <Divider />
         <Btn onClick={onSettings} title="Settings"><Settings size={14} strokeWidth={2.2} /></Btn>
+      </div>
       </div>
     </div>
   )
@@ -207,35 +212,50 @@ function RecordBtn({ isRecording, onClick }) {
   )
 }
 
+function Divider() {
+  return <div style={{
+    width: 1, height: 18,
+    background: 'linear-gradient(180deg, transparent, rgba(255,255,255,0.1) 50%, transparent)',
+    margin: '0 6px',
+  }} />
+}
+
 function Btn({ children, onClick, title, active }) {
   return (
     <button
       onClick={onClick}
       title={title}
       style={{
-        width: 32,
-        height: 32,
+        width: 30,
+        height: 30,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        borderRadius: 8,
+        borderRadius: 9,
         fontSize: 13,
         cursor: 'pointer',
-        transition: 'all 0.15s ease-out',
-        background: active ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.04)',
-        color: active ? '#6366f1' : '#eeeef0',
-        border: active ? '1px solid rgba(99,102,241,0.25)' : '1px solid rgba(255,255,255,0.06)',
+        transition: 'all 0.18s cubic-bezier(0.2, 0.8, 0.2, 1)',
+        background: active
+          ? 'linear-gradient(135deg, rgba(139,92,246,0.25) 0%, rgba(236,72,153,0.2) 100%)'
+          : 'rgba(255,255,255,0.035)',
+        color: active ? '#e9d5ff' : '#c8c8d0',
+        border: active ? '1px solid rgba(168,85,247,0.5)' : '1px solid rgba(255,255,255,0.05)',
+        boxShadow: active ? '0 0 16px rgba(168,85,247,0.35), inset 0 1px 0 rgba(255,255,255,0.08)' : 'none',
       }}
       onMouseEnter={e => {
         if (!active) {
           e.currentTarget.style.background = 'rgba(255,255,255,0.08)'
-          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'
+          e.currentTarget.style.borderColor = 'rgba(168,85,247,0.3)'
+          e.currentTarget.style.color = '#fff'
+          e.currentTarget.style.transform = 'translateY(-1px)'
         }
       }}
       onMouseLeave={e => {
         if (!active) {
-          e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
-          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)'
+          e.currentTarget.style.background = 'rgba(255,255,255,0.035)'
+          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)'
+          e.currentTarget.style.color = '#c8c8d0'
+          e.currentTarget.style.transform = 'translateY(0)'
         }
       }}
     >
