@@ -418,12 +418,6 @@ function Section({ title, children }) {
     </div>
   )
 }
-        marginBottom: 12,
-      }}>{title}</h3>
-      {children}
-    </div>
-  )
-}
 
 function Slider({ label, value, min, max, step, onChange, display }) {
   const pct = ((value - min) / (max - min)) * 100
