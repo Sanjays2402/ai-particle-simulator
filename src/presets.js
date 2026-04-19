@@ -646,4 +646,141 @@ const brightness = 0.4 + streakFactor * 0.5 + Math.sin(i * 7.1 + time * 3) * 0.1
 const saturation = 0.7 + streakFactor * 0.3;
 color.setHSL(doppler, saturation, brightness);`,
   },
+  // ── v4 ITERs 1-5: new presets ──
+  {
+    id: 'double-pendulum',
+    name: 'Double Pendulum',
+    emoji: '⚡',
+    description: 'Chaotic trails from a swarm of double pendulums.',
+    controls: [
+      { id: 'chaos', label: 'Chaos', value: 1.5, min: 0.3, max: 3 },
+      { id: 'length', label: 'Arm Length', value: 2, min: 0.5, max: 4 },
+    ],
+    code: `// Many double-pendulum trails
+const pendulum = Math.floor(i / 40);
+const trail = i % 40;
+const seedA = Math.sin(pendulum * 12.9) * 43758.5453;
+const seedB = Math.sin(pendulum * 78.2) * 12345.6789;
+const phaseA = (seedA - Math.floor(seedA)) * Math.PI * 2;
+const phaseB = (seedB - Math.floor(seedB)) * Math.PI * 2;
+const tt = time - trail * 0.04;
+const L1 = controls.length, L2 = controls.length * 0.7;
+const a = phaseA + tt * controls.chaos;
+const b = phaseB + tt * (controls.chaos * 1.73); // irrational ratio → chaos
+const x = L1 * Math.sin(a) + L2 * Math.sin(a + b);
+const y = L1 * Math.cos(a) + L2 * Math.cos(a + b) - 3;
+const fade = 1 - trail / 40;
+target.set(x, y, Math.sin(a * 2 + b) * 0.5);
+color.setHSL((pendulum * 0.08) % 1, 0.9, 0.3 + fade * 0.5);`,
+  },
+  {
+    id: 'lightning-storm',
+    name: 'Lightning Storm',
+    emoji: '⛈',
+    description: 'Branching lightning bolts strike in random bursts.',
+    controls: [
+      { id: 'frequency', label: 'Strike Rate', value: 1.5, min: 0.3, max: 4 },
+      { id: 'branches', label: 'Branching', value: 0.6, min: 0, max: 1.2 },
+    ],
+    code: `// Lightning bolts with fractal branches
+const bolt = Math.floor(i / 120);
+const p = (i % 120) / 120;
+const strike = Math.floor(time * controls.frequency + bolt * 0.8);
+const boltSeed = Math.sin(strike * 73.14 + bolt * 17.3) * 43758.5453;
+const originX = ((boltSeed - Math.floor(boltSeed)) - 0.5) * 12;
+const boltAge = (time * controls.frequency + bolt * 0.8) % 1;
+const brightness = Math.pow(1 - boltAge, 3);
+// Fractal jitter (Perlin-ish via layered sines)
+const jitter = Math.sin(p * 47 + strike * 31) * 0.6 * controls.branches * (1 - p * 0.5)
+             + Math.sin(p * 113 + strike * 71) * 0.3 * controls.branches;
+// Branch offset
+const branchPhase = Math.sin(i * 0.37 + bolt) * controls.branches * 0.4;
+target.set(
+  originX + jitter + branchPhase,
+  6 - p * 14,
+  Math.sin(p * 23 + strike) * 0.4 * controls.branches
+);
+const hot = brightness * (0.9 + Math.sin(i * 0.7) * 0.1);
+color.setRGB(hot * 0.9 + 0.1, hot * 0.95 + 0.05, hot * 1.2);`,
+  },
+  {
+    id: 'cherry-blossoms',
+    name: 'Cherry Blossoms',
+    emoji: '🌸',
+    description: 'Pink petals tumble in a gentle breeze.',
+    controls: [
+      { id: 'wind', label: 'Wind', value: 0.4, min: 0, max: 1.5 },
+      { id: 'density', label: 'Density', value: 1, min: 0.5, max: 2 },
+    ],
+    code: `// Falling petals with rotation and wind
+const seedA = Math.sin(i * 12.9898) * 43758.5453;
+const seedB = Math.sin(i * 78.233) * 12345.6789;
+const rx = seedA - Math.floor(seedA);
+const rz = seedB - Math.floor(seedB);
+const fallSpeed = 0.5 + rx * 0.8;
+const cycle = (rx * 10 + time * fallSpeed * 0.3 * controls.density) % 1;
+const y = 8 - cycle * 16;
+const spin = time * (rx - 0.5) * 3;
+const windX = Math.sin(time * 0.5 + y * 0.3) * controls.wind * 2;
+const swayX = Math.sin(time * 1.2 + i * 0.1) * 0.4;
+target.set(
+  (rx - 0.5) * 14 + windX + swayX + Math.cos(spin) * 0.15,
+  y,
+  (rz - 0.5) * 8 + Math.sin(spin) * 0.15
+);
+const tint = 0.92 + Math.sin(i * 0.3) * 0.04; // light pink
+const sat = 0.55 + Math.sin(i * 0.7) * 0.1;
+const light = 0.7 + Math.sin(i + time) * 0.1;
+color.setHSL(tint, sat, light);`,
+  },
+  {
+    id: 'crystal-lattice',
+    name: 'Crystal Lattice',
+    emoji: '🔷',
+    description: 'Pulsing 3D crystalline grid with breathing rhythm.',
+    controls: [
+      { id: 'pulse', label: 'Pulse', value: 1, min: 0, max: 3 },
+      { id: 'density', label: 'Density', value: 10, min: 5, max: 20 },
+    ],
+    code: `// 3D grid with per-cell pulse
+const side = Math.ceil(Math.pow(count, 1/3));
+const x = i % side;
+const y = Math.floor(i / side) % side;
+const z = Math.floor(i / (side * side));
+const spacing = 14 / side;
+const cx = (x - side/2) * spacing;
+const cy = (y - side/2) * spacing;
+const cz = (z - side/2) * spacing;
+const dist = Math.sqrt(cx*cx + cy*cy + cz*cz);
+const wave = Math.sin(dist * 0.8 - time * 2) * 0.3 * controls.pulse;
+const scale = 1 + wave;
+target.set(cx * scale, cy * scale, cz * scale);
+const bri = 0.4 + (wave + 0.3) * 0.7;
+const hue = 0.55 + Math.sin(dist * 0.3 + time * 0.5) * 0.1;
+color.setHSL(hue, 0.9, Math.max(0.1, bri));`,
+  },
+  {
+    id: 'swarm',
+    name: 'Swarm',
+    emoji: '🐝',
+    description: 'Boids-inspired swarm that flocks around attractors.',
+    controls: [
+      { id: 'cohesion', label: 'Cohesion', value: 1, min: 0, max: 2 },
+      { id: 'speed', label: 'Speed', value: 1, min: 0.3, max: 2.5 },
+    ],
+    code: `// Pseudo-boid: particles orbit 3 moving attractors
+const att = i % 3;
+const atX = Math.sin(time * 0.5 + att * 2.094) * 4;
+const atY = Math.cos(time * 0.4 + att * 2.094) * 3;
+const atZ = Math.sin(time * 0.3 + att * 4.189) * 3;
+const seed = Math.sin(i * 19.7) * 43758.5453;
+const r = 0.5 + (seed - Math.floor(seed)) * 2.5 / controls.cohesion;
+const phase = i * 0.6 + time * controls.speed;
+const dx = r * Math.sin(phase) * Math.cos(phase * 0.5 + i * 0.1);
+const dy = r * Math.sin(phase * 0.7 + i * 0.2);
+const dz = r * Math.cos(phase) * Math.sin(phase * 0.5 + i * 0.1);
+target.set(atX + dx, atY + dy, atZ + dz);
+const hue = att === 0 ? 0.55 : att === 1 ? 0.85 : 0.12;
+color.setHSL(hue, 0.9, 0.55);`,
+  },
 ]

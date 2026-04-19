@@ -618,3 +618,56 @@ kbd, .kbd {
 .sidebar-toggle.left  { right: -11px; border-radius: 0 10px 10px 0; border-left: none; }
 .sidebar-toggle.right { left: -11px;  border-radius: 10px 0 0 10px; border-right: none; }
 .sidebar-toggle:hover { color: #fff; background: linear-gradient(180deg, rgba(168,85,247,0.25), rgba(236,72,153,0.18)); box-shadow: 0 0 16px rgba(168,85,247,0.35); }
+
+/* v4 iter 10: preset emoji bounces gently on active */
+.preset-card.active > .preset-emoji {
+  animation: preset-bounce 1.6s cubic-bezier(0.25,1.6,0.3,1) infinite;
+}
+@keyframes preset-bounce {
+  0%,100% { transform: translateY(0); }
+  40% { transform: translateY(-3px); }
+}
+
+/* v4 iter 11: hover ring on theme swatches */
+.theme-swatch { position: relative; }
+.theme-swatch:hover::after {
+  content:''; position:absolute; inset:-3px; border-radius:50%;
+  border: 1.5px solid rgba(168,85,247,0.5);
+  animation: swatch-ring 0.9s ease-out;
+}
+@keyframes swatch-ring {
+  from { opacity: 0.8; transform: scale(0.8); }
+  to   { opacity: 0; transform: scale(1.3); }
+}
+
+/* v4 iter 12: scroll snap for preset carousel */
+.preset-carousel {
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+.preset-carousel > * { scroll-snap-align: start; }
+
+/* v4 iter 13: command palette result keyboard selected highlight */
+.cmdk-item.selected {
+  background: linear-gradient(90deg, rgba(168,85,247,0.22), rgba(236,72,153,0.12)) !important;
+  border-left: 2px solid #a855f7;
+  padding-left: 14px !important;
+}
+
+/* v4 iter 14: smooth scale-in for modals */
+@keyframes modal-scale-in {
+  from { opacity: 0; transform: scale(0.92) translateY(8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+.modal-scale-in { animation: modal-scale-in 0.22s cubic-bezier(0.2,0.8,0.2,1); }
+
+/* v4 iter 15: ambient bloom on canvas corners */
+.canvas-ambient-corners::before,
+.canvas-ambient-corners::after {
+  content: ''; position: fixed; width: 240px; height: 240px;
+  pointer-events: none; z-index: 2;
+  background: radial-gradient(circle, rgba(168,85,247,0.12) 0%, transparent 70%);
+  filter: blur(40px);
+}
+.canvas-ambient-corners::before { top: -80px; left: -80px; }
+.canvas-ambient-corners::after  { bottom: -80px; right: -80px; background: radial-gradient(circle, rgba(236,72,153,0.10) 0%, transparent 70%); }
