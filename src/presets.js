@@ -604,4 +604,46 @@ if (!isFlare) {
   color.setHSL(hue, 0.95 - tipHeat * 0.3, light);
 }`,
   },
+  {
+    id: 'quantum-tunnel',
+    name: 'Quantum Tunnel',
+    description: 'Wormhole with relativistic light streaks warping through spacetime',
+    emoji: '🕳️',
+    code: `addControl('tunnelLength', 'Tunnel Depth', 6, 24, 14);
+addControl('warp', 'Warp Intensity', 0.3, 3, 1.2);
+addControl('streakSpeed', 'Streak Speed', 0.5, 5, 2);
+setInfo('Quantum Tunnel', 'Wormhole with relativistic light streaks');
+
+const t = i / count;
+const ringIdx = Math.floor(t * 60);
+const ringT = ringIdx / 60;
+
+// Particle travels down the tunnel, wraps around
+const travel = (ringT + time * controls.streakSpeed * 0.1) % 1.0;
+const z = (travel - 0.5) * controls.tunnelLength;
+
+// Tunnel radius pinches at center (wormhole throat)
+const pinch = 0.6 + Math.abs(travel - 0.5) * 1.4;
+const baseRadius = pinch * (1 + Math.sin(travel * Math.PI * 4 + time) * 0.15 * controls.warp);
+
+// Spiral angle with relativistic twist near the throat
+const twist = controls.warp * (1 - Math.abs(travel - 0.5) * 2) * 3;
+const angle = (i * 0.3761) + travel * Math.PI * 6 + time * 1.2 + twist;
+
+// Streak: stretch particles along direction of travel near the throat
+const streakFactor = Math.pow(1 - Math.abs(travel - 0.5) * 2, 2);
+const streakJitter = (Math.sin(i * 91.3) * 0.5) * streakFactor * 0.8;
+
+target.set(
+  Math.cos(angle) * baseRadius,
+  Math.sin(angle) * baseRadius,
+  z + streakJitter
+);
+
+// Color: blueshift entering, redshift exiting (Doppler effect)
+const doppler = travel < 0.5 ? 0.6 - travel * 0.4 : travel * 0.15;
+const brightness = 0.4 + streakFactor * 0.5 + Math.sin(i * 7.1 + time * 3) * 0.1;
+const saturation = 0.7 + streakFactor * 0.3;
+color.setHSL(doppler, saturation, brightness);`,
+  },
 ]
