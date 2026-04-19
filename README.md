@@ -5,27 +5,36 @@
 [![React](https://img.shields.io/badge/React-18-61dafb)](https://react.dev)
 [![Three.js](https://img.shields.io/badge/Three.js-r160-black)](https://threejs.org)
 
-A real-time 3D particle system generator powered by AI. Describe what you want, and watch 20,000+ particles come to life.
+A real-time 3D particle system generator powered by AI. Describe what you want, and watch 20,000+ particles come to life — wrapped in a premium command-palette driven UI.
 
-![Spiral Galaxy](screenshots/galaxy.png)
+![Main UI](docs/screenshot-main.png)
 
 ## ✨ Features
 
-- **🎨 10 Built-in Presets** — Spiral Galaxy, DNA Helix, Fireworks, Heartbeat, Torus Knot, Butterfly, Vortex, Cube Wave, Aurora, Sphere Pulse
+- **🎨 25+ Built-in Presets** — Galaxy, DNA, Fireworks, Heart, Butterfly, Vortex, Aurora, Black Hole, Solar Flare, Quantum Tunnel, and more
 - **🤖 AI Text-to-Particles** — Describe any effect and AI generates the simulation code
 - **🎛️ Dynamic Controls** — AI-generated sliders for real-time parameter tweaking
 - **✨ Visual Styles** — Sparkle, Plasma, Blob, Ring particle rendering modes
-- **🖱️ Mouse Interaction** — Particles react to cursor movement in real-time
+- **🎨 6 Color Themes** — Neon, Cyberpunk, Ocean, Fire, Mono, Rainbow
+- **⌘K Command Palette** — Fuzzy-search every preset, action, and shortcut
+- **📊 Live Telemetry** — FPS, particle count, theme, and style in the right panel
+- **🖱️ Mouse Interaction** — Particles react to cursor movement + parallax orbs
 - **🎵 Sound Reactivity** — Particles respond to audio input
 - **📸 Screenshots** — Capture your creations with one click
+- **🎬 GIF Export** — Record 3-second animated GIFs
 - **📥 Export** — Download as standalone HTML or React component code
 - **⚡ 60fps Performance** — Optimized for 20K+ particles with zero garbage collection
 
 ## Screenshots
 
-| Spiral Galaxy | DNA Helix | Heartbeat |
-|:---:|:---:|:---:|
-| ![Galaxy](screenshots/galaxy.png) | ![DNA](screenshots/dna-helix.png) | ![Heart](screenshots/heartbeat.png) |
+### Main interface
+![Main UI](docs/screenshot-main.png)
+
+### ⌘K Command Palette
+![Command Palette](docs/screenshot-cmdk.png)
+
+### Theme palette with live preview
+![Themes](docs/screenshot-hero.png)
 
 ## 🚀 Getting Started
 
