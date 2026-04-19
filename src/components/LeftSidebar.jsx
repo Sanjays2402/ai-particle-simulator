@@ -144,15 +144,35 @@ export default function LeftSidebar() {
           disabled={isExportingGif}
           style={{
             width: '100%',
-            padding: '10px 0',
-            borderRadius: 8,
-            fontSize: 13,
+            padding: '11px 0',
+            borderRadius: 10,
+            fontSize: 12.5,
             fontWeight: 600,
+            letterSpacing: '-0.005em',
             cursor: isExportingGif ? 'not-allowed' : 'pointer',
-            transition: 'all 0.15s ease-out',
-            background: isExportingGif ? 'rgba(255,255,255,0.04)' : '#6366f1',
+            transition: 'all 0.2s cubic-bezier(0.2,0.8,0.2,1)',
+            background: isExportingGif
+              ? 'rgba(255,255,255,0.04)'
+              : 'linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%)',
+            backgroundSize: '200% 100%',
+            backgroundPosition: '0% 0%',
             color: isExportingGif ? '#7a7a90' : '#ffffff',
             border: 'none',
+            boxShadow: isExportingGif ? 'none' : '0 6px 20px rgba(168,85,247,0.35), inset 0 1px 0 rgba(255,255,255,0.2)',
+          }}
+          onMouseEnter={e => {
+            if (!isExportingGif) {
+              e.currentTarget.style.backgroundPosition = '100% 0%'
+              e.currentTarget.style.transform = 'translateY(-1px)'
+              e.currentTarget.style.boxShadow = '0 10px 28px rgba(168,85,247,0.5), inset 0 1px 0 rgba(255,255,255,0.25)'
+            }
+          }}
+          onMouseLeave={e => {
+            if (!isExportingGif) {
+              e.currentTarget.style.backgroundPosition = '0% 0%'
+              e.currentTarget.style.transform = 'translateY(0)'
+              e.currentTarget.style.boxShadow = '0 6px 20px rgba(168,85,247,0.35), inset 0 1px 0 rgba(255,255,255,0.2)'
+            }
           }}
         >
           {isExportingGif
