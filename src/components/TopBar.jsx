@@ -1,6 +1,10 @@
 import { useRef, useEffect } from 'react'
 import { useStore } from '../store'
 import { presets } from '../presets'
+import {
+  Play, Pause, RotateCcw, Maximize2, Shuffle, Magnet, Camera, Link2,
+  Mic, Download, Settings, Repeat, Sparkles,
+} from 'lucide-react'
 
 export default function TopBar({ onSettings }) {
   const { playing, setPlaying, loadRandom, mouseAttract, setMouseAttract, audioReactive, setAudioReactive, isRecording, startRecording, stopRecording, recordingBuffer, enterReplay, isReplaying } = useStore()
@@ -117,10 +121,10 @@ export default function TopBar({ onSettings }) {
       position: 'sticky',
       top: 0,
       zIndex: 20,
-      background: 'rgba(6,6,10,0.85)',
-      backdropFilter: 'blur(16px)',
-      WebkitBackdropFilter: 'blur(16px)',
-      borderBottom: '1px solid rgba(255,255,255,0.04)',
+      background: 'linear-gradient(180deg, rgba(6,6,10,0.78) 0%, rgba(10,10,18,0.62) 100%)',
+      backdropFilter: 'blur(24px) saturate(140%)',
+      WebkitBackdropFilter: 'blur(24px) saturate(140%)',
+      borderBottom: '1px solid rgba(255,255,255,0.06)',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{
@@ -128,31 +132,49 @@ export default function TopBar({ onSettings }) {
           fontWeight: 600,
           letterSpacing: '-0.02em',
           color: '#eeeef0',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 8,
         }}>
-          ✦ Particle Simulator
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 22, height: 22, borderRadius: 6,
+            background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%)',
+            boxShadow: '0 0 16px rgba(168,85,247,0.45)',
+          }}>
+            <Sparkles size={12} strokeWidth={2.5} color="#fff" />
+          </span>
+          Particle Simulator
         </span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         <Btn onClick={() => setPlaying(!playing)} title={playing ? 'Pause (Space)' : 'Play (Space)'}>
-          {playing ? '⏸' : '▶️'}
+          {playing ? <Pause size={14} strokeWidth={2.2} /> : <Play size={14} strokeWidth={2.2} />}
         </Btn>
         <RecordBtn isRecording={isRecording} onClick={() => isRecording ? stopRecording() : startRecording()} />
         {recordingBuffer.length > 0 && !isReplaying && (
-          <Btn onClick={enterReplay} title="Enter Replay">🔁</Btn>
+          <Btn onClick={enterReplay} title="Enter Replay"><Repeat size={14} strokeWidth={2.2} /></Btn>
         )}
         <Btn onClick={() => {
           const { loadPreset, currentPreset, loadCustomCode, particleFnSource, infoTitle, infoDesc } = useStore.getState()
           if (currentPreset) loadPreset(currentPreset)
           else loadCustomCode(particleFnSource, infoTitle, infoDesc)
-        }} title="Reset Camera">⟲</Btn>
-        <Btn onClick={handleFullscreen} title="Fullscreen (F)">⛶</Btn>
-        <Btn onClick={loadRandom} title="Random Preset (R)">🎲</Btn>
-        <Btn onClick={() => setMouseAttract(!mouseAttract)} title="Mouse Attract" active={mouseAttract}>🧲</Btn>
-        <Btn onClick={handleScreenshot} title="Screenshot (S)">📷</Btn>
-        <Btn onClick={handleShare} title="Share URL">🔗</Btn>
-        <Btn onClick={handleMic} title="Sound Reactivity" active={audioReactive}>🎤</Btn>
-        <Btn onClick={handleExport} title="Export HTML">⬇</Btn>
-        <Btn onClick={onSettings} title="Settings">⚙</Btn>
+        }} title="Reset Camera"><RotateCcw size={14} strokeWidth={2.2} /></Btn>
+        <Divider />
+        <Btn onClick={handleFullscreen} title="Fullscreen (F)"><Maximize2 size={14} strokeWidth={2.2} /></Btn>
+        <Btn onClick={loadRandom} title="Random Preset (R)"><Shuffle size={14} strokeWidth={2.2} /></Btn>
+        <Btn onClick={() => setMouseAttract(!mouseAttract)} title="Mouse Attract" active={mouseAttract}><Magnet size={14} strokeWidth={2.2} /></Btn>
+        <Btn onClick={handleMic} title="Sound Reactivity" active={audioReactive}><Mic size={14} strokeWidth={2.2} /></Btn>
+        <Divider />
+        <Btn onClick={handleScreenshot} title="Screenshot (S)"><Camera size={14} strokeWidth={2.2} /></Btn>
+        <Btn onClick={handleShare} title="Share URL"><Link2 size={14} strokeWidth={2.2} /></Btn>
+        <Btn onClick={handleExport} title="Export HTML"><Download size={14} strokeWidth={2.2} /></Btn>
+        <Divider />
+        <Btn onClick={onSettings} title="Settings"><Settings size={14} strokeWidth={2.2} /></Btn>
+      </div>
       </div>
     </div>
   )
@@ -190,35 +212,50 @@ function RecordBtn({ isRecording, onClick }) {
   )
 }
 
+function Divider() {
+  return <div style={{
+    width: 1, height: 18,
+    background: 'linear-gradient(180deg, transparent, rgba(255,255,255,0.1) 50%, transparent)',
+    margin: '0 6px',
+  }} />
+}
+
 function Btn({ children, onClick, title, active }) {
   return (
     <button
       onClick={onClick}
       title={title}
       style={{
-        width: 32,
-        height: 32,
+        width: 30,
+        height: 30,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        borderRadius: 8,
+        borderRadius: 9,
         fontSize: 13,
         cursor: 'pointer',
-        transition: 'all 0.15s ease-out',
-        background: active ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.04)',
-        color: active ? '#6366f1' : '#eeeef0',
-        border: active ? '1px solid rgba(99,102,241,0.25)' : '1px solid rgba(255,255,255,0.06)',
+        transition: 'all 0.18s cubic-bezier(0.2, 0.8, 0.2, 1)',
+        background: active
+          ? 'linear-gradient(135deg, rgba(139,92,246,0.25) 0%, rgba(236,72,153,0.2) 100%)'
+          : 'rgba(255,255,255,0.035)',
+        color: active ? '#e9d5ff' : '#c8c8d0',
+        border: active ? '1px solid rgba(168,85,247,0.5)' : '1px solid rgba(255,255,255,0.05)',
+        boxShadow: active ? '0 0 16px rgba(168,85,247,0.35), inset 0 1px 0 rgba(255,255,255,0.08)' : 'none',
       }}
       onMouseEnter={e => {
         if (!active) {
           e.currentTarget.style.background = 'rgba(255,255,255,0.08)'
-          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'
+          e.currentTarget.style.borderColor = 'rgba(168,85,247,0.3)'
+          e.currentTarget.style.color = '#fff'
+          e.currentTarget.style.transform = 'translateY(-1px)'
         }
       }}
       onMouseLeave={e => {
         if (!active) {
-          e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
-          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)'
+          e.currentTarget.style.background = 'rgba(255,255,255,0.035)'
+          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)'
+          e.currentTarget.style.color = '#c8c8d0'
+          e.currentTarget.style.transform = 'translateY(0)'
         }
       }}
     >

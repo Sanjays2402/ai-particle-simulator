@@ -25,17 +25,17 @@ export default function PresetCarousel() {
 
   return (
     <div className="hide-scrollbar" style={{
-      height: 88,
+      height: 100,
       display: 'flex',
       alignItems: 'center',
-      gap: 8,
+      gap: 10,
       padding: '0 16px',
       overflowX: 'auto',
       flexShrink: 0,
-      background: 'rgba(8,8,14,0.9)',
-      backdropFilter: 'blur(20px)',
-      WebkitBackdropFilter: 'blur(20px)',
-      borderTop: '1px solid rgba(255,255,255,0.04)',
+      background: 'linear-gradient(180deg, rgba(8,8,14,0.62) 0%, rgba(8,8,14,0.82) 100%)',
+      backdropFilter: 'blur(24px) saturate(140%)',
+      WebkitBackdropFilter: 'blur(24px) saturate(140%)',
+      borderTop: '1px solid rgba(255,255,255,0.06)',
     }}>
       {sorted.map(p => {
         const isFav = favoritedPresets.includes(p.id)
@@ -48,53 +48,65 @@ export default function PresetCarousel() {
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
-                gap: 4,
-                padding: thumb ? '4px 4px 6px' : '8px 16px',
-                borderRadius: 12,
+                gap: 6,
+                padding: thumb ? '5px 5px 7px' : '10px 16px',
+                borderRadius: 14,
                 cursor: 'pointer',
-                transition: 'all 0.15s ease-out',
-                background: currentPreset === p.id ? 'rgba(99,102,241,0.1)' : 'rgba(255,255,255,0.03)',
+                transition: 'all 0.25s cubic-bezier(0.2, 0.8, 0.2, 1)',
+                background: currentPreset === p.id
+                  ? 'linear-gradient(135deg, rgba(139,92,246,0.18) 0%, rgba(236,72,153,0.18) 100%)'
+                  : 'rgba(255,255,255,0.03)',
                 border: isFav
-                  ? '1px solid rgba(245,158,11,0.35)'
+                  ? '1px solid rgba(245,158,11,0.45)'
                   : currentPreset === p.id
-                    ? '1px solid rgba(99,102,241,0.25)'
-                    : '1px solid rgba(255,255,255,0.04)',
+                    ? '1px solid rgba(168,85,247,0.45)'
+                    : '1px solid rgba(255,255,255,0.05)',
+                boxShadow: currentPreset === p.id
+                  ? '0 8px 24px rgba(139,92,246,0.25), 0 0 0 1px rgba(168,85,247,0.2) inset'
+                  : 'none',
+                transform: currentPreset === p.id ? 'translateY(-2px)' : 'translateY(0)',
               }}
               onMouseEnter={e => {
                 if (currentPreset !== p.id) {
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.06)'
-                  e.currentTarget.style.transform = 'translateY(-1px)'
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.07)'
+                  e.currentTarget.style.transform = 'translateY(-3px) scale(1.02)'
+                  e.currentTarget.style.borderColor = 'rgba(168,85,247,0.3)'
+                  e.currentTarget.style.boxShadow = '0 10px 30px rgba(0,0,0,0.4)'
                 }
               }}
               onMouseLeave={e => {
                 if (currentPreset !== p.id) {
                   e.currentTarget.style.background = 'rgba(255,255,255,0.03)'
+                  e.currentTarget.style.transform = 'translateY(0) scale(1)'
+                  e.currentTarget.style.borderColor = isFav ? 'rgba(245,158,11,0.45)' : 'rgba(255,255,255,0.05)'
+                  e.currentTarget.style.boxShadow = 'none'
                 }
-                e.currentTarget.style.transform = 'translateY(0)'
               }}
             >
               {thumb ? (
                 <img src={thumb} alt={p.name} style={{
-                  width: 120, height: 80, borderRadius: 4,
+                  width: 120, height: 72, borderRadius: 8,
                   objectFit: 'cover',
-                  border: '1px solid rgba(255,255,255,0.06)',
+                  border: '1px solid rgba(255,255,255,0.08)',
                 }} />
               ) : (
                 <div style={{
-                  width: 120, height: 80, borderRadius: 4,
-                  background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(129,140,248,0.05))',
-                  border: '1px solid rgba(255,255,255,0.06)',
+                  width: 120, height: 72, borderRadius: 8,
+                  background: 'linear-gradient(135deg, rgba(139,92,246,0.25), rgba(236,72,153,0.12))',
+                  border: '1px solid rgba(255,255,255,0.08)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 28,
+                  fontSize: 30,
+                  filter: currentPreset === p.id ? 'none' : 'saturate(0.85)',
                 }}>
                   {p.emoji}
                 </div>
               )}
               <span style={{
-                fontSize: 10,
-                fontWeight: 500,
+                fontSize: 10.5,
+                fontWeight: currentPreset === p.id ? 600 : 500,
                 whiteSpace: 'nowrap',
-                color: currentPreset === p.id ? '#818cf8' : '#7a7a90',
+                letterSpacing: '-0.01em',
+                color: currentPreset === p.id ? '#e9d5ff' : '#8a8aa0',
               }}>
                 {p.name}
               </span>

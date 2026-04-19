@@ -7,6 +7,7 @@ import RightSidebar from './components/RightSidebar'
 import PresetCarousel from './components/PresetCarousel'
 import Timeline from './components/Timeline'
 import SettingsModal from './components/SettingsModal'
+import { CommandPalette } from './components/CommandPalette'
 
 export default function App() {
   const [showSettings, setShowSettings] = useState(false)
@@ -40,18 +41,23 @@ export default function App() {
   }, [])
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden">
-      <TopBar onSettings={() => setShowSettings(true)} />
-      <div className="flex flex-1 overflow-hidden">
-        <LeftSidebar />
-        <div className="flex-1 relative">
-          <ParticleCanvas />
-        </div>
-        <RightSidebar />
+    <div className="flex flex-col h-screen w-screen overflow-hidden relative">
+      {/* Full-bleed canvas — sidebars float over it */}
+      <div className="absolute inset-0 z-0">
+        <ParticleCanvas />
       </div>
-      <Timeline />
-      <PresetCarousel />
+      <div className="relative z-10 flex flex-col h-full w-full pointer-events-none">
+        <div className="pointer-events-auto"><TopBar onSettings={() => setShowSettings(true)} /></div>
+        <div className="flex flex-1 overflow-hidden">
+          <div className="pointer-events-auto"><LeftSidebar /></div>
+          <div className="flex-1 relative" />
+          <div className="pointer-events-auto"><RightSidebar /></div>
+        </div>
+        <div className="pointer-events-auto"><Timeline /></div>
+        <div className="pointer-events-auto"><PresetCarousel /></div>
+      </div>
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      <CommandPalette onSettings={() => setShowSettings(true)} />
     </div>
   )
 }

@@ -91,16 +91,19 @@ export default function LeftSidebar() {
   }
 
   return (
-    <div style={{
+    <div className="sidebar-glow-left" style={{
+      position: 'relative',
       width: 280,
       display: 'flex',
       flexDirection: 'column',
       overflowY: 'auto',
       flexShrink: 0,
-      background: 'rgba(8,8,14,0.9)',
-      backdropFilter: 'blur(20px)',
-      WebkitBackdropFilter: 'blur(20px)',
-      borderRight: '1px solid rgba(255,255,255,0.04)',
+      background: 'linear-gradient(180deg, rgba(8,8,14,0.72) 0%, rgba(12,12,22,0.68) 100%)',
+      backdropFilter: 'blur(28px) saturate(140%)',
+      WebkitBackdropFilter: 'blur(28px) saturate(140%)',
+      borderRight: '1px solid rgba(255,255,255,0.06)',
+      boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.02), 1px 0 40px rgba(0,0,0,0.25)',
+      height: '100%',
     }}>
       <Section title="System Core">
         <Slider label="Particles" value={particleCount} min={1000} max={performanceMode ? 10000 : 50000} step={1000}
@@ -142,15 +145,35 @@ export default function LeftSidebar() {
           disabled={isExportingGif}
           style={{
             width: '100%',
-            padding: '10px 0',
-            borderRadius: 8,
-            fontSize: 13,
+            padding: '11px 0',
+            borderRadius: 10,
+            fontSize: 12.5,
             fontWeight: 600,
+            letterSpacing: '-0.005em',
             cursor: isExportingGif ? 'not-allowed' : 'pointer',
-            transition: 'all 0.15s ease-out',
-            background: isExportingGif ? 'rgba(255,255,255,0.04)' : '#6366f1',
+            transition: 'all 0.2s cubic-bezier(0.2,0.8,0.2,1)',
+            background: isExportingGif
+              ? 'rgba(255,255,255,0.04)'
+              : 'linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%)',
+            backgroundSize: '200% 100%',
+            backgroundPosition: '0% 0%',
             color: isExportingGif ? '#7a7a90' : '#ffffff',
             border: 'none',
+            boxShadow: isExportingGif ? 'none' : '0 6px 20px rgba(168,85,247,0.35), inset 0 1px 0 rgba(255,255,255,0.2)',
+          }}
+          onMouseEnter={e => {
+            if (!isExportingGif) {
+              e.currentTarget.style.backgroundPosition = '100% 0%'
+              e.currentTarget.style.transform = 'translateY(-1px)'
+              e.currentTarget.style.boxShadow = '0 10px 28px rgba(168,85,247,0.5), inset 0 1px 0 rgba(255,255,255,0.25)'
+            }
+          }}
+          onMouseLeave={e => {
+            if (!isExportingGif) {
+              e.currentTarget.style.backgroundPosition = '0% 0%'
+              e.currentTarget.style.transform = 'translateY(0)'
+              e.currentTarget.style.boxShadow = '0 6px 20px rgba(168,85,247,0.35), inset 0 1px 0 rgba(255,255,255,0.2)'
+            }
           }}
         >
           {isExportingGif
@@ -390,27 +413,50 @@ function Section({ title, children }) {
   return (
     <div style={{ padding: '14px 16px', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
       <h3 style={{
-        fontSize: 11,
-        fontWeight: 600,
+        fontSize: 10,
+        fontWeight: 700,
         textTransform: 'uppercase',
-        letterSpacing: '0.08em',
-        color: '#5a5a70',
+        letterSpacing: '0.12em',
+        color: 'transparent',
         marginBottom: 12,
-      }}>{title}</h3>
+        backgroundImage: 'linear-gradient(90deg, #a78bfa 0%, #f472b6 100%)',
+        WebkitBackgroundClip: 'text',
+        backgroundClip: 'text',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+      }}>
+        <span style={{
+          display: 'inline-block',
+          width: 5, height: 5, borderRadius: '50%',
+          background: 'linear-gradient(135deg, #a78bfa, #f472b6)',
+          boxShadow: '0 0 8px rgba(168,85,247,0.8)',
+          flexShrink: 0,
+        }} />
+        {title}
+      </h3>
       {children}
     </div>
   )
 }
 
 function Slider({ label, value, min, max, step, onChange, display }) {
+  const pct = ((value - min) / (max - min)) * 100
   return (
     <div style={{ marginBottom: 12 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
         <span style={{ color: '#7a7a90' }}>{label}</span>
-        <span style={{ color: '#6366f1', fontWeight: 500 }}>{display ? display(value) : value}</span>
+        <span style={{
+          color: '#c084fc',
+          fontWeight: 500,
+          fontVariantNumeric: 'tabular-nums',
+          fontFamily: 'JetBrains Mono, monospace',
+          fontSize: 11,
+        }}>{display ? display(value) : value}</span>
       </div>
       <input type="range" min={min} max={max} step={step} value={value}
-        onChange={e => onChange(parseFloat(e.target.value))} style={{ width: '100%' }} />
+        onChange={e => onChange(parseFloat(e.target.value))}
+        style={{ width: '100%', '--val': `${pct}%` }} />
     </div>
   )
 }
@@ -428,26 +474,30 @@ function Toggle({ value, onChange }) {
   return (
     <button onClick={() => onChange(!value)}
       style={{
-        width: 36,
-        height: 20,
-        borderRadius: 10,
+        width: 38,
+        height: 22,
+        borderRadius: 999,
         position: 'relative',
         cursor: 'pointer',
-        transition: 'all 0.15s ease-out',
-        background: value ? '#6366f1' : 'rgba(255,255,255,0.08)',
-        border: 'none',
+        transition: 'all 0.22s cubic-bezier(0.2,0.8,0.2,1)',
+        background: value
+          ? 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)'
+          : 'rgba(255,255,255,0.06)',
+        border: value ? '1px solid rgba(168,85,247,0.5)' : '1px solid rgba(255,255,255,0.07)',
+        boxShadow: value ? '0 0 14px rgba(168,85,247,0.45), inset 0 1px 0 rgba(255,255,255,0.15)' : 'inset 0 1px 0 rgba(255,255,255,0.03)',
         flexShrink: 0,
       }}
     >
       <div style={{
-        width: 14,
-        height: 14,
+        width: 16,
+        height: 16,
         borderRadius: '50%',
         position: 'absolute',
-        top: 3,
+        top: 2,
         left: value ? 19 : 3,
-        transition: 'all 0.15s ease-out',
-        background: value ? '#ffffff' : '#7a7a90',
+        background: '#ffffff',
+        transition: 'all 0.22s cubic-bezier(0.2,0.8,0.2,1)',
+        boxShadow: value ? '0 2px 6px rgba(0,0,0,0.35), 0 0 0 0 rgba(168,85,247,0.4)' : '0 2px 4px rgba(0,0,0,0.35)',
       }} />
     </button>
   )
