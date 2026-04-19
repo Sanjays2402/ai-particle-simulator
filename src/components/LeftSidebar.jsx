@@ -403,14 +403,22 @@ function Section({ title, children }) {
 }
 
 function Slider({ label, value, min, max, step, onChange, display }) {
+  const pct = ((value - min) / (max - min)) * 100
   return (
     <div style={{ marginBottom: 12 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
         <span style={{ color: '#7a7a90' }}>{label}</span>
-        <span style={{ color: '#6366f1', fontWeight: 500 }}>{display ? display(value) : value}</span>
+        <span style={{
+          color: '#c084fc',
+          fontWeight: 500,
+          fontVariantNumeric: 'tabular-nums',
+          fontFamily: 'JetBrains Mono, monospace',
+          fontSize: 11,
+        }}>{display ? display(value) : value}</span>
       </div>
       <input type="range" min={min} max={max} step={step} value={value}
-        onChange={e => onChange(parseFloat(e.target.value))} style={{ width: '100%' }} />
+        onChange={e => onChange(parseFloat(e.target.value))}
+        style={{ width: '100%', '--val': `${pct}%` }} />
     </div>
   )
 }

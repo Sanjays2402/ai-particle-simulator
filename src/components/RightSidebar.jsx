@@ -38,24 +38,33 @@ export default function RightSidebar() {
             fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
             letterSpacing: '0.08em', color: '#5a5a70', marginBottom: 12,
           }}>Controls</h3>
-          {dynamicControls.map(c => (
+          {dynamicControls.map(c => {
+            const v = dynamicValues[c.id] ?? c.value
+            const pct = ((v - c.min) / (c.max - c.min)) * 100
+            return (
             <div key={c.id} style={{ marginBottom: 14 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
                 <span style={{ color: '#7a7a90' }}>{c.label}</span>
-                <span style={{ color: '#6366f1', fontWeight: 500 }}>
-                  {(dynamicValues[c.id] ?? c.value).toFixed(1)}
+                <span style={{
+                  color: '#c084fc',
+                  fontWeight: 500,
+                  fontFamily: 'JetBrains Mono, monospace',
+                  fontSize: 11,
+                  fontVariantNumeric: 'tabular-nums',
+                }}>
+                  {v.toFixed(1)}
                 </span>
               </div>
               <input
                 type="range"
                 min={c.min} max={c.max}
                 step={(c.max - c.min) / 100}
-                value={dynamicValues[c.id] ?? c.value}
+                value={v}
                 onChange={e => setDynamicValue(c.id, parseFloat(e.target.value))}
-                style={{ width: '100%' }}
+                style={{ width: '100%', '--val': `${pct}%` }}
               />
             </div>
-          ))}
+          )})}
         </div>
       )}
 
