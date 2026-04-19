@@ -1,6 +1,10 @@
 import { useRef, useEffect } from 'react'
 import { useStore } from '../store'
 import { presets } from '../presets'
+import {
+  Play, Pause, RotateCcw, Maximize2, Shuffle, Magnet, Camera, Link2,
+  Mic, Download, Settings, Repeat, Sparkles,
+} from 'lucide-react'
 
 export default function TopBar({ onSettings }) {
   const { playing, setPlaying, loadRandom, mouseAttract, setMouseAttract, audioReactive, setAudioReactive, isRecording, startRecording, stopRecording, recordingBuffer, enterReplay, isReplaying } = useStore()
@@ -128,31 +132,44 @@ export default function TopBar({ onSettings }) {
           fontWeight: 600,
           letterSpacing: '-0.02em',
           color: '#eeeef0',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 8,
         }}>
-          ✦ Particle Simulator
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 22, height: 22, borderRadius: 6,
+            background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%)',
+            boxShadow: '0 0 16px rgba(168,85,247,0.45)',
+          }}>
+            <Sparkles size={12} strokeWidth={2.5} color="#fff" />
+          </span>
+          Particle Simulator
         </span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         <Btn onClick={() => setPlaying(!playing)} title={playing ? 'Pause (Space)' : 'Play (Space)'}>
-          {playing ? '⏸' : '▶️'}
+          {playing ? <Pause size={14} strokeWidth={2.2} /> : <Play size={14} strokeWidth={2.2} />}
         </Btn>
         <RecordBtn isRecording={isRecording} onClick={() => isRecording ? stopRecording() : startRecording()} />
         {recordingBuffer.length > 0 && !isReplaying && (
-          <Btn onClick={enterReplay} title="Enter Replay">🔁</Btn>
+          <Btn onClick={enterReplay} title="Enter Replay"><Repeat size={14} strokeWidth={2.2} /></Btn>
         )}
         <Btn onClick={() => {
           const { loadPreset, currentPreset, loadCustomCode, particleFnSource, infoTitle, infoDesc } = useStore.getState()
           if (currentPreset) loadPreset(currentPreset)
           else loadCustomCode(particleFnSource, infoTitle, infoDesc)
-        }} title="Reset Camera">⟲</Btn>
-        <Btn onClick={handleFullscreen} title="Fullscreen (F)">⛶</Btn>
-        <Btn onClick={loadRandom} title="Random Preset (R)">🎲</Btn>
-        <Btn onClick={() => setMouseAttract(!mouseAttract)} title="Mouse Attract" active={mouseAttract}>🧲</Btn>
-        <Btn onClick={handleScreenshot} title="Screenshot (S)">📷</Btn>
-        <Btn onClick={handleShare} title="Share URL">🔗</Btn>
-        <Btn onClick={handleMic} title="Sound Reactivity" active={audioReactive}>🎤</Btn>
-        <Btn onClick={handleExport} title="Export HTML">⬇</Btn>
-        <Btn onClick={onSettings} title="Settings">⚙</Btn>
+        }} title="Reset Camera"><RotateCcw size={14} strokeWidth={2.2} /></Btn>
+        <Btn onClick={handleFullscreen} title="Fullscreen (F)"><Maximize2 size={14} strokeWidth={2.2} /></Btn>
+        <Btn onClick={loadRandom} title="Random Preset (R)"><Shuffle size={14} strokeWidth={2.2} /></Btn>
+        <Btn onClick={() => setMouseAttract(!mouseAttract)} title="Mouse Attract" active={mouseAttract}><Magnet size={14} strokeWidth={2.2} /></Btn>
+        <Btn onClick={handleScreenshot} title="Screenshot (S)"><Camera size={14} strokeWidth={2.2} /></Btn>
+        <Btn onClick={handleShare} title="Share URL"><Link2 size={14} strokeWidth={2.2} /></Btn>
+        <Btn onClick={handleMic} title="Sound Reactivity" active={audioReactive}><Mic size={14} strokeWidth={2.2} /></Btn>
+        <Btn onClick={handleExport} title="Export HTML"><Download size={14} strokeWidth={2.2} /></Btn>
+        <Btn onClick={onSettings} title="Settings"><Settings size={14} strokeWidth={2.2} /></Btn>
       </div>
     </div>
   )
