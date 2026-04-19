@@ -44,6 +44,7 @@ export default function PresetCarousel() {
           <div key={p.id} style={{ position: 'relative', flexShrink: 0 }}>
             <button
               onClick={() => loadPreset(p.id)}
+              className="preset-card"
               style={{
                 display: 'flex',
                 flexDirection: 'column',
@@ -114,6 +115,7 @@ export default function PresetCarousel() {
             {/* Favorite star */}
             <button
               onClick={e => { e.stopPropagation(); toggleFavorite(p.id) }}
+              className={`fav-btn ${isFav ? 'active' : ''}`}
               style={{
                 position: 'absolute', top: 2, right: 2,
                 width: 22, height: 22,

@@ -136,14 +136,7 @@ export default function TopBar({ onSettings }) {
           alignItems: 'center',
           gap: 8,
         }}>
-          <span style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 22, height: 22, borderRadius: 6,
-            background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%)',
-            boxShadow: '0 0 16px rgba(168,85,247,0.45)',
-          }}>
+          <span className="logo-mark">
             <Sparkles size={12} strokeWidth={2.5} color="#fff" />
           </span>
           Particle Simulator
