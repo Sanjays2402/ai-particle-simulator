@@ -10,11 +10,13 @@ import SettingsModal from './components/SettingsModal'
 import StatusStrip from './components/StatusStrip'
 import Toast from './components/Toast'
 import { CommandPalette } from './components/CommandPalette'
-import { Sparkles } from 'lucide-react'
+import { Sparkles, ChevronLeft, ChevronRight } from 'lucide-react'
 
 export default function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [showSplash, setShowSplash] = useState(true)
+  const [leftOpen, setLeftOpen] = useState(true)
+  const [rightOpen, setRightOpen] = useState(true)
   const loadPreset = useStore(s => s.loadPreset)
   const loadCustomCode = useStore(s => s.loadCustomCode)
   const orb1 = useRef(null), orb2 = useRef(null), orb3 = useRef(null)
@@ -24,7 +26,6 @@ export default function App() {
     return () => clearTimeout(t)
   }, [])
 
-  // v2 iter 12: mouse parallax on orbs
   useEffect(() => {
     const onMove = (e) => {
       const x = (e.clientX / window.innerWidth - 0.5) * 2
@@ -62,16 +63,69 @@ export default function App() {
       <div className="absolute inset-0 z-0">
         <ParticleCanvas />
       </div>
-      {/* v2 iter 12: volumetric parallax orbs over canvas, below UI */}
       <div ref={orb1} className="orb orb-1" style={{ zIndex: 1 }} />
       <div ref={orb2} className="orb orb-2" style={{ zIndex: 1 }} />
       <div ref={orb3} className="orb orb-3" style={{ zIndex: 1 }} />
+
       <div className="relative z-10 flex flex-col h-full w-full pointer-events-none">
         <div className="pointer-events-auto"><TopBar onSettings={() => setShowSettings(true)} /></div>
         <div className="flex flex-1 overflow-hidden">
-          <div className="pointer-events-auto slide-in-left"><LeftSidebar /></div>
+          {/* Left sidebar + toggle */}
+          <div className="pointer-events-auto slide-in-left" style={{ position: 'relative', display: leftOpen ? 'block' : 'none' }}>
+            <LeftSidebar />
+            <button className="sidebar-toggle left" onClick={() => setLeftOpen(false)} title="Hide sidebar">
+              <ChevronLeft size={14} />
+            </button>
+          </div>
+          {!leftOpen && (
+            <button
+              onClick={() => setLeftOpen(true)}
+              title="Show sidebar"
+              className="pointer-events-auto"
+              style={{
+                position: 'absolute', left: 0, top: 72, zIndex: 30,
+                width: 26, height: 44,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                background: 'linear-gradient(180deg, rgba(168,85,247,0.18), rgba(236,72,153,0.12))',
+                border: '1px solid rgba(168,85,247,0.35)', borderLeft: 'none',
+                borderRadius: '0 10px 10px 0',
+                color: '#fff',
+                cursor: 'pointer',
+                backdropFilter: 'blur(12px)',
+                boxShadow: '0 0 14px rgba(168,85,247,0.3)',
+              }}>
+              <ChevronRight size={14} />
+            </button>
+          )}
+
           <div className="flex-1 relative" />
-          <div className="pointer-events-auto slide-in-right"><RightSidebar /></div>
+
+          {!rightOpen && (
+            <button
+              onClick={() => setRightOpen(true)}
+              title="Show sidebar"
+              className="pointer-events-auto"
+              style={{
+                position: 'absolute', right: 0, top: 72, zIndex: 30,
+                width: 26, height: 44,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                background: 'linear-gradient(180deg, rgba(168,85,247,0.18), rgba(236,72,153,0.12))',
+                border: '1px solid rgba(168,85,247,0.35)', borderRight: 'none',
+                borderRadius: '10px 0 0 10px',
+                color: '#fff',
+                cursor: 'pointer',
+                backdropFilter: 'blur(12px)',
+                boxShadow: '0 0 14px rgba(168,85,247,0.3)',
+              }}>
+              <ChevronLeft size={14} />
+            </button>
+          )}
+          <div className="pointer-events-auto slide-in-right" style={{ position: 'relative', display: rightOpen ? 'block' : 'none' }}>
+            <RightSidebar />
+            <button className="sidebar-toggle right" onClick={() => setRightOpen(false)} title="Hide sidebar">
+              <ChevronRight size={14} />
+            </button>
+          </div>
         </div>
         <div className="pointer-events-auto"><Timeline /></div>
         <div className="pointer-events-auto"><PresetCarousel /></div>

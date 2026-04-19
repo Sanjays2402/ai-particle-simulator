@@ -126,7 +126,7 @@ export default function TopBar({ onSettings }) {
       WebkitBackdropFilter: 'blur(24px) saturate(140%)',
       borderBottom: '1px solid rgba(255,255,255,0.06)',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <span style={{
           fontSize: 15,
           fontWeight: 600,
@@ -141,6 +141,26 @@ export default function TopBar({ onSettings }) {
           </span>
           Particle Simulator
         </span>
+        <button
+          onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))}
+          title="Open command palette"
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            padding: '4px 8px 4px 10px',
+            borderRadius: 8,
+            background: 'rgba(255,255,255,0.03)',
+            border: '1px solid rgba(255,255,255,0.06)',
+            color: '#9a9ab0',
+            fontSize: 11,
+            cursor: 'pointer',
+            transition: 'all 0.18s',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(168,85,247,0.08)'; e.currentTarget.style.borderColor = 'rgba(168,85,247,0.3)' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)' }}
+        >
+          Search
+          <span style={{ display: 'inline-flex', gap: 2 }}><kbd>⌘</kbd><kbd>K</kbd></span>
+        </button>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>

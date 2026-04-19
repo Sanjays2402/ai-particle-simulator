@@ -193,29 +193,22 @@ export default function LeftSidebar() {
         <ToggleRow label="Collisions" value={collisionsEnabled} onChange={setCollisionsEnabled} />
 
         <div style={{ marginTop: 8, marginBottom: 6 }}>
-          <span style={{ fontSize: 12, color: '#7a7a90' }}>Force Field</span>
+          <span style={{ fontSize: 12, color: '#9a9ab0', fontWeight: 500 }}>Force Field</span>
         </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginBottom: 8 }}>
           {[
-            { id: 'attractor', label: '🧲 Attract', color: '#6366f1' },
-            { id: 'repulsor', label: '💥 Repulse', color: '#ef4444' },
-            { id: 'vortex', label: '🌀 Vortex', color: '#8b5cf6' },
-            { id: 'turbulence', label: '💨 Turb.', color: '#f59e0b' },
+            { id: 'attractor', label: 'Attract', ico: '🧲' },
+            { id: 'repulsor', label: 'Repulse', ico: '💥' },
+            { id: 'vortex', label: 'Vortex', ico: '🌀' },
+            { id: 'turbulence', label: 'Turb.', ico: '💨' },
           ].map(ff => (
             <button key={ff.id}
               onClick={() => setForceFieldType(forceFieldType === ff.id ? null : ff.id)}
-              style={{
-                padding: '5px 10px',
-                borderRadius: 6,
-                fontSize: 11,
-                fontWeight: 500,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease-out',
-                background: forceFieldType === ff.id ? `${ff.color}18` : 'rgba(255,255,255,0.04)',
-                color: forceFieldType === ff.id ? ff.color : '#7a7a90',
-                border: forceFieldType === ff.id ? `1px solid ${ff.color}40` : '1px solid rgba(255,255,255,0.04)',
-              }}
-            >{ff.label}</button>
+              className={`ff-btn ${forceFieldType === ff.id ? 'active' : ''}`}
+            >
+              <span className="ff-ico">{ff.ico}</span>
+              {ff.label}
+            </button>
           ))}
         </div>
         {forceFieldType && (
@@ -225,20 +218,23 @@ export default function LeftSidebar() {
       </Section>
 
       <Section title="Visual Style">
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
           {STYLES.map(s => (
             <button key={s} onClick={() => setVisualStyle(s)}
               style={{
-                padding: '10px 14px',
-                borderRadius: 6,
-                fontSize: 12,
-                fontWeight: 500,
+                padding: '10px 8px',
+                borderRadius: 8,
+                fontSize: 11.5,
+                fontWeight: 550,
                 textTransform: 'capitalize',
                 cursor: 'pointer',
-                transition: 'all 0.15s ease-out',
-                background: visualStyle === s ? '#6366f1' : 'rgba(255,255,255,0.04)',
-                color: visualStyle === s ? '#ffffff' : '#7a7a90',
-                border: visualStyle === s ? '1px solid rgba(99,102,241,0.4)' : '1px solid rgba(255,255,255,0.04)',
+                transition: 'all 0.2s cubic-bezier(0.2,0.8,0.2,1)',
+                background: visualStyle === s
+                  ? 'linear-gradient(135deg, rgba(168,85,247,0.22) 0%, rgba(236,72,153,0.18) 100%)'
+                  : 'rgba(255,255,255,0.03)',
+                color: visualStyle === s ? '#f3e8ff' : '#8a8aa0',
+                border: visualStyle === s ? '1px solid rgba(168,85,247,0.45)' : '1px solid rgba(255,255,255,0.05)',
+                boxShadow: visualStyle === s ? '0 0 14px rgba(168,85,247,0.25), inset 0 1px 0 rgba(255,255,255,0.06)' : 'none',
               }}
             >{s}</button>
           ))}
@@ -246,27 +242,35 @@ export default function LeftSidebar() {
       </Section>
 
       <Section title="Theme">
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
           {THEME_LIST.map(t => (
             <button key={t.id} onClick={() => setTheme(t.id)}
+              title={t.name}
               style={{
                 display: 'flex',
+                flexDirection: 'column',
                 alignItems: 'center',
-                gap: 6,
-                padding: '6px 10px',
-                borderRadius: 6,
-                fontSize: 12,
+                gap: 5,
+                padding: '8px 4px',
+                borderRadius: 8,
+                fontSize: 10.5,
                 fontWeight: 500,
                 cursor: 'pointer',
-                transition: 'all 0.15s ease-out',
-                background: theme === t.id ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.04)',
-                border: theme === t.id ? `1px solid ${t.color.startsWith('linear') ? 'rgba(255,255,255,0.2)' : t.color + '40'}` : '1px solid rgba(255,255,255,0.04)',
-                color: '#7a7a90',
+                transition: 'all 0.2s cubic-bezier(0.2,0.8,0.2,1)',
+                background: theme === t.id ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.02)',
+                border: theme === t.id
+                  ? `1px solid ${t.color.startsWith('linear') ? 'rgba(255,255,255,0.3)' : t.color + '80'}`
+                  : '1px solid rgba(255,255,255,0.04)',
+                color: theme === t.id ? '#eeeef0' : '#8a8aa0',
+                boxShadow: theme === t.id && !t.color.startsWith('linear')
+                  ? `0 0 12px ${t.color}40` : theme === t.id ? '0 0 14px rgba(168,85,247,0.25)' : 'none',
               }}
             >
               <span style={{
-                display: 'inline-block', width: 6, height: 6, borderRadius: '50%',
-                background: t.color, flexShrink: 0,
+                width: 22, height: 22, borderRadius: '50%',
+                background: t.color,
+                boxShadow: `0 0 8px ${t.color.startsWith('linear') ? 'rgba(255,255,255,0.25)' : t.color}, inset 0 1px 0 rgba(255,255,255,0.18)`,
+                flexShrink: 0,
               }} />
               {t.name}
             </button>
@@ -281,14 +285,8 @@ export default function LeftSidebar() {
               type="text"
               value={presetSearch}
               onChange={e => setPresetSearch(e.target.value)}
-              placeholder="Search presets..."
-              style={{
-                width: '100%', padding: '6px 28px 6px 10px', borderRadius: 6, fontSize: 12,
-                background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
-                color: '#eeeef0', outline: 'none', transition: 'all 0.15s ease-out',
-              }}
-              onFocus={e => e.target.style.borderColor = 'rgba(99,102,241,0.4)'}
-              onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.06)'}
+              placeholder="Search presets…"
+              className="search-v3"
             />
             {presetSearch && (
               <button onClick={() => setPresetSearch('')}
@@ -379,30 +377,39 @@ export default function LeftSidebar() {
           style={{
             width: '100%',
             marginTop: 8,
-            padding: '10px 0',
-            borderRadius: 8,
-            fontSize: 13,
+            padding: '11px 0',
+            borderRadius: 10,
+            fontSize: 12.5,
             fontWeight: 600,
+            letterSpacing: '-0.005em',
             cursor: aiLoading || !prompt.trim() ? 'not-allowed' : 'pointer',
-            transition: 'all 0.15s ease-out',
-            background: '#6366f1',
+            transition: 'all 0.22s cubic-bezier(0.2,0.8,0.2,1)',
+            background: aiLoading
+              ? 'linear-gradient(90deg, #6366f1, #a855f7, #ec4899, #a855f7, #6366f1)'
+              : 'linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%)',
+            backgroundSize: aiLoading ? '300% 100%' : '100% 100%',
+            animation: aiLoading ? 'gen-shimmer 2s linear infinite' : 'none',
             color: '#ffffff',
-            border: 'none',
-            opacity: aiLoading || !prompt.trim() ? 0.4 : 1,
+            border: '1px solid rgba(168,85,247,0.5)',
+            opacity: aiLoading || !prompt.trim() ? (aiLoading ? 1 : 0.4) : 1,
+            boxShadow: !aiLoading && prompt.trim()
+              ? '0 4px 20px rgba(168,85,247,0.35), inset 0 1px 0 rgba(255,255,255,0.18)'
+              : 'none',
           }}
           onMouseEnter={e => {
             if (!aiLoading && prompt.trim()) {
-              e.currentTarget.style.background = '#818cf8'
-              e.currentTarget.style.boxShadow = '0 0 20px rgba(99,102,241,0.3)'
+              e.currentTarget.style.transform = 'translateY(-1px)'
+              e.currentTarget.style.boxShadow = '0 8px 28px rgba(168,85,247,0.5), inset 0 1px 0 rgba(255,255,255,0.22)'
             }
           }}
           onMouseLeave={e => {
-            e.currentTarget.style.background = '#6366f1'
-            e.currentTarget.style.boxShadow = 'none'
+            e.currentTarget.style.transform = 'translateY(0)'
+            if (!aiLoading && prompt.trim()) e.currentTarget.style.boxShadow = '0 4px 20px rgba(168,85,247,0.35), inset 0 1px 0 rgba(255,255,255,0.18)'
           }}
         >
-          {aiLoading ? '⏳ Generating...' : '✦ Generate'}
+          {aiLoading ? '✨ Generating…' : '✦ Generate'}
         </button>
+        <style>{`@keyframes gen-shimmer { 0% { background-position: 0% 50%; } 100% { background-position: 300% 50%; } }`}</style>
         {aiError && <p style={{ fontSize: 12, marginTop: 8, color: '#ef4444' }}>{aiError}</p>}
       </Section>
     </div>
@@ -411,30 +418,11 @@ export default function LeftSidebar() {
 
 function Section({ title, children }) {
   return (
-    <div style={{ padding: '14px 16px', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-      <h3 style={{
-        fontSize: 10,
-        fontWeight: 700,
-        textTransform: 'uppercase',
-        letterSpacing: '0.12em',
-        color: 'transparent',
-        marginBottom: 12,
-        backgroundImage: 'linear-gradient(90deg, #a78bfa 0%, #f472b6 100%)',
-        WebkitBackgroundClip: 'text',
-        backgroundClip: 'text',
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-      }}>
-        <span style={{
-          display: 'inline-block',
-          width: 5, height: 5, borderRadius: '50%',
-          background: 'linear-gradient(135deg, #a78bfa, #f472b6)',
-          boxShadow: '0 0 8px rgba(168,85,247,0.8)',
-          flexShrink: 0,
-        }} />
+    <div style={{ padding: '14px 16px 8px' }}>
+      <div className="section-label-v2" style={{ marginBottom: 12 }}>
+        <span className="dot" />
         {title}
-      </h3>
+      </div>
       {children}
     </div>
   )
@@ -444,15 +432,9 @@ function Slider({ label, value, min, max, step, onChange, display }) {
   const pct = ((value - min) / (max - min)) * 100
   return (
     <div style={{ marginBottom: 12 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
-        <span style={{ color: '#7a7a90' }}>{label}</span>
-        <span style={{
-          color: '#c084fc',
-          fontWeight: 500,
-          fontVariantNumeric: 'tabular-nums',
-          fontFamily: 'JetBrains Mono, monospace',
-          fontSize: 11,
-        }}>{display ? display(value) : value}</span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginBottom: 6 }}>
+        <span style={{ color: '#9a9ab0', fontWeight: 500, letterSpacing: '-0.005em' }}>{label}</span>
+        <span className="value-chip">{display ? display(value) : value}</span>
       </div>
       <input type="range" min={min} max={max} step={step} value={value}
         onChange={e => onChange(parseFloat(e.target.value))}

@@ -505,3 +505,116 @@ kbd, .kbd {
   to { opacity: 0; visibility: hidden; }
 }
 
+
+/* ==========================================================
+   V3 POLISH PASS
+   ========================================================== */
+
+/* v3 iter 05: scroll edge fade for sidebars */
+.sidebar-glow-left, .sidebar-glow-right {
+  mask-image: linear-gradient(180deg, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+}
+
+/* v3 iter 06: smaller cleaner top bar icon buttons */
+.topbtn-v3 {
+  width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.05);
+  color: #bdbdd0;
+  cursor: pointer;
+  transition: all 0.18s cubic-bezier(0.2,0.8,0.2,1);
+}
+.topbtn-v3:hover { background: rgba(168,85,247,0.12); border-color: rgba(168,85,247,0.35); color: #f0e8ff; transform: translateY(-1px); }
+.topbtn-v3.active {
+  background: linear-gradient(135deg, rgba(168,85,247,0.25), rgba(236,72,153,0.18));
+  border-color: rgba(168,85,247,0.45);
+  color: #fff;
+  box-shadow: 0 0 14px rgba(168,85,247,0.35), inset 0 1px 0 rgba(255,255,255,0.1);
+}
+
+/* v3 iter 07: preset card skeleton fallback */
+.preset-skeleton {
+  background: linear-gradient(135deg, rgba(99,102,241,0.2), rgba(236,72,153,0.12)) !important;
+}
+.preset-skeleton::before {
+  content: '✨';
+  font-size: 28px;
+  opacity: 0.7;
+  filter: drop-shadow(0 0 8px rgba(168,85,247,0.6));
+}
+
+/* v3 iter 08: search input with focus glow */
+.search-v3 {
+  width: 100%;
+  padding: 8px 32px 8px 12px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.06);
+  color: #eeeef0;
+  outline: none;
+  transition: all 0.2s cubic-bezier(0.2,0.8,0.2,1);
+}
+.search-v3:focus {
+  border-color: rgba(168,85,247,0.5);
+  background: rgba(168,85,247,0.06);
+  box-shadow: 0 0 0 3px rgba(168,85,247,0.1), 0 0 20px rgba(168,85,247,0.12);
+}
+
+/* v3 iter 11: force field grid buttons */
+.ff-btn {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 10px 6px;
+  border-radius: 10px;
+  font-size: 10.5px; font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.2,0.8,0.2,1);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.05);
+  color: #8a8aa0;
+}
+.ff-btn:hover { border-color: rgba(168,85,247,0.3); color: #c8c8d8; transform: translateY(-1px); }
+.ff-btn.active {
+  background: linear-gradient(135deg, rgba(168,85,247,0.22), rgba(236,72,153,0.16));
+  border-color: rgba(168,85,247,0.5);
+  color: #f3e8ff;
+  box-shadow: 0 0 14px rgba(168,85,247,0.3), inset 0 1px 0 rgba(255,255,255,0.08);
+}
+.ff-btn .ff-ico { font-size: 18px; line-height: 1; }
+
+/* v3 iter 14: "AI active" pulsing ring used during generation */
+.ai-pulse {
+  position: relative;
+}
+.ai-pulse::before {
+  content: ''; position: absolute; inset: -4px; border-radius: 14px;
+  border: 2px solid rgba(168,85,247,0.45);
+  animation: ai-ring 1.6s cubic-bezier(0.2,0.8,0.2,1) infinite;
+  pointer-events: none;
+}
+@keyframes ai-ring {
+  0%   { opacity: 0.9; transform: scale(0.95); }
+  70%  { opacity: 0; transform: scale(1.15); }
+  100% { opacity: 0; transform: scale(1.15); }
+}
+
+/* v3 iter 15: sidebar collapse toggle buttons */
+.sidebar-toggle {
+  position: absolute;
+  top: 72px;
+  width: 22px; height: 44px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: linear-gradient(180deg, rgba(20,20,32,0.9), rgba(12,12,20,0.9));
+  border: 1px solid rgba(168,85,247,0.28);
+  color: #c8c8d8;
+  cursor: pointer;
+  z-index: 30;
+  transition: all 0.2s cubic-bezier(0.2,0.8,0.2,1);
+  backdrop-filter: blur(12px);
+}
+.sidebar-toggle.left  { right: -11px; border-radius: 0 10px 10px 0; border-left: none; }
+.sidebar-toggle.right { left: -11px;  border-radius: 10px 0 0 10px; border-right: none; }
+.sidebar-toggle:hover { color: #fff; background: linear-gradient(180deg, rgba(168,85,247,0.25), rgba(236,72,153,0.18)); box-shadow: 0 0 16px rgba(168,85,247,0.35); }
