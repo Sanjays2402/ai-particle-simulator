@@ -7,6 +7,7 @@ import RightSidebar from './components/RightSidebar'
 import PresetCarousel from './components/PresetCarousel'
 import Timeline from './components/Timeline'
 import SettingsModal from './components/SettingsModal'
+import { CommandPalette } from './components/CommandPalette'
 
 export default function App() {
   const [showSettings, setShowSettings] = useState(false)
@@ -56,6 +57,7 @@ export default function App() {
         <div className="pointer-events-auto"><PresetCarousel /></div>
       </div>
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      <CommandPalette onSettings={() => setShowSettings(true)} />
     </div>
   )
 }

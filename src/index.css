@@ -152,3 +152,18 @@ h1, h2, h3 {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-2px); }
 }
+
+/* Command palette */
+[cmdk-item][data-selected="true"] {
+  background: linear-gradient(135deg, rgba(168,85,247,0.18) 0%, rgba(236,72,153,0.14) 100%) !important;
+  box-shadow: 0 0 0 1px rgba(168,85,247,0.35) inset;
+}
+[cmdk-group-heading] { padding: 6px 10px !important; }
+@keyframes cp-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes cp-slide {
+  from { opacity: 0; transform: translateY(-12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
