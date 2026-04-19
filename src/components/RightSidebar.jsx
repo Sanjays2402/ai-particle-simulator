@@ -4,7 +4,8 @@ export default function RightSidebar() {
   const { dynamicControls, dynamicValues, setDynamicValue, infoTitle, infoDesc } = useStore()
 
   return (
-    <div style={{
+    <div className="sidebar-glow-right" style={{
+      position: 'relative',
       width: 260,
       display: 'flex',
       flexDirection: 'column',

@@ -91,7 +91,8 @@ export default function LeftSidebar() {
   }
 
   return (
-    <div style={{
+    <div className="sidebar-glow-left" style={{
+      position: 'relative',
       width: 280,
       display: 'flex',
       flexDirection: 'column',
