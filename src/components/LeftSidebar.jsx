@@ -392,11 +392,32 @@ function Section({ title, children }) {
   return (
     <div style={{ padding: '14px 16px', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
       <h3 style={{
-        fontSize: 11,
-        fontWeight: 600,
+        fontSize: 10,
+        fontWeight: 700,
         textTransform: 'uppercase',
-        letterSpacing: '0.08em',
-        color: '#5a5a70',
+        letterSpacing: '0.12em',
+        color: 'transparent',
+        marginBottom: 12,
+        backgroundImage: 'linear-gradient(90deg, #a78bfa 0%, #f472b6 100%)',
+        WebkitBackgroundClip: 'text',
+        backgroundClip: 'text',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+      }}>
+        <span style={{
+          display: 'inline-block',
+          width: 5, height: 5, borderRadius: '50%',
+          background: 'linear-gradient(135deg, #a78bfa, #f472b6)',
+          boxShadow: '0 0 8px rgba(168,85,247,0.8)',
+          flexShrink: 0,
+        }} />
+        {title}
+      </h3>
+      {children}
+    </div>
+  )
+}
         marginBottom: 12,
       }}>{title}</h3>
       {children}
