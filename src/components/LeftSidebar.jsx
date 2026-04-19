@@ -97,10 +97,12 @@ export default function LeftSidebar() {
       flexDirection: 'column',
       overflowY: 'auto',
       flexShrink: 0,
-      background: 'rgba(8,8,14,0.9)',
-      backdropFilter: 'blur(20px)',
-      WebkitBackdropFilter: 'blur(20px)',
-      borderRight: '1px solid rgba(255,255,255,0.04)',
+      background: 'linear-gradient(180deg, rgba(8,8,14,0.72) 0%, rgba(12,12,22,0.68) 100%)',
+      backdropFilter: 'blur(28px) saturate(140%)',
+      WebkitBackdropFilter: 'blur(28px) saturate(140%)',
+      borderRight: '1px solid rgba(255,255,255,0.06)',
+      boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.02), 1px 0 40px rgba(0,0,0,0.25)',
+      height: '100%',
     }}>
       <Section title="System Core">
         <Slider label="Particles" value={particleCount} min={1000} max={performanceMode ? 10000 : 50000} step={1000}

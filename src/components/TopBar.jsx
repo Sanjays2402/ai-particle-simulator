@@ -121,10 +121,10 @@ export default function TopBar({ onSettings }) {
       position: 'sticky',
       top: 0,
       zIndex: 20,
-      background: 'rgba(6,6,10,0.85)',
-      backdropFilter: 'blur(16px)',
-      WebkitBackdropFilter: 'blur(16px)',
-      borderBottom: '1px solid rgba(255,255,255,0.04)',
+      background: 'linear-gradient(180deg, rgba(6,6,10,0.78) 0%, rgba(10,10,18,0.62) 100%)',
+      backdropFilter: 'blur(24px) saturate(140%)',
+      WebkitBackdropFilter: 'blur(24px) saturate(140%)',
+      borderBottom: '1px solid rgba(255,255,255,0.06)',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{

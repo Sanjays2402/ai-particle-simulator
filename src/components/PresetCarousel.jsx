@@ -32,10 +32,10 @@ export default function PresetCarousel() {
       padding: '0 16px',
       overflowX: 'auto',
       flexShrink: 0,
-      background: 'rgba(8,8,14,0.9)',
-      backdropFilter: 'blur(20px)',
-      WebkitBackdropFilter: 'blur(20px)',
-      borderTop: '1px solid rgba(255,255,255,0.04)',
+      background: 'linear-gradient(180deg, rgba(8,8,14,0.62) 0%, rgba(8,8,14,0.82) 100%)',
+      backdropFilter: 'blur(24px) saturate(140%)',
+      WebkitBackdropFilter: 'blur(24px) saturate(140%)',
+      borderTop: '1px solid rgba(255,255,255,0.06)',
     }}>
       {sorted.map(p => {
         const isFav = favoritedPresets.includes(p.id)
