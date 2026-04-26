@@ -1,4 +1,4 @@
-# ✦ AI Particle Simulator
+# AI Particle Simulator
 
 [![Live Demo](https://img.shields.io/badge/demo-live-brightgreen)](https://sanjays2402.github.io/ai-particle-simulator)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -9,21 +9,21 @@ A real-time 3D particle system generator powered by AI. Describe what you want, 
 
 ![Main UI](docs/screenshot-main.png)
 
-## ✨ Features
+## Features
 
-- **🎨 25+ Built-in Presets** — Galaxy, DNA, Fireworks, Heart, Butterfly, Vortex, Aurora, Black Hole, Solar Flare, Quantum Tunnel, and more
-- **🤖 AI Text-to-Particles** — Describe any effect and AI generates the simulation code
-- **🎛️ Dynamic Controls** — AI-generated sliders for real-time parameter tweaking
-- **✨ Visual Styles** — Sparkle, Plasma, Blob, Ring particle rendering modes
-- **🎨 6 Color Themes** — Neon, Cyberpunk, Ocean, Fire, Mono, Rainbow
+- **25+ Built-in Presets** — Galaxy, DNA, Fireworks, Heart, Butterfly, Vortex, Aurora, Black Hole, Solar Flare, Quantum Tunnel, and more
+- **AI Text-to-Particles** — Describe any effect and AI generates the simulation code
+- **Dynamic Controls** — AI-generated sliders for real-time parameter tweaking
+- **Visual Styles** — Sparkle, Plasma, Blob, Ring particle rendering modes
+- **6 Color Themes** — Neon, Cyberpunk, Ocean, Fire, Mono, Rainbow
 - **⌘K Command Palette** — Fuzzy-search every preset, action, and shortcut
-- **📊 Live Telemetry** — FPS, particle count, theme, and style in the right panel
-- **🖱️ Mouse Interaction** — Particles react to cursor movement + parallax orbs
-- **🎵 Sound Reactivity** — Particles respond to audio input
-- **📸 Screenshots** — Capture your creations with one click
-- **🎬 GIF Export** — Record 3-second animated GIFs
-- **📥 Export** — Download as standalone HTML or React component code
-- **⚡ 60fps Performance** — Optimized for 20K+ particles with zero garbage collection
+- **Live Telemetry** — FPS, particle count, theme, and style in the right panel
+- **Mouse Interaction** — Particles react to cursor movement + parallax orbs
+- **Sound Reactivity** — Particles respond to audio input
+- **Screenshots** — Capture your creations with one click
+- **GIF Export** — Record 3-second animated GIFs
+- **Export** — Download as standalone HTML or React component code
+- **60fps Performance** — Optimized for 20K+ particles with zero garbage collection
 
 ## Screenshots
 
@@ -36,7 +36,7 @@ A real-time 3D particle system generator powered by AI. Describe what you want, 
 ### Theme palette with live preview
 ![Themes](docs/screenshot-hero.png)
 
-## 🚀 Getting Started
+## Getting Started
 
 ```bash
 # Clone the repo
@@ -64,14 +64,14 @@ Open [http://localhost:5173](http://localhost:5173) to see it in action.
 | `M` | Toggle mouse interaction |
 | `F` | Toggle fullscreen |
 
-## 🤖 AI Integration
+## AI Integration
 
 To use the AI text-to-particle feature:
 
-1. Click the ⚙ Settings icon
+1. Click the Settings icon
 2. Enter your OpenAI-compatible API key and base URL
 3. Type a description in the Smart Text Engine
-4. Hit **✦ Generate**
+4. Hit **Generate**
 
 Works with any OpenAI-compatible API (OpenAI, Anthropic via proxy, local models, etc.)
 
@@ -82,7 +82,7 @@ Works with any OpenAI-compatible API (OpenAI, Anthropic via proxy, local models,
 - *"Rain falling through fog with splashes on an invisible surface"*
 - *"Fireflies in a forest at night, flickering randomly"*
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 - **React 18** + **Vite** — Fast dev/build toolchain
 - **Three.js** + **React Three Fiber** + **Drei** — 3D rendering
@@ -90,7 +90,7 @@ Works with any OpenAI-compatible API (OpenAI, Anthropic via proxy, local models,
 - **Tailwind CSS** — Styling
 - **Zustand** — State management
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Feel free to open issues or submit PRs.
 
@@ -100,6 +100,6 @@ Contributions are welcome! Feel free to open issues or submit PRs.
 4. Push to the branch (`git push origin feat/amazing-feature`)
 5. Open a Pull Request
 
-## 📄 License
+## License
 
 MIT — see [LICENSE](LICENSE) for details.
