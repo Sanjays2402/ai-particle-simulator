@@ -783,4 +783,58 @@ target.set(atX + dx, atY + dy, atZ + dz);
 const hue = att === 0 ? 0.55 : att === 1 ? 0.85 : 0.12;
 color.setHSL(hue, 0.9, 0.55);`,
   },
+  {
+    id: 'lightning-storm',
+    name: 'Lightning Storm',
+    description: 'Branching fractal lightning bolts with flickering electric charge',
+    emoji: '⚡',
+    code: `addControl('bolts', 'Bolt Count', 3, 12, 6);
+addControl('jitter', 'Jaggedness', 0.1, 1.5, 0.6);
+addControl('flicker', 'Flicker Speed', 1, 10, 4);
+addControl('branchProb', 'Branching', 0, 1, 0.5);
+setInfo('Lightning Storm', 'Branching fractal lightning with flickering charge');
+
+const boltCount = Math.floor(controls.bolts);
+const bolt = i % boltCount;
+const t = Math.floor(i / boltCount) / Math.max(1, Math.floor(count / boltCount));
+
+// Each bolt has its own seed for position and timing
+const boltSeed = bolt * 13.37;
+const originX = Math.sin(boltSeed) * 5;
+const originZ = Math.cos(boltSeed * 1.7) * 5;
+
+// Strike timing: each bolt fires on its own rhythm
+const strikePhase = (time * controls.flicker * 0.3 + boltSeed) % 1.0;
+const alive = strikePhase < 0.25 ? 1.0 : Math.max(0, 1 - (strikePhase - 0.25) * 4);
+
+// Vertical descent from sky to ground
+const y = 6 - t * 12;
+
+// Fractal jaggedness using layered noise
+const n1 = Math.sin(t * 17.3 + boltSeed) * Math.cos(t * 23.1 + boltSeed * 2);
+const n2 = Math.sin(t * 53.7 + boltSeed * 3) * 0.5;
+const n3 = Math.sin(t * 113.1 + boltSeed * 5) * 0.25;
+const jag = (n1 + n2 + n3) * controls.jitter;
+
+// Branching: some particles fork off the main path
+const forkSeed = Math.sin(i * 91.7 + boltSeed) * 0.5 + 0.5;
+const isBranch = forkSeed < controls.branchProb && t > 0.2 && t < 0.9;
+const branchAngle = forkSeed * Math.PI * 4;
+const branchLen = (1 - t) * 1.5 * (forkSeed - 0.4);
+const bx = isBranch ? Math.cos(branchAngle) * branchLen : 0;
+const bz = isBranch ? Math.sin(branchAngle) * branchLen : 0;
+
+target.set(
+  originX + jag + bx,
+  y,
+  originZ + jag * 0.7 + bz
+);
+
+// Color: white-hot core fading to electric blue/violet, modulated by strike phase
+const heat = alive * (0.7 + Math.sin(time * controls.flicker * 6 + boltSeed) * 0.3);
+const hue = 0.62 + (1 - heat) * 0.08; // blue to violet
+const light = 0.15 + heat * 0.75;
+const sat = 0.4 + (1 - heat) * 0.6;
+color.setHSL(hue, sat, light);`,
+  },
 ]
