@@ -784,15 +784,15 @@ const hue = att === 0 ? 0.55 : att === 1 ? 0.85 : 0.12;
 color.setHSL(hue, 0.9, 0.55);`,
   },
   {
-    id: 'lightning-storm',
-    name: 'Lightning Storm',
+    id: 'lightning-fractal',
+    name: 'Lightning Fractal',
     description: 'Branching fractal lightning bolts with flickering electric charge',
     emoji: '⚡',
     code: `addControl('bolts', 'Bolt Count', 3, 12, 6);
 addControl('jitter', 'Jaggedness', 0.1, 1.5, 0.6);
 addControl('flicker', 'Flicker Speed', 1, 10, 4);
 addControl('branchProb', 'Branching', 0, 1, 0.5);
-setInfo('Lightning Storm', 'Branching fractal lightning with flickering charge');
+setInfo('Lightning Fractal', 'Branching fractal lightning with flickering charge');
 
 const boltCount = Math.floor(controls.bolts);
 const bolt = i % boltCount;
@@ -836,5 +836,63 @@ const hue = 0.62 + (1 - heat) * 0.08; // blue to violet
 const light = 0.15 + heat * 0.75;
 const sat = 0.4 + (1 - heat) * 0.6;
 color.setHSL(hue, sat, light);`,
+  },
+  {
+    id: 'galaxy-collision',
+    name: 'Galaxy Collision',
+    description: 'Two spiral galaxies merge in a tidal dance, throwing off stellar streams',
+    emoji: '💫',
+    code: `addControl('separation', 'Separation', 2, 10, 5);
+addControl('mergeSpeed', 'Merge Speed', 0.05, 1, 0.25);
+addControl('armTwist', 'Arm Twist', 1, 6, 3);
+addControl('tidalStretch', 'Tidal Stretch', 0, 2, 1);
+setInfo('Galaxy Collision', 'Two spiral galaxies merging with tidal streams');
+
+const t = i / count;
+const galaxy = i % 2; // 0 = galaxy A, 1 = galaxy B
+const inGalaxyT = Math.floor(i / 2) / Math.floor(count / 2);
+
+// Merge progress oscillates 0 → 1 → 0 so collision keeps replaying
+const mergeCycle = (Math.sin(time * controls.mergeSpeed) + 1) * 0.5;
+const sep = controls.separation * (1 - mergeCycle * 0.92);
+
+// Galaxy centers approach along the X axis, then pass through
+const centerX = (galaxy === 0 ? -1 : 1) * sep;
+const centerZ = (galaxy === 0 ? 1 : -1) * sep * 0.25 * (1 - mergeCycle);
+
+// Spiral arm structure inside each galaxy
+const armCount = 3;
+const arm = Math.floor(inGalaxyT * armCount * 13) % armCount;
+const armOffset = (arm / armCount) * Math.PI * 2 + (galaxy === 0 ? 0 : Math.PI);
+const diskRadius = Math.sqrt(inGalaxyT) * 3.5;
+const rotationDir = galaxy === 0 ? 1 : -1;
+const armAngle = armOffset + diskRadius * controls.armTwist * 0.4 + time * 0.3 * rotationDir;
+
+// Tidal stretch: outer particles get pulled toward the other galaxy during close approach
+const pullStrength = mergeCycle * controls.tidalStretch * (diskRadius / 3.5);
+const pullX = (galaxy === 0 ? 1 : -1) * pullStrength * 1.2;
+
+// Random scatter for thickness
+const seed1 = Math.sin(i * 127.1) * 0.5;
+const seed2 = Math.cos(i * 311.7) * 0.5;
+const diskY = seed1 * 0.25 * (1 - inGalaxyT * 0.5);
+const armSpread = seed2 * 0.3 * inGalaxyT;
+
+const localX = Math.cos(armAngle) * diskRadius + armSpread + pullX;
+const localZ = Math.sin(armAngle) * diskRadius + armSpread;
+
+target.set(
+  centerX + localX,
+  diskY + Math.sin(time * 0.5 + i * 0.01) * 0.15 * mergeCycle,
+  centerZ + localZ
+);
+
+// Color: galaxies have distinct hues, brightness spikes at collision peak
+const baseHue = galaxy === 0 ? 0.6 : 0.05; // cool blue vs warm gold
+const heatBoost = mergeCycle * pullStrength * 0.15;
+const coreLight = (1 - inGalaxyT) * 0.35;
+const burst = Math.pow(mergeCycle, 4) * 0.25;
+const lum = 0.3 + coreLight + burst + Math.sin(time + i * 0.1) * 0.05;
+color.setHSL((baseHue + heatBoost) % 1, 0.85, Math.min(0.85, lum));`,
   },
 ]
