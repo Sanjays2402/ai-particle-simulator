@@ -895,4 +895,58 @@ const burst = Math.pow(mergeCycle, 4) * 0.25;
 const lum = 0.3 + coreLight + burst + Math.sin(time + i * 0.1) * 0.05;
 color.setHSL((baseHue + heatBoost) % 1, 0.85, Math.min(0.85, lum));`,
   },
+  {
+    id: 'lorenz-attractor',
+    name: 'Lorenz Attractor',
+    description: 'The classic butterfly — chaotic strange attractor traced by drifting particles',
+    emoji: '🦋',
+    code: `addControl('sigma', 'Sigma', 5, 20, 10);
+addControl('rho', 'Rho', 14, 50, 28);
+addControl('beta', 'Beta', 1, 5, 2.667);
+addControl('flow', 'Flow Speed', 0.1, 2, 0.6);
+setInfo('Lorenz Attractor', 'Chaotic butterfly trajectory in phase space');
+
+// Each particle follows its own deterministic-but-chaotic trajectory along the
+// Lorenz system: dx = sigma*(y-x), dy = x*(rho-z) - y, dz = x*y - beta*z.
+// We integrate forward by an amount that depends on time so the cloud moves
+// continuously, with a per-particle phase offset so they do not all clump.
+
+const sigma = controls.sigma;
+const rho = controls.rho;
+const beta = controls.beta;
+
+// Pseudo-random but stable seed per particle — small offsets near the standard
+// initial condition (1, 1, 1). Sensitive dependence on initial conditions then
+// fans them across the full attractor.
+const seed = i * 0.00271828;
+let x = 1 + Math.sin(i * 12.9898) * 0.5;
+let y = 1 + Math.cos(i * 78.233) * 0.5;
+let z = 1 + Math.sin(i * 37.719) * 0.5;
+
+// Steps to integrate. More particles → fewer steps each so the frame stays cheap.
+const dt = 0.008;
+const totalT = time * controls.flow + seed * 40;
+const steps = Math.min(420, 60 + Math.floor(totalT * 8) % 360);
+
+for (let s = 0; s < steps; s++) {
+  const dx = sigma * (y - x);
+  const dy = x * (rho - z) - y;
+  const dz = x * y - beta * z;
+  x += dx * dt;
+  y += dy * dt;
+  z += dz * dt;
+}
+
+// The raw attractor lives roughly in [-25, 25]^3 with z in [0, 50]. Scale and
+// recenter so it fits the viewport nicely.
+const scale = 0.12;
+target.set(x * scale, (z - 25) * scale, y * scale);
+
+// Color encodes which lobe of the butterfly we're on (sign of x) and speed.
+const speed = Math.abs(sigma * (y - x)) + Math.abs(x * (rho - z) - y);
+const lobeHue = x > 0 ? 0.55 : 0.95; // teal vs magenta
+const hueShift = Math.min(0.15, speed * 0.0015);
+const lum = 0.45 + Math.min(0.35, speed * 0.004);
+color.setHSL((lobeHue + hueShift) % 1, 0.85, lum);`,
+  },
 ]
