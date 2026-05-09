@@ -208,7 +208,17 @@ export const useStore = create((set, get) => ({
   },
 
   loadRandom: () => {
-    const idx = Math.floor(Math.random() * presets.length)
+    // Avoid landing on the same preset twice in a row — a single-preset library
+    // is the trivial edge case where we just reload it.
+    const { currentPreset } = get()
+    if (presets.length <= 1) {
+      get().loadPreset(presets[0].id)
+      return
+    }
+    let idx = Math.floor(Math.random() * presets.length)
+    if (presets[idx].id === currentPreset) {
+      idx = (idx + 1) % presets.length
+    }
     get().loadPreset(presets[idx].id)
   },
 

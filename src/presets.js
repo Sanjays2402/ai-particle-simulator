@@ -949,4 +949,57 @@ const hueShift = Math.min(0.15, speed * 0.0015);
 const lum = 0.45 + Math.min(0.35, speed * 0.004);
 color.setHSL((lobeHue + hueShift) % 1, 0.85, lum);`,
   },
+  {
+    id: 'klein-bottle',
+    name: 'Klein Bottle',
+    description: 'A non-orientable 4D surface — inside is outside, twisting through itself',
+    emoji: '🍶',
+    code: `addControl('twist', 'Twist', 0.3, 2.5, 1);
+addControl('thickness', 'Thickness', 0.3, 1.5, 0.7);
+addControl('rotation', 'Rotation', 0, 2, 0.4);
+setInfo('Klein Bottle', 'A non-orientable surface that has no inside or outside');
+
+// Parametric Klein bottle (figure-8 immersion in 3D):
+//   x = (R + r*cos(v/2)*sin(u) - r*sin(v/2)*sin(2u)) * cos(v)
+//   y = (R + r*cos(v/2)*sin(u) - r*sin(v/2)*sin(2u)) * sin(v)
+//   z =  r*sin(v/2)*sin(u) + r*cos(v/2)*sin(2u)
+// u in [0, 2pi] runs around the small loop; v in [0, 2pi] sweeps the body.
+
+// Distribute particles on a 2D grid over (u, v) with a slight jitter so the
+// surface looks dense rather than gridded.
+const rows = Math.max(1, Math.floor(Math.sqrt(count)));
+const cols = Math.max(1, Math.ceil(count / rows));
+const row = i % rows;
+const col = Math.floor(i / rows) % cols;
+
+const jitterU = (Math.sin(i * 12.9898) * 0.5) * (Math.PI * 2 / rows) * 0.6;
+const jitterV = (Math.cos(i * 78.233) * 0.5) * (Math.PI * 2 / cols) * 0.6;
+
+const u = (row / rows) * Math.PI * 2 + jitterU;
+const v = (col / cols) * Math.PI * 2 + jitterV + time * controls.rotation;
+
+const R = 2.2;
+const r = controls.thickness;
+const tw = controls.twist;
+
+const halfV = v / 2;
+const sinU = Math.sin(u);
+const sin2U = Math.sin(2 * u * tw);
+const cosHalfV = Math.cos(halfV);
+const sinHalfV = Math.sin(halfV);
+
+const tube = R + r * cosHalfV * sinU - r * sinHalfV * sin2U;
+const px = tube * Math.cos(v);
+const py = r * sinHalfV * sinU + r * cosHalfV * sin2U;
+const pz = tube * Math.sin(v);
+
+const scale = 0.7;
+target.set(px * scale, py * scale, pz * scale);
+
+// Color flows around the body (v) with a luminance ripple along the tube (u),
+// hinting at the surface's continuous twist with no boundary.
+const hue = (v / (Math.PI * 2) + time * 0.05) % 1;
+const ripple = 0.5 + Math.sin(u * 3 + time * 1.5) * 0.18;
+color.setHSL(hue, 0.75, ripple);`,
+  },
 ]

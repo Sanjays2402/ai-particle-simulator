@@ -10,7 +10,7 @@ import {
 export function CommandPalette({ onSettings }) {
   const [open, setOpen] = useState(false)
   const {
-    loadPreset, setPlaying, playing, setMouseAttract, mouseAttract,
+    loadPreset, setPlaying, playing, setMouseAttract, mouseAttract, loadRandom,
   } = useStore()
 
   useEffect(() => {
@@ -90,11 +90,7 @@ export function CommandPalette({ onSettings }) {
               if (currentPreset) loadPreset(currentPreset)
             })} />
             <Item icon={Maximize2} label="Toggle Fullscreen" shortcut="F" onSelect={run(() => document.documentElement.requestFullscreen?.())} />
-            <Item icon={Shuffle} label="Random Preset" shortcut="R" onSelect={run(() => {
-              const list = presets
-              const p = list[Math.floor(Math.random() * list.length)]
-              loadPreset(p.id)
-            })} />
+            <Item icon={Shuffle} label="Random Preset" shortcut="R" onSelect={run(() => loadRandom())} />
           </Command.Group>
 
           <Command.Group heading="Tools" style={groupHeading}>
