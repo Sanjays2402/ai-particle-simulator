@@ -1002,4 +1002,61 @@ const hue = (v / (Math.PI * 2) + time * 0.05) % 1;
 const ripple = 0.5 + Math.sin(u * 3 + time * 1.5) * 0.18;
 color.setHSL(hue, 0.75, ripple);`,
   },
+  {
+    id: 'black-hole',
+    name: 'Black Hole',
+    description: 'Accretion disk spiraling into the void with gravitational lensing',
+    emoji: '🕳️',
+    code: `addControl('spin', 'Spin Rate', 0.2, 3, 1.2);
+addControl('diskWidth', 'Disk Width', 0.5, 4, 2);
+addControl('eventHorizon', 'Event Horizon', 0.3, 2, 0.8);
+setInfo('Black Hole', 'An accretion disk spiraling into a singularity');
+
+// Two populations: ~75% form the swirling accretion disk, ~25% form
+// a faint photon-sphere halo that gets bent around the horizon.
+const inHalo = (i % 4) === 0;
+const t = i / count;
+
+// Pseudo-random hash for stable per-particle offsets.
+const h1 = Math.sin(i * 127.1) * 0.5 + 0.5;
+const h2 = Math.sin(i * 311.7) * 0.5 + 0.5;
+const h3 = Math.sin(i * 74.7) * 0.5 + 0.5;
+
+const eh = controls.eventHorizon;
+
+if (inHalo) {
+  // Photon-sphere halo: thin shell just outside the horizon, lensed.
+  const shell = eh * 1.25 + h1 * 0.25;
+  const theta = h2 * Math.PI * 2 + time * controls.spin * 0.3;
+  const phi = (h3 - 0.5) * Math.PI * 0.7; // squashed toward the disk plane
+  target.set(
+    Math.cos(phi) * Math.cos(theta) * shell,
+    Math.sin(phi) * shell * 0.6,
+    Math.cos(phi) * Math.sin(theta) * shell
+  );
+  // Cool blue-shifted halo glow.
+  color.setHSL(0.58, 0.85, 0.35 + h1 * 0.15);
+} else {
+  // Accretion disk: log-spiral inflow from outer radius toward the horizon.
+  const outer = eh + controls.diskWidth;
+  const phase = (h1 + time * 0.05) % 1; // inflow progress
+  const radius = outer - phase * (outer - eh * 1.02);
+  // Keplerian-ish: inner orbits faster than outer ones.
+  const omega = controls.spin * (1.5 / (radius + 0.2));
+  const angle = h2 * Math.PI * 2 + time * omega;
+  // Thin disk with slight warp.
+  const warp = Math.sin(angle * 2 + time * 0.5) * 0.06 * (radius / outer);
+  const y = (h3 - 0.5) * 0.15 * (radius / outer) + warp;
+  target.set(
+    Math.cos(angle) * radius,
+    y,
+    Math.sin(angle) * radius
+  );
+  // Heat gradient: hot blue-white near the horizon, red-orange at the rim.
+  const heat = 1 - (radius - eh) / (outer - eh); // 0 cool .. 1 hot
+  const hue = 0.08 - heat * 0.08 + (1 - heat) * 0.55; // red -> blue
+  const lum = 0.4 + heat * 0.45;
+  color.setHSL((hue + 1) % 1, 0.95, lum);
+}`,
+  },
 ]
