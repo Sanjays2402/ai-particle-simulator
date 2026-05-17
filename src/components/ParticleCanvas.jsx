@@ -136,9 +136,23 @@ function Particles() {
   const pointSize = useMemo(() => {
     switch (visualStyle) {
       case 'plasma': return 3.5
-      case 'blob': return 5
-      case 'ring': return 2
+      case 'blob':   return 5
+      case 'ring':   return 2
+      case 'glow':   return 7   // bigger soft halo
+      case 'dot':    return 1.2 // tiny crisp pixel
       default: return 2.5
+    }
+  }, [visualStyle])
+
+  // Material tuning per visual style. Glow opens up to a bright halo,
+  // dot stays small with size attenuation off for a starfield look.
+  const matOpts = useMemo(() => {
+    switch (visualStyle) {
+      case 'glow': return { opacity: 0.35, sizeAttenuation: true }
+      case 'dot':  return { opacity: 0.85, sizeAttenuation: false }
+      case 'blob': return { opacity: 0.28, sizeAttenuation: true }
+      case 'ring': return { opacity: 0.55, sizeAttenuation: true }
+      default:     return { opacity: 0.2,  sizeAttenuation: true }
     }
   }, [visualStyle])
 
@@ -378,10 +392,10 @@ function Particles() {
       </bufferGeometry>
       <pointsMaterial
         size={pointSize * 0.25}
-        sizeAttenuation
+        sizeAttenuation={matOpts.sizeAttenuation}
         vertexColors
         transparent
-        opacity={0.2}
+        opacity={matOpts.opacity}
         blending={THREE.AdditiveBlending}
         depthWrite={false}
         toneMapped={false}

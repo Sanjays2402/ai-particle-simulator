@@ -285,7 +285,7 @@ export const useStore = create((set, get) => {
   // Use this when you want a complete surprise instead of just a new preset.
   smashRandom: () => {
     const { currentPreset } = get()
-    const STYLES = ['sparkle', 'plasma', 'blob', 'ring']
+    const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
     const THEME_IDS = ['neon', 'cyberpunk', 'ocean', 'fire', 'monochrome', 'rainbow']
     // Pick a new preset (avoid repeats when possible).
     let idx = Math.floor(Math.random() * presets.length)

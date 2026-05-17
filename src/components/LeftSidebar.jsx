@@ -4,7 +4,7 @@ import { presets } from '../presets'
 import { GifEncoder } from '../lib/gifEncoder'
 import { startCanvasRecording, downloadVideoBlob, isVideoExportSupported } from '../lib/videoRecorder'
 
-const STYLES = ['sparkle', 'plasma', 'blob', 'ring']
+const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
 const THEME_LIST = [
   { id: 'neon', name: 'Neon', color: '#6366f1' },
   { id: 'cyberpunk', name: 'Cyberpunk', color: '#ff00ff' },
