@@ -1470,4 +1470,46 @@ const sat = 0.55 + h3 * 0.2;
 const lum = 0.45 + h2 * 0.2 - Math.abs(y) * 0.04;
 color.setHSL(hue, sat, Math.max(0.1, Math.min(0.85, lum)));`,
   },
+  {
+    id: 'solar-wind',
+    name: 'Solar Wind',
+    description: 'Streaming charged particles bending around a magnetic field',
+    emoji: '☀️',
+    code: `addControl('streamSpeed', 'Stream Speed', 0.3, 3, 1.2);
+addControl('fieldStrength', 'Field Bend', 0.2, 3, 1.4);
+addControl('spread', 'Spread', 0.5, 3, 1.4);
+setInfo('Solar Wind', 'Charged particles streaming and bending around a field');
+
+const h1 = Math.sin(i * 127.1) * 0.5 + 0.5;
+const h2 = Math.sin(i * 311.7) * 0.5 + 0.5;
+const h3 = Math.sin(i *  74.7) * 0.5 + 0.5;
+const h4 = Math.sin(i * 519.1) * 0.5 + 0.5;
+
+// Each particle streams from -x toward +x with a wrap-around phase.
+const phase = (h1 + time * controls.streamSpeed * 0.2) % 1;
+const xStart = -8;
+const x = xStart + phase * 16;
+
+// Initial offset in the y/z plane.
+const y0 = (h2 - 0.5) * 4 * controls.spread;
+const z0 = (h3 - 0.5) * 4 * controls.spread;
+
+// Bend by a virtual dipole at the origin — the closer to x=0, the
+// stronger the deflection. Use a soft falloff so things don't shoot
+// off to infinity.
+const r2 = x * x + 0.5;
+const bend = controls.fieldStrength / r2;
+// Push perpendicular to the original offset to mimic Lorentz curve.
+const y = y0 + Math.sin(phase * 6.28 + h4 * 3) * bend;
+const z = z0 + Math.cos(phase * 6.28 + h4 * 3) * bend;
+
+target.set(x, y, z);
+
+// Hot-yellow at the front, fading to red as particles slow.
+const progress = phase;
+const hue = 0.12 - progress * 0.1;
+const sat = 0.9 - progress * 0.3;
+const lum = 0.65 - progress * 0.3;
+color.setHSL((hue + 1) % 1, sat, Math.max(0.1, lum));`,
+  },
 ]
