@@ -1288,4 +1288,103 @@ const sat = 0.9 - cool * 0.65;
 const lum = 0.55 - cool * 0.3;
 color.setHSL((hue + 1) % 1, Math.max(0.05, sat), Math.max(0.1, lum));`,
   },
+  {
+    id: 'pulsar',
+    name: 'Pulsar',
+    description: 'Rotating neutron star with twin polar particle jets',
+    emoji: '📡',
+    code: `addControl('spin', 'Spin Rate', 1, 20, 8);
+addControl('coneSpread', 'Cone Spread', 0.05, 0.6, 0.18);
+addControl('jetLength', 'Jet Length', 3, 12, 7);
+setInfo('Pulsar', 'Beaming neutron star with twin axial particle jets');
+
+// Each particle is either in the equatorial accretion sheet or in one
+// of the two polar beams. Pick a stable role from the hash so we don't
+// flicker between roles every frame.
+const h1 = Math.sin(i * 127.1) * 0.5 + 0.5;
+const h2 = Math.sin(i * 311.7) * 0.5 + 0.5;
+const h3 = Math.sin(i *  74.7) * 0.5 + 0.5;
+const h4 = Math.sin(i * 519.1) * 0.5 + 0.5;
+
+const isJet = h1 < 0.5;
+const sign = h2 < 0.5 ? -1 : 1;
+const spin = time * controls.spin;
+
+if (isJet) {
+  // Polar beam: particles stream from pole at random radial offset.
+  // Loop the axial position with 'life' so the beam keeps emitting.
+  const life = (h3 + time * 0.4) % 1;
+  const z = sign * life * controls.jetLength;
+  const rad = controls.coneSpread * life * (0.5 + h4);
+  const ang = h4 * Math.PI * 2 + spin * 0.3;
+  target.set(
+    Math.cos(ang) * rad,
+    z,
+    Math.sin(ang) * rad
+  );
+  // Cool blue jet, dimming with distance from the star.
+  const hue = 0.58 - life * 0.05;
+  const lum = 0.7 - life * 0.4;
+  color.setHSL(hue, 0.9, Math.max(0.1, lum));
+} else {
+  // Equatorial accretion disk — thin band orbiting fast.
+  const r = 1.0 + h3 * 1.6;
+  const ang = h4 * Math.PI * 2 + spin / r;
+  target.set(
+    Math.cos(ang) * r,
+    (h3 - 0.5) * 0.25, // slight thickness
+    Math.sin(ang) * r
+  );
+  const hue = 0.08 + h3 * 0.1; // hot orange-yellow
+  const lum = 0.5 + Math.sin(ang * 3 + time) * 0.15;
+  color.setHSL(hue, 0.85, Math.max(0.15, lum));
+}`,
+  },
+  {
+    id: 'crystal-cave',
+    name: 'Crystal Cave',
+    description: 'Slowly drifting crystalline shards refracting light',
+    emoji: '🔮',
+    code: `addControl('density', 'Density', 0.3, 2, 1);
+addControl('drift', 'Drift Speed', 0.1, 1, 0.3);
+addControl('facets', 'Facet Count', 3, 12, 6);
+setInfo('Crystal Cave', 'Slowly drifting crystalline shards refracting light');
+
+// Each particle sits on the surface of a virtual prism that drifts and
+// rotates slowly. We group particles into 'facets' across the cave so
+// the rendering looks like multiple shards instead of a uniform cloud.
+const h1 = Math.sin(i * 127.1) * 0.5 + 0.5;
+const h2 = Math.sin(i * 311.7) * 0.5 + 0.5;
+const h3 = Math.sin(i *  74.7) * 0.5 + 0.5;
+const h4 = Math.sin(i * 519.1) * 0.5 + 0.5;
+
+const facetCount = Math.floor(controls.facets);
+const facet = i % facetCount;
+const facetAngle = (facet / facetCount) * Math.PI * 2;
+
+// Each facet has its own slow drift trajectory.
+const drift = controls.drift;
+const cx = Math.sin(time * 0.15 * drift + facet * 0.7) * 4;
+const cy = Math.cos(time * 0.11 * drift + facet * 1.3) * 3;
+const cz = Math.sin(time * 0.13 * drift + facet * 2.1) * 4;
+
+// Local prism coordinates — thin slab, longer along its own axis.
+const u = (h1 - 0.5) * 2.0 * controls.density;
+const v = (h2 - 0.5) * 0.25;             // thin slab
+const w = (h3 - 0.5) * 1.4;
+
+// Rotate the slab around its facet angle.
+const ca = Math.cos(facetAngle), sa = Math.sin(facetAngle);
+target.set(
+  cx + u * ca - w * sa,
+  cy + v,
+  cz + u * sa + w * ca
+);
+
+// Refractive look: tint each facet a different cool color, with
+// glints when the math points away from origin.
+const hue = 0.5 + facet * 0.04 + h4 * 0.08;
+const glint = Math.abs(u + w) > 0.9 ? 0.25 : 0;
+color.setHSL((hue + 1) % 1, 0.55, 0.45 + glint);`,
+  },
 ]
