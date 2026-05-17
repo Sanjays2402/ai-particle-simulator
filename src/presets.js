@@ -1104,4 +1104,44 @@ const hue = 0.78 - heat * 0.28; // 0.78 violet -> 0.5 cyan
 const lum = 0.35 + heat * 0.55 + Math.sin(phase * Math.PI * 2 + i) * 0.08;
 color.setHSL((hue + 1) % 1, 0.9, Math.min(lum, 0.92));`,
   },
+  {
+    id: 'wormhole',
+    name: 'Wormhole',
+    description: 'Tunneling spacetime corridor with relativistic streaks',
+    emoji: '🌀',
+    code: `addControl('flow', 'Flow Speed', 0.3, 3, 1.4);
+addControl('twist', 'Twist', 0, 4, 1.6);
+addControl('throat', 'Throat Radius', 0.4, 2, 0.9);
+setInfo('Wormhole', 'A funnel-shaped spacetime corridor with relativistic streaks');
+
+// Treat the tunnel as a parameterized funnel along z.
+// 'phase' is each particle's progress through the tunnel (0..1).
+const h1 = Math.sin(i * 127.1) * 0.5 + 0.5;
+const h2 = Math.sin(i * 311.7) * 0.5 + 0.5;
+const h3 = Math.sin(i *  74.7) * 0.5 + 0.5;
+
+// Loop phase — each particle keeps streaming through the tunnel.
+const phase = (h1 + time * controls.flow * 0.18) % 1;
+
+// Funnel radius: narrow throat in the middle, wide mouths at the ends.
+const z = (phase - 0.5) * 14;
+const throat = controls.throat;
+const r = throat + Math.abs(z) * 0.28 + h2 * 0.18;
+
+// Twist around the axis grows toward the throat, exaggerating motion.
+const twistGain = 1 + (1 - Math.abs(phase - 0.5) * 2) * controls.twist;
+const angle = h2 * Math.PI * 2 + time * 0.7 * twistGain;
+
+target.set(
+  Math.cos(angle) * r,
+  Math.sin(angle) * r,
+  z
+);
+
+// Color: cool violet at the mouths, electric cyan at the throat.
+const nearThroat = 1 - Math.abs(phase - 0.5) * 2;
+const hue = 0.72 - nearThroat * 0.22; // 0.72 violet -> 0.5 cyan
+const lum = 0.32 + nearThroat * 0.55 + h3 * 0.1;
+color.setHSL((hue + 1) % 1, 0.85, Math.min(lum, 0.9));`,
+  },
 ]
