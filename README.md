@@ -11,17 +11,27 @@ A real-time 3D particle system generator powered by AI. Describe what you want, 
 
 ## Features
 
-- **25+ Built-in Presets** — Galaxy, DNA, Fireworks, Heart, Butterfly, Vortex, Aurora, Black Hole, Solar Flare, Quantum Tunnel, and more
+- **40+ Built-in Presets** — Spiral Galaxy, DNA Helix, Fireworks, Heartbeat, Vortex, Aurora, Black Hole, Quantum Tunnel, Plasma Storm, Wormhole, Magnetosphere, Supernova, Fluid Vortex, and more
 - **AI Text-to-Particles** — Describe any effect and AI generates the simulation code
 - **Dynamic Controls** — AI-generated sliders for real-time parameter tweaking
-- **Visual Styles** — Sparkle, Plasma, Blob, Ring particle rendering modes
-- **6 Color Themes** — Neon, Cyberpunk, Ocean, Fire, Mono, Rainbow
+- **6 Visual Styles** — Sparkle, Plasma, Blob, Ring, Glow, Dot rendering modes
+- **11 Color Themes** — Neon, Cyberpunk, Ocean, Fire, Mono, Rainbow, Sunset, Forest, Arctic, Retro, Vaporwave
+- **Gradient Palette Picker** — 2-stop custom tints with quick presets
+- **Post-FX** — Chromatic aberration, vignette, film-grain noise on top of bloom
 - **⌘K Command Palette** — Fuzzy-search every preset, action, and shortcut
+- **? Help Overlay** — Full keyboard shortcut cheat sheet, one keystroke away
+- **Debug HUD** — Toggle with backtick; live FPS / frame-time / heap stats
 - **Live Telemetry** — FPS, particle count, theme, and style in the right panel
-- **Mouse Interaction** — Particles react to cursor movement + parallax orbs
-- **Sound Reactivity** — Particles respond to audio input
-- **Screenshots** — Capture your creations with one click
+- **Mouse Interaction** — Cursor attractor, plus a Paintbrush mode that stamps persistent attractors as you drag
+- **Audio Reactivity** — Bass / Mid / Treble band split with a built-in beat detector
 - **GIF Export** — Record 3-second animated GIFs
+- **WebM / MP4 Video Export** — MediaRecorder-based clip capture
+- **URL State Sharing** — Send a v2 share URL that round-trips preset, palette, FX, and camera
+- **Settings Persistence** — Quality / camera / theme survive a refresh via localStorage
+- **Smash Button** — One-click random scene: preset + style + theme + camera
+- **Onboarding Tour** — 4-step first-run welcome that gets out of the way
+- **Mobile Drawer Layout** — Sidebars collapse to overlay drawers under 720 px
+- **Double-Tap to Play/Pause** — Touch-friendly gesture on the canvas
 - **Export** — Download as standalone HTML or React component code
 - **60fps Performance** — Optimized for 20K+ particles with zero garbage collection
 
