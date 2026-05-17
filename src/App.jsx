@@ -11,6 +11,7 @@ import StatusStrip from './components/StatusStrip'
 import Toast from './components/Toast'
 import { CommandPalette } from './components/CommandPalette'
 import HelpOverlay from './components/HelpOverlay'
+import DebugHUD from './components/DebugHUD'
 import { Sparkles, ChevronLeft, ChevronRight } from 'lucide-react'
 
 export default function App() {
@@ -138,6 +139,7 @@ export default function App() {
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       <CommandPalette onSettings={() => setShowSettings(true)} />
       <HelpOverlay />
+      <DebugHUD />
 
       {showSplash && (
         <div className="splash">
