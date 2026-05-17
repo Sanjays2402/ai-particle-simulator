@@ -45,10 +45,16 @@ file. The format roughly follows [Keep a Changelog](https://keepachangelog.com).
 ### Added — Export & Sharing
 - WebM / MP4 video recording via MediaRecorder
 - v2 URL share encoding (palette + post-FX + audio + camera)
+- One-click "Tweet this scene" button (Twitter web intent)
 - Settings persistence via localStorage
+- Export / Import settings as JSON file
 
 ### Added — Reliability
 - Top-level React error boundary with recovery UI
+
+### Refactored
+- `buildShareUrl` extracted into `src/lib/share.js` so copy-link and
+  tweet buttons share one source of truth for the v2 payload schema.
 
 ### Docs
 - README feature list and keyboard table fully refreshed
