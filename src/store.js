@@ -135,6 +135,7 @@ export const useStore = create((set, get) => {
 
   // Favorites & Search
   favoritedPresets: JSON.parse(localStorage.getItem('favorite-presets') || '[]'),
+  recentPresets: JSON.parse(localStorage.getItem('recent-presets') || '[]'),
   presetSearch: '',
   showFavoritesOnly: false,
 
@@ -276,6 +277,10 @@ export const useStore = create((set, get) => {
       physicsState.forceFieldType = preset.physics.forceField || null
       if (preset.physics.forceFieldStrength !== undefined) physicsState.forceFieldStrength = preset.physics.forceFieldStrength
     }
+    // Push onto recents — most-recent first, max 8, no duplicates.
+    const prevRecents = get().recentPresets
+    const recentPresets = [presetId, ...prevRecents.filter(id => id !== presetId)].slice(0, 8)
+    try { localStorage.setItem('recent-presets', JSON.stringify(recentPresets)) } catch { /* ignore */ }
     set({
       currentPreset: presetId,
       particleFn: fn,
@@ -284,6 +289,7 @@ export const useStore = create((set, get) => {
       dynamicValues: Object.fromEntries(controls.map(c => [c.id, c.value])),
       infoTitle: title || preset.name,
       infoDesc: description || preset.description,
+      recentPresets,
       ...physicsState,
     })
     setTimeout(() => get().capturePresetThumbnail(presetId), 2000)
