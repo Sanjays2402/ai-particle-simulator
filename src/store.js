@@ -42,6 +42,13 @@ const THEMES = {
   fire:       { neon: '#ff6600', hueShift: 30 },
   monochrome: { neon: '#cccccc', hueShift: 0, saturation: 0 },
   rainbow:    { neon: '#ff00ff', hueShift: -1 }, // -1 = cycle
+  // v2 themes — each picks an accent + a global hue offset so existing
+  // presets pick up the look without touching their per-particle code.
+  sunset:     { neon: '#ff9d5c', hueShift: 15 },   // warm orange-pink dusk
+  forest:     { neon: '#22c55e', hueShift: 120 },  // deep green canopy
+  arctic:     { neon: '#bae6fd', hueShift: 195 },  // pale icy blue
+  retro:      { neon: '#f472b6', hueShift: 320 },  // 80s pink/magenta
+  vaporwave:  { neon: '#a78bfa', hueShift: 270 },  // pastel purple/teal
 }
 
 export { THEMES }
@@ -301,7 +308,7 @@ export const useStore = create((set, get) => {
   smashRandom: () => {
     const { currentPreset } = get()
     const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
-    const THEME_IDS = ['neon', 'cyberpunk', 'ocean', 'fire', 'monochrome', 'rainbow']
+    const THEME_IDS = ['neon', 'cyberpunk', 'ocean', 'fire', 'monochrome', 'rainbow', 'sunset', 'forest', 'arctic', 'retro', 'vaporwave']
     // Pick a new preset (avoid repeats when possible).
     let idx = Math.floor(Math.random() * presets.length)
     if (presets.length > 1 && presets[idx].id === currentPreset) idx = (idx + 1) % presets.length
