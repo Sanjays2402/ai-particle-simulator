@@ -5,6 +5,10 @@ import { presets } from '../presets'
 export default function PresetCarousel() {
   const { loadPreset, currentPreset, favoritedPresets, toggleFavorite } = useStore()
   const [thumbs, setThumbs] = useState({})
+  // Filter the carousel down to favorites only — mirrors the existing
+  // showFavoritesOnly flag the sidebar search uses, but local since the
+  // carousel isn't tied to the sidebar's filter state.
+  const [favOnly, setFavOnly] = useState(false)
 
   // Load thumbnails from localStorage
   useEffect(() => {
@@ -17,11 +21,13 @@ export default function PresetCarousel() {
   }, [currentPreset])
 
   // Sort: favorites first
-  const sorted = [...presets].sort((a, b) => {
-    const aFav = favoritedPresets.includes(a.id) ? 0 : 1
-    const bFav = favoritedPresets.includes(b.id) ? 0 : 1
-    return aFav - bFav
-  })
+  const sorted = [...presets]
+    .filter(p => !favOnly || favoritedPresets.includes(p.id))
+    .sort((a, b) => {
+      const aFav = favoritedPresets.includes(a.id) ? 0 : 1
+      const bFav = favoritedPresets.includes(b.id) ? 0 : 1
+      return aFav - bFav
+    })
 
   return (
     <div className="hide-scrollbar" style={{
@@ -37,6 +43,26 @@ export default function PresetCarousel() {
       WebkitBackdropFilter: 'blur(24px) saturate(140%)',
       borderTop: '1px solid rgba(255,255,255,0.06)',
     }}>
+      <button
+        onClick={() => setFavOnly(v => !v)}
+        title={favOnly ? 'Show all presets' : 'Show only favorites'}
+        style={{
+          flexShrink: 0,
+          height: 70, width: 56,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          borderRadius: 10, cursor: 'pointer',
+          background: favOnly
+            ? 'linear-gradient(135deg, rgba(168,85,247,0.25), rgba(236,72,153,0.2))'
+            : 'rgba(255,255,255,0.04)',
+          color: favOnly ? '#f3e8ff' : '#8a8aa0',
+          border: favOnly ? '1px solid rgba(168,85,247,0.45)' : '1px solid rgba(255,255,255,0.07)',
+          fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase',
+          flexDirection: 'column', gap: 4,
+        }}
+      >
+        <span style={{ fontSize: 18, lineHeight: 1 }}>{favoritedPresets.length > 0 ? '★' : '☆'}</span>
+        <span style={{ fontSize: 9 }}>{favOnly ? 'Favs' : 'All'}</span>
+      </button>
       {sorted.map(p => {
         const isFav = favoritedPresets.includes(p.id)
         const thumb = thumbs[p.id]
