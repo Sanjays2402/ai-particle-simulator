@@ -1,6 +1,40 @@
 import { create } from 'zustand'
 import { presets } from './presets'
 
+// Lightweight settings persistence: a subset of user-tweakable values
+// is read once on store init and written back whenever it changes.
+// Doing this by hand (instead of zustand/middleware/persist) keeps the
+// API surface unchanged and lets us pick exactly which keys persist.
+const PERSIST_KEY = 'particle-settings-v1'
+const PERSIST_FIELDS = [
+  'particleCount', 'speed', 'glowIntensity', 'visualStyle',
+  'theme', 'trails', 'mouseAttract', 'attractStrength',
+  'orbitSpeed', 'autoRotate', 'autoRotateSpeed',
+  'minDistance', 'maxDistance',
+]
+
+function loadPersisted() {
+  try {
+    const raw = localStorage.getItem(PERSIST_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    // Whitelist filter so renamed/removed fields don't leak in.
+    const out = {}
+    for (const k of PERSIST_FIELDS) {
+      if (k in parsed) out[k] = parsed[k]
+    }
+    return out
+  } catch { return {} }
+}
+
+function savePersisted(state) {
+  try {
+    const out = {}
+    for (const k of PERSIST_FIELDS) out[k] = state[k]
+    localStorage.setItem(PERSIST_KEY, JSON.stringify(out))
+  } catch { /* quota / private mode */ }
+}
+
 const THEMES = {
   neon:       { neon: '#00ff88', hueShift: 0 },
   cyberpunk:  { neon: '#ff00ff', hueShift: 300 },
@@ -12,7 +46,9 @@ const THEMES = {
 
 export { THEMES }
 
-export const useStore = create((set, get) => ({
+export const useStore = create((set, get) => {
+  const persisted = loadPersisted()
+  return {
   // Particle settings
   particleCount: 20000,
   speed: 1.0,
@@ -275,7 +311,23 @@ export const useStore = create((set, get) => ({
       set({ aiLoading: false })
     }
   },
-}))
+  // Apply persisted overrides last so they win over defaults but lose
+  // to anything the user passes via the URL hash on first load.
+  ...persisted,
+  }
+})
+
+// Persist whenever any whitelisted field changes. Subscribing to the
+// whole store and diffing is cheap enough for our cadence.
+let _prev = {}
+for (const k of PERSIST_FIELDS) _prev[k] = useStore.getState()[k]
+useStore.subscribe((state) => {
+  let dirty = false
+  for (const k of PERSIST_FIELDS) {
+    if (state[k] !== _prev[k]) { _prev[k] = state[k]; dirty = true }
+  }
+  if (dirty) savePersisted(state)
+})
 
 function compileParticleFn(code) {
   const controls = []
