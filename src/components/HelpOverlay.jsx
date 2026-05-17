@@ -12,6 +12,7 @@ const SHORTCUTS = [
   ] },
   { group: 'View', items: [
     ['F',           'Toggle fullscreen'],
+    ['Shift + F',   'Favorite / unfavorite current preset'],
     ['S',           'Screenshot to PNG'],
   ] },
   { group: 'Tools', items: [

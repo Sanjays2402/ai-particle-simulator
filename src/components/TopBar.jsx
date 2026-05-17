@@ -151,11 +151,28 @@ export default function TopBar({ onSettings }) {
   useEffect(() => {
     const handler = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
-      const { setPlaying, playing, loadRandom, loadPreset, nextPreset, prevPreset } = useStore.getState()
+      const { setPlaying, playing, loadRandom, loadPreset, nextPreset, prevPreset, toggleFavorite } = useStore.getState()
       switch (e.code) {
         case 'Space': e.preventDefault(); setPlaying(!playing); break
         case 'KeyR': loadRandom(); break
-        case 'KeyF': handleFullscreen(); break
+        case 'KeyF':
+          if (e.shiftKey) {
+            // Shift+F = star/unstar the current preset.
+            const cur = useStore.getState().currentPreset
+            if (cur) {
+              toggleFavorite(cur)
+              const notif = document.getElementById('perf-notif')
+              if (notif) {
+                const isFav = useStore.getState().favoritedPresets.includes(cur)
+                notif.textContent = isFav ? '★ Added to favorites' : '☆ Removed from favorites'
+                notif.style.opacity = '1'
+                setTimeout(() => notif.style.opacity = '0', 1500)
+              }
+            }
+          } else {
+            handleFullscreen()
+          }
+          break
         case 'KeyS': handleScreenshot(); break
         case 'ArrowLeft': e.preventDefault(); prevPreset(); break
         case 'ArrowRight': e.preventDefault(); nextPreset(); break
