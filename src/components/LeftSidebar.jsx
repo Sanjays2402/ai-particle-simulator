@@ -208,6 +208,10 @@ export default function LeftSidebar() {
         <PostFXRow />
       </Section>
 
+      <Section title="Gradient Palette">
+        <PaletteRow />
+      </Section>
+
       <Section title="Export">
         <button
           onClick={() => {
@@ -579,6 +583,64 @@ function Toggle({ value, onChange }) {
         boxShadow: value ? '0 2px 6px rgba(0,0,0,0.35), 0 0 0 0 rgba(168,85,247,0.4)' : '0 2px 4px rgba(0,0,0,0.35)',
       }} />
     </button>
+  )
+}
+
+// Two-stop gradient palette picker. Quick chips swap in canned looks;
+// the two color inputs let users pick exact endpoints.
+const PALETTE_PRESETS = [
+  { id: 'indigo-pink', a: '#6366f1', b: '#ec4899', label: 'Indigo → Pink' },
+  { id: 'sunset',      a: '#f97316', b: '#dc2626', label: 'Sunset' },
+  { id: 'ocean',       a: '#22d3ee', b: '#1e3a8a', label: 'Ocean Deep' },
+  { id: 'mint',        a: '#bbf7d0', b: '#0e7490', label: 'Mint Lagoon' },
+  { id: 'mono',        a: '#f5f5f5', b: '#111111', label: 'Mono' },
+  { id: 'aurora',      a: '#a3e635', b: '#7c3aed', label: 'Aurora' },
+]
+function PaletteRow() {
+  const enabled = useStore(s => s.paletteEnabled)
+  const setEnabled = useStore(s => s.setPaletteEnabled)
+  const a = useStore(s => s.paletteA)
+  const b = useStore(s => s.paletteB)
+  const mix = useStore(s => s.paletteMix)
+  const setA = useStore(s => s.setPaletteA)
+  const setB = useStore(s => s.setPaletteB)
+  const setMix = useStore(s => s.setPaletteMix)
+  return (
+    <>
+      <ToggleRow label="Enable Palette" value={enabled} onChange={setEnabled} />
+      {enabled && (
+        <>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+            <label style={{ fontSize: 11, color: '#8a8aa0' }}>Top</label>
+            <input type="color" value={a} onChange={e => setA(e.target.value)}
+              style={{ width: 36, height: 26, border: '1px solid rgba(255,255,255,0.06)', borderRadius: 6, background: 'transparent', cursor: 'pointer' }} />
+            <label style={{ fontSize: 11, color: '#8a8aa0', marginLeft: 8 }}>Bot</label>
+            <input type="color" value={b} onChange={e => setB(e.target.value)}
+              style={{ width: 36, height: 26, border: '1px solid rgba(255,255,255,0.06)', borderRadius: 6, background: 'transparent', cursor: 'pointer' }} />
+            <div style={{
+              flex: 1, height: 24, marginLeft: 6, borderRadius: 6,
+              background: `linear-gradient(180deg, ${a} 0%, ${b} 100%)`,
+              border: '1px solid rgba(255,255,255,0.06)',
+            }} />
+          </div>
+          <Slider label="Mix" value={mix} min={0} max={1} step={0.05}
+            onChange={setMix} display={v => `${Math.round(v * 100)}%`} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 8 }}>
+            {PALETTE_PRESETS.map(p => (
+              <button key={p.id} onClick={() => { setA(p.a); setB(p.b) }} title={p.label}
+                style={{
+                  height: 28, borderRadius: 6, cursor: 'pointer',
+                  background: `linear-gradient(180deg, ${p.a} 0%, ${p.b} 100%)`,
+                  border: (a === p.a && b === p.b)
+                    ? '1px solid rgba(168,85,247,0.6)'
+                    : '1px solid rgba(255,255,255,0.08)',
+                  boxShadow: (a === p.a && b === p.b) ? '0 0 12px rgba(168,85,247,0.35)' : 'none',
+                }} />
+            ))}
+          </div>
+        </>
+      )}
+    </>
   )
 }
 

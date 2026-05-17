@@ -194,6 +194,20 @@ export const useStore = create((set, get) => {
   setFilmGrain: (v) => set({ filmGrain: v }),
   setFilmGrainIntensity: (v) => set({ filmGrainIntensity: v }),
 
+  // Gradient color palette — user-picked 2-stop tint applied to each
+  // particle by linearly interpolating between the stops based on the
+  // particle's normalized z-position. Pre-parsed RGB values are cached
+  // so the per-particle loop only does adds + multiplies.
+  paletteEnabled: false,
+  paletteA: '#6366f1', // top stop (z = +1)
+  paletteB: '#ec4899', // bottom stop (z = -1)
+  paletteMix: 0.6,     // how strongly the tint overrides the source color
+  setPaletteEnabled: (v) => set({ paletteEnabled: v }),
+  setPaletteA: (v) => set({ paletteA: v }),
+  setPaletteB: (v) => set({ paletteB: v }),
+  setPaletteMix: (v) => set({ paletteMix: v }),
+
+
 
   setMouseAttract: (v) => set({ mouseAttract: v }),
   paintMode: false,

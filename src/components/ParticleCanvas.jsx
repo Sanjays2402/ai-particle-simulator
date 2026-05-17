@@ -169,12 +169,28 @@ function Particles() {
     const { mouseAttract, attractStrength, theme, audioLevel,
             audioBass, audioMid, audioTreble, audioBeat, audioMode,
             paintPoints,
+            paletteEnabled, paletteA, paletteB, paletteMix,
             gravityEnabled, gravityStrength, collisionsEnabled,
             forceFieldType, forceFieldStrength } = useStore.getState()
     const themeData = THEMES[theme]
     const mousePos = window.__mousePos
     // Flat array of paint coords — avoids re-reading the .length each particle.
     const paintLen = paintPoints.length
+
+    // Pre-parse palette hex strings once per frame so the per-particle
+    // tint loop only does fmul/fadd, no string parsing.
+    let paletteAR = 0, paletteAG = 0, paletteAB = 0
+    let paletteBR = 0, paletteBG = 0, paletteBB = 0
+    if (paletteEnabled) {
+      const a = parseInt(paletteA.slice(1), 16) || 0
+      const b = parseInt(paletteB.slice(1), 16) || 0
+      paletteAR = ((a >> 16) & 0xff) / 255
+      paletteAG = ((a >>  8) & 0xff) / 255
+      paletteAB = ( a        & 0xff) / 255
+      paletteBR = ((b >> 16) & 0xff) / 255
+      paletteBG = ((b >>  8) & 0xff) / 255
+      paletteBB = ( b        & 0xff) / 255
+    }
 
     // Ensure velocity array exists
     if (!velocitiesRef.current || prevCountRef.current !== particleCount) {
@@ -348,6 +364,21 @@ function Particles() {
         } else {
           _color.offsetHSL(themeData.hueShift / 360, 0, 0)
         }
+      }
+
+      // Gradient palette tint — lerp each particle's color toward a
+      // 2-stop gradient driven by its normalized z coord. Pre-parsed RGB
+      // values keep this allocation-free in the per-particle loop.
+      if (paletteEnabled) {
+        // Map z roughly to [0,1]; clamp so far-out particles still pin.
+        const zn = Math.max(0, Math.min(1, _target.z * 0.07 + 0.5))
+        const tr = paletteAR * zn + paletteBR * (1 - zn)
+        const tg = paletteAG * zn + paletteBG * (1 - zn)
+        const tb = paletteAB * zn + paletteBB * (1 - zn)
+        const m = paletteMix
+        _color.r = _color.r * (1 - m) + tr * m
+        _color.g = _color.g * (1 - m) + tg * m
+        _color.b = _color.b * (1 - m) + tb * m
       }
 
       posArr[i3] = _target.x; posArr[i3 + 1] = _target.y; posArr[i3 + 2] = _target.z
