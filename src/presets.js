@@ -433,14 +433,14 @@ const hue = (i * 0.618033988 + time * 0.02) % 1.0;
 color.setHSL(hue, 0.7 + twinkle * 0.3, 0.15 + twinkle * 0.55);`,
   },
   {
-    id: 'black-hole',
-    name: 'Black Hole',
-    description: 'Accretion disk swirling around a gravitational singularity',
-    emoji: '🕳️',
+    id: 'accretion-disk',
+    name: 'Accretion Disk',
+    description: 'Tilted disk of plasma swirling around a singularity',
+    emoji: '💫',
     code: `addControl('diskRadius', 'Disk Radius', 2, 10, 6);
 addControl('warpSpeed', 'Warp Speed', 0.5, 5, 2);
 addControl('thickness', 'Disk Thickness', 0.1, 1.5, 0.4);
-setInfo('Black Hole', 'Accretion disk around a singularity');
+setInfo('Accretion Disk', 'A tilted accretion disk around a singularity');
 
 const t = i / count;
 const golden = 2.399963229728653;
