@@ -129,6 +129,7 @@ function Particles() {
     const noop = () => {}
     const dv = useStore.getState().dynamicValues
     const { mouseAttract, attractStrength, theme, audioLevel,
+            audioBass, audioMid, audioTreble, audioBeat, audioMode,
             gravityEnabled, gravityStrength, collisionsEnabled,
             forceFieldType, forceFieldStrength } = useStore.getState()
     const themeData = THEMES[theme]
@@ -261,8 +262,15 @@ function Particles() {
       }
 
       // Audio modulation
-      if (audioLevel > 0.01) {
-        const scale = 1 + audioLevel * 0.5
+      // Pick which audio signal drives the modulation. 'beat' pulses the
+      // scale on each detected beat, 'bass' uses the bass band directly,
+      // 'level' is the legacy full-spectrum average.
+      const audioSignal =
+        audioMode === 'beat' ? audioBeat :
+        audioMode === 'bass' ? audioBass :
+        audioLevel
+      if (audioSignal > 0.01) {
+        const scale = 1 + audioSignal * 0.5
         _target.x *= scale
         _target.y *= scale
         _target.z *= scale
@@ -410,6 +418,9 @@ export default function ParticleCanvas() {
   const audioReactive = useStore(s => s.audioReactive)
   const fpsRef = useRef(null)
   const audioLevel = useStore(s => s.audioLevel)
+  const audioBass = useStore(s => s.audioBass)
+  const audioMid = useStore(s => s.audioMid)
+  const audioTreble = useStore(s => s.audioTreble)
 
   // FPS overlay
   useEffect(() => {
@@ -504,7 +515,10 @@ export default function ParticleCanvas() {
           display: 'flex', alignItems: 'flex-end', padding: '0 4px', gap: 2,
         }}>
           {Array.from({ length: 32 }, (_, i) => {
-            const h = Math.max(2, audioLevel * 20 * (0.5 + Math.sin(i * 0.5 + Date.now() * 0.005) * 0.5))
+            // Map bar index to a band so the visualizer reflects what the
+            // analyser is actually seeing instead of just a sin wave.
+            const band = i < 4 ? audioBass : i < 14 ? audioMid : audioTreble
+            const h = Math.max(2, (band * 20 + audioLevel * 6) * (0.5 + Math.sin(i * 0.5 + Date.now() * 0.005) * 0.5))
             return <div key={i} style={{
               flex: 1, height: h, background: 'var(--neon)', opacity: 0.6,
               borderRadius: '2px 2px 0 0', transition: 'height 0.05s',

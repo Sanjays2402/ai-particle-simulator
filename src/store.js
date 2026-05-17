@@ -82,6 +82,14 @@ export const useStore = create((set, get) => {
   performanceMode: false,
   audioReactive: false,
   audioLevel: 0,
+  // Per-band audio levels: bass = bottom 12% of bins, mid = 12–40%, treble = 40–100%.
+  audioBass: 0,
+  audioMid: 0,
+  audioTreble: 0,
+  // Beat detector: pulses to 1 then decays.
+  audioBeat: 0,
+  // Reactivity mode: 'level' (legacy), 'bass', 'beat'.
+  audioMode: 'level',
 
   // Physics engine
   gravityEnabled: false,
@@ -182,6 +190,9 @@ export const useStore = create((set, get) => {
   },
   setAudioReactive: (v) => set({ audioReactive: v }),
   setAudioLevel: (v) => set({ audioLevel: v }),
+  setAudioBands: (bass, mid, treble) => set({ audioBass: bass, audioMid: mid, audioTreble: treble }),
+  setAudioBeat: (v) => set({ audioBeat: v }),
+  setAudioMode: (v) => set({ audioMode: v }),
   setGravityEnabled: (v) => set({ gravityEnabled: v }),
   setGravityStrength: (v) => set({ gravityStrength: v }),
   setCollisionsEnabled: (v) => set({ collisionsEnabled: v }),

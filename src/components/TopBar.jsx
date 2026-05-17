@@ -58,6 +58,8 @@ export default function TopBar({ onSettings }) {
     if (audioReactive) {
       setAudioReactive(false)
       useStore.getState().setAudioLevel(0)
+      useStore.getState().setAudioBands(0, 0, 0)
+      useStore.getState().setAudioBeat(0)
       if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null }
       if (audioCtxRef.current) { audioCtxRef.current.close(); audioCtxRef.current = null }
       return
@@ -69,17 +71,53 @@ export default function TopBar({ onSettings }) {
       audioCtxRef.current = ctx
       const src = ctx.createMediaStreamSource(stream)
       const analyser = ctx.createAnalyser()
-      analyser.fftSize = 256
+      analyser.fftSize = 512
       src.connect(analyser)
       const data = new Uint8Array(analyser.frequencyBinCount)
       setAudioReactive(true)
+
+      // Beat detection state — simple energy-based detector: keep a
+      // 1-second rolling average of bass energy and trigger when the
+      // current frame exceeds avg * 1.4 with a 200ms refractory period.
+      const bassHistory = []
+      let lastBeatTime = 0
+
       const poll = () => {
         if (!audioCtxRef.current) return
         analyser.getByteFrequencyData(data)
-        let sum = 0
-        for (let i = 0; i < data.length; i++) sum += data[i]
-        const avg = sum / data.length / 255
+        const n = data.length
+        // Bands: bass (0–12%), mid (12–40%), treble (40–100%).
+        const bassEnd = Math.floor(n * 0.12)
+        const midEnd = Math.floor(n * 0.40)
+        let sumBass = 0, sumMid = 0, sumTreble = 0, sumAll = 0
+        for (let k = 0; k < n; k++) {
+          const v = data[k]
+          sumAll += v
+          if (k < bassEnd) sumBass += v
+          else if (k < midEnd) sumMid += v
+          else sumTreble += v
+        }
+        const bass   = (sumBass   / Math.max(1, bassEnd))         / 255
+        const mid    = (sumMid    / Math.max(1, midEnd - bassEnd))/ 255
+        const treble = (sumTreble / Math.max(1, n - midEnd))      / 255
+        const avg    = sumAll / n / 255
+
         useStore.getState().setAudioLevel(avg)
+        useStore.getState().setAudioBands(bass, mid, treble)
+
+        // Beat detection on bass band.
+        bassHistory.push(bass)
+        if (bassHistory.length > 60) bassHistory.shift()
+        const baseline = bassHistory.reduce((s, b) => s + b, 0) / bassHistory.length
+        const now = performance.now()
+        if (bass > baseline * 1.4 && bass > 0.18 && now - lastBeatTime > 200) {
+          lastBeatTime = now
+          useStore.getState().setAudioBeat(1)
+        } else {
+          // Decay the beat pulse so visuals can latch on it gently.
+          const cur = useStore.getState().audioBeat
+          if (cur > 0) useStore.getState().setAudioBeat(Math.max(0, cur - 0.04))
+        }
         requestAnimationFrame(poll)
       }
       poll()
