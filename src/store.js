@@ -258,6 +258,22 @@ export const useStore = create((set, get) => {
     get().loadPreset(presets[idx].id)
   },
 
+  // Smash: full random scene — preset + style + theme + camera params.
+  // Use this when you want a complete surprise instead of just a new preset.
+  smashRandom: () => {
+    const { currentPreset } = get()
+    const STYLES = ['sparkle', 'plasma', 'blob', 'ring']
+    const THEME_IDS = ['neon', 'cyberpunk', 'ocean', 'fire', 'monochrome', 'rainbow']
+    // Pick a new preset (avoid repeats when possible).
+    let idx = Math.floor(Math.random() * presets.length)
+    if (presets.length > 1 && presets[idx].id === currentPreset) idx = (idx + 1) % presets.length
+    const newStyle = STYLES[Math.floor(Math.random() * STYLES.length)]
+    const newTheme = THEME_IDS[Math.floor(Math.random() * THEME_IDS.length)]
+    set({ visualStyle: newStyle, autoRotate: Math.random() < 0.5 })
+    get().setTheme(newTheme)
+    get().loadPreset(presets[idx].id)
+  },
+
   nextPreset: () => {
     const { currentPreset } = get()
     const idx = presets.findIndex(p => p.id === currentPreset)
