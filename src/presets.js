@@ -1387,4 +1387,47 @@ const hue = 0.5 + facet * 0.04 + h4 * 0.08;
 const glint = Math.abs(u + w) > 0.9 ? 0.25 : 0;
 color.setHSL((hue + 1) % 1, 0.55, 0.45 + glint);`,
   },
+  {
+    id: 'hyperjump',
+    name: 'Hyperjump',
+    description: 'Star-streak tunnel for warp-drive screenshots',
+    emoji: '🚀',
+    code: `addControl('warpSpeed', 'Warp Speed', 0.4, 5, 1.6);
+addControl('streak', 'Streak Length', 0.5, 5, 2);
+addControl('density', 'Density', 0.5, 2, 1);
+setInfo('Hyperjump', 'Star-streak tunnel — great with Chromatic Aberration on');
+
+// Each particle has a fixed angular position around the tunnel axis
+// (forward = +z). 'life' loops through 0..1 so the star keeps moving
+// toward the camera. Streak length compresses depth so a single
+// point is rendered as a visible line via temporal trails.
+const h1 = Math.sin(i * 127.1) * 0.5 + 0.5;
+const h2 = Math.sin(i * 311.7) * 0.5 + 0.5;
+const h3 = Math.sin(i *  74.7) * 0.5 + 0.5;
+
+const angle = h1 * Math.PI * 2;
+const radius = (0.4 + h2 * 2.5) * controls.density;
+const speed = controls.warpSpeed * (0.6 + h3 * 0.8);
+
+// Loop life and bias toward the camera so most stars are near the
+// front edge — that's the part you can see in a warp shot.
+const rawLife = (h3 + time * speed * 0.3) % 1;
+// Squash so most of the band crowds the front; controls.streak biases
+// further toward the streaky end.
+const life = Math.pow(rawLife, 1.0 / controls.streak);
+const z = -10 + life * 20;
+
+target.set(
+  Math.cos(angle) * radius,
+  Math.sin(angle) * radius,
+  z
+);
+
+// White-hot at the front, blue-shifted falling away.
+const near = life;
+const hue = 0.55 + (1 - near) * 0.05; // electric blue
+const lum = 0.4 + near * 0.55;
+const sat = 0.7 - near * 0.4; // de-saturate to near-white up close
+color.setHSL(hue, Math.max(0, sat), Math.min(0.95, lum));`,
+  },
 ]
