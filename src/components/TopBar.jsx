@@ -3,11 +3,11 @@ import { useStore } from '../store'
 import { presets } from '../presets'
 import {
   Play, Pause, RotateCcw, Maximize2, Shuffle, Magnet, Camera, Link2,
-  Mic, Download, Settings, Repeat, Sparkles, Zap,
+  Mic, Download, Settings, Repeat, Sparkles, Zap, Paintbrush,
 } from 'lucide-react'
 
 export default function TopBar({ onSettings }) {
-  const { playing, setPlaying, loadRandom, smashRandom, mouseAttract, setMouseAttract, audioReactive, setAudioReactive, isRecording, startRecording, stopRecording, recordingBuffer, enterReplay, isReplaying } = useStore()
+  const { playing, setPlaying, loadRandom, smashRandom, mouseAttract, setMouseAttract, paintMode, setPaintMode, clearPaintPoints, audioReactive, setAudioReactive, isRecording, startRecording, stopRecording, recordingBuffer, enterReplay, isReplaying } = useStore()
   const audioCtxRef = useRef(null)
   const streamRef = useRef(null)
 
@@ -219,6 +219,11 @@ export default function TopBar({ onSettings }) {
         <Btn onClick={loadRandom} title="Random Preset (R)"><Shuffle size={14} strokeWidth={2.2} /></Btn>
         <Btn onClick={smashRandom} title="Smash — random preset + style + theme"><Zap size={14} strokeWidth={2.2} /></Btn>
         <Btn onClick={() => setMouseAttract(!mouseAttract)} title="Mouse Attract" active={mouseAttract}><Magnet size={14} strokeWidth={2.2} /></Btn>
+        <Btn
+          onClick={() => { if (paintMode) clearPaintPoints(); setPaintMode(!paintMode) }}
+          title={paintMode ? 'Paint Mode · click again to clear & exit' : 'Paint Mode — drag to stamp attractors'}
+          active={paintMode}
+        ><Paintbrush size={14} strokeWidth={2.2} /></Btn>
         <Btn onClick={handleMic} title="Sound Reactivity" active={audioReactive}><Mic size={14} strokeWidth={2.2} /></Btn>
         <Divider />
         <Btn onClick={handleScreenshot} title="Screenshot (S)"><Camera size={14} strokeWidth={2.2} /></Btn>

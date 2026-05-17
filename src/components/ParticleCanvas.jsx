@@ -53,17 +53,41 @@ function FPSCounter() {
 }
 
 function MouseAttractor() {
-  const { camera, raycaster, pointer } = useThree()
+  const { camera, raycaster, pointer, gl } = useThree()
   const planeRef = useRef(new THREE.Plane(new THREE.Vector3(0, 0, 1), 0))
   const intersectPoint = useRef(new THREE.Vector3())
+  const draggingRef = useRef(false)
+  const lastStampRef = useRef(0)
+
+  // Paint-mode listeners: hold mouse and drag to stamp persistent attractors.
+  useEffect(() => {
+    const dom = gl.domElement
+    const onDown = () => { draggingRef.current = true }
+    const onUp = () => { draggingRef.current = false }
+    dom.addEventListener('pointerdown', onDown)
+    window.addEventListener('pointerup', onUp)
+    return () => {
+      dom.removeEventListener('pointerdown', onDown)
+      window.removeEventListener('pointerup', onUp)
+    }
+  }, [gl])
 
   useFrame(() => {
-    const { mouseAttract } = useStore.getState()
-    if (!mouseAttract) return
+    const { mouseAttract, paintMode, addPaintPoint } = useStore.getState()
+    if (!mouseAttract && !paintMode) return
     raycaster.setFromCamera(pointer, camera)
     raycaster.ray.intersectPlane(planeRef.current, intersectPoint.current)
     // Store mouse3D globally for particles to use
     window.__mousePos = intersectPoint.current
+
+    // Stamp paint points at ~30 Hz while dragging in paint mode.
+    if (paintMode && draggingRef.current) {
+      const now = performance.now()
+      if (now - lastStampRef.current > 33) {
+        lastStampRef.current = now
+        addPaintPoint([intersectPoint.current.x, intersectPoint.current.y, intersectPoint.current.z])
+      }
+    }
   })
 
   return null
@@ -130,10 +154,13 @@ function Particles() {
     const dv = useStore.getState().dynamicValues
     const { mouseAttract, attractStrength, theme, audioLevel,
             audioBass, audioMid, audioTreble, audioBeat, audioMode,
+            paintPoints,
             gravityEnabled, gravityStrength, collisionsEnabled,
             forceFieldType, forceFieldStrength } = useStore.getState()
     const themeData = THEMES[theme]
     const mousePos = window.__mousePos
+    // Flat array of paint coords — avoids re-reading the .length each particle.
+    const paintLen = paintPoints.length
 
     // Ensure velocity array exists
     if (!velocitiesRef.current || prevCountRef.current !== particleCount) {
@@ -258,6 +285,25 @@ function Particles() {
           _target.x += dx * force
           _target.y += dy * force
           _target.z += dz * force
+        }
+      }
+
+      // Paint-mode soft attractors — nudge particles toward each stamped
+      // point. Capped at ~24 points in the store so this stays O(24N).
+      if (paintLen > 0) {
+        for (let pi = 0; pi < paintLen; pi++) {
+          const pt = paintPoints[pi]
+          const pdx = pt[0] - _target.x
+          const pdy = pt[1] - _target.y
+          const pdz = pt[2] - _target.z
+          const psq = pdx * pdx + pdy * pdy + pdz * pdz
+          // Squared-distance early-out keeps the cost tiny far from paint.
+          if (psq < 9) {
+            const pforce = 0.18 / (psq + 1)
+            _target.x += pdx * pforce
+            _target.y += pdy * pforce
+            _target.z += pdz * pforce
+          }
         }
       }
 

@@ -172,6 +172,18 @@ export const useStore = create((set, get) => {
   setPlaying: (v) => set({ playing: v }),
   setPrompt: (v) => set({ prompt: v }),
   setMouseAttract: (v) => set({ mouseAttract: v }),
+
+  // Paint mode — click-drag to drop persistent attractors on the canvas.
+  paintMode: false,
+  paintPoints: [], // array of [x, y, z]
+  setPaintMode: (v) => set({ paintMode: v }),
+  addPaintPoint: (p) => {
+    const list = get().paintPoints
+    // Hard cap so the per-particle inner loop stays cheap.
+    const next = list.length >= 24 ? [...list.slice(1), p] : [...list, p]
+    set({ paintPoints: next })
+  },
+  clearPaintPoints: () => set({ paintPoints: [] }),
   setAttractStrength: (v) => set({ attractStrength: v }),
   setTrails: (v) => set({ trails: v }),
   setOrbitSpeed: (v) => set({ orbitSpeed: v }),
