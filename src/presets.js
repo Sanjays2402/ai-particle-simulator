@@ -1144,4 +1144,55 @@ const hue = 0.72 - nearThroat * 0.22; // 0.72 violet -> 0.5 cyan
 const lum = 0.32 + nearThroat * 0.55 + h3 * 0.1;
 color.setHSL((hue + 1) % 1, 0.85, Math.min(lum, 0.9));`,
   },
+  {
+    id: 'magnetosphere',
+    name: 'Magnetosphere',
+    description: 'Dipole field lines glowing along Earth-like magnetic flux',
+    emoji: '🧲',
+    code: `addControl('field', 'Field Strength', 0.5, 3, 1.5);
+addControl('lines', 'Flux Lines', 4, 24, 12);
+addControl('flicker', 'Aurora Flicker', 0, 2, 1);
+setInfo('Magnetosphere', 'A dipole magnetic field with particles riding flux lines');
+
+// Each particle is assigned to a single flux line; the parametric form
+// r(θ) = L * cos²(θ) gives the classic dipole magnetic-field-line shape.
+const lines = Math.floor(controls.lines);
+const lineIdx = i % lines;
+const tAlong = (i / count); // position along the line
+const lineAngle = (lineIdx / lines) * Math.PI * 2;
+
+// Latitude sweeps from south pole (+π/2 - eps) up through equator (0)
+// down to north pole (-π/2 + eps).
+const lat = (tAlong - 0.5) * Math.PI * 0.9;
+const cosLat = Math.cos(lat);
+
+// L-shell: each line sits at a different equatorial radius for a
+// classic nested-shell look.
+const L = 1.5 + (lineIdx % 4) * 0.9 + controls.field * 0.5;
+const r = L * cosLat * cosLat;
+
+// Tilt the dipole 11° like Earth, plus slow precession.
+const tilt = 0.19 + Math.sin(time * 0.2) * 0.05;
+const spin = time * 0.4;
+
+// Build the point on the field line in the un-tilted frame.
+const px = r * cosLat * Math.cos(lineAngle + spin);
+const py = r * Math.sin(lat);
+const pz = r * cosLat * Math.sin(lineAngle + spin);
+
+// Rotate around z by 'tilt' to skew the dipole.
+const ct = Math.cos(tilt), st = Math.sin(tilt);
+target.set(
+  px * ct - py * st,
+  px * st + py * ct,
+  pz
+);
+
+// Aurora flicker: brighten near the poles, dim at the equator.
+const polar = Math.abs(Math.sin(lat)); // 0 equator, 1 poles
+const flick = 1 + Math.sin(time * 6 + i * 0.7) * 0.25 * controls.flicker * polar;
+const hue = 0.42 - polar * 0.1; // green near equator, cyan at poles
+const lum = (0.35 + polar * 0.35) * flick;
+color.setHSL((hue + 1) % 1, 0.85, Math.min(lum, 0.85));`,
+  },
 ]
