@@ -1240,4 +1240,52 @@ const lum = 0.25 + heat * 0.65 - cycle * 0.1;
 const sat = 0.4 + cycle * 0.55;
 color.setHSL((hue + 1) % 1, Math.min(sat, 1), Math.max(0.05, Math.min(lum, 0.92)));`,
   },
+  {
+    id: 'fluid-vortex',
+    name: 'Fluid Vortex',
+    description: 'Smoke-like fluid with vortex stretching and shear',
+    emoji: '🌫️',
+    code: `addControl('viscosity', 'Viscosity', 0.2, 2, 0.8);
+addControl('vorticity', 'Vorticity', 0.3, 3, 1.4);
+addControl('plume', 'Plume Rise', 0, 2, 1);
+setInfo('Fluid Vortex', 'Smoke-like fluid with vortex stretching');
+
+// Stable per-particle hashes so the cloud has structure that persists.
+const h1 = Math.sin(i * 127.1) * 0.5 + 0.5;
+const h2 = Math.sin(i * 311.7) * 0.5 + 0.5;
+const h3 = Math.sin(i *  74.7) * 0.5 + 0.5;
+const h4 = Math.sin(i * 519.1) * 0.5 + 0.5;
+
+// Particle 'lifetime' loops continuously so smoke keeps coming.
+const life = (h4 + time * 0.13 / controls.viscosity) % 1;
+
+// Source: a flat disk at the bottom that emits smoke upward.
+const srcAngle = h1 * Math.PI * 2;
+const srcR = h2 * 1.2;
+let x = Math.cos(srcAngle) * srcR;
+let y = -3 + life * 6 * controls.plume; // rise as it ages
+let z = Math.sin(srcAngle) * srcR;
+
+// Vortex stretching — swirl scales with vertical position; horizontal
+// radius expands as the parcel rises (mushroom-cloud growth).
+const grow = 0.7 + life * 1.3;
+const swirl = controls.vorticity * (0.4 + life * 0.9);
+const ang = srcAngle + swirl * time + Math.sin(life * 5 + h3 * 6) * 0.4;
+const rOut = (h3 * 1.2 + 0.4) * grow;
+x += Math.cos(ang) * rOut;
+z += Math.sin(ang) * rOut;
+
+// Shear: horizontal layers slide past each other.
+x += Math.sin(y * 1.3 + time * 0.7) * 0.4;
+z += Math.cos(y * 1.1 + time * 0.5) * 0.4;
+
+target.set(x, y, z);
+
+// Color: hot orange at source, cooling to gray-blue as the smoke rises.
+const cool = life;
+const hue = 0.07 - cool * 0.07 + cool * 0.6; // orange -> blue-gray
+const sat = 0.9 - cool * 0.65;
+const lum = 0.55 - cool * 0.3;
+color.setHSL((hue + 1) % 1, Math.max(0.05, sat), Math.max(0.1, lum));`,
+  },
 ]
