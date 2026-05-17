@@ -57,6 +57,64 @@ export default function SettingsModal({ onClose }) {
               border: '1px solid rgba(239,68,68,0.25)', cursor: 'pointer',
             }}
           >Reset Local Settings &amp; Reload</button>
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <button
+              onClick={() => {
+                // Dump everything from the v1 settings blob + favorites
+                // into a JSON file. Useful for round-tripping between
+                // machines or browsers without share URLs.
+                const blob = {
+                  v: 1,
+                  settings: JSON.parse(localStorage.getItem('particle-settings-v1') || '{}'),
+                  favorites: JSON.parse(localStorage.getItem('favorite-presets') || '[]'),
+                  recent: JSON.parse(localStorage.getItem('recent-presets') || '[]'),
+                }
+                const data = JSON.stringify(blob, null, 2)
+                const ts = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')
+                const url = URL.createObjectURL(new Blob([data], { type: 'application/json' }))
+                const a = document.createElement('a')
+                a.href = url
+                a.download = `particle-settings-${ts}.json`
+                a.click()
+                setTimeout(() => URL.revokeObjectURL(url), 1000)
+              }}
+              style={{
+                flex: 1, padding: '8px 0', borderRadius: 8, fontSize: 12, fontWeight: 500,
+                background: 'rgba(99,102,241,0.1)', color: '#a5b4fc',
+                border: '1px solid rgba(99,102,241,0.25)', cursor: 'pointer',
+              }}
+            >Export JSON</button>
+            <label
+              style={{
+                flex: 1, padding: '8px 0', borderRadius: 8, fontSize: 12, fontWeight: 500,
+                background: 'rgba(34,197,94,0.08)', color: '#86efac',
+                border: '1px solid rgba(34,197,94,0.25)', cursor: 'pointer',
+                textAlign: 'center',
+              }}
+            >
+              Import JSON
+              <input
+                type="file"
+                accept="application/json,.json"
+                style={{ display: 'none' }}
+                onChange={async (e) => {
+                  const f = e.target.files && e.target.files[0]
+                  if (!f) return
+                  try {
+                    const text = await f.text()
+                    const blob = JSON.parse(text)
+                    if (blob.settings)  localStorage.setItem('particle-settings-v1', JSON.stringify(blob.settings))
+                    if (blob.favorites) localStorage.setItem('favorite-presets', JSON.stringify(blob.favorites))
+                    if (blob.recent)    localStorage.setItem('recent-presets', JSON.stringify(blob.recent))
+                    window.location.reload()
+                  } catch (err) {
+                    window.alert('Could not parse settings JSON: ' + err.message)
+                  }
+                }}
+              />
+            </label>
+          </div>
         </div>
 
         <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
