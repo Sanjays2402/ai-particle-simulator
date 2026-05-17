@@ -35,6 +35,30 @@ export default function SettingsModal({ onClose }) {
         <Field label="API Base URL" value={url} onChange={setUrl} placeholder="https://api.openai.com/v1" />
         <Field label="API Key" value={key} onChange={setKey} placeholder="sk-..." type="password" />
         <Field label="Model" value={model} onChange={setModel} placeholder="gpt-4o-mini" />
+
+        <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          <div style={{ fontSize: 12, fontWeight: 500, color: '#7a7a90', marginBottom: 8 }}>Local Data</div>
+          <button
+            onClick={() => {
+              if (!window.confirm('Reset all local settings (theme, quality, palette, favorites, onboarding)?')) return
+              try {
+                localStorage.removeItem('particle-settings-v1')
+                localStorage.removeItem('particle-onboarding-v1-seen')
+                localStorage.removeItem('favorite-presets')
+                Object.keys(localStorage)
+                  .filter(k => k.startsWith('preset-thumb-'))
+                  .forEach(k => localStorage.removeItem(k))
+              } catch { /* ignore quota / private mode */ }
+              window.location.reload()
+            }}
+            style={{
+              width: '100%', padding: '9px 0', borderRadius: 8, fontSize: 12, fontWeight: 550,
+              background: 'rgba(239,68,68,0.08)', color: '#fca5a5',
+              border: '1px solid rgba(239,68,68,0.25)', cursor: 'pointer',
+            }}
+          >Reset Local Settings &amp; Reload</button>
+        </div>
+
         <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
           <button onClick={onClose} style={{
             flex: 1, padding: '10px 0', borderRadius: 8, fontSize: 13, fontWeight: 500,
