@@ -67,12 +67,16 @@ Open [http://localhost:5173](http://localhost:5173) to see it in action.
 | Key | Action |
 |-----|--------|
 | `Space` | Play / Pause simulation |
-| `R` | Reset to default view |
+| `R` | Random preset |
+| `←` / `→` | Previous / next preset |
+| `1`–`9`, `0` | Jump to preset 1–10 |
 | `S` | Take screenshot |
-| `1-9` | Switch between presets |
-| `T` | Toggle trail effect |
-| `M` | Toggle mouse interaction |
 | `F` | Toggle fullscreen |
+| `⌘K` / `Ctrl+K` | Open command palette |
+| `?` | Toggle keyboard help overlay |
+| `` ` `` | Toggle debug HUD (FPS / heap) |
+
+Double-tap or double-click the canvas to play / pause. Drag with **Paint Mode** on to stamp persistent attractors; click the brush icon again to clear them.
 
 ## AI Integration
 
