@@ -197,6 +197,13 @@ export default function LeftSidebar() {
           onChange={setMaxDistance} display={v => `${v}`} />
       </Section>
 
+      <Section title="Audio Reactivity">
+        <p style={{ fontSize: 11, color: '#7a7a90', marginBottom: 8 }}>
+          Click the 🎤 toolbar button to enable. Pick how audio drives the visuals:
+        </p>
+        <AudioModeRow />
+      </Section>
+
       <Section title="Export">
         <button
           onClick={() => {
@@ -568,5 +575,47 @@ function Toggle({ value, onChange }) {
         boxShadow: value ? '0 2px 6px rgba(0,0,0,0.35), 0 0 0 0 rgba(168,85,247,0.4)' : '0 2px 4px rgba(0,0,0,0.35)',
       }} />
     </button>
+  )
+}
+
+// Three-way segmented control for the audio reactivity mode.
+function AudioModeRow() {
+  const audioMode = useStore(s => s.audioMode)
+  const setAudioMode = useStore(s => s.setAudioMode)
+  const audioReactive = useStore(s => s.audioReactive)
+  const audioBass = useStore(s => s.audioBass)
+  const audioBeat = useStore(s => s.audioBeat)
+  const audioLevel = useStore(s => s.audioLevel)
+  const MODES = [
+    { id: 'level', label: 'Level', desc: 'Full spectrum average' },
+    { id: 'bass',  label: 'Bass',  desc: 'Low-frequency band' },
+    { id: 'beat',  label: 'Beat',  desc: 'Pulse on kick drum' },
+  ]
+  return (
+    <div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+        {MODES.map(m => (
+          <button key={m.id} onClick={() => setAudioMode(m.id)} title={m.desc}
+            style={{
+              padding: '7px 0', borderRadius: 7, fontSize: 11.5, fontWeight: 550, cursor: 'pointer',
+              transition: 'all 0.15s ease-out',
+              background: audioMode === m.id
+                ? 'linear-gradient(135deg, rgba(168,85,247,0.22) 0%, rgba(236,72,153,0.18) 100%)'
+                : 'rgba(255,255,255,0.03)',
+              color: audioMode === m.id ? '#f3e8ff' : '#8a8aa0',
+              border: audioMode === m.id ? '1px solid rgba(168,85,247,0.45)' : '1px solid rgba(255,255,255,0.05)',
+              opacity: audioReactive ? 1 : 0.7,
+            }}
+          >{m.label}</button>
+        ))}
+      </div>
+      {audioReactive && (
+        <div style={{ marginTop: 10, fontSize: 11, color: '#7a7a90', fontFamily: 'JetBrains Mono, monospace', display: 'flex', justifyContent: 'space-between' }}>
+          <span>lvl <span style={{ color: '#a8a8b8' }}>{audioLevel.toFixed(2)}</span></span>
+          <span>bass <span style={{ color: '#a8a8b8' }}>{audioBass.toFixed(2)}</span></span>
+          <span>beat <span style={{ color: audioBeat > 0.5 ? '#86efac' : '#a8a8b8' }}>{audioBeat.toFixed(2)}</span></span>
+        </div>
+      )}
+    </div>
   )
 }
