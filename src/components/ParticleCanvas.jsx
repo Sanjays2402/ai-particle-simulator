@@ -547,8 +547,23 @@ export default function ParticleCanvas() {
     return () => cancelAnimationFrame(raf)
   }, [])
 
+  // Double-tap on mobile / double-click on desktop = play/pause.
+  // We use the manual gap timer here instead of dblclick so it also
+  // fires on iOS Safari where dblclick is fussy on canvases.
+  const lastTapRef = useRef(0)
+  const handleTap = () => {
+    const now = performance.now()
+    if (now - lastTapRef.current < 330) {
+      const { playing, setPlaying } = useStore.getState()
+      setPlaying(!playing)
+      lastTapRef.current = 0
+    } else {
+      lastTapRef.current = now
+    }
+  }
+
   return (
-    <div className="w-full h-full relative">
+    <div className="w-full h-full relative" onPointerUp={handleTap}>
       <Canvas
         camera={{ position: [0, 5, 15], fov: 60 }}
         gl={{ antialias: true, alpha: false, preserveDrawingBuffer: true }}
