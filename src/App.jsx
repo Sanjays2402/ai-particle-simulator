@@ -12,6 +12,7 @@ import Toast from './components/Toast'
 import { CommandPalette } from './components/CommandPalette'
 import HelpOverlay from './components/HelpOverlay'
 import DebugHUD from './components/DebugHUD'
+import Onboarding from './components/Onboarding'
 import { Sparkles, ChevronLeft, ChevronRight } from 'lucide-react'
 
 export default function App() {
@@ -140,6 +141,7 @@ export default function App() {
       <CommandPalette onSettings={() => setShowSettings(true)} />
       <HelpOverlay />
       <DebugHUD />
+      <Onboarding />
 
       {showSplash && (
         <div className="splash">
