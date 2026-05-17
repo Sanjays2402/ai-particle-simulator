@@ -1,6 +1,7 @@
 import { useRef, useEffect } from 'react'
 import { useStore } from '../store'
 import { presets } from '../presets'
+import { buildShareUrl } from '../lib/share'
 import {
   Play, Pause, RotateCcw, Maximize2, Shuffle, Magnet, Camera, Link2,
   Mic, Download, Settings, Repeat, Sparkles, Zap, Paintbrush, Send,
@@ -41,33 +42,7 @@ export default function TopBar({ onSettings }) {
   }
 
   const handleShare = () => {
-    const s = useStore.getState()
-    // V2 share payload — includes palette, post-FX, audio mode, and trails.
-    // We bump the version (v) so older share URLs still load via the v1 path.
-    const data = {
-      v: 2,
-      code: s.particleFnSource,
-      preset: s.currentPreset,
-      count: s.particleCount,
-      speed: s.speed,
-      glow: s.glowIntensity,
-      style: s.visualStyle,
-      theme: s.theme,
-      trails: s.trails,
-      autoRotate: s.autoRotate,
-      autoRotateSpeed: s.autoRotateSpeed,
-      audioMode: s.audioMode,
-      mouseAttract: s.mouseAttract,
-      palette: s.paletteEnabled ? { a: s.paletteA, b: s.paletteB, mix: s.paletteMix } : undefined,
-      fx: {
-        ca: s.chromaticAberration, caI: s.chromaticIntensity,
-        vg: s.vignette,             vgI: s.vignetteIntensity,
-        fg: s.filmGrain,            fgI: s.filmGrainIntensity,
-      },
-    }
-    const json = JSON.stringify(data)
-    const hash = btoa(encodeURIComponent(json))
-    const url = `${window.location.origin}${window.location.pathname}#share=${hash}`
+    const url = buildShareUrl(useStore.getState())
     navigator.clipboard.writeText(url).then(() => {
       const notif = document.getElementById('perf-notif')
       if (notif) { notif.textContent = '🔗 URL copied to clipboard!'; notif.style.opacity = '1'; setTimeout(() => notif.style.opacity = '0', 2000) }
@@ -77,33 +52,8 @@ export default function TopBar({ onSettings }) {
   }
 
   const handleTweet = () => {
-    // Build the same v2 share URL as handleShare, then push it through
-    // Twitter's web intent. We don't have an external image host, so
-    // the tweet just gets the URL + a friendly description.
     const s = useStore.getState()
-    const data = {
-      v: 2,
-      code: s.particleFnSource,
-      preset: s.currentPreset,
-      count: s.particleCount,
-      speed: s.speed,
-      glow: s.glowIntensity,
-      style: s.visualStyle,
-      theme: s.theme,
-      trails: s.trails,
-      autoRotate: s.autoRotate,
-      autoRotateSpeed: s.autoRotateSpeed,
-      audioMode: s.audioMode,
-      mouseAttract: s.mouseAttract,
-      palette: s.paletteEnabled ? { a: s.paletteA, b: s.paletteB, mix: s.paletteMix } : undefined,
-      fx: {
-        ca: s.chromaticAberration, caI: s.chromaticIntensity,
-        vg: s.vignette,             vgI: s.vignetteIntensity,
-        fg: s.filmGrain,            fgI: s.filmGrainIntensity,
-      },
-    }
-    const hash = btoa(encodeURIComponent(JSON.stringify(data)))
-    const url = `${window.location.origin}${window.location.pathname}#share=${hash}`
+    const url = buildShareUrl(s)
     const name = s.infoTitle || s.currentPreset || 'a particle scene'
     const text = encodeURIComponent(`Check out "${name}" in AI Particle Simulator`)
     const u = encodeURIComponent(url)
