@@ -13,6 +13,7 @@ import { CommandPalette } from './components/CommandPalette'
 import HelpOverlay from './components/HelpOverlay'
 import DebugHUD from './components/DebugHUD'
 import Onboarding from './components/Onboarding'
+import MouseTrail from './components/MouseTrail'
 import { useIsMobile } from './lib/useIsMobile'
 import { Sparkles, ChevronLeft, ChevronRight } from 'lucide-react'
 
@@ -183,6 +184,7 @@ export default function App() {
       <HelpOverlay />
       <DebugHUD />
       <Onboarding />
+      <MouseTrail />
 
       {showSplash && (
         <div className="splash">

@@ -208,6 +208,13 @@ export const useStore = create((set, get) => {
   setPaletteB: (v) => set({ paletteB: v }),
   setPaletteMix: (v) => set({ paletteMix: v }),
 
+  // Optional DOM-overlay mouse trail. Renders fading dots behind the
+  // cursor; pure CSS so cost is negligible. Default off to keep the
+  // baseline UI calm.
+  mouseTrail: false,
+  setMouseTrail: (v) => set({ mouseTrail: v }),
+
+
 
 
   setMouseAttract: (v) => set({ mouseAttract: v }),

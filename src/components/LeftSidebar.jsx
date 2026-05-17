@@ -197,6 +197,14 @@ export default function LeftSidebar() {
           onChange={setMaxDistance} display={v => `${v}`} />
       </Section>
 
+      <Section title="Cursor">
+        <ToggleRow
+          label="Mouse Trail"
+          value={useStore(s => s.mouseTrail)}
+          onChange={useStore(s => s.setMouseTrail)}
+        />
+      </Section>
+
       <Section title="Audio Reactivity">
         <p style={{ fontSize: 11, color: '#7a7a90', marginBottom: 8 }}>
           Click the 🎤 toolbar button to enable. Pick how audio drives the visuals:
