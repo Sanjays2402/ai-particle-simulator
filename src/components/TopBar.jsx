@@ -3,7 +3,7 @@ import { useStore } from '../store'
 import { presets } from '../presets'
 import {
   Play, Pause, RotateCcw, Maximize2, Shuffle, Magnet, Camera, Link2,
-  Mic, Download, Settings, Repeat, Sparkles, Zap, Paintbrush,
+  Mic, Download, Settings, Repeat, Sparkles, Zap, Paintbrush, Send,
 } from 'lucide-react'
 
 export default function TopBar({ onSettings }) {
@@ -74,6 +74,41 @@ export default function TopBar({ onSettings }) {
     }).catch(() => {
       window.prompt('Share URL:', url)
     })
+  }
+
+  const handleTweet = () => {
+    // Build the same v2 share URL as handleShare, then push it through
+    // Twitter's web intent. We don't have an external image host, so
+    // the tweet just gets the URL + a friendly description.
+    const s = useStore.getState()
+    const data = {
+      v: 2,
+      code: s.particleFnSource,
+      preset: s.currentPreset,
+      count: s.particleCount,
+      speed: s.speed,
+      glow: s.glowIntensity,
+      style: s.visualStyle,
+      theme: s.theme,
+      trails: s.trails,
+      autoRotate: s.autoRotate,
+      autoRotateSpeed: s.autoRotateSpeed,
+      audioMode: s.audioMode,
+      mouseAttract: s.mouseAttract,
+      palette: s.paletteEnabled ? { a: s.paletteA, b: s.paletteB, mix: s.paletteMix } : undefined,
+      fx: {
+        ca: s.chromaticAberration, caI: s.chromaticIntensity,
+        vg: s.vignette,             vgI: s.vignetteIntensity,
+        fg: s.filmGrain,            fgI: s.filmGrainIntensity,
+      },
+    }
+    const hash = btoa(encodeURIComponent(JSON.stringify(data)))
+    const url = `${window.location.origin}${window.location.pathname}#share=${hash}`
+    const name = s.infoTitle || s.currentPreset || 'a particle scene'
+    const text = encodeURIComponent(`Check out "${name}" in AI Particle Simulator`)
+    const u = encodeURIComponent(url)
+    window.open(`https://twitter.com/intent/tweet?text=${text}&url=${u}`,
+      '_blank', 'noopener,noreferrer')
   }
 
   const handleMic = async () => {
@@ -267,6 +302,7 @@ export default function TopBar({ onSettings }) {
         <Divider />
         <Btn onClick={handleScreenshot} title="Screenshot (S)"><Camera size={14} strokeWidth={2.2} /></Btn>
         <Btn onClick={handleShare} title="Share URL"><Link2 size={14} strokeWidth={2.2} /></Btn>
+        <Btn onClick={handleTweet} title="Tweet this scene"><Send size={14} strokeWidth={2.2} /></Btn>
         <Btn onClick={handleExport} title="Export HTML"><Download size={14} strokeWidth={2.2} /></Btn>
         <Divider />
         <Btn onClick={onSettings} title="Settings"><Settings size={14} strokeWidth={2.2} /></Btn>
