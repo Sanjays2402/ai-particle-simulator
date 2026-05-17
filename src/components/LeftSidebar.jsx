@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useStore, THEMES } from '../store'
 import { presets } from '../presets'
 import { GifEncoder } from '../lib/gifEncoder'
+import { startCanvasRecording, downloadVideoBlob, isVideoExportSupported } from '../lib/videoRecorder'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring']
 const THEME_LIST = [
@@ -14,6 +15,8 @@ const THEME_LIST = [
 ]
 
 export default function LeftSidebar() {
+  const [videoRec, setVideoRec] = useState(null)
+  const [videoElapsed, setVideoElapsed] = useState(0)
   const {
     particleCount, setParticleCount,
     speed, setSpeed,
@@ -88,6 +91,29 @@ export default function LeftSidebar() {
     URL.revokeObjectURL(url)
 
     useStore.setState({ isExportingGif: false, gifProgress: null })
+  }
+
+  const exportVideo = async () => {
+    if (videoRec) {
+      if (videoRec._cleanup) videoRec._cleanup()
+      const { blob, mime } = await videoRec.stop()
+      const baseName = `particle-${(useStore.getState().infoTitle || 'video').replace(/\s+/g, '-').toLowerCase()}`
+      downloadVideoBlob(blob, mime, baseName)
+      setVideoRec(null)
+      setVideoElapsed(0)
+      return
+    }
+    const canvas = document.querySelector('#particle-canvas canvas')
+    if (!canvas) return
+    const rec = startCanvasRecording(canvas, { fps: 30 })
+    if (!rec) {
+      window.alert('Video export not supported in this browser.')
+      return
+    }
+    setVideoRec(rec)
+    const started = Date.now()
+    rec._timer = setInterval(() => setVideoElapsed((Date.now() - started) / 1000), 250)
+    rec._cleanup = () => clearInterval(rec._timer)
   }
 
   return (
@@ -217,6 +243,31 @@ export default function LeftSidebar() {
               : '🎬 Capturing...'
             : '🎬 Export as GIF (3s)'}
         </button>
+
+        {isVideoExportSupported() && (
+          <button
+            onClick={exportVideo}
+            style={{
+              width: '100%', marginTop: 8,
+              padding: '11px 0', borderRadius: 10,
+              fontSize: 12.5, fontWeight: 600,
+              cursor: 'pointer', transition: 'all 0.15s ease-out',
+              background: videoRec
+                ? 'linear-gradient(135deg, #ef4444 0%, #f97316 100%)'
+                : 'rgba(255,255,255,0.04)',
+              color: videoRec ? '#ffffff' : '#c8c8d0',
+              border: videoRec
+                ? '1px solid rgba(239,68,68,0.5)'
+                : '1px solid rgba(255,255,255,0.06)',
+              boxShadow: videoRec ? '0 4px 18px rgba(239,68,68,0.35)' : 'none',
+            }}
+            title="Capture canvas to WebM / MP4 (browser dependent)"
+          >
+            {videoRec
+              ? `⏺︎ Recording · ${videoElapsed.toFixed(1)}s · Stop & save`
+              : '🎥 Record Video (WebM/MP4)'}
+          </button>
+        )}
       </Section>
 
       <Section title="Physics Engine">
