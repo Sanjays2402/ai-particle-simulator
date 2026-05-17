@@ -1,7 +1,7 @@
 import { useRef, useMemo, useEffect, useCallback } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
-import { EffectComposer, Bloom } from '@react-three/postprocessing'
+import { EffectComposer, Bloom, ChromaticAberration, Vignette, Noise } from '@react-three/postprocessing'
 import * as THREE from 'three'
 import { useStore, THEMES } from '../store'
 
@@ -476,6 +476,12 @@ export default function ParticleCanvas() {
   const glowIntensity = useStore(s => s.glowIntensity)
   const trails = useStore(s => s.trails)
   const audioReactive = useStore(s => s.audioReactive)
+  const chromaticAberration = useStore(s => s.chromaticAberration)
+  const chromaticIntensity = useStore(s => s.chromaticIntensity)
+  const vignette = useStore(s => s.vignette)
+  const vignetteIntensity = useStore(s => s.vignetteIntensity)
+  const filmGrain = useStore(s => s.filmGrain)
+  const filmGrainIntensity = useStore(s => s.filmGrainIntensity)
   const fpsRef = useRef(null)
   const audioLevel = useStore(s => s.audioLevel)
   const audioBass = useStore(s => s.audioBass)
@@ -526,6 +532,15 @@ export default function ParticleCanvas() {
         <CameraControls />
         <EffectComposer>
           <Bloom intensity={glowIntensity * 0.6} luminanceThreshold={0.8} luminanceSmoothing={0.4} radius={0.3} mipmapBlur />
+          {chromaticAberration && (
+            <ChromaticAberration offset={[chromaticIntensity, chromaticIntensity]} />
+          )}
+          {vignette && (
+            <Vignette eskil={false} offset={0.2} darkness={vignetteIntensity} />
+          )}
+          {filmGrain && (
+            <Noise opacity={filmGrainIntensity} premultiply />
+          )}
         </EffectComposer>
       </Canvas>
 

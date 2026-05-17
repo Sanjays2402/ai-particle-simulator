@@ -171,9 +171,24 @@ export const useStore = create((set, get) => {
   setVisualStyle: (v) => set({ visualStyle: v }),
   setPlaying: (v) => set({ playing: v }),
   setPrompt: (v) => set({ prompt: v }),
-  setMouseAttract: (v) => set({ mouseAttract: v }),
+  // Post-processing toggles — each is opt-in so the default look stays
+  // identical until the user flips one on. Intensity ranges are tuned
+  // to land somewhere flattering without much tweaking.
+  chromaticAberration: false,
+  chromaticIntensity: 0.003,
+  vignette: false,
+  vignetteIntensity: 0.45,
+  filmGrain: false,
+  filmGrainIntensity: 0.18,
+  setChromaticAberration: (v) => set({ chromaticAberration: v }),
+  setChromaticIntensity: (v) => set({ chromaticIntensity: v }),
+  setVignette: (v) => set({ vignette: v }),
+  setVignetteIntensity: (v) => set({ vignetteIntensity: v }),
+  setFilmGrain: (v) => set({ filmGrain: v }),
+  setFilmGrainIntensity: (v) => set({ filmGrainIntensity: v }),
 
-  // Paint mode — click-drag to drop persistent attractors on the canvas.
+
+  setMouseAttract: (v) => set({ mouseAttract: v }),
   paintMode: false,
   paintPoints: [], // array of [x, y, z]
   setPaintMode: (v) => set({ paintMode: v }),

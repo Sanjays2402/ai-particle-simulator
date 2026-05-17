@@ -204,6 +204,10 @@ export default function LeftSidebar() {
         <AudioModeRow />
       </Section>
 
+      <Section title="Post-FX">
+        <PostFXRow />
+      </Section>
+
       <Section title="Export">
         <button
           onClick={() => {
@@ -575,6 +579,42 @@ function Toggle({ value, onChange }) {
         boxShadow: value ? '0 2px 6px rgba(0,0,0,0.35), 0 0 0 0 rgba(168,85,247,0.4)' : '0 2px 4px rgba(0,0,0,0.35)',
       }} />
     </button>
+  )
+}
+
+// Post-FX toggles + intensity sliders. Each effect is opt-in so the
+// default scene is unchanged until the user explicitly enables one.
+function PostFXRow() {
+  const chromaticAberration   = useStore(s => s.chromaticAberration)
+  const chromaticIntensity    = useStore(s => s.chromaticIntensity)
+  const vignette              = useStore(s => s.vignette)
+  const vignetteIntensity     = useStore(s => s.vignetteIntensity)
+  const filmGrain             = useStore(s => s.filmGrain)
+  const filmGrainIntensity    = useStore(s => s.filmGrainIntensity)
+  const setChromaticAberration = useStore(s => s.setChromaticAberration)
+  const setChromaticIntensity  = useStore(s => s.setChromaticIntensity)
+  const setVignette            = useStore(s => s.setVignette)
+  const setVignetteIntensity   = useStore(s => s.setVignetteIntensity)
+  const setFilmGrain           = useStore(s => s.setFilmGrain)
+  const setFilmGrainIntensity  = useStore(s => s.setFilmGrainIntensity)
+  return (
+    <>
+      <ToggleRow label="Chromatic Aberration" value={chromaticAberration} onChange={setChromaticAberration} />
+      {chromaticAberration && (
+        <Slider label="CA Intensity" value={chromaticIntensity} min={0} max={0.015} step={0.0005}
+          onChange={setChromaticIntensity} display={v => v.toFixed(4)} />
+      )}
+      <ToggleRow label="Vignette" value={vignette} onChange={setVignette} />
+      {vignette && (
+        <Slider label="Vignette Darkness" value={vignetteIntensity} min={0} max={1} step={0.05}
+          onChange={setVignetteIntensity} display={v => v.toFixed(2)} />
+      )}
+      <ToggleRow label="Film Grain" value={filmGrain} onChange={setFilmGrain} />
+      {filmGrain && (
+        <Slider label="Grain Intensity" value={filmGrainIntensity} min={0} max={0.6} step={0.02}
+          onChange={setFilmGrainIntensity} display={v => v.toFixed(2)} />
+      )}
+    </>
   )
 }
 
