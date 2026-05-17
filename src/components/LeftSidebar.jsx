@@ -120,6 +120,41 @@ export default function LeftSidebar() {
         {performanceMode && (
           <p style={{ fontSize: 11, color: '#f59e0b', marginTop: 4 }}>⚡ Particle count reduced 50%</p>
         )}
+
+        {/* Quick particle-count presets. */}
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 11, color: '#7a7a90', marginBottom: 6, fontWeight: 500 }}>Quality Preset</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+            {[
+              { id: 'low',   label: 'Low',   count: 2000  },
+              { id: 'med',   label: 'Med',   count: 10000 },
+              { id: 'high',  label: 'High',  count: 25000 },
+              { id: 'ultra', label: 'Ultra', count: 50000 },
+            ].map(p => {
+              const active = particleCount === p.count
+              return (
+                <button key={p.id}
+                  onClick={() => {
+                    if (performanceMode) setPerformanceMode(false)
+                    setParticleCount(p.count)
+                  }}
+                  className="quality-chip"
+                  style={{
+                    padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+                    cursor: 'pointer', transition: 'all 0.15s ease-out',
+                    background: active
+                      ? 'linear-gradient(135deg, rgba(168,85,247,0.22) 0%, rgba(236,72,153,0.18) 100%)'
+                      : 'rgba(255,255,255,0.03)',
+                    color: active ? '#f3e8ff' : '#8a8aa0',
+                    border: active ? '1px solid rgba(168,85,247,0.45)' : '1px solid rgba(255,255,255,0.05)',
+                    boxShadow: active ? '0 0 12px rgba(168,85,247,0.22)' : 'none',
+                  }}
+                  title={`${(p.count / 1000).toFixed(0)}K particles`}
+                >{p.label}</button>
+              )
+            })}
+          </div>
+        </div>
       </Section>
 
       <Section title="Camera">
