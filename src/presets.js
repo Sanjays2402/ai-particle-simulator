@@ -1430,4 +1430,44 @@ const lum = 0.4 + near * 0.55;
 const sat = 0.7 - near * 0.4; // de-saturate to near-white up close
 color.setHSL(hue, Math.max(0, sat), Math.min(0.95, lum));`,
   },
+  {
+    id: 'sandstorm',
+    name: 'Sandstorm',
+    description: 'Wind-driven desert particles with turbulent flow',
+    emoji: '🌪️',
+    code: `addControl('wind', 'Wind Speed', 0.4, 4, 1.6);
+addControl('turbulence', 'Turbulence', 0.2, 3, 1.2);
+addControl('coverage', 'Coverage', 0.4, 2, 1.2);
+setInfo('Sandstorm', 'Wind-driven sand with turbulent flow');
+
+// Use stable hashes so each grain has a consistent role.
+const h1 = Math.sin(i * 127.1) * 0.5 + 0.5;
+const h2 = Math.sin(i * 311.7) * 0.5 + 0.5;
+const h3 = Math.sin(i *  74.7) * 0.5 + 0.5;
+const h4 = Math.sin(i * 519.1) * 0.5 + 0.5;
+
+// Sand grains stream left-to-right with a wrap-around so the storm
+// keeps blowing without a visible reset.
+const phase = (h1 + time * controls.wind * 0.18) % 1;
+const x = phase * 14 - 7; // sweep across
+const y = (h2 - 0.5) * 6 * controls.coverage;
+const z = (h3 - 0.5) * 4 * controls.coverage;
+
+// Layered sines for turbulence — cheap pseudo-noise, no allocs.
+const t1 = Math.sin(x * 0.8 + time * 1.4 + h4 * 6.0);
+const t2 = Math.sin(y * 0.7 + time * 1.1 + h4 * 3.7);
+const t3 = Math.sin((x + y) * 0.5 + time * 0.9);
+
+const tx = (t1 + t3 * 0.3) * controls.turbulence * 0.4;
+const ty = (t2 + t1 * 0.4) * controls.turbulence * 0.35;
+const tz = (t3 + t2 * 0.5) * controls.turbulence * 0.25;
+
+target.set(x + tx, y + ty, z + tz);
+
+// Sand color: warm beige with darker variation per grain.
+const hue = 0.08 + h4 * 0.04;
+const sat = 0.55 + h3 * 0.2;
+const lum = 0.45 + h2 * 0.2 - Math.abs(y) * 0.04;
+color.setHSL(hue, sat, Math.max(0.1, Math.min(0.85, lum)));`,
+  },
 ]
