@@ -1059,4 +1059,49 @@ if (inHalo) {
   color.setHSL((hue + 1) % 1, 0.95, lum);
 }`,
   },
+  {
+    id: 'plasma-storm',
+    name: 'Plasma Storm',
+    description: 'Roiling plasma cloud with curling magnetic filaments',
+    emoji: '⚡',
+    code: `addControl('turbulence', 'Turbulence', 0.3, 3, 1.4);
+addControl('hotspot', 'Hot Core', 0.5, 3, 1.6);
+addControl('curl', 'Filament Curl', 0, 2, 1);
+setInfo('Plasma Storm', 'Curl-noise plasma with arcing magnetic filaments');
+
+// Curl-noise approximation built from layered sines so we can run it
+// 20K+ times per frame without allocating anything.
+const h1 = Math.sin(i * 127.1) * 0.5 + 0.5;
+const h2 = Math.sin(i * 311.7) * 0.5 + 0.5;
+const h3 = Math.sin(i *  74.7) * 0.5 + 0.5;
+const h4 = Math.sin(i * 491.3) * 0.5 + 0.5;
+
+const t = time * 0.6;
+const phase = (h4 + t * 0.07) % 1; // staggered lifecycle
+
+// Seed point on a fat sphere we then warp.
+const theta = h1 * Math.PI * 2;
+const phi   = h2 * Math.PI;
+const baseR = 1.5 + h3 * 2.5 + Math.sin(phase * Math.PI) * controls.hotspot;
+
+let sx = Math.sin(phi) * Math.cos(theta) * baseR;
+let sy = Math.cos(phi) * baseR * 0.9;
+let sz = Math.sin(phi) * Math.sin(theta) * baseR;
+
+// Curl distortion — cross-coupled sin/cos so divergence stays low.
+const k = controls.curl;
+const tu = controls.turbulence;
+sx += Math.sin(sy * 1.3 + t * 1.7) * 0.6 * tu - Math.cos(sz * 1.1 + t * 1.3) * 0.4 * k;
+sy += Math.sin(sz * 1.1 + t * 1.9) * 0.6 * tu - Math.cos(sx * 1.4 + t * 1.1) * 0.4 * k;
+sz += Math.sin(sx * 1.5 + t * 1.5) * 0.6 * tu - Math.cos(sy * 1.2 + t * 1.7) * 0.4 * k;
+
+target.set(sx, sy, sz);
+
+// Temperature drives color: violet outer → cyan core → white-hot peak.
+const dist = Math.sqrt(sx * sx + sy * sy + sz * sz);
+const heat = Math.max(0, Math.min(1, 1 - dist / 5));
+const hue = 0.78 - heat * 0.28; // 0.78 violet -> 0.5 cyan
+const lum = 0.35 + heat * 0.55 + Math.sin(phase * Math.PI * 2 + i) * 0.08;
+color.setHSL((hue + 1) % 1, 0.9, Math.min(lum, 0.92));`,
+  },
 ]
