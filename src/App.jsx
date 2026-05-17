@@ -13,13 +13,15 @@ import { CommandPalette } from './components/CommandPalette'
 import HelpOverlay from './components/HelpOverlay'
 import DebugHUD from './components/DebugHUD'
 import Onboarding from './components/Onboarding'
+import { useIsMobile } from './lib/useIsMobile'
 import { Sparkles, ChevronLeft, ChevronRight } from 'lucide-react'
 
 export default function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [showSplash, setShowSplash] = useState(true)
-  const [leftOpen, setLeftOpen] = useState(true)
-  const [rightOpen, setRightOpen] = useState(true)
+  const isMobile = useIsMobile()
+  const [leftOpen, setLeftOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 720)
+  const [rightOpen, setRightOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 720)
   const loadPreset = useStore(s => s.loadPreset)
   const loadCustomCode = useStore(s => s.loadCustomCode)
   const orb1 = useRef(null), orb2 = useRef(null), orb3 = useRef(null)
@@ -99,7 +101,14 @@ export default function App() {
         <div className="pointer-events-auto"><TopBar onSettings={() => setShowSettings(true)} /></div>
         <div className="flex flex-1 overflow-hidden">
           {/* Left sidebar + toggle */}
-          <div className="pointer-events-auto slide-in-left" style={{ position: 'relative', display: leftOpen ? 'block' : 'none' }}>
+          <div className="pointer-events-auto slide-in-left" style={{
+            position: isMobile ? 'absolute' : 'relative',
+            top: isMobile ? 64 : undefined,
+            bottom: isMobile ? 0 : undefined,
+            left: 0,
+            zIndex: isMobile ? 25 : 'auto',
+            display: leftOpen ? 'block' : 'none',
+          }}>
             <LeftSidebar />
             <button className="sidebar-toggle left" onClick={() => setLeftOpen(false)} title="Hide sidebar">
               <ChevronLeft size={14} />
@@ -148,7 +157,14 @@ export default function App() {
               <ChevronLeft size={14} />
             </button>
           )}
-          <div className="pointer-events-auto slide-in-right" style={{ position: 'relative', display: rightOpen ? 'block' : 'none' }}>
+          <div className="pointer-events-auto slide-in-right" style={{
+            position: isMobile ? 'absolute' : 'relative',
+            top: isMobile ? 64 : undefined,
+            bottom: isMobile ? 0 : undefined,
+            right: 0,
+            zIndex: isMobile ? 25 : 'auto',
+            display: rightOpen ? 'block' : 'none',
+          }}>
             <RightSidebar />
             <button className="sidebar-toggle right" onClick={() => setRightOpen(false)} title="Hide sidebar">
               <ChevronRight size={14} />
