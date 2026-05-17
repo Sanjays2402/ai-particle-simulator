@@ -41,8 +41,30 @@ export default function TopBar({ onSettings }) {
   }
 
   const handleShare = () => {
-    const { particleFnSource, currentPreset, particleCount, speed, glowIntensity, visualStyle, theme } = useStore.getState()
-    const data = { code: particleFnSource, preset: currentPreset, count: particleCount, speed, glow: glowIntensity, style: visualStyle, theme }
+    const s = useStore.getState()
+    // V2 share payload — includes palette, post-FX, audio mode, and trails.
+    // We bump the version (v) so older share URLs still load via the v1 path.
+    const data = {
+      v: 2,
+      code: s.particleFnSource,
+      preset: s.currentPreset,
+      count: s.particleCount,
+      speed: s.speed,
+      glow: s.glowIntensity,
+      style: s.visualStyle,
+      theme: s.theme,
+      trails: s.trails,
+      autoRotate: s.autoRotate,
+      autoRotateSpeed: s.autoRotateSpeed,
+      audioMode: s.audioMode,
+      mouseAttract: s.mouseAttract,
+      palette: s.paletteEnabled ? { a: s.paletteA, b: s.paletteB, mix: s.paletteMix } : undefined,
+      fx: {
+        ca: s.chromaticAberration, caI: s.chromaticIntensity,
+        vg: s.vignette,             vgI: s.vignetteIntensity,
+        fg: s.filmGrain,            fgI: s.filmGrainIntensity,
+      },
+    }
     const json = JSON.stringify(data)
     const hash = btoa(encodeURIComponent(json))
     const url = `${window.location.origin}${window.location.pathname}#share=${hash}`

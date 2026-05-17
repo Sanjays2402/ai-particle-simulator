@@ -48,11 +48,36 @@ export default function App() {
         const encoded = hash.slice(7)
         const json = decodeURIComponent(atob(encoded))
         const data = JSON.parse(json)
-        if (data.count) useStore.getState().setParticleCount(data.count)
-        if (data.speed) useStore.getState().setSpeed(data.speed)
-        if (data.glow) useStore.getState().setGlowIntensity(data.glow)
-        if (data.style) useStore.getState().setVisualStyle(data.style)
-        if (data.theme) useStore.getState().setTheme(data.theme)
+        const s = useStore.getState()
+        // V1 fields (always honored).
+        if (data.count) s.setParticleCount(data.count)
+        if (data.speed) s.setSpeed(data.speed)
+        if (data.glow) s.setGlowIntensity(data.glow)
+        if (data.style) s.setVisualStyle(data.style)
+        if (data.theme) s.setTheme(data.theme)
+
+        // V2 fields — ignore silently when missing so old links keep working.
+        if (data.trails != null) s.setTrails(data.trails)
+        if (data.autoRotate != null) s.setAutoRotate(data.autoRotate)
+        if (data.autoRotateSpeed != null) s.setAutoRotateSpeed(data.autoRotateSpeed)
+        if (data.audioMode) s.setAudioMode(data.audioMode)
+        if (data.mouseAttract != null) s.setMouseAttract(data.mouseAttract)
+        if (data.palette) {
+          s.setPaletteEnabled(true)
+          if (data.palette.a) s.setPaletteA(data.palette.a)
+          if (data.palette.b) s.setPaletteB(data.palette.b)
+          if (data.palette.mix != null) s.setPaletteMix(data.palette.mix)
+        }
+        if (data.fx) {
+          if (data.fx.ca != null)  s.setChromaticAberration(data.fx.ca)
+          if (data.fx.caI != null) s.setChromaticIntensity(data.fx.caI)
+          if (data.fx.vg != null)  s.setVignette(data.fx.vg)
+          if (data.fx.vgI != null) s.setVignetteIntensity(data.fx.vgI)
+          if (data.fx.fg != null)  s.setFilmGrain(data.fx.fg)
+          if (data.fx.fgI != null) s.setFilmGrainIntensity(data.fx.fgI)
+        }
+
+        // Load scene last so dynamic controls and infoTitle render on top.
         if (data.preset) loadPreset(data.preset)
         else if (data.code) loadCustomCode(data.code)
         return
