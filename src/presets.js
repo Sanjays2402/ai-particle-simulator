@@ -1195,4 +1195,49 @@ const hue = 0.42 - polar * 0.1; // green near equator, cyan at poles
 const lum = (0.35 + polar * 0.35) * flick;
 color.setHSL((hue + 1) % 1, 0.85, Math.min(lum, 0.85));`,
   },
+  {
+    id: 'supernova',
+    name: 'Supernova',
+    description: 'Looping star explosion shockwave with cooling ejecta',
+    emoji: '💥',
+    code: `addControl('period', 'Period', 1, 8, 4);
+addControl('shockSpeed', 'Shock Speed', 0.5, 3, 1.5);
+addControl('asymmetry', 'Asymmetry', 0, 1, 0.3);
+setInfo('Supernova', 'A looping stellar explosion with cooling ejecta');
+
+// Looped cycle so the explosion replays.
+const cycle = (time / controls.period) % 1; // 0..1
+
+// Per-particle direction on the unit sphere (stable across frames).
+const h1 = Math.sin(i * 127.1) * 0.5 + 0.5;
+const h2 = Math.sin(i * 311.7) * 0.5 + 0.5;
+const h3 = Math.sin(i *  74.7) * 0.5 + 0.5;
+
+const theta = h1 * Math.PI * 2;
+const phi = Math.acos(2 * h2 - 1); // uniform on a sphere
+const dx = Math.sin(phi) * Math.cos(theta);
+const dy = Math.cos(phi);
+const dz = Math.sin(phi) * Math.sin(theta);
+
+// Each particle picks a random ejecta speed; this gives the chunky,
+// shell-plus-trail look of a real SN remnant.
+const eject = 0.6 + h3 * 1.0; // 0.6 .. 1.6
+const shock = controls.shockSpeed * 10;
+
+// Asymmetric blowout — one hemisphere flies faster.
+const asym = 1 + (dx + dz) * 0.5 * controls.asymmetry;
+
+// Radius vs. time: linear during expansion, then snaps back to 0 to loop.
+const r = cycle * shock * eject * asym;
+
+target.set(dx * r, dy * r, dz * r);
+
+// Color: white-hot core during ignition (cycle ~0), fades through
+// yellow/orange/red as the cycle progresses (cooling ejecta).
+const heat = 1 - cycle; // 1 hot -> 0 cool
+const hue = 0.13 - heat * 0.13; // 0.13 yellow -> 0.0 red
+const lum = 0.25 + heat * 0.65 - cycle * 0.1;
+const sat = 0.4 + cycle * 0.55;
+color.setHSL((hue + 1) % 1, Math.min(sat, 1), Math.max(0.05, Math.min(lum, 0.92)));`,
+  },
 ]
