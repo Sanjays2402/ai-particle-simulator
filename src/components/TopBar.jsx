@@ -99,6 +99,8 @@ export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snaps
     if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null }
     if (audioCtxRef.current) { audioCtxRef.current.close().catch(() => {}); audioCtxRef.current = null }
     analyserRef.current = null
+    // Tell waveform/etc subscribers the analyser is gone.
+    if (typeof window !== 'undefined') window.__particleAudioAnalyser = null
     setAudioReactive(false)
     setAudioSource(null)
     setActiveDemoKind(null)
@@ -167,6 +169,7 @@ export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snaps
       analyser.fftSize = 512
       src.connect(analyser)
       analyserRef.current = analyser
+      if (typeof window !== 'undefined') window.__particleAudioAnalyser = analyser
       setAudioSource('mic')
       setAudioReactive(true)
       startAnalyserLoop()
@@ -196,6 +199,7 @@ export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snaps
       const analyser = ctx.createAnalyser()
       analyser.fftSize = 512
       analyserRef.current = analyser
+      if (typeof window !== 'undefined') window.__particleAudioAnalyser = analyser
       const loop = createLoop(ctx, kind)
       if (!loop) return
       demoLoopRef.current = loop

@@ -18,6 +18,7 @@ import SnapshotGallery from './components/SnapshotGallery'
 import Slideshow from './components/Slideshow'
 import Minimap from './components/Minimap'
 import MidiPanel from './components/MidiPanel'
+import WaveformOverlay from './components/WaveformOverlay'
 import { useGlobalMidi } from './lib/useGlobalMidi'
 import { loadSnapshots } from './lib/snapshotGallery'
 import { useIsMobile } from './lib/useIsMobile'
@@ -272,6 +273,7 @@ export default function App() {
       <MouseTrail />
       <Slideshow />
       <Minimap />
+      <WaveformOverlay />
       <MidiPanel open={midiOpen} onClose={() => setMidiOpen(false)} />
 
       {showSplash && (

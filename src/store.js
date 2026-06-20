@@ -426,6 +426,14 @@ export const useStore = create((set, get) => {
   minimapEnabled: false,
   setMinimapEnabled: (v) => set({ minimapEnabled: !!v }),
 
+  // Waveform overlay — small oscilloscope strip pinned to the top-
+  // right of the canvas whenever audio reactivity is on AND this
+  // toggle is enabled. Renders the live time-domain signal so users
+  // can SEE what the audio reactivity is responding to. Off by
+  // default; zero cost when off.
+  waveformEnabled: false,
+  setWaveformEnabled: (v) => set({ waveformEnabled: !!v }),
+
   setMouseAttract: (v) => set({ mouseAttract: v }),
   paintMode: false,
   paintPoints: [], // array of [x, y, z]

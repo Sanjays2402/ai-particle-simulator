@@ -234,6 +234,13 @@ export default function LeftSidebar() {
         <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
           <CameraShakeRow />
         </div>
+        <div style={{ marginTop: 8 }}>
+          <ToggleRow
+            label="Waveform overlay"
+            value={useStore(s => s.waveformEnabled)}
+            onChange={useStore(s => s.setWaveformEnabled)}
+          />
+        </div>
         <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
           <MidiButton />
         </div>
