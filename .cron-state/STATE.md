@@ -14,7 +14,7 @@ Per-frame loop in `src/components/ParticleCanvas.jsx` (`Particles` mesh):
 
 Existing capabilities (do not re-ship):
 - 46 presets, 11 themes, 6 visual styles, 4 force-field types
-- Audio reactivity (level / bass / beat)
+- Audio reactivity (level / bass / beat) — mic OR built-in demo loops (4 kinds)
 - Gravity + collisions + spatial-hash physics
 - Post-FX: bloom + chromatic aberration + vignette + film-grain
 - Recording / replay with timeline scrubber, GIF + WebM/MP4 export
@@ -23,41 +23,58 @@ Existing capabilities (do not re-ship):
 - Quality-preset chips, performance auto-throttle, debug HUD (FPS/heap)
 - Settings persistence + JSON import/export, error boundary, onboarding tour
 - Command palette (⌘K), help overlay (?), mouse trail, mobile drawers
+- Preset category filter chips, kaleidoscope, hue cycle, click-drop force fields
+- Saved camera views (V quick-save, up to 6), camera shake on beat
+- Session stats (lifetime presets / gifs / screenshots / time)
+- Snapshot gallery (last 8 PNGs in localStorage, re-download + delete)
+- Live preset source viewer (read-only, copy button, syntax-coloured)
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
 Status legend: [ ] todo · [x] done · [/] in-progress
 
 ### Batch 1 — discoverability + interaction + visual depth  (SHIPPED)
-- [x] **R1.01** Preset categories + filter chips (group the 46 presets so Shape Presets list is browseable)  — 2514538
-- [x] **R1.02** Kaleidoscope / radial symmetry mode (2/4/6/8-fold rotational mirror of the leader particles)  — 4699716
-- [x] **R1.03** Click-to-drop force-field center (place the active field anywhere instead of always at origin; visible marker)  — 2dc8c73
-- [x] **R1.04** Camera presets — save/restore named camera views with persistence  — b3418a5
-- [x] **R1.05** Hue Cycle / animated theme drift (gentle rainbow drift over time, layered on any theme)  — c63ab97
+- [x] **R1.01** Preset categories + filter chips  — 2514538
+- [x] **R1.02** Kaleidoscope / radial symmetry mode  — 4699716
+- [x] **R1.03** Click-to-drop force-field center  — 2dc8c73
+- [x] **R1.04** Camera presets — save/restore named camera views  — b3418a5
+- [x] **R1.05** Hue Cycle / animated theme drift  — c63ab97
 
-### Batch 2 — next 5 (refilled)
-- [ ] R2.01 Snapshot gallery — last 8 screenshots stashed in an overlay strip with re-download / share
-- [ ] R2.02 Echo / trail FBO that survives EffectComposer (current trails are gl.autoClear hack)
-- [ ] R2.03 Camera shake on beat (subtle kick when audio-reactive+beat is on)
-- [ ] R2.04 Built-in demo audio loops (so users without a mic can drive audio mode)
-- [ ] R2.05 Live preset code viewer/editor (read-only first, edit later) — see preset source
+### Batch 2 — gallery + telemetry + audio expansion  (SHIPPED)
+- [x] **R2.06** Session stats panel (presets/gifs/screenshots/time, persisted)  — 848240e
+- [x] **R2.01** Snapshot gallery (last 8 screenshots in overlay strip)  — 2a829de
+- [x] **R2.03** Camera shake on beat (subtle audio-driven kick)  — 88520e3
+- [x] **R2.05** Live preset code viewer (read-only, copy, syntax-coloured)  — b6418b3
+- [x] **R2.04** Built-in demo audio loops (pulse/bass/arp/ambient, no mic needed)  — 4f85470
+  (+ dee8108 lint-gate cleanup for the demo audio feature)
+
+Note: R2.02 (Echo / trail FBO that survives EffectComposer) was deferred
+out of this batch — it's a render-pipeline refactor that doesn't fit a
+single slice. Will revisit as its own dedicated batch.
+
+### Batch 3 — next 5 (refilled)
+- [ ] R3.01 Scene bookmarks panel — save current full scene to localStorage gallery
+- [ ] R3.02 Background gradient picker for the canvas clear color (subtle nebula bg)
+- [ ] R3.03 Auto-cycle presets — slideshow mode, dwell N seconds per preset
+- [ ] R3.04 Multi-preset blend (crossfade two presets over t seconds)
+- [ ] R3.05 Reduced-motion accessibility mode (respect prefers-reduced-motion)
 
 ### Future queue (refill when batch closes)
-- [ ] R2.06 Stats: total session time, presets visited, GIFs exported, kept in localStorage
-- [ ] R2.07 Scene bookmarks panel — save current full scene to localStorage gallery
-- [ ] R2.08 3D depth-of-field post-FX (Bokeh) toggle
-- [ ] R2.09 Particle "wind" — global directional drift vector + UI sliders
-- [ ] R2.10 Multi-preset blend (crossfade two presets over t seconds)
-- [ ] R2.11 Color theme editor (build a custom theme with picker, save to localStorage)
-- [ ] R2.12 Preset thumbnail rendering during carousel idle (offscreen cache)
-- [ ] R2.13 Touch gestures: pinch zoom maps to particle count, two-finger swipe = next preset
-- [ ] R2.14 Reduced-motion accessibility mode (respect prefers-reduced-motion)
-- [ ] R2.15 Background gradient picker for the canvas clear color (subtle nebula bg)
-- [ ] R2.16 Keyboard remap UI (rebind shortcuts, persist)
-- [ ] R2.17 Trigonometric noise particle deformer (global "shake" applied after the preset fn)
-- [ ] R2.18 Mini-map overlay showing camera angle vs particle bounds
-- [ ] R2.19 Auto-cycle presets — slideshow mode, dwell N seconds per preset
-- [ ] R2.20 Onscreen MIDI controller mapping (Web MIDI) to live sliders
+- [ ] R3.06 3D depth-of-field post-FX (Bokeh) toggle
+- [ ] R3.07 Particle "wind" — global directional drift vector + UI sliders
+- [ ] R3.08 Color theme editor (build a custom theme with picker, save to localStorage)
+- [ ] R3.09 Preset thumbnail rendering during carousel idle (offscreen cache)
+- [ ] R3.10 Touch gestures: pinch zoom maps to particle count, two-finger swipe = next preset
+- [ ] R3.11 Keyboard remap UI (rebind shortcuts, persist)
+- [ ] R3.12 Trigonometric noise particle deformer (global "shake" applied after the preset fn)
+- [ ] R3.13 Mini-map overlay showing camera angle vs particle bounds
+- [ ] R3.14 Onscreen MIDI controller mapping (Web MIDI) to live sliders
+- [ ] R3.15 Echo / trail FBO that survives EffectComposer (R2.02 deferred — render pipeline refactor)
+- [ ] R3.16 Editable preset code viewer (graduate the R2.05 viewer to a contenteditable + re-compile)
+- [ ] R3.17 Snapshot grid view (modal showing all 8 snapshots in a grid w/ full-res preview)
+- [ ] R3.18 Audio waveform overlay (oscilloscope strip showing the actual signal)
+- [ ] R3.19 Camera path animator (interpolate between saved views over N seconds)
+- [ ] R3.20 OpenGraph snapshot endpoint (server-rendered card for share URLs)
 
 ## TICK LOG
 - 2026-06-19 23:41 PT — Bootstrap + Batch 1 (5/5).
@@ -65,4 +82,12 @@ Status legend: [ ] todo · [x] done · [/] in-progress
   c63ab97 (R1.05 hue cycle), b3418a5 (R1.04 camera views), 2dc8c73 (R1.03 place-field).
   Gates: lint baseline preserved (23 errors, 3 warnings — all pre-existing).
   Build: 283ms green. Unit tests: 4/4 pass (cameraViews, hueCycle, kaleidoscope, presetCategories).
-
+- 2026-06-20 03:57 PT — Batch 2 (5/5).
+  Commits: 848240e (R2.06 session stats), 2a829de (R2.01 snapshot gallery),
+  88520e3 (R2.03 camera shake on beat), b6418b3 (R2.05 live code viewer),
+  4f85470 (R2.04 demo audio loops), dee8108 (lint-gate cleanup for 4f85470).
+  Gates: lint baseline preserved (23 errors, 3 warnings — all pre-existing).
+  Build: 299ms green. Unit tests: 9/9 pass (cameraShake, cameraViews, codeTokens,
+  demoAudioLoops, hueCycle, kaleidoscope, presetCategories, sessionStats,
+  snapshotGallery).
+  Note: R2.02 deferred — render pipeline refactor needs its own batch.
