@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
-import { Activity, Sparkles, Palette, Gauge, Camera, X, BarChart3 } from 'lucide-react'
+import { Activity, Sparkles, Palette, Gauge, Camera, X, BarChart3, Code2, Copy, ChevronDown, ChevronUp } from 'lucide-react'
 import { loadCameraViews, saveCameraViews, appendView, CAMERA_VIEWS_MAX } from '../lib/cameraViews'
 import { formatDuration } from '../lib/sessionStats'
+import { tokenize } from '../lib/codeTokens'
 import { showToast } from './Toast'
 
 function SectionHeader({ children }) {
@@ -115,6 +116,11 @@ export default function RightSidebar() {
       <div style={{ padding: '2px 16px 14px' }}>
         <SectionHeader>Session Stats</SectionHeader>
         <SessionStatsPanel />
+      </div>
+
+      <div style={{ padding: '2px 16px 14px' }}>
+        <SectionHeader>Preset Source</SectionHeader>
+        <CodeViewerPanel />
       </div>
 
       {/* Keyboard shortcuts hint */}
@@ -336,6 +342,144 @@ function SessionStatsPanel() {
         }}>
         Reset Stats
       </button>
+    </div>
+  )
+}
+
+// Live preset code viewer (read-only). Shows the source of whatever
+// scene is currently rendering with light syntax colouring + line
+// numbers. Collapsed by default — opening it reveals the body. Copy
+// button stuffs the source onto the clipboard so users can iterate
+// in their editor or paste into the AI prompt.
+const TOKEN_COLOR = {
+  comment: '#7a7a90',
+  string:  '#86efac',
+  number:  '#fbbf24',
+  keyword: '#c084fc',
+  builtin: '#f472b6',
+  ident:   '#e9e9f0',
+  punct:   '#9a9ab0',
+  ws:      'inherit',
+  text:    '#e9e9f0',
+}
+function CodeViewerPanel() {
+  const source = useStore(s => s.particleFnSource)
+  const title  = useStore(s => s.infoTitle)
+  const currentPreset = useStore(s => s.currentPreset)
+  const [open, setOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const tokens = open && source ? tokenize(source) : []
+  const lineCount = source ? source.split('\n').length : 0
+  const sourceBytes = source ? source.length : 0
+
+  const handleCopy = async () => {
+    if (!source) return
+    try {
+      await navigator.clipboard.writeText(source)
+      setCopied(true)
+      showToast('Source copied to clipboard', <Copy size={10} color="#fff" strokeWidth={2.4} />)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // Fallback: ancient browsers / iframe sandboxing.
+      window.prompt('Copy the source:', source)
+    }
+  }
+
+  if (!source) {
+    return (
+      <div style={{
+        padding: '10px 8px', textAlign: 'center', fontSize: 11,
+        color: '#6a6a80', background: 'rgba(255,255,255,0.02)',
+        border: '1px dashed rgba(255,255,255,0.05)', borderRadius: 7,
+      }}>
+        Load a preset to see its source.
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(o => !o)}
+        title={open ? 'Collapse' : 'Expand'}
+        style={{
+          width: '100%', padding: '7px 10px',
+          display: 'inline-flex', alignItems: 'center', gap: 8,
+          borderRadius: 8, fontSize: 11.5, fontWeight: 550, cursor: 'pointer',
+          background: open
+            ? 'linear-gradient(135deg, rgba(168,85,247,0.18), rgba(99,102,241,0.14))'
+            : 'rgba(255,255,255,0.03)',
+          color: open ? '#e9d5ff' : '#c8c8d0',
+          border: open ? '1px solid rgba(168,85,247,0.35)' : '1px solid rgba(255,255,255,0.05)',
+          transition: 'all 0.15s ease-out',
+        }}
+      >
+        <Code2 size={12} strokeWidth={2.2} color={open ? '#c084fc' : '#9a9ab0'} />
+        <span style={{ flex: 1, textAlign: 'left' }}>
+          {open ? 'Hide' : 'Show'} source
+        </span>
+        <span style={{ fontFamily: 'Geist Mono, monospace', fontSize: 10, color: '#7a7a90', fontWeight: 500 }}>
+          {lineCount} ln · {Math.ceil(sourceBytes / 100) / 10}K
+        </span>
+        {open ? <ChevronUp size={12} strokeWidth={2.2} /> : <ChevronDown size={12} strokeWidth={2.2} />}
+      </button>
+      {open && (
+        <div style={{
+          marginTop: 6, borderRadius: 8, overflow: 'hidden',
+          border: '1px solid rgba(168,85,247,0.18)',
+          background: 'linear-gradient(180deg, rgba(8,8,14,0.6), rgba(10,10,18,0.4))',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03), 0 0 12px rgba(168,85,247,0.08)',
+          animation: 'code-expand 0.18s ease-out',
+        }}>
+          <style>{`@keyframes code-expand { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: translateY(0); } }`}</style>
+          {/* Header strip: title + copy + preset id */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '6px 8px 6px 10px',
+            borderBottom: '1px solid rgba(255,255,255,0.05)',
+            background: 'rgba(0,0,0,0.2)',
+          }}>
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              fontSize: 10.5, color: '#c8c8d0', fontWeight: 500,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
+            }}>
+              <span style={{ color: '#c084fc', fontFamily: 'Geist Mono, monospace' }}>{currentPreset || 'custom'}</span>
+              {title && <span style={{ color: '#7a7a90' }}>·</span>}
+              {title && <span style={{ color: '#9a9ab0', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>}
+            </div>
+            <button onClick={handleCopy}
+              title="Copy source"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '3px 7px', borderRadius: 5, fontSize: 10.5, fontWeight: 500,
+                background: copied ? 'rgba(34,197,94,0.15)' : 'rgba(168,85,247,0.1)',
+                color: copied ? '#86efac' : '#e9d5ff',
+                border: copied ? '1px solid rgba(34,197,94,0.3)' : '1px solid rgba(168,85,247,0.3)',
+                cursor: 'pointer', transition: 'all 0.15s ease-out',
+              }}>
+              <Copy size={10} strokeWidth={2.4} />
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+          {/* Body */}
+          <pre style={{
+            margin: 0, padding: '8px 10px',
+            maxHeight: 240, overflow: 'auto',
+            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+            fontSize: 10.5, lineHeight: 1.45,
+            color: '#e9e9f0',
+            whiteSpace: 'pre',
+            tabSize: 2,
+          }}>
+            <code>
+              {tokens.map(([type, text], i) => (
+                <span key={i} style={{ color: TOKEN_COLOR[type] || TOKEN_COLOR.text }}>{text}</span>
+              ))}
+            </code>
+          </pre>
+        </div>
+      )}
     </div>
   )
 }
