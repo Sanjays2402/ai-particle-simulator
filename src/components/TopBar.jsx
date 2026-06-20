@@ -17,8 +17,11 @@ export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snaps
   const demoLoopRef = useRef(null)
   // Which audio source is active: null | 'mic' | 'demo'. Tracked
   // separately from `audioReactive` so toggling between sources doesn't
-  // need a full teardown of the store flag.
+  // need a full teardown of the store flag. `activeDemoKind` mirrors
+  // demoLoopRef.current?.kind so the render path never has to read
+  // the ref (which would violate the React refs rule).
   const [audioSource, setAudioSource] = useState(null)
+  const [activeDemoKind, setActiveDemoKind] = useState(null)
   const [demoMenuOpen, setDemoMenuOpen] = useState(false)
 
   const handleFullscreen = () => {
@@ -97,6 +100,7 @@ export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snaps
     analyserRef.current = null
     setAudioReactive(false)
     setAudioSource(null)
+    setActiveDemoKind(null)
     useStore.getState().setAudioLevel(0)
     useStore.getState().setAudioBands(0, 0, 0)
     useStore.getState().setAudioBeat(0)
@@ -175,7 +179,7 @@ export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snaps
   // feature (level/bass/beat, camera shake) responds identically.
   const handleDemo = async (kind) => {
     // Toggle off if the same loop is already running.
-    if (audioSource === 'demo' && demoLoopRef.current?.kind === kind) {
+    if (audioSource === 'demo' && activeDemoKind === kind) {
       teardownAudio()
       setDemoMenuOpen(false)
       return
@@ -201,6 +205,7 @@ export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snaps
       loop.node.connect(analyser)
       loop.node.connect(ctx.destination)
       setAudioSource('demo')
+      setActiveDemoKind(kind)
       setAudioReactive(true)
       setDemoMenuOpen(false)
       startAnalyserLoop()
@@ -211,6 +216,7 @@ export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snaps
 
   // Tear down when the component unmounts so no audio leaks if the
   // user navigates away mid-loop.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => () => teardownAudio(), [])
 
   useEffect(() => {
@@ -331,7 +337,7 @@ export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snaps
         <Btn onClick={handleMic} title={audioSource === 'mic' ? 'Stop mic' : 'Sound Reactivity (mic)'} active={audioSource === 'mic'}><Mic size={14} strokeWidth={2.2} /></Btn>
         <DemoAudioBtn
           active={audioSource === 'demo'}
-          activeKind={demoLoopRef.current?.kind}
+          activeKind={activeDemoKind}
           open={demoMenuOpen}
           onToggle={() => setDemoMenuOpen(o => !o)}
           onPick={handleDemo}
