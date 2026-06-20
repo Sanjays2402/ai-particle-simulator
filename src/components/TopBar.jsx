@@ -1,17 +1,25 @@
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { presets } from '../presets'
 import { buildShareUrl } from '../lib/share'
 import { captureFromCanvas, appendSnapshot, loadSnapshots, saveSnapshots } from '../lib/snapshotGallery'
+import { createLoop, DEMO_LOOPS } from '../lib/demoAudioLoops'
 import {
   Play, Pause, RotateCcw, Maximize2, Shuffle, Magnet, Camera, Link2,
-  Mic, Download, Settings, Repeat, Sparkles, Zap, Paintbrush, Send, Images,
+  Mic, Download, Settings, Repeat, Sparkles, Zap, Paintbrush, Send, Images, Music2,
 } from 'lucide-react'
 
 export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snapshotCount }) {
-  const { playing, setPlaying, loadRandom, smashRandom, mouseAttract, setMouseAttract, paintMode, setPaintMode, clearPaintPoints, audioReactive, setAudioReactive, isRecording, startRecording, stopRecording, recordingBuffer, enterReplay, isReplaying } = useStore()
+  const { playing, setPlaying, loadRandom, smashRandom, mouseAttract, setMouseAttract, paintMode, setPaintMode, clearPaintPoints, setAudioReactive, isRecording, startRecording, stopRecording, recordingBuffer, enterReplay, isReplaying } = useStore()
   const audioCtxRef = useRef(null)
   const streamRef = useRef(null)
+  const analyserRef = useRef(null)
+  const demoLoopRef = useRef(null)
+  // Which audio source is active: null | 'mic' | 'demo'. Tracked
+  // separately from `audioReactive` so toggling between sources doesn't
+  // need a full teardown of the store flag.
+  const [audioSource, setAudioSource] = useState(null)
+  const [demoMenuOpen, setDemoMenuOpen] = useState(false)
 
   const handleFullscreen = () => {
     if (document.fullscreenElement) document.exitFullscreen()
@@ -80,16 +88,70 @@ export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snaps
       '_blank', 'noopener,noreferrer')
   }
 
-  const handleMic = async () => {
-    if (audioReactive) {
-      setAudioReactive(false)
-      useStore.getState().setAudioLevel(0)
-      useStore.getState().setAudioBands(0, 0, 0)
-      useStore.getState().setAudioBeat(0)
-      if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null }
-      if (audioCtxRef.current) { audioCtxRef.current.close(); audioCtxRef.current = null }
-      return
+  // Shared teardown — used by both mic-off and demo-stop so we never
+  // leave a dangling stream / ctx / oscillator behind.
+  const teardownAudio = () => {
+    if (demoLoopRef.current) { demoLoopRef.current.stop(); demoLoopRef.current = null }
+    if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null }
+    if (audioCtxRef.current) { audioCtxRef.current.close().catch(() => {}); audioCtxRef.current = null }
+    analyserRef.current = null
+    setAudioReactive(false)
+    setAudioSource(null)
+    useStore.getState().setAudioLevel(0)
+    useStore.getState().setAudioBands(0, 0, 0)
+    useStore.getState().setAudioBeat(0)
+  }
+
+  // Start the analyser-polling loop against the active analyser. The
+  // store's bass/mid/treble/level/beat values get updated every frame
+  // — same code path the mic uses, so any audio-reactive feature
+  // (camera shake, audio scaling, visualizer bar) just works.
+  const startAnalyserLoop = () => {
+    const analyser = analyserRef.current
+    if (!analyser) return
+    const data = new Uint8Array(analyser.frequencyBinCount)
+    const bassHistory = []
+    let lastBeatTime = 0
+    const poll = () => {
+      if (!audioCtxRef.current || analyserRef.current !== analyser) return
+      analyser.getByteFrequencyData(data)
+      const n = data.length
+      const bassEnd = Math.floor(n * 0.12)
+      const midEnd = Math.floor(n * 0.40)
+      let sumBass = 0, sumMid = 0, sumTreble = 0, sumAll = 0
+      for (let k = 0; k < n; k++) {
+        const v = data[k]
+        sumAll += v
+        if (k < bassEnd) sumBass += v
+        else if (k < midEnd) sumMid += v
+        else sumTreble += v
+      }
+      const bass   = (sumBass   / Math.max(1, bassEnd))         / 255
+      const mid    = (sumMid    / Math.max(1, midEnd - bassEnd))/ 255
+      const treble = (sumTreble / Math.max(1, n - midEnd))      / 255
+      const avg    = sumAll / n / 255
+      useStore.getState().setAudioLevel(avg)
+      useStore.getState().setAudioBands(bass, mid, treble)
+      bassHistory.push(bass)
+      if (bassHistory.length > 60) bassHistory.shift()
+      const baseline = bassHistory.reduce((s, b) => s + b, 0) / bassHistory.length
+      const now = performance.now()
+      if (bass > baseline * 1.4 && bass > 0.18 && now - lastBeatTime > 200) {
+        lastBeatTime = now
+        useStore.getState().setAudioBeat(1)
+      } else {
+        const cur = useStore.getState().audioBeat
+        if (cur > 0) useStore.getState().setAudioBeat(Math.max(0, cur - 0.04))
+      }
+      requestAnimationFrame(poll)
     }
+    poll()
+  }
+
+  const handleMic = async () => {
+    // If demo is playing, swap it out for the mic without flicker.
+    if (audioSource === 'demo') teardownAudio()
+    if (audioSource === 'mic') { teardownAudio(); return }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
@@ -99,58 +161,57 @@ export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snaps
       const analyser = ctx.createAnalyser()
       analyser.fftSize = 512
       src.connect(analyser)
-      const data = new Uint8Array(analyser.frequencyBinCount)
+      analyserRef.current = analyser
+      setAudioSource('mic')
       setAudioReactive(true)
-
-      // Beat detection state — simple energy-based detector: keep a
-      // 1-second rolling average of bass energy and trigger when the
-      // current frame exceeds avg * 1.4 with a 200ms refractory period.
-      const bassHistory = []
-      let lastBeatTime = 0
-
-      const poll = () => {
-        if (!audioCtxRef.current) return
-        analyser.getByteFrequencyData(data)
-        const n = data.length
-        // Bands: bass (0–12%), mid (12–40%), treble (40–100%).
-        const bassEnd = Math.floor(n * 0.12)
-        const midEnd = Math.floor(n * 0.40)
-        let sumBass = 0, sumMid = 0, sumTreble = 0, sumAll = 0
-        for (let k = 0; k < n; k++) {
-          const v = data[k]
-          sumAll += v
-          if (k < bassEnd) sumBass += v
-          else if (k < midEnd) sumMid += v
-          else sumTreble += v
-        }
-        const bass   = (sumBass   / Math.max(1, bassEnd))         / 255
-        const mid    = (sumMid    / Math.max(1, midEnd - bassEnd))/ 255
-        const treble = (sumTreble / Math.max(1, n - midEnd))      / 255
-        const avg    = sumAll / n / 255
-
-        useStore.getState().setAudioLevel(avg)
-        useStore.getState().setAudioBands(bass, mid, treble)
-
-        // Beat detection on bass band.
-        bassHistory.push(bass)
-        if (bassHistory.length > 60) bassHistory.shift()
-        const baseline = bassHistory.reduce((s, b) => s + b, 0) / bassHistory.length
-        const now = performance.now()
-        if (bass > baseline * 1.4 && bass > 0.18 && now - lastBeatTime > 200) {
-          lastBeatTime = now
-          useStore.getState().setAudioBeat(1)
-        } else {
-          // Decay the beat pulse so visuals can latch on it gently.
-          const cur = useStore.getState().audioBeat
-          if (cur > 0) useStore.getState().setAudioBeat(Math.max(0, cur - 0.04))
-        }
-        requestAnimationFrame(poll)
-      }
-      poll()
+      startAnalyserLoop()
     } catch (e) {
       console.error('Mic access denied:', e)
     }
   }
+
+  // Toggle one of the built-in demo loops. Pipes a synthesized signal
+  // through the same analyser the mic uses so every audio-reactive
+  // feature (level/bass/beat, camera shake) responds identically.
+  const handleDemo = async (kind) => {
+    // Toggle off if the same loop is already running.
+    if (audioSource === 'demo' && demoLoopRef.current?.kind === kind) {
+      teardownAudio()
+      setDemoMenuOpen(false)
+      return
+    }
+    // Swap mic / other demo out first so we never stack contexts.
+    teardownAudio()
+    try {
+      const ctx = new AudioContext()
+      audioCtxRef.current = ctx
+      // Resume in case the browser auto-suspended the context (Safari
+      // does this until a user gesture).
+      if (ctx.state === 'suspended') await ctx.resume()
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 512
+      analyserRef.current = analyser
+      const loop = createLoop(ctx, kind)
+      if (!loop) return
+      demoLoopRef.current = loop
+      // Connect the loop to BOTH the analyser (for visuals) and
+      // destination (so users actually hear the music). Routing
+      // through the analyser-only branch would make the feature
+      // confusing — "where's the audio?".
+      loop.node.connect(analyser)
+      loop.node.connect(ctx.destination)
+      setAudioSource('demo')
+      setAudioReactive(true)
+      setDemoMenuOpen(false)
+      startAnalyserLoop()
+    } catch (e) {
+      console.error('Demo loop start failed:', e)
+    }
+  }
+
+  // Tear down when the component unmounts so no audio leaks if the
+  // user navigates away mid-loop.
+  useEffect(() => () => teardownAudio(), [])
 
   useEffect(() => {
     const handler = (e) => {
@@ -267,7 +328,14 @@ export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snaps
           title={paintMode ? 'Paint Mode · click again to clear & exit' : 'Paint Mode — drag to stamp attractors'}
           active={paintMode}
         ><Paintbrush size={14} strokeWidth={2.2} /></Btn>
-        <Btn onClick={handleMic} title="Sound Reactivity" active={audioReactive}><Mic size={14} strokeWidth={2.2} /></Btn>
+        <Btn onClick={handleMic} title={audioSource === 'mic' ? 'Stop mic' : 'Sound Reactivity (mic)'} active={audioSource === 'mic'}><Mic size={14} strokeWidth={2.2} /></Btn>
+        <DemoAudioBtn
+          active={audioSource === 'demo'}
+          activeKind={demoLoopRef.current?.kind}
+          open={demoMenuOpen}
+          onToggle={() => setDemoMenuOpen(o => !o)}
+          onPick={handleDemo}
+        />
         <Divider />
         <Btn onClick={handleScreenshot} title="Screenshot (S)"><Camera size={14} strokeWidth={2.2} /></Btn>
         <GalleryBtn onClick={onToggleGallery} active={galleryOpen} count={snapshotCount} />
@@ -419,6 +487,127 @@ function Btn({ children, onClick, title, active }) {
     >
       {children}
     </button>
+  )
+}
+
+// Demo Audio Loops button — opens a small popover listing the
+// built-in synthesized loops. Clicking a loop starts it (and feeds
+// it into the same analyser the mic uses); clicking the active loop
+// again stops it. Closes on outside click via the popover backdrop.
+function DemoAudioBtn({ active, activeKind, open, onToggle, onPick }) {
+  return (
+    <div style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        onClick={onToggle}
+        title={active ? `Playing: ${activeKind} — click to choose another or stop` : 'Built-in demo audio loops (no mic needed)'}
+        style={{
+          width: 30, height: 30, display: 'flex',
+          alignItems: 'center', justifyContent: 'center',
+          borderRadius: 9, cursor: 'pointer',
+          transition: 'all 0.18s cubic-bezier(0.2, 0.8, 0.2, 1)',
+          background: active
+            ? 'linear-gradient(135deg, rgba(34,197,94,0.25) 0%, rgba(99,102,241,0.18) 100%)'
+            : 'rgba(255,255,255,0.035)',
+          color: active ? '#bbf7d0' : '#c8c8d0',
+          border: active ? '1px solid rgba(34,197,94,0.5)' : '1px solid rgba(255,255,255,0.05)',
+          boxShadow: active ? '0 0 16px rgba(34,197,94,0.35), inset 0 1px 0 rgba(255,255,255,0.08)' : 'none',
+        }}
+        onMouseEnter={e => {
+          if (!active) {
+            e.currentTarget.style.background = 'rgba(255,255,255,0.08)'
+            e.currentTarget.style.borderColor = 'rgba(34,197,94,0.3)'
+            e.currentTarget.style.color = '#fff'
+            e.currentTarget.style.transform = 'translateY(-1px)'
+          }
+        }}
+        onMouseLeave={e => {
+          if (!active) {
+            e.currentTarget.style.background = 'rgba(255,255,255,0.035)'
+            e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)'
+            e.currentTarget.style.color = '#c8c8d0'
+            e.currentTarget.style.transform = 'translateY(0)'
+          }
+        }}
+      >
+        <Music2 size={14} strokeWidth={2.2} />
+      </button>
+      {open && (
+        <>
+          {/* Outside-click catcher */}
+          <div onClick={onToggle} style={{
+            position: 'fixed', inset: 0, zIndex: 60,
+            background: 'transparent',
+          }} />
+          <div style={{
+            position: 'absolute', top: 38, right: 0, zIndex: 65,
+            width: 240,
+            background: 'linear-gradient(180deg, rgba(14,14,22,0.96) 0%, rgba(10,10,18,0.94) 100%)',
+            backdropFilter: 'blur(20px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+            border: '1px solid rgba(34,197,94,0.25)',
+            borderRadius: 12,
+            boxShadow: '0 20px 50px rgba(0,0,0,0.5), 0 0 30px rgba(34,197,94,0.15)',
+            padding: 6,
+            animation: 'demo-pop 0.16s cubic-bezier(0.2,0.8,0.2,1)',
+          }}>
+            <style>{`@keyframes demo-pop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }`}</style>
+            <div style={{
+              padding: '6px 10px 8px', fontSize: 10, fontWeight: 700, letterSpacing: '0.12em',
+              textTransform: 'uppercase', color: '#86efac',
+              borderBottom: '1px solid rgba(34,197,94,0.12)', marginBottom: 4,
+            }}>
+              Demo Audio Loops
+            </div>
+            {DEMO_LOOPS.map(l => {
+              const isCurrent = active && activeKind === l.id
+              return (
+                <button key={l.id} onClick={() => onPick(l.id)}
+                  style={{
+                    width: '100%', display: 'flex', flexDirection: 'column',
+                    alignItems: 'flex-start', gap: 2,
+                    padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
+                    background: isCurrent
+                      ? 'linear-gradient(135deg, rgba(34,197,94,0.18), rgba(99,102,241,0.12))'
+                      : 'transparent',
+                    color: isCurrent ? '#bbf7d0' : '#d8d8e0',
+                    border: isCurrent ? '1px solid rgba(34,197,94,0.35)' : '1px solid transparent',
+                    transition: 'all 0.12s ease-out', textAlign: 'left',
+                    marginBottom: 2,
+                  }}
+                  onMouseEnter={e => {
+                    if (!isCurrent) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
+                  }}
+                  onMouseLeave={e => {
+                    if (!isCurrent) e.currentTarget.style.background = 'transparent'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 550 }}>{l.label}</span>
+                    {isCurrent && <span style={{
+                      marginLeft: 'auto', fontSize: 9, fontFamily: 'Geist Mono, monospace',
+                      color: '#86efac', padding: '1px 6px', borderRadius: 4,
+                      background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.3)',
+                    }}>PLAYING</span>}
+                  </div>
+                  <span style={{ fontSize: 10.5, color: '#7a7a90', lineHeight: 1.4 }}>{l.desc}</span>
+                </button>
+              )
+            })}
+            {active && (
+              <button onClick={() => onPick(activeKind)}
+                style={{
+                  width: '100%', marginTop: 6, padding: '7px 0',
+                  borderRadius: 7, fontSize: 11, fontWeight: 550, cursor: 'pointer',
+                  background: 'rgba(239,68,68,0.08)', color: '#fca5a5',
+                  border: '1px solid rgba(239,68,68,0.25)',
+                }}>
+                Stop
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 
