@@ -16,6 +16,7 @@ import Onboarding from './components/Onboarding'
 import MouseTrail from './components/MouseTrail'
 import SnapshotGallery from './components/SnapshotGallery'
 import Slideshow from './components/Slideshow'
+import Minimap from './components/Minimap'
 import { loadSnapshots } from './lib/snapshotGallery'
 import { useIsMobile } from './lib/useIsMobile'
 import { getOSPrefersReduced, subscribeOSReducedMotion } from './lib/reducedMotion'
@@ -256,6 +257,7 @@ export default function App() {
       <Onboarding />
       <MouseTrail />
       <Slideshow />
+      <Minimap />
 
       {showSplash && (
         <div className="splash">

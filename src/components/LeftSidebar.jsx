@@ -199,6 +199,11 @@ export default function LeftSidebar() {
           onChange={setMinDistance} display={v => `${v}`} />
         <Slider label="Max Zoom" value={maxDistance} min={20} max={100} step={5}
           onChange={setMaxDistance} display={v => `${v}`} />
+        <ToggleRow
+          label="Mini-map"
+          value={useStore(s => s.minimapEnabled)}
+          onChange={useStore(s => s.setMinimapEnabled)}
+        />
       </Section>
 
       <Section title="Cursor">

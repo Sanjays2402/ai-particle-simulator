@@ -419,6 +419,13 @@ export const useStore = create((set, get) => {
   setCameraShake: (v) => set({ cameraShake: v }),
   setCameraShakeIntensity: (v) => set({ cameraShakeIntensity: Math.max(0, Math.min(1, v)) }),
 
+  // Mini-map overlay — small top-down XZ widget pinned to the bottom-
+  // right of the canvas. Shows where the camera sits vs the scene
+  // origin and lets the user click to recenter the orbit target.
+  // Off by default; zero cost when off (component returns null).
+  minimapEnabled: false,
+  setMinimapEnabled: (v) => set({ minimapEnabled: !!v }),
+
   setMouseAttract: (v) => set({ mouseAttract: v }),
   paintMode: false,
   paintPoints: [], // array of [x, y, z]
