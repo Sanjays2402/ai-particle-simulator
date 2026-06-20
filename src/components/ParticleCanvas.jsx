@@ -7,6 +7,7 @@ import { useStore, THEMES } from '../store'
 import { cameraShakeOffset } from '../lib/cameraShake'
 import { smoothstep } from '../lib/crossfade'
 import { resolveReducedMotion } from '../lib/reducedMotion'
+import { windVector, applyWind } from '../lib/wind'
 
 // FPS counter component (renders as HTML overlay)
 function FPSCounter() {
@@ -199,6 +200,7 @@ function Particles() {
             forceFieldType, forceFieldStrength, forceFieldCenter,
             kaleidoscopeEnabled, kaleidoscopeSegments,
             hueCycleEnabled, hueCycleSpeed,
+            windEnabled, windIntensity, windAzimuth, windPitch,
             blendActive, blendTargetFn, blendProgress, advanceBlend } = useStore.getState()
     // Crossfade ticker — outside the per-particle loop so it advances
     // exactly once per frame regardless of particle count.
@@ -271,6 +273,15 @@ function Particles() {
     const hueCycleOffset = (hueCycleEnabled && !reducedMotion)
       ? ((t * (hueCycleSpeed / 60)) % 1 + 1) % 1
       : 0
+
+    // Wind precomputation: one vector + magnitude per frame, used by
+    // every particle. windEnabled+intensity=0 short-circuits to a zero
+    // vector inside windVector(), so the per-particle applyWind() is
+    // a single zero-check when wind is "off". Suppressed under reduced
+    // motion — vestibular users skip the constant scene drift.
+    const windVec = (windEnabled && !reducedMotion)
+      ? windVector(windAzimuth, windPitch, windIntensity)
+      : null
 
     for (let idx = 0; idx < particleCount; idx++) {
       _target.set(0, 0, 0)
@@ -409,6 +420,11 @@ function Particles() {
           _target.z += dz * force
         }
       }
+
+      // Global wind drift — single vector mul + add per particle when
+      // enabled, fast-pathed entirely when disabled. Time-step scaled
+      // so framerate variation doesn't change perceived speed.
+      if (windVec) applyWind(_target, windVec, dt)
 
       // Paint-mode soft attractors — nudge particles toward each stamped
       // point. Capped at ~24 points in the store so this stays O(24N).

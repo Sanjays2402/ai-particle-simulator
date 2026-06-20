@@ -5,6 +5,7 @@ import {
   addSessionSeconds,
 } from './lib/sessionStats'
 import { clampFocusDistance, clampFocalLength, clampBokehScale } from './lib/depthOfField'
+import { clampIntensity as clampWindIntensity, clampAzimuth as clampWindAzimuth, clampPitch as clampWindPitch } from './lib/wind'
 
 // Lightweight settings persistence: a subset of user-tweakable values
 // is read once on store init and written back whenever it changes.
@@ -245,6 +246,22 @@ export const useStore = create((set, get) => {
   setDofFocusDistance: (v) => set({ dofFocusDistance: clampFocusDistance(v) }),
   setDofFocalLength: (v)   => set({ dofFocalLength:   clampFocalLength(v) }),
   setDofBokehScale: (v)    => set({ dofBokehScale:    clampBokehScale(v) }),
+
+  // Wind — a global drift vector applied to every particle each
+  // frame. Useful for storm / atmospheric / floating-dust looks
+  // without having to author it into each preset fn. Azimuth +
+  // pitch live in degrees so the UI feels predictable; the
+  // renderer converts to a unit vector via lib/wind.js per frame.
+  // Off (intensity = 0) by default → renderer takes the zero-vector
+  // fast path and the per-particle loop is unchanged.
+  windEnabled: false,
+  windIntensity: 1.0,
+  windAzimuth: 0,     // degrees on XZ plane, 0 = +X axis (east)
+  windPitch: 0,       // degrees lift off XZ plane, +90 = straight up
+  setWindEnabled: (v) => set({ windEnabled: !!v }),
+  setWindIntensity: (v) => set({ windIntensity: clampWindIntensity(v) }),
+  setWindAzimuth: (v)   => set({ windAzimuth:   clampWindAzimuth(v) }),
+  setWindPitch: (v)     => set({ windPitch:     clampWindPitch(v) }),
 
   // Gradient color palette — user-picked 2-stop tint applied to each
   // particle by linearly interpolating between the stops based on the

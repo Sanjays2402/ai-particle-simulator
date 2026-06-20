@@ -4,6 +4,7 @@ import { presets } from '../presets'
 import { GifEncoder } from '../lib/gifEncoder'
 import { startCanvasRecording, downloadVideoBlob, isVideoExportSupported } from '../lib/videoRecorder'
 import { CATEGORIES, categoryOf, countByCategory } from '../lib/presetCategories'
+import { compassFor } from '../lib/wind'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
 const THEME_LIST = [
@@ -206,6 +207,10 @@ export default function LeftSidebar() {
           value={useStore(s => s.mouseTrail)}
           onChange={useStore(s => s.setMouseTrail)}
         />
+      </Section>
+
+      <Section title="Wind">
+        <WindRow />
       </Section>
 
       <Section title="Kaleidoscope">
@@ -766,6 +771,44 @@ function CameraShakeRow() {
           <p style={{ fontSize: 11, color: '#7a7a90', marginTop: -4 }}>
             Best paired with the <span style={{ color: '#c084fc' }}>Beat</span> mode above.
           </p>
+        </>
+      )}
+    </>
+  )
+}
+
+// Global wind: a constant directional drift applied to every particle.
+// Azimuth + pitch sliders are gated behind the toggle so the section
+// stays calm by default. Off → renderer takes the zero-vector fast path.
+function WindRow() {
+  const enabled   = useStore(s => s.windEnabled)
+  const intensity = useStore(s => s.windIntensity)
+  const azimuth   = useStore(s => s.windAzimuth)
+  const pitch     = useStore(s => s.windPitch)
+  const setEn  = useStore(s => s.setWindEnabled)
+  const setI   = useStore(s => s.setWindIntensity)
+  const setAz  = useStore(s => s.setWindAzimuth)
+  const setPi  = useStore(s => s.setWindPitch)
+  return (
+    <>
+      <ToggleRow label="Wind" value={enabled} onChange={setEn} />
+      {enabled && (
+        <>
+          <Slider label="Intensity" value={intensity} min={0} max={5} step={0.1}
+            onChange={setI} display={v => v.toFixed(1)} />
+          <Slider label="Azimuth" value={azimuth} min={0} max={360} step={1}
+            onChange={setAz} display={v => `${v | 0}° (${compassFor(v)})`} />
+          <Slider label="Pitch" value={pitch} min={-90} max={90} step={1}
+            onChange={setPi} display={v => `${v | 0}°`} />
+          <div style={{
+            marginTop: 4, fontSize: 11, color: '#7a7a90',
+            padding: '6px 8px', borderRadius: 6,
+            background: 'rgba(168,85,247,0.05)',
+            border: '1px solid rgba(168,85,247,0.12)',
+          }}>
+            Particles drift toward the compass heading every frame.
+            Try Storm preset + Vortex field for a hurricane look.
+          </div>
         </>
       )}
     </>
