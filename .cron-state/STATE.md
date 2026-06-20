@@ -28,19 +28,21 @@ Existing capabilities (do not re-ship):
 
 Status legend: [ ] todo · [x] done · [/] in-progress
 
-### Batch 1 — discoverability + interaction + visual depth
-- [ ] **R1.01** Preset categories + filter chips (group the 46 presets so Shape Presets list is browseable)
-- [ ] **R1.02** Kaleidoscope / radial symmetry mode (2/4/6/8-fold rotational mirror of the leader particles)
-- [ ] **R1.03** Click-to-drop force-field center (place the active field anywhere instead of always at origin; visible marker)
-- [ ] **R1.04** Camera presets — save/restore named camera views with persistence
-- [ ] **R1.05** Hue Cycle / animated theme drift (gentle rainbow drift over time, layered on any theme)
+### Batch 1 — discoverability + interaction + visual depth  (SHIPPED)
+- [x] **R1.01** Preset categories + filter chips (group the 46 presets so Shape Presets list is browseable)  — 2514538
+- [x] **R1.02** Kaleidoscope / radial symmetry mode (2/4/6/8-fold rotational mirror of the leader particles)  — 4699716
+- [x] **R1.03** Click-to-drop force-field center (place the active field anywhere instead of always at origin; visible marker)  — 2dc8c73
+- [x] **R1.04** Camera presets — save/restore named camera views with persistence  — b3418a5
+- [x] **R1.05** Hue Cycle / animated theme drift (gentle rainbow drift over time, layered on any theme)  — c63ab97
 
-### Future queue (refill when batch closes)
+### Batch 2 — next 5 (refilled)
 - [ ] R2.01 Snapshot gallery — last 8 screenshots stashed in an overlay strip with re-download / share
 - [ ] R2.02 Echo / trail FBO that survives EffectComposer (current trails are gl.autoClear hack)
 - [ ] R2.03 Camera shake on beat (subtle kick when audio-reactive+beat is on)
 - [ ] R2.04 Built-in demo audio loops (so users without a mic can drive audio mode)
 - [ ] R2.05 Live preset code viewer/editor (read-only first, edit later) — see preset source
+
+### Future queue (refill when batch closes)
 - [ ] R2.06 Stats: total session time, presets visited, GIFs exported, kept in localStorage
 - [ ] R2.07 Scene bookmarks panel — save current full scene to localStorage gallery
 - [ ] R2.08 3D depth-of-field post-FX (Bokeh) toggle
@@ -58,4 +60,9 @@ Status legend: [ ] todo · [x] done · [/] in-progress
 - [ ] R2.20 Onscreen MIDI controller mapping (Web MIDI) to live sliders
 
 ## TICK LOG
-- (this tick adds entries below)
+- 2026-06-19 23:41 PT — Bootstrap + Batch 1 (5/5).
+  Commits: b66f8e7 (bootstrap), 2514538 (R1.01 categories), 4699716 (R1.02 kaleidoscope),
+  c63ab97 (R1.05 hue cycle), b3418a5 (R1.04 camera views), 2dc8c73 (R1.03 place-field).
+  Gates: lint baseline preserved (23 errors, 3 warnings — all pre-existing).
+  Build: 283ms green. Unit tests: 4/4 pass (cameraViews, hueCycle, kaleidoscope, presetCategories).
+
