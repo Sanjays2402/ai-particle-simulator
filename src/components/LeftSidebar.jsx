@@ -206,6 +206,10 @@ export default function LeftSidebar() {
         />
       </Section>
 
+      <Section title="Kaleidoscope">
+        <KaleidoscopeRow />
+      </Section>
+
       <Section title="Audio Reactivity">
         <p style={{ fontSize: 11, color: '#7a7a90', marginBottom: 8 }}>
           Click the 🎤 toolbar button to enable. Pick how audio drives the visuals:
@@ -699,6 +703,36 @@ function AudioModeRow() {
         </div>
       )}
     </div>
+  )
+}
+
+// Kaleidoscope: N-fold radial symmetry mode. Sliders are gated so the
+// segment count is only shown when the mode is on, keeping the sidebar
+// quiet in the default configuration.
+function KaleidoscopeRow() {
+  const enabled  = useStore(s => s.kaleidoscopeEnabled)
+  const segments = useStore(s => s.kaleidoscopeSegments)
+  const setEn    = useStore(s => s.setKaleidoscopeEnabled)
+  const setSeg   = useStore(s => s.setKaleidoscopeSegments)
+  return (
+    <>
+      <ToggleRow label="Radial Symmetry" value={enabled} onChange={setEn} />
+      {enabled && (
+        <>
+          <Slider label="Segments" value={segments} min={2} max={12} step={1}
+            onChange={setSeg} display={v => `${v}-fold`} />
+          <div style={{
+            marginTop: 4, fontSize: 11, color: '#7a7a90',
+            padding: '6px 8px', borderRadius: 6,
+            background: 'rgba(168,85,247,0.05)',
+            border: '1px solid rgba(168,85,247,0.12)',
+          }}>
+            Particles are partitioned into {segments} rotated slices.
+            Effective unique particles: ~{Math.floor((useStore.getState().particleCount || 0) / Math.max(1, segments) / 1000)}K.
+          </div>
+        </>
+      )}
+    </>
   )
 }
 

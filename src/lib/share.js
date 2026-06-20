@@ -27,6 +27,9 @@ export function buildShareUrl(state) {
       vg: s.vignette,             vgI: s.vignetteIntensity,
       fg: s.filmGrain,            fgI: s.filmGrainIntensity,
     },
+    kaleido: s.kaleidoscopeEnabled
+      ? { segs: s.kaleidoscopeSegments }
+      : undefined,
   }
   const hash = btoa(encodeURIComponent(JSON.stringify(data)))
   return `${window.location.origin}${window.location.pathname}#share=${hash}`

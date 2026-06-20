@@ -79,6 +79,10 @@ export default function App() {
           if (data.fx.fg != null)  s.setFilmGrain(data.fx.fg)
           if (data.fx.fgI != null) s.setFilmGrainIntensity(data.fx.fgI)
         }
+        if (data.kaleido) {
+          s.setKaleidoscopeEnabled(true)
+          if (data.kaleido.segs != null) s.setKaleidoscopeSegments(data.kaleido.segs)
+        }
 
         // Load scene last so dynamic controls and infoTitle render on top.
         if (data.preset) loadPreset(data.preset)

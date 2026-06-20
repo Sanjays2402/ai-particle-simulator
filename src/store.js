@@ -216,6 +216,17 @@ export const useStore = create((set, get) => {
   mouseTrail: false,
   setMouseTrail: (v) => set({ mouseTrail: v }),
 
+  // Kaleidoscope: N-fold rotational symmetry around the Y axis. When
+  // enabled, particles are partitioned into N slices; each slice's
+  // index is folded onto the first ("leader") slice before the preset
+  // fn runs, then its computed position is rotated by slice * 2π/N.
+  // The result is a perfectly symmetric kaleidoscope that costs the
+  // same as the original scene (no extra particle work).
+  kaleidoscopeEnabled: false,
+  kaleidoscopeSegments: 6,
+  setKaleidoscopeEnabled: (v) => set({ kaleidoscopeEnabled: v }),
+  setKaleidoscopeSegments: (v) => set({ kaleidoscopeSegments: Math.max(2, Math.min(16, Math.round(v))) }),
+
 
 
 

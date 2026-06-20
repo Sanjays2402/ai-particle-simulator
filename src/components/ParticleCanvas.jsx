@@ -171,7 +171,8 @@ function Particles() {
             paintPoints,
             paletteEnabled, paletteA, paletteB, paletteMix,
             gravityEnabled, gravityStrength, collisionsEnabled,
-            forceFieldType, forceFieldStrength } = useStore.getState()
+            forceFieldType, forceFieldStrength,
+            kaleidoscopeEnabled, kaleidoscopeSegments } = useStore.getState()
     const themeData = THEMES[theme]
     const mousePos = window.__mousePos
     // Flat array of paint coords — avoids re-reading the .length each particle.
@@ -216,14 +217,45 @@ function Particles() {
       }
     }
 
+    // Kaleidoscope precomputation: leaderCount is the number of unique
+    // particles we actually run the preset fn for; the rest are mirrors
+    // of those leaders rotated around the Y axis. We use a single Math.
+    // floor + atan2 trick to keep per-particle cost a few floats.
+    const kaleidoSegs = (kaleidoscopeEnabled && kaleidoscopeSegments >= 2)
+      ? kaleidoscopeSegments | 0
+      : 1
+    const leaderCount = (kaleidoSegs > 1)
+      ? Math.max(1, Math.floor(particleCount / kaleidoSegs))
+      : particleCount
+    const kaleidoStep = (Math.PI * 2) / Math.max(1, kaleidoSegs)
+
     for (let idx = 0; idx < particleCount; idx++) {
       _target.set(0, 0, 0)
       _color.setRGB(1, 1, 1)
       try {
-        compiledFn(idx, particleCount, _target, _color, t, THREE, noop, noop, dv)
+        // In kaleidoscope mode, every slice computes positions for the
+        // same `leaderCount` source indices, then rotates the output.
+        const srcIdx = (kaleidoSegs > 1) ? (idx % leaderCount) : idx
+        const srcCount = (kaleidoSegs > 1) ? leaderCount : particleCount
+        compiledFn(srcIdx, srcCount, _target, _color, t, THREE, noop, noop, dv)
       } catch (e) {
         if (!errorRef.current) { errorRef.current = e.message; console.error('Runtime error:', e) }
         break
+      }
+
+      // Apply rotational symmetry: every particle beyond the leader
+      // slice gets its (x, z) rotated by (segId * 2π/N). Y stays put
+      // so the symmetry axis is upright (matches the camera default).
+      if (kaleidoSegs > 1) {
+        const segId = Math.floor(idx / leaderCount)
+        if (segId > 0 && segId < kaleidoSegs) {
+          const ang = segId * kaleidoStep
+          const c = Math.cos(ang), s = Math.sin(ang)
+          const rx = _target.x * c - _target.z * s
+          const rz = _target.x * s + _target.z * c
+          _target.x = rx
+          _target.z = rz
+        }
       }
 
       const i3 = idx * 3
