@@ -138,6 +138,8 @@ export const useStore = create((set, get) => {
   recentPresets: JSON.parse(localStorage.getItem('recent-presets') || '[]'),
   presetSearch: '',
   showFavoritesOnly: false,
+  presetCategory: 'all',
+  setPresetCategory: (v) => set({ presetCategory: v }),
 
   toggleFavorite: (id) => set(s => {
     const favs = s.favoritedPresets.includes(id)

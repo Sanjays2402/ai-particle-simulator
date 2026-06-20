@@ -3,6 +3,7 @@ import { useStore, THEMES } from '../store'
 import { presets } from '../presets'
 import { GifEncoder } from '../lib/gifEncoder'
 import { startCanvasRecording, downloadVideoBlob, isVideoExportSupported } from '../lib/videoRecorder'
+import { CATEGORIES, categoryOf, countByCategory } from '../lib/presetCategories'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
 const THEME_LIST = [
@@ -412,44 +413,15 @@ export default function LeftSidebar() {
               transition: 'all 0.15s ease-out', whiteSpace: 'nowrap',
             }}>★ Favs</button>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {presets.filter(p => {
-            const matchSearch = !presetSearch || p.name.toLowerCase().includes(presetSearch.toLowerCase())
-            const matchFav = !showFavoritesOnly || favoritedPresets.includes(p.id)
-            return matchSearch && matchFav
-          }).map(p => (
-            <button key={p.id} onClick={() => loadPreset(p.id)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                padding: '10px 12px',
-                borderRadius: 8,
-                textAlign: 'left',
-                fontSize: 13,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease-out',
-                background: currentPreset === p.id ? 'rgba(99,102,241,0.08)' : 'transparent',
-                color: currentPreset === p.id ? '#818cf8' : '#7a7a90',
-                border: currentPreset === p.id ? '1px solid rgba(99,102,241,0.2)' : '1px solid transparent',
-              }}
-              onMouseEnter={e => {
-                if (currentPreset !== p.id) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
-              }}
-              onMouseLeave={e => {
-                if (currentPreset !== p.id) e.currentTarget.style.background = 'transparent'
-              }}
-            >
-              <span style={{ fontSize: 16 }}>{p.emoji}</span>
-              <span style={{ flex: 1 }}>{p.name}</span>
-              <span onClick={e => { e.stopPropagation(); toggleFavorite(p.id); }}
-                style={{ fontSize: 14, cursor: 'pointer', color: favoritedPresets.includes(p.id) ? '#f59e0b' : '#4a4a60',
-                  transition: 'color 0.15s ease-out' }}>
-                {favoritedPresets.includes(p.id) ? '★' : '☆'}
-              </span>
-            </button>
-          ))}
-        </div>
+        <CategoryChips />
+        <PresetList
+          presetSearch={presetSearch}
+          showFavoritesOnly={showFavoritesOnly}
+          favoritedPresets={favoritedPresets}
+          currentPreset={currentPreset}
+          loadPreset={loadPreset}
+          toggleFavorite={toggleFavorite}
+        />
       </Section>
 
       <Section title="Smart Text Engine">
@@ -726,6 +698,105 @@ function AudioModeRow() {
           <span>beat <span style={{ color: audioBeat > 0.5 ? '#86efac' : '#a8a8b8' }}>{audioBeat.toFixed(2)}</span></span>
         </div>
       )}
+    </div>
+  )
+}
+
+// Category filter chips that drive the Shape Presets list. Reads the
+// active category from the store so the list and the chips stay in
+// lock-step across re-renders.
+function CategoryChips() {
+  const active = useStore(s => s.presetCategory || 'all')
+  const setActive = useStore(s => s.setPresetCategory)
+  const counts = countByCategory(presets)
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 10 }}>
+      {CATEGORIES.map(c => {
+        const isActive = active === c.id
+        const n = counts[c.id] || 0
+        if (n === 0) return null
+        return (
+          <button key={c.id} onClick={() => setActive(c.id)}
+            title={`${c.label} (${n})`}
+            style={{
+              padding: '4px 9px', borderRadius: 999, fontSize: 10.5, fontWeight: 600,
+              cursor: 'pointer', whiteSpace: 'nowrap',
+              transition: 'all 0.15s ease-out',
+              letterSpacing: '0.01em',
+              background: isActive
+                ? 'linear-gradient(135deg, rgba(168,85,247,0.25), rgba(236,72,153,0.18))'
+                : 'rgba(255,255,255,0.035)',
+              color: isActive ? '#f3e8ff' : '#8a8aa0',
+              border: isActive ? '1px solid rgba(168,85,247,0.45)' : '1px solid rgba(255,255,255,0.06)',
+              boxShadow: isActive ? '0 0 10px rgba(168,85,247,0.25)' : 'none',
+            }}>
+            {c.label}
+            <span style={{
+              marginLeft: 5, fontSize: 9, opacity: 0.7,
+              fontFamily: 'Geist Mono, monospace',
+            }}>{n}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// Filtered preset list. Pulled out so the category subscription causes
+// a re-render of just the list, not the whole sidebar.
+function PresetList({ presetSearch, showFavoritesOnly, favoritedPresets, currentPreset, loadPreset, toggleFavorite }) {
+  const cat = useStore(s => s.presetCategory || 'all')
+  const filtered = presets.filter(p => {
+    const matchSearch = !presetSearch || p.name.toLowerCase().includes(presetSearch.toLowerCase())
+    const matchFav = !showFavoritesOnly || favoritedPresets.includes(p.id)
+    const matchCat = cat === 'all' || categoryOf(p.id) === cat
+    return matchSearch && matchFav && matchCat
+  })
+  if (filtered.length === 0) {
+    return (
+      <div style={{
+        padding: '14px 12px', textAlign: 'center', fontSize: 12,
+        color: '#6a6a80', background: 'rgba(255,255,255,0.02)',
+        border: '1px dashed rgba(255,255,255,0.05)', borderRadius: 8,
+      }}>
+        No presets match this filter.
+      </div>
+    )
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {filtered.map(p => (
+        <button key={p.id} onClick={() => loadPreset(p.id)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '10px 12px',
+            borderRadius: 8,
+            textAlign: 'left',
+            fontSize: 13,
+            cursor: 'pointer',
+            transition: 'all 0.15s ease-out',
+            background: currentPreset === p.id ? 'rgba(99,102,241,0.08)' : 'transparent',
+            color: currentPreset === p.id ? '#818cf8' : '#7a7a90',
+            border: currentPreset === p.id ? '1px solid rgba(99,102,241,0.2)' : '1px solid transparent',
+          }}
+          onMouseEnter={e => {
+            if (currentPreset !== p.id) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
+          }}
+          onMouseLeave={e => {
+            if (currentPreset !== p.id) e.currentTarget.style.background = 'transparent'
+          }}
+        >
+          <span style={{ fontSize: 16 }}>{p.emoji}</span>
+          <span style={{ flex: 1 }}>{p.name}</span>
+          <span onClick={e => { e.stopPropagation(); toggleFavorite(p.id); }}
+            style={{ fontSize: 14, cursor: 'pointer', color: favoritedPresets.includes(p.id) ? '#f59e0b' : '#4a4a60',
+              transition: 'color 0.15s ease-out' }}>
+            {favoritedPresets.includes(p.id) ? '★' : '☆'}
+          </span>
+        </button>
+      ))}
     </div>
   )
 }
