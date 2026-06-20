@@ -83,6 +83,10 @@ export default function App() {
           s.setKaleidoscopeEnabled(true)
           if (data.kaleido.segs != null) s.setKaleidoscopeSegments(data.kaleido.segs)
         }
+        if (data.hueCycle) {
+          s.setHueCycleEnabled(true)
+          if (data.hueCycle.speed != null) s.setHueCycleSpeed(data.hueCycle.speed)
+        }
 
         // Load scene last so dynamic controls and infoTitle render on top.
         if (data.preset) loadPreset(data.preset)

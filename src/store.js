@@ -227,6 +227,15 @@ export const useStore = create((set, get) => {
   setKaleidoscopeEnabled: (v) => set({ kaleidoscopeEnabled: v }),
   setKaleidoscopeSegments: (v) => set({ kaleidoscopeSegments: Math.max(2, Math.min(16, Math.round(v))) }),
 
+  // Hue Cycle: continuously offset the global hue over time. Layered
+  // on top of whatever theme is active so users get a slow rainbow
+  // drift without giving up Sunset/Forest/Arctic/etc. Speed is in
+  // "full cycles per minute" so the slider has an intuitive scale.
+  hueCycleEnabled: false,
+  hueCycleSpeed: 6,  // cycles per minute
+  setHueCycleEnabled: (v) => set({ hueCycleEnabled: v }),
+  setHueCycleSpeed: (v) => set({ hueCycleSpeed: Math.max(0.5, Math.min(60, v)) }),
+
 
 
 

@@ -390,6 +390,9 @@ export default function LeftSidebar() {
             </button>
           ))}
         </div>
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+          <HueCycleRow />
+        </div>
       </Section>
 
       <Section title="Shape Presets">
@@ -832,5 +835,38 @@ function PresetList({ presetSearch, showFavoritesOnly, favoritedPresets, current
         </button>
       ))}
     </div>
+  )
+}
+
+// Hue Cycle: continuous global hue drift layered on top of any theme.
+// Includes a live color-bar preview so users can see the wheel
+// position the cycle is currently at without staring at the canvas.
+function HueCycleRow() {
+  const enabled = useStore(s => s.hueCycleEnabled)
+  const speed   = useStore(s => s.hueCycleSpeed)
+  const setEn   = useStore(s => s.setHueCycleEnabled)
+  const setSp   = useStore(s => s.setHueCycleSpeed)
+  return (
+    <>
+      <ToggleRow label="Hue Cycle" value={enabled} onChange={setEn} />
+      {enabled && (
+        <>
+          <Slider label="Speed" value={speed} min={0.5} max={30} step={0.5}
+            onChange={setSp} display={v => `${v.toFixed(1)} cpm`} />
+          <div style={{
+            marginTop: 6, height: 14, borderRadius: 7,
+            background: 'linear-gradient(90deg, #ef4444, #f59e0b, #facc15, #22c55e, #06b6d4, #6366f1, #a855f7, #ec4899, #ef4444)',
+            border: '1px solid rgba(255,255,255,0.06)',
+            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.1), 0 0 12px rgba(168,85,247,0.18)',
+            animation: `hue-cycle-bar ${(60 / Math.max(0.5, speed)).toFixed(2)}s linear infinite`,
+            backgroundSize: '200% 100%',
+          }} />
+          <style>{`@keyframes hue-cycle-bar { from { background-position: 0% 0%; } to { background-position: 100% 0%; } }`}</style>
+          <div style={{ marginTop: 4, fontSize: 11, color: '#7a7a90', textAlign: 'center' }}>
+            One full rotation every {(60 / Math.max(0.5, speed)).toFixed(1)}s.
+          </div>
+        </>
+      )}
+    </>
   )
 }

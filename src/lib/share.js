@@ -30,6 +30,9 @@ export function buildShareUrl(state) {
     kaleido: s.kaleidoscopeEnabled
       ? { segs: s.kaleidoscopeSegments }
       : undefined,
+    hueCycle: s.hueCycleEnabled
+      ? { speed: s.hueCycleSpeed }
+      : undefined,
   }
   const hash = btoa(encodeURIComponent(JSON.stringify(data)))
   return `${window.location.origin}${window.location.pathname}#share=${hash}`

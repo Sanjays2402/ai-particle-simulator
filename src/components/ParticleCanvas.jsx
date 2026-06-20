@@ -172,7 +172,8 @@ function Particles() {
             paletteEnabled, paletteA, paletteB, paletteMix,
             gravityEnabled, gravityStrength, collisionsEnabled,
             forceFieldType, forceFieldStrength,
-            kaleidoscopeEnabled, kaleidoscopeSegments } = useStore.getState()
+            kaleidoscopeEnabled, kaleidoscopeSegments,
+            hueCycleEnabled, hueCycleSpeed } = useStore.getState()
     const themeData = THEMES[theme]
     const mousePos = window.__mousePos
     // Flat array of paint coords — avoids re-reading the .length each particle.
@@ -228,6 +229,13 @@ function Particles() {
       ? Math.max(1, Math.floor(particleCount / kaleidoSegs))
       : particleCount
     const kaleidoStep = (Math.PI * 2) / Math.max(1, kaleidoSegs)
+
+    // Hue Cycle precomputation: convert cycles-per-minute to a 0..1
+    // hue offset that wraps every (60 / speed) seconds. Computing this
+    // once per frame keeps the per-particle work to a single offsetHSL.
+    const hueCycleOffset = hueCycleEnabled
+      ? ((t * (hueCycleSpeed / 60)) % 1 + 1) % 1
+      : 0
 
     for (let idx = 0; idx < particleCount; idx++) {
       _target.set(0, 0, 0)
@@ -396,6 +404,13 @@ function Particles() {
         } else {
           _color.offsetHSL(themeData.hueShift / 360, 0, 0)
         }
+      }
+
+      // Hue Cycle — global continuous hue drift layered on top of any
+      // theme. Speed is in cycles per minute, so divide by 60 to get
+      // cycles per second. Computed once per frame above and reused.
+      if (hueCycleEnabled) {
+        _color.offsetHSL(hueCycleOffset, 0, 0)
       }
 
       // Gradient palette tint — lerp each particle's color toward a
