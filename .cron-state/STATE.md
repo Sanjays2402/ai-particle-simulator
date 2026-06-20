@@ -28,6 +28,11 @@ Existing capabilities (do not re-ship):
 - Session stats (lifetime presets / gifs / screenshots / time)
 - Snapshot gallery (last 8 PNGs in localStorage, re-download + delete)
 - Live preset source viewer (read-only, copy button, syntax-coloured)
+- Scene bookmarks (B quick-save, up to 12, preset + palette + FX + force + camera shake)
+- Custom background gradient (alpha canvas + CSS layer, 6 nebula chips, 0-360 angle)
+- Slideshow / auto-cycle presets (sequence / shuffle / favourites, 2-60s dwell)
+- Crossfade between presets (smoothstep ramp, 0.5-10s, progress bar + cancel)
+- Reduced-motion mode (auto/reduce/full, gates hue cycle, auto-rotate, shake, orbs, splash)
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -52,29 +57,36 @@ Note: R2.02 (Echo / trail FBO that survives EffectComposer) was deferred
 out of this batch — it's a render-pipeline refactor that doesn't fit a
 single slice. Will revisit as its own dedicated batch.
 
-### Batch 3 — next 5 (refilled)
-- [ ] R3.01 Scene bookmarks panel — save current full scene to localStorage gallery
-- [ ] R3.02 Background gradient picker for the canvas clear color (subtle nebula bg)
-- [ ] R3.03 Auto-cycle presets — slideshow mode, dwell N seconds per preset
-- [ ] R3.04 Multi-preset blend (crossfade two presets over t seconds)
-- [ ] R3.05 Reduced-motion accessibility mode (respect prefers-reduced-motion)
+### Batch 3 — persistence + show reel + accessibility  (SHIPPED)
+- [x] **R3.01** Scene bookmarks panel (full-scene save/restore, B/Shift+B shortcuts)  — 800f2f3
+- [x] **R3.02** Background gradient picker (alpha canvas + CSS layer, 6 nebulas)  — d709811
+- [x] **R3.03** Auto-cycle presets — slideshow mode (sequence/shuffle/favs, 2-60s)  — bd78841
+- [x] **R3.04** Multi-preset blend (crossfade with smoothstep ease, 0.5-10s)  — 22e4091
+- [x] **R3.05** Reduced-motion accessibility mode (OS-aware + 3-mode override)  — 9e4239f
+
+### Batch 4 — next 5 (refilled)
+- [ ] R4.01 3D depth-of-field post-FX (Bokeh) toggle
+- [ ] R4.02 Particle "wind" — global directional drift vector + UI sliders
+- [ ] R4.03 Color theme editor (build a custom theme with picker, save to localStorage)
+- [ ] R4.04 Trigonometric noise particle deformer (global "shake" applied after the preset fn)
+- [ ] R4.05 Touch gestures: pinch zoom maps to particle count, two-finger swipe = next preset
 
 ### Future queue (refill when batch closes)
-- [ ] R3.06 3D depth-of-field post-FX (Bokeh) toggle
-- [ ] R3.07 Particle "wind" — global directional drift vector + UI sliders
-- [ ] R3.08 Color theme editor (build a custom theme with picker, save to localStorage)
-- [ ] R3.09 Preset thumbnail rendering during carousel idle (offscreen cache)
-- [ ] R3.10 Touch gestures: pinch zoom maps to particle count, two-finger swipe = next preset
-- [ ] R3.11 Keyboard remap UI (rebind shortcuts, persist)
-- [ ] R3.12 Trigonometric noise particle deformer (global "shake" applied after the preset fn)
-- [ ] R3.13 Mini-map overlay showing camera angle vs particle bounds
-- [ ] R3.14 Onscreen MIDI controller mapping (Web MIDI) to live sliders
-- [ ] R3.15 Echo / trail FBO that survives EffectComposer (R2.02 deferred — render pipeline refactor)
-- [ ] R3.16 Editable preset code viewer (graduate the R2.05 viewer to a contenteditable + re-compile)
-- [ ] R3.17 Snapshot grid view (modal showing all 8 snapshots in a grid w/ full-res preview)
-- [ ] R3.18 Audio waveform overlay (oscilloscope strip showing the actual signal)
-- [ ] R3.19 Camera path animator (interpolate between saved views over N seconds)
-- [ ] R3.20 OpenGraph snapshot endpoint (server-rendered card for share URLs)
+- [ ] R4.06 Keyboard remap UI (rebind shortcuts, persist)
+- [ ] R4.07 Mini-map overlay showing camera angle vs particle bounds
+- [ ] R4.08 Onscreen MIDI controller mapping (Web MIDI) to live sliders
+- [ ] R4.09 Echo / trail FBO that survives EffectComposer (R2.02 deferred — render pipeline refactor)
+- [ ] R4.10 Editable preset code viewer (graduate the R2.05 viewer to a contenteditable + re-compile)
+- [ ] R4.11 Snapshot grid view (modal showing all 8 snapshots in a grid w/ full-res preview)
+- [ ] R4.12 Audio waveform overlay (oscilloscope strip showing the actual signal)
+- [ ] R4.13 Camera path animator (interpolate between saved views over N seconds)
+- [ ] R4.14 OpenGraph snapshot endpoint (server-rendered card for share URLs)
+- [ ] R4.15 Preset thumbnail rendering during carousel idle (offscreen cache)
+- [ ] R4.16 Slideshow that respects category filter chips (currently walks the whole library)
+- [ ] R4.17 Bookmark export/import as JSON (share entire collections)
+- [ ] R4.18 Random scene generator that fully randomises bookmark fields (smash → save)
+- [ ] R4.19 Cross-fade timing chips (0.5s / 2s / 5s / 10s presets in the Crossfade panel)
+- [ ] R4.20 Audio-reactive background gradient (cycle hue of the bg with beat)
 
 ## TICK LOG
 - 2026-06-19 23:41 PT — Bootstrap + Batch 1 (5/5).
@@ -83,7 +95,7 @@ single slice. Will revisit as its own dedicated batch.
   Gates: lint baseline preserved (23 errors, 3 warnings — all pre-existing).
   Build: 283ms green. Unit tests: 4/4 pass (cameraViews, hueCycle, kaleidoscope, presetCategories).
 - 2026-06-20 03:57 PT — Batch 2 (5/5).
-  Commits: 848240e (R2.06 session stats), 2a829de (R2.01 snapshot gallery),
+  Commits: 848280e (R2.06 session stats), 2a829de (R2.01 snapshot gallery),
   88520e3 (R2.03 camera shake on beat), b6418b3 (R2.05 live code viewer),
   4f85470 (R2.04 demo audio loops), dee8108 (lint-gate cleanup for 4f85470).
   Gates: lint baseline preserved (23 errors, 3 warnings — all pre-existing).
@@ -91,3 +103,12 @@ single slice. Will revisit as its own dedicated batch.
   demoAudioLoops, hueCycle, kaleidoscope, presetCategories, sessionStats,
   snapshotGallery).
   Note: R2.02 deferred — render pipeline refactor needs its own batch.
+- 2026-06-20 07:26 PT — Batch 3 (5/5).
+  Commits: 800f2f3 (R3.01 scene bookmarks), d709811 (R3.02 bg gradient),
+  bd78841 (R3.03 slideshow), 22e4091 (R3.04 crossfade), 9e4239f (R3.05 reduced motion).
+  Gates: lint baseline preserved (23 errors, 3 warnings — all pre-existing).
+  R3.04 transiently raised the count to 24 (missing useEffect import in LeftSidebar);
+  R3.05's import fix restored baseline by the time the batch was gated.
+  Build: 302ms green. Unit tests: 14/14 pass (bgGradient, cameraShake, cameraViews,
+  codeTokens, crossfade, demoAudioLoops, hueCycle, kaleidoscope, presetCategories,
+  reducedMotion, sceneBookmarks, sessionStats, slideshow, snapshotGallery).
