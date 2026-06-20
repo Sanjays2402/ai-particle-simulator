@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
-import { Activity, Sparkles, Palette, Gauge, Camera, X, BarChart3, Code2, Copy, ChevronDown, ChevronUp, Bookmark, BookmarkPlus } from 'lucide-react'
+import { Activity, Sparkles, Palette, Gauge, Camera, X, BarChart3, Code2, Copy, ChevronDown, ChevronUp, Bookmark, BookmarkPlus, Pencil, Play, RotateCcw } from 'lucide-react'
 import { loadCameraViews, saveCameraViews, appendView, CAMERA_VIEWS_MAX } from '../lib/cameraViews'
 import { formatDuration } from '../lib/sessionStats'
 import { tokenize } from '../lib/codeTokens'
 import { loadKeymap, resolveAction } from '../lib/keymap'
+import { validatePresetSource, sourceStats, isModified } from '../lib/presetEditor'
 import {
   loadBookmarks, saveBookmarks, appendBookmark, removeBookmark,
   applyScene, captureScene, MAX_BOOKMARKS,
@@ -535,26 +536,73 @@ function CodeViewerPanel() {
   const source = useStore(s => s.particleFnSource)
   const title  = useStore(s => s.infoTitle)
   const currentPreset = useStore(s => s.currentPreset)
+  const loadCustomCode = useStore(s => s.loadCustomCode)
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
-  const tokens = open && source ? tokenize(source) : []
-  const lineCount = source ? source.split('\n').length : 0
-  const sourceBytes = source ? source.length : 0
+  // Edit mode + draft buffer. We seed the buffer from `source` every
+  // time the user enters edit mode so swapping presets while not
+  // editing doesn't blow away in-flight changes.
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [validation, setValidation] = useState({ ok: true })
+  const tokens = open && !editing && source ? tokenize(source) : []
+  const stats = sourceStats(editing ? draft : source)
+  const lineCount = stats.lines
+  const sourceBytes = stats.bytes
+  const dirty = editing && isModified(source || '', draft)
 
   const handleCopy = async () => {
-    if (!source) return
+    const text = editing ? draft : source
+    if (!text) return
     try {
-      await navigator.clipboard.writeText(source)
+      await navigator.clipboard.writeText(text)
       setCopied(true)
       showToast('Source copied to clipboard', <Copy size={10} color="#fff" strokeWidth={2.4} />)
       setTimeout(() => setCopied(false), 1500)
     } catch {
       // Fallback: ancient browsers / iframe sandboxing.
-      window.prompt('Copy the source:', source)
+      window.prompt('Copy the source:', text)
     }
   }
 
-  if (!source) {
+  const enterEdit = () => {
+    setDraft(source || '')
+    setValidation({ ok: true })
+    setEditing(true)
+  }
+  const cancelEdit = () => {
+    setEditing(false)
+    setDraft('')
+    setValidation({ ok: true })
+  }
+  const handleDraftChange = (e) => {
+    const next = e.target.value
+    setDraft(next)
+    // Live-validate; the Compile button stays disabled until clean.
+    setValidation(validatePresetSource(next))
+  }
+  const handleCompile = () => {
+    const v = validatePresetSource(draft)
+    setValidation(v)
+    if (!v.ok) return
+    // Swap the live fn through the store's existing path. Title/desc
+    // get a small "(edited)" marker so users can tell at a glance.
+    const heading = title ? `${title} (edited)` : 'Custom Preset'
+    const desc = currentPreset
+      ? `Edited from "${currentPreset}".`
+      : 'Edited from your own code.'
+    loadCustomCode(draft, heading, desc)
+    showToast('Preset recompiled', <Play size={10} color="#fff" strokeWidth={2.4} />)
+    // Exit edit mode so the user can see the new source rendered.
+    setEditing(false)
+    setDraft('')
+  }
+  const handleRevert = () => {
+    setDraft(source || '')
+    setValidation({ ok: true })
+  }
+
+  if (!source && !editing) {
     return (
       <div style={{
         padding: '10px 8px', textAlign: 'center', fontSize: 11,
@@ -601,54 +649,142 @@ function CodeViewerPanel() {
           animation: 'code-expand 0.18s ease-out',
         }}>
           <style>{`@keyframes code-expand { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: translateY(0); } }`}</style>
-          {/* Header strip: title + copy + preset id */}
+          {/* Header strip: title + edit/compile/copy + preset id */}
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '6px 8px 6px 10px',
+            padding: '6px 8px 6px 10px', gap: 6,
             borderBottom: '1px solid rgba(255,255,255,0.05)',
             background: 'rgba(0,0,0,0.2)',
           }}>
             <div style={{
               display: 'inline-flex', alignItems: 'center', gap: 6,
               fontSize: 10.5, color: '#c8c8d0', fontWeight: 500,
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0,
             }}>
               <span style={{ color: '#c084fc', fontFamily: 'Geist Mono, monospace' }}>{currentPreset || 'custom'}</span>
               {title && <span style={{ color: '#7a7a90' }}>·</span>}
               {title && <span style={{ color: '#9a9ab0', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>}
+              {editing && <span style={{ color: '#fcd34d', fontFamily: 'Geist Mono, monospace', fontSize: 9 }}>(editing)</span>}
             </div>
-            <button onClick={handleCopy}
-              title="Copy source"
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                padding: '3px 7px', borderRadius: 5, fontSize: 10.5, fontWeight: 500,
-                background: copied ? 'rgba(34,197,94,0.15)' : 'rgba(168,85,247,0.1)',
-                color: copied ? '#86efac' : '#e9d5ff',
-                border: copied ? '1px solid rgba(34,197,94,0.3)' : '1px solid rgba(168,85,247,0.3)',
-                cursor: 'pointer', transition: 'all 0.15s ease-out',
-              }}>
-              <Copy size={10} strokeWidth={2.4} />
-              {copied ? 'Copied' : 'Copy'}
-            </button>
+            <div style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+              {editing ? (
+                <>
+                  <CodeBtn onClick={handleRevert} disabled={!dirty} title="Revert draft to current source">
+                    <RotateCcw size={10} strokeWidth={2.4} /> Revert
+                  </CodeBtn>
+                  <CodeBtn onClick={cancelEdit} title="Discard edits">
+                    <X size={10} strokeWidth={2.4} /> Cancel
+                  </CodeBtn>
+                  <CodeBtn
+                    onClick={handleCompile}
+                    primary
+                    disabled={!validation.ok || !dirty}
+                    title={!validation.ok ? validation.error : dirty ? 'Recompile and apply' : 'No changes'}
+                  >
+                    <Play size={10} strokeWidth={2.4} /> Compile
+                  </CodeBtn>
+                </>
+              ) : (
+                <>
+                  <CodeBtn onClick={enterEdit} title="Edit source — recompile to apply">
+                    <Pencil size={10} strokeWidth={2.4} /> Edit
+                  </CodeBtn>
+                  <CodeBtn onClick={handleCopy} primary={copied ? false : true} title="Copy source">
+                    <Copy size={10} strokeWidth={2.4} /> {copied ? 'Copied' : 'Copy'}
+                  </CodeBtn>
+                </>
+              )}
+            </div>
           </div>
-          {/* Body */}
-          <pre style={{
-            margin: 0, padding: '8px 10px',
-            maxHeight: 240, overflow: 'auto',
-            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
-            fontSize: 10.5, lineHeight: 1.45,
-            color: '#e9e9f0',
-            whiteSpace: 'pre',
-            tabSize: 2,
-          }}>
-            <code>
-              {tokens.map(([type, text], i) => (
-                <span key={i} style={{ color: TOKEN_COLOR[type] || TOKEN_COLOR.text }}>{text}</span>
-              ))}
-            </code>
-          </pre>
+
+          {/* Inline validation banner */}
+          {editing && !validation.ok && (
+            <div style={{
+              padding: '6px 10px', fontSize: 10.5,
+              background: 'rgba(239,68,68,0.10)', color: '#fca5a5',
+              borderBottom: '1px solid rgba(239,68,68,0.25)',
+              fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+            }}>{validation.error}</div>
+          )}
+          {editing && validation.ok && validation.warnings && validation.warnings.length > 0 && (
+            <div style={{
+              padding: '6px 10px', fontSize: 10.5,
+              background: 'rgba(245,158,11,0.08)', color: '#fcd34d',
+              borderBottom: '1px solid rgba(245,158,11,0.20)',
+            }}>
+              {validation.warnings.join(' · ')}
+            </div>
+          )}
+
+          {/* Body — pre (read-only) or textarea (editing) */}
+          {editing ? (
+            <textarea
+              value={draft}
+              onChange={handleDraftChange}
+              spellCheck={false}
+              autoCapitalize="off"
+              autoComplete="off"
+              autoCorrect="off"
+              style={{
+                width: '100%', minHeight: 260, maxHeight: 420,
+                padding: '8px 10px',
+                margin: 0, border: 'none', outline: 'none',
+                background: 'transparent', color: '#e9e9f0',
+                fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                fontSize: 10.5, lineHeight: 1.45, tabSize: 2,
+                resize: 'vertical',
+                caretColor: '#c084fc',
+              }}
+            />
+          ) : (
+            <pre style={{
+              margin: 0, padding: '8px 10px',
+              maxHeight: 240, overflow: 'auto',
+              fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+              fontSize: 10.5, lineHeight: 1.45,
+              color: '#e9e9f0',
+              whiteSpace: 'pre',
+              tabSize: 2,
+            }}>
+              <code>
+                {tokens.map(([type, text], i) => (
+                  <span key={i} style={{ color: TOKEN_COLOR[type] || TOKEN_COLOR.text }}>{text}</span>
+                ))}
+              </code>
+            </pre>
+          )}
         </div>
       )}
     </div>
+  )
+}
+
+// Small button used in the code-viewer header. `primary` lights it up
+// in the brand gradient; `disabled` greys it out.
+function CodeBtn({ onClick, primary, disabled, title, children }) {
+  const baseBg = disabled
+    ? 'rgba(255,255,255,0.02)'
+    : primary
+      ? 'linear-gradient(135deg, rgba(168,85,247,0.20), rgba(99,102,241,0.16))'
+      : 'rgba(255,255,255,0.04)'
+  const fg = disabled
+    ? '#5a5a70'
+    : primary ? '#e9d5ff' : '#c8c8d0'
+  const bd = disabled
+    ? '1px solid rgba(255,255,255,0.05)'
+    : primary ? '1px solid rgba(168,85,247,0.35)' : '1px solid rgba(255,255,255,0.06)'
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      disabled={disabled}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        padding: '3px 7px', borderRadius: 5, fontSize: 10.5, fontWeight: 500,
+        background: baseBg, color: fg, border: bd,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        transition: 'all 0.15s ease-out',
+      }}
+    >{children}</button>
   )
 }
