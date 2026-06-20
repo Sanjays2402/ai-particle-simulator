@@ -6,6 +6,7 @@ import {
 } from './lib/sessionStats'
 import { clampFocusDistance, clampFocalLength, clampBokehScale } from './lib/depthOfField'
 import { clampIntensity as clampWindIntensity, clampAzimuth as clampWindAzimuth, clampPitch as clampWindPitch } from './lib/wind'
+import { loadThemes as loadCustomThemes, saveThemes as saveCustomThemes, addTheme as addCustomThemeHelper, removeTheme as removeCustomThemeHelper, resolveTheme as resolveThemeHelper } from './lib/customThemes'
 
 // Lightweight settings persistence: a subset of user-tweakable values
 // is read once on store init and written back whenever it changes.
@@ -445,9 +446,37 @@ export const useStore = create((set, get) => {
 
   setTheme: (t) => {
     set({ theme: t })
-    const theme = THEMES[t]
-    if (theme) document.documentElement.style.setProperty('--neon', theme.neon)
+    // Resolve against built-ins first, then custom themes so a saved
+    // custom theme can also drive the --neon CSS variable.
+    const resolved = resolveThemeHelper(t, THEMES, get().customThemes)
+    if (resolved) document.documentElement.style.setProperty('--neon', resolved.neon)
   },
+
+  // Custom theme editor — user-authored themes with their own neon
+  // accent + hue shift, persisted to localStorage via lib/customThemes.
+  // ParticleCanvas resolves the active theme via the same helper so
+  // built-ins and custom themes paint identically.
+  customThemes: loadCustomThemes(),
+  addCustomTheme: (partial) => {
+    const next = addCustomThemeHelper(get().customThemes, partial)
+    saveCustomThemes(next)
+    set({ customThemes: next })
+    return next[0] ? next[0].id : null
+  },
+  removeCustomTheme: (id) => {
+    const next = removeCustomThemeHelper(get().customThemes, id)
+    saveCustomThemes(next)
+    // If the deleted theme was active, fall back to neon so the UI
+    // doesn't end up pointing at a non-existent theme id.
+    const active = get().theme
+    if (active === id) {
+      set({ theme: 'neon', customThemes: next })
+      document.documentElement.style.setProperty('--neon', THEMES.neon.neon)
+    } else {
+      set({ customThemes: next })
+    }
+  },
+  refreshCustomThemes: () => set({ customThemes: loadCustomThemes() }),
 
   setAiSettings: (key, baseUrl, model) => {
     localStorage.setItem('ai-api-key', key)

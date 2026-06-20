@@ -8,6 +8,7 @@ import { cameraShakeOffset } from '../lib/cameraShake'
 import { smoothstep } from '../lib/crossfade'
 import { resolveReducedMotion } from '../lib/reducedMotion'
 import { windVector, applyWind } from '../lib/wind'
+import { resolveTheme as resolveActiveTheme } from '../lib/customThemes'
 
 // FPS counter component (renders as HTML overlay)
 function FPSCounter() {
@@ -205,7 +206,8 @@ function Particles() {
     // Crossfade ticker — outside the per-particle loop so it advances
     // exactly once per frame regardless of particle count.
     if (blendActive) advanceBlend(delta)
-    const themeData = THEMES[theme]
+    const customThemes = useStore.getState().customThemes
+    const themeData = resolveActiveTheme(theme, THEMES, customThemes)
     const mousePos = window.__mousePos
     // Flat array of paint coords — avoids re-reading the .length each particle.
     const paintLen = paintPoints.length

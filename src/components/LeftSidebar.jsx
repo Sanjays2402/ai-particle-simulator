@@ -408,6 +408,9 @@ export default function LeftSidebar() {
           ))}
         </div>
         <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+          <CustomThemesRow />
+        </div>
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
           <HueCycleRow />
         </div>
       </Section>
@@ -774,6 +777,158 @@ function CameraShakeRow() {
         </>
       )}
     </>
+  )
+}
+
+// User-authored themes — name + accent color + hue shift, persisted
+// via `lib/customThemes`. Lives at the bottom of the Theme section so
+// the built-in chips remain the primary surface; the editor only
+// surfaces when the user wants to create / pick a custom theme.
+function CustomThemesRow() {
+  const customThemes = useStore(s => s.customThemes)
+  const activeTheme  = useStore(s => s.theme)
+  const setTheme     = useStore(s => s.setTheme)
+  const addCustomTheme = useStore(s => s.addCustomTheme)
+  const removeCustomTheme = useStore(s => s.removeCustomTheme)
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState('My Theme')
+  const [neon, setNeon] = useState('#a855f7')
+  const [hueShift, setHueShift] = useState(0)
+
+  const save = () => {
+    const id = addCustomTheme({ name, neon, hueShift })
+    if (id) setTheme(id)
+    setOpen(false)
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <span style={{ fontSize: 11.5, fontWeight: 550, color: '#a8a8b8', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
+          Custom Themes
+        </span>
+        <button
+          onClick={() => setOpen(o => !o)}
+          style={{
+            fontSize: 11, padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
+            background: open ? 'rgba(168,85,247,0.18)' : 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(168,85,247,0.25)', color: '#d8b4fe',
+          }}
+        >{open ? 'Close' : '+ New'}</button>
+      </div>
+
+      {customThemes.length === 0 && !open && (
+        <p style={{ fontSize: 11, color: '#7a7a90', margin: 0 }}>
+          No custom themes yet. Click <span style={{ color: '#c084fc' }}>+ New</span> to create one.
+        </p>
+      )}
+
+      {customThemes.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: open ? 10 : 0 }}>
+          {customThemes.map(t => {
+            const active = activeTheme === t.id
+            return (
+              <div key={t.id} style={{ position: 'relative' }}>
+                <button
+                  onClick={() => setTheme(t.id)}
+                  title={`${t.name} · hue ${t.hueShift >= 0 ? '+' : ''}${t.hueShift}°`}
+                  style={{
+                    width: '100%',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+                    padding: '8px 4px', borderRadius: 8, fontSize: 10.5, fontWeight: 500,
+                    cursor: 'pointer', transition: 'all 0.2s cubic-bezier(0.2,0.8,0.2,1)',
+                    background: active ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.02)',
+                    border: active ? `1px solid ${t.neon}80` : '1px solid rgba(255,255,255,0.04)',
+                    color: active ? '#eeeef0' : '#8a8aa0',
+                    boxShadow: active ? `0 0 12px ${t.neon}40` : 'none',
+                  }}
+                >
+                  <span style={{
+                    width: 22, height: 22, borderRadius: '50%',
+                    background: t.neon,
+                    boxShadow: `0 0 8px ${t.neon}, inset 0 1px 0 rgba(255,255,255,0.18)`,
+                    flexShrink: 0,
+                  }} />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>
+                    {t.name}
+                  </span>
+                </button>
+                <button
+                  onClick={() => removeCustomTheme(t.id)}
+                  title="Delete"
+                  style={{
+                    position: 'absolute', top: 2, right: 2,
+                    width: 18, height: 18, padding: 0, lineHeight: 1,
+                    borderRadius: 4, cursor: 'pointer', fontSize: 11,
+                    background: 'rgba(0,0,0,0.5)', color: '#f0abfc',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                  }}
+                >×</button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {open && (
+        <div style={{
+          marginTop: 8, padding: 10, borderRadius: 8,
+          background: 'rgba(168,85,247,0.06)',
+          border: '1px solid rgba(168,85,247,0.18)',
+        }}>
+          <label style={{ fontSize: 11, color: '#a8a8b8', display: 'block', marginBottom: 4 }}>
+            Name
+          </label>
+          <input
+            value={name}
+            onChange={e => setName(e.target.value.slice(0, 32))}
+            placeholder="My Theme"
+            style={{
+              width: '100%', padding: '6px 8px', borderRadius: 6,
+              background: 'rgba(0,0,0,0.3)', color: '#eeeef0', fontSize: 12,
+              border: '1px solid rgba(255,255,255,0.08)', marginBottom: 10,
+            }}
+          />
+          <label style={{ fontSize: 11, color: '#a8a8b8', display: 'block', marginBottom: 4 }}>
+            Accent Color
+          </label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <input type="color" value={neon}
+              onChange={e => setNeon(e.target.value)}
+              style={{ width: 36, height: 28, border: 'none', cursor: 'pointer', background: 'transparent' }} />
+            <input value={neon}
+              onChange={e => setNeon(e.target.value)}
+              maxLength={7}
+              style={{
+                flex: 1, padding: '6px 8px', borderRadius: 6,
+                background: 'rgba(0,0,0,0.3)', color: '#eeeef0', fontSize: 12,
+                fontFamily: 'JetBrains Mono, monospace',
+                border: '1px solid rgba(255,255,255,0.08)',
+              }} />
+          </div>
+          <Slider label="Hue Shift" value={hueShift} min={-180} max={180} step={5}
+            onChange={setHueShift} display={v => `${v >= 0 ? '+' : ''}${v}°`} />
+          <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+            <button
+              onClick={save}
+              style={{
+                flex: 1, padding: '8px 0', borderRadius: 6, fontSize: 12, fontWeight: 600,
+                background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%)',
+                border: 'none', color: '#fff', cursor: 'pointer',
+              }}
+            >Save Theme</button>
+            <button
+              onClick={() => setOpen(false)}
+              style={{
+                padding: '8px 14px', borderRadius: 6, fontSize: 12,
+                background: 'rgba(255,255,255,0.04)', color: '#8a8aa0',
+                border: '1px solid rgba(255,255,255,0.08)', cursor: 'pointer',
+              }}
+            >Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
