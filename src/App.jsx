@@ -15,6 +15,7 @@ import DebugHUD from './components/DebugHUD'
 import Onboarding from './components/Onboarding'
 import MouseTrail from './components/MouseTrail'
 import SnapshotGallery from './components/SnapshotGallery'
+import Slideshow from './components/Slideshow'
 import { loadSnapshots } from './lib/snapshotGallery'
 import { useIsMobile } from './lib/useIsMobile'
 import { Sparkles, ChevronLeft, ChevronRight } from 'lucide-react'
@@ -214,6 +215,7 @@ export default function App() {
       <DebugHUD />
       <Onboarding />
       <MouseTrail />
+      <Slideshow />
 
       {showSplash && (
         <div className="splash">

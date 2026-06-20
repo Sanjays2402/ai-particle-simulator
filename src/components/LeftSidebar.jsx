@@ -407,6 +407,10 @@ export default function LeftSidebar() {
         <BgGradientRow />
       </Section>
 
+      <Section title="Slideshow">
+        <SlideshowRow />
+      </Section>
+
       <Section title="Shape Presets">
         <div style={{ display: 'flex', gap: 6, marginBottom: 10, alignItems: 'center' }}>
           <div style={{ position: 'relative', flex: 1 }}>
@@ -901,6 +905,65 @@ function HueCycleRow() {
           <div style={{ marginTop: 4, fontSize: 11, color: '#7a7a90', textAlign: 'center' }}>
             One full rotation every {(60 / Math.max(0.5, speed)).toFixed(1)}s.
           </div>
+        </>
+      )}
+    </>
+  )
+}
+
+// Slideshow mode — rotate through the preset library on a timer.
+// Order chips pick between sequence, shuffle, and favourites; the
+// dwell slider sets seconds per preset. The actual rotation lives
+// in <Slideshow /> (mounted in App.jsx).
+function SlideshowRow() {
+  const enabled  = useStore(s => s.slideshowEnabled)
+  const dwell    = useStore(s => s.slideshowDwellSec)
+  const order    = useStore(s => s.slideshowOrder)
+  const setEn    = useStore(s => s.setSlideshowEnabled)
+  const setDwell = useStore(s => s.setSlideshowDwellSec)
+  const setOrder = useStore(s => s.setSlideshowOrder)
+  const favCount = useStore(s => s.favoritedPresets.length)
+  const ORDERS = [
+    { id: 'sequence',   label: 'Order' },
+    { id: 'shuffle',    label: 'Shuffle' },
+    { id: 'favourites', label: `★ Favs${favCount ? ` (${favCount})` : ''}` },
+  ]
+  return (
+    <>
+      <ToggleRow label="Auto-cycle" value={enabled} onChange={setEn} />
+      {enabled && (
+        <>
+          <Slider label="Dwell" value={dwell} min={2} max={60} step={1}
+            onChange={setDwell} display={v => `${v}s`} />
+          <div style={{ marginTop: 4, marginBottom: 6 }}>
+            <span style={{ fontSize: 11, color: '#7a7a90', fontWeight: 500 }}>Order</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+            {ORDERS.map(o => {
+              const active = order === o.id
+              const disabled = o.id === 'favourites' && favCount === 0
+              return (
+                <button key={o.id} onClick={() => !disabled && setOrder(o.id)}
+                  disabled={disabled}
+                  title={disabled ? 'Star some presets first' : o.label}
+                  style={{
+                    padding: '7px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+                    cursor: disabled ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.15s ease-out',
+                    background: active
+                      ? 'linear-gradient(135deg, rgba(168,85,247,0.22) 0%, rgba(236,72,153,0.18) 100%)'
+                      : 'rgba(255,255,255,0.03)',
+                    color: disabled ? '#4a4a5a' : active ? '#f3e8ff' : '#8a8aa0',
+                    border: active ? '1px solid rgba(168,85,247,0.45)' : '1px solid rgba(255,255,255,0.05)',
+                    opacity: disabled ? 0.5 : 1,
+                  }}
+                >{o.label}</button>
+              )
+            })}
+          </div>
+          <p style={{ fontSize: 11, color: '#7a7a90', marginTop: 8 }}>
+            New scene every {dwell}s. Manually loading a preset pauses the timer until the next dwell.
+          </p>
         </>
       )}
     </>

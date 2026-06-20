@@ -289,6 +289,17 @@ export const useStore = create((set, get) => {
   setBgGradientB: (v) => set({ bgGradientB: v }),
   setBgGradientAngle: (v) => set({ bgGradientAngle: Math.max(0, Math.min(360, v | 0)) }),
 
+  // Slideshow mode — rotate through filtered/favourited presets on a
+  // timer. `slideshowOrder` is one of 'sequence' | 'shuffle' | 'favourites'.
+  // The driver in App.jsx watches these and rotates accordingly; we
+  // keep all state here so any UI surface can pause / change cadence.
+  slideshowEnabled: false,
+  slideshowDwellSec: 8,
+  slideshowOrder: 'sequence',
+  setSlideshowEnabled: (v) => set({ slideshowEnabled: v }),
+  setSlideshowDwellSec: (v) => set({ slideshowDwellSec: Math.max(2, Math.min(120, v)) }),
+  setSlideshowOrder: (v) => set({ slideshowOrder: v }),
+
   // Camera shake on beat — when audio reactivity + this toggle are on,
   // the camera nudges on each detected beat (or bass surge). Intensity
   // is a 0..1 scalar that the renderer multiplies by the active audio
