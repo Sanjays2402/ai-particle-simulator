@@ -234,6 +234,9 @@ export default function LeftSidebar() {
         <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
           <CameraShakeRow />
         </div>
+        <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+          <MidiButton />
+        </div>
       </Section>
 
       <Section title="Post-FX">
@@ -1477,6 +1480,42 @@ function PlaceFieldRow() {
           Reset to origin
         </button>
       )}
+    </div>
+  )
+}
+
+// Trigger button for the MIDI Controller mapping panel. Lives in the
+// Audio Reactivity section because both are "external signal → live
+// param" workflows. Fires a window event the App-level state listens
+// for; keeps LeftSidebar from needing a prop-drilled setter.
+function MidiButton() {
+  const supported = typeof navigator !== 'undefined' && !!navigator.requestMIDIAccess
+  return (
+    <div>
+      <button
+        onClick={() => window.dispatchEvent(new Event('particle:open-midi'))}
+        title={supported ? 'Open MIDI Controller mapping' : 'Web MIDI is not supported in this browser'}
+        disabled={!supported}
+        style={{
+          width: '100%', padding: '8px 10px', borderRadius: 8,
+          fontSize: 12, fontWeight: 550, cursor: supported ? 'pointer' : 'not-allowed',
+          background: supported
+            ? 'linear-gradient(135deg, rgba(99,102,241,0.18), rgba(168,85,247,0.14))'
+            : 'rgba(255,255,255,0.03)',
+          color: supported ? '#c7d2fe' : '#5a5a70',
+          border: supported ? '1px solid rgba(99,102,241,0.35)' : '1px solid rgba(255,255,255,0.05)',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'space-between',
+        }}
+      >
+        <span>{'MIDI Controller\u2026'}</span>
+        <span style={{ fontSize: 10, color: supported ? '#a5b4fc' : '#5a5a70' }}>
+          {supported ? 'CC \u2192 sliders' : 'unsupported'}
+        </span>
+      </button>
+      <p style={{ fontSize: 10, color: '#6a6a80', marginTop: 6, lineHeight: 1.5 }}>
+        Map hardware knobs/faders to live sliders.
+        {!supported && ' Try Chrome or Edge.'}
+      </p>
     </div>
   )
 }

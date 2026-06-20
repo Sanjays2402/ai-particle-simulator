@@ -17,6 +17,8 @@ import MouseTrail from './components/MouseTrail'
 import SnapshotGallery from './components/SnapshotGallery'
 import Slideshow from './components/Slideshow'
 import Minimap from './components/Minimap'
+import MidiPanel from './components/MidiPanel'
+import { useGlobalMidi } from './lib/useGlobalMidi'
 import { loadSnapshots } from './lib/snapshotGallery'
 import { useIsMobile } from './lib/useIsMobile'
 import { getOSPrefersReduced, subscribeOSReducedMotion } from './lib/reducedMotion'
@@ -24,6 +26,18 @@ import { Sparkles, ChevronLeft, ChevronRight } from 'lucide-react'
 
 export default function App() {
   const [showSettings, setShowSettings] = useState(false)
+  const [midiOpen, setMidiOpen] = useState(false)
+  // Listen for the global "open MIDI panel" event so any UI surface
+  // (LeftSidebar button, command palette later) can trigger it.
+  useEffect(() => {
+    const onOpen = () => setMidiOpen(true)
+    window.addEventListener('particle:open-midi', onOpen)
+    return () => window.removeEventListener('particle:open-midi', onOpen)
+  }, [])
+  // Always-on Web MIDI listener — only requests access if the user
+  // already has saved bindings (so a no-controller user never sees a
+  // permission prompt).
+  useGlobalMidi()
   // Splash is suppressed for reduced-motion users (the scale-in/fade-out
   // is purely decorative). Initialize state from the OS pref directly
   // so we never need a synchronous setState in an effect — that pattern
@@ -258,6 +272,7 @@ export default function App() {
       <MouseTrail />
       <Slideshow />
       <Minimap />
+      <MidiPanel open={midiOpen} onClose={() => setMidiOpen(false)} />
 
       {showSplash && (
         <div className="splash">
