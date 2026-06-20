@@ -1,9 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
-import { Activity, Sparkles, Palette, Gauge, Camera, X, BarChart3, Code2, Copy, ChevronDown, ChevronUp } from 'lucide-react'
+import { Activity, Sparkles, Palette, Gauge, Camera, X, BarChart3, Code2, Copy, ChevronDown, ChevronUp, Bookmark, BookmarkPlus } from 'lucide-react'
 import { loadCameraViews, saveCameraViews, appendView, CAMERA_VIEWS_MAX } from '../lib/cameraViews'
 import { formatDuration } from '../lib/sessionStats'
 import { tokenize } from '../lib/codeTokens'
+import {
+  loadBookmarks, saveBookmarks, appendBookmark, removeBookmark,
+  applyScene, captureScene, MAX_BOOKMARKS,
+} from '../lib/sceneBookmarks'
 import { showToast } from './Toast'
 
 function SectionHeader({ children }) {
@@ -114,6 +118,11 @@ export default function RightSidebar() {
       </div>
 
       <div style={{ padding: '2px 16px 14px' }}>
+        <SectionHeader>Scene Bookmarks</SectionHeader>
+        <SceneBookmarks />
+      </div>
+
+      <div style={{ padding: '2px 16px 14px' }}>
         <SectionHeader>Session Stats</SectionHeader>
         <SessionStatsPanel />
       </div>
@@ -150,6 +159,14 @@ export default function RightSidebar() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>Save camera view</span>
             <kbd>V</kbd>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>Save scene bookmark</span>
+            <kbd>B</kbd>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>Restore last bookmark</span>
+            <span style={{ display: 'inline-flex', gap: 3 }}><kbd>⇧</kbd><kbd>B</kbd></span>
           </div>
         </div>
       </div>
@@ -283,6 +300,155 @@ function CameraViews() {
               </button>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Scene Bookmarks — save the full scene (preset + style + theme +
+// palette + FX + force field + audio + camera modulators) to
+// localStorage and restore in a click. Camera Views handles camera
+// orbit; this handles the *content* the camera is looking at.
+// Quick-save: B. Restore most recent: Shift+B. Both respect input
+// focus so typing in textareas isn't hijacked.
+function SceneBookmarks() {
+  const [items, setItems] = useState(() => loadBookmarks())
+  const currentPreset = useStore(s => s.currentPreset)
+  const infoTitle     = useStore(s => s.infoTitle)
+
+  const save = (name) => {
+    const scene = captureScene(useStore.getState())
+    const next = appendBookmark(items, { name, scene })
+    setItems(next)
+    saveBookmarks(next)
+    showToast(`Saved "${name}"`, <Bookmark size={10} color="#fff" strokeWidth={2.4} />)
+  }
+
+  const restore = (b) => {
+    const applied = applyScene(b.scene, useStore.getState())
+    showToast(`Restored "${b.name}" (${applied.length})`, <Bookmark size={10} color="#fff" strokeWidth={2.4} />)
+  }
+
+  const remove = (id) => {
+    const next = removeBookmark(items, id)
+    setItems(next)
+    saveBookmarks(next)
+  }
+
+  // Default name builder — prefer the loaded preset's nice title so
+  // bookmarks named "Cherry Blossoms" beat "Scene 4".
+  const nextDefaultName = () => {
+    if (infoTitle) {
+      // Append " 2", " 3" if a bookmark with that title already exists.
+      const base = infoTitle.slice(0, 28)
+      const dupes = items.filter(it => it.name === base || it.name.startsWith(`${base} `)).length
+      return dupes > 0 ? `${base} ${dupes + 1}` : base
+    }
+    return `Scene ${(items[0]?.id || 0) + 1}`
+  }
+
+  // Keyboard: B = quick-save, Shift+B = restore most recent.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.key === 'b' && !e.shiftKey) {
+        e.preventDefault()
+        save(nextDefaultName())
+      } else if (e.key === 'B' && e.shiftKey) {
+        if (items.length === 0) { showToast('No bookmarks yet'); return }
+        e.preventDefault()
+        restore(items[0])
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, infoTitle])
+
+  const canSaveMore = items.length < MAX_BOOKMARKS
+
+  return (
+    <div>
+      <button
+        onClick={() => {
+          const def = nextDefaultName()
+          const name = window.prompt('Name this scene bookmark:', def) || def
+          if (!canSaveMore) {
+            showToast(`Max ${MAX_BOOKMARKS} bookmarks — delete one first`)
+            return
+          }
+          save(name.slice(0, 32))
+        }}
+        title={canSaveMore ? 'Press B to quick-save' : `Max ${MAX_BOOKMARKS} bookmarks — delete one first`}
+        style={{
+          width: '100%', padding: '8px 0', marginBottom: 8,
+          borderRadius: 8, fontSize: 12, fontWeight: 550, cursor: 'pointer',
+          background: canSaveMore
+            ? 'linear-gradient(135deg, rgba(99,102,241,0.18), rgba(168,85,247,0.14))'
+            : 'rgba(255,255,255,0.03)',
+          color: canSaveMore ? '#dbeafe' : '#5a5a70',
+          border: canSaveMore ? '1px solid rgba(99,102,241,0.35)' : '1px solid rgba(255,255,255,0.05)',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+        }}
+      >
+        <BookmarkPlus size={12} strokeWidth={2.2} /> Save current scene
+        {canSaveMore && <kbd style={{ marginLeft: 4 }}>B</kbd>}
+      </button>
+      {items.length === 0 ? (
+        <div style={{
+          padding: '12px 8px', borderRadius: 8, textAlign: 'center',
+          background: 'rgba(255,255,255,0.02)',
+          border: '1px dashed rgba(255,255,255,0.05)',
+          fontSize: 11, color: '#6a6a80',
+        }}>
+          No bookmarks yet. Press <kbd>B</kbd> to save a scene.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {items.map(b => {
+            const isCurrent = b.scene.currentPreset && b.scene.currentPreset === currentPreset
+            return (
+              <div key={b.id} style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '7px 9px', borderRadius: 7,
+                background: 'rgba(255,255,255,0.025)',
+                border: isCurrent
+                  ? '1px solid rgba(99,102,241,0.35)'
+                  : '1px solid rgba(255,255,255,0.05)',
+                transition: 'all 0.15s ease-out',
+              }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(99,102,241,0.07)'; e.currentTarget.style.borderColor = 'rgba(99,102,241,0.3)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.025)'; e.currentTarget.style.borderColor = isCurrent ? 'rgba(99,102,241,0.35)' : 'rgba(255,255,255,0.05)' }}
+              >
+                <button onClick={() => restore(b)}
+                  title={`preset: ${b.scene.currentPreset || 'custom'} · theme: ${b.scene.theme || '-'}`}
+                  style={{
+                    flex: 1, background: 'none', border: 'none', color: '#d8d8e0',
+                    fontSize: 12, fontWeight: 500, textAlign: 'left', cursor: 'pointer',
+                    padding: 0, display: 'inline-flex', alignItems: 'center', gap: 8,
+                    overflow: 'hidden',
+                  }}>
+                  <Bookmark size={11} strokeWidth={2.2} color={isCurrent ? '#818cf8' : '#a5b4fc'} />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {b.name}
+                  </span>
+                  <span style={{ marginLeft: 'auto', fontSize: 10, color: '#5a5a70', fontFamily: 'Geist Mono, monospace' }}>
+                    {b.scene.currentPreset?.slice(0, 10) || 'custom'}
+                  </span>
+                </button>
+                <button onClick={() => remove(b.id)} title="Delete bookmark"
+                  style={{
+                    width: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    borderRadius: 5, background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.05)', color: '#9a9ab0', cursor: 'pointer',
+                  }}>
+                  <X size={9} strokeWidth={2.5} />
+                </button>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
