@@ -36,6 +36,11 @@ Existing capabilities (do not re-ship):
 - Trig-noise particle deformer (global wiggle layered on top of any preset)
 - Custom theme editor (name + accent + hue, 12-theme cap, localStorage)
 - Touch gestures (two-finger pinch = particle count, swipe = preset nav)
+- Rebindable keyboard shortcuts (Settings → Keyboard panel, conflict detection, layout-independent codes)
+- Mini-map overlay (top-down XZ widget, click to recenter orbit target)
+- Web MIDI controller mapping (CC → 14 live store actions, Learn workflow, always-on hook)
+- Editable preset source viewer (textarea + live validate + Compile/Revert/Cancel)
+- Live audio waveform / oscilloscope overlay (pinned top-right, peak-aware glow)
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -74,29 +79,36 @@ single slice. Will revisit as its own dedicated batch.
 - [x] **R4.04** Trig-noise particle deformer — global wiggle  — f77aa66
 - [x] **R4.05** Touch gestures — pinch=count, swipe=preset  — 19decc5
 
-### Batch 5 — next 5 (refilled)
-- [ ] R5.01 Keyboard remap UI (rebind shortcuts, persist)
-- [ ] R5.02 Mini-map overlay showing camera angle vs particle bounds
-- [ ] R5.03 Web MIDI controller mapping (CC/note → live sliders)
-- [ ] R5.04 Editable preset code viewer (graduate the R2.05 viewer to contenteditable + re-compile)
-- [ ] R5.05 Audio waveform overlay (oscilloscope strip showing the actual signal)
+### Batch 5 — power-user controls + observability  (SHIPPED)
+- [x] **R5.01** Keyboard remap UI (rebind shortcuts, conflict flags, persist)  — 3f2a893
+- [x] **R5.02** Mini-map overlay showing camera vs particle bounds  — a6f1d8e
+- [x] **R5.03** Web MIDI controller mapping (CC → live sliders)  — 483708f
+- [x] **R5.04** Editable preset code viewer (graduated from R2.05 read-only)  — df1aa6c
+- [x] **R5.05** Audio waveform overlay (oscilloscope strip on the real signal)  — d27a408
+
+### Batch 6 — next 5 (refilled)
+- [ ] R6.01 Snapshot grid view (modal showing all 8 snapshots in a grid w/ full-res preview) [was R5.06]
+- [ ] R6.02 Camera path animator (interpolate between saved views over N seconds) [was R5.07]
+- [ ] R6.03 Slideshow that respects category filter chips (currently walks the whole library) [was R5.10]
+- [ ] R6.04 Bookmark export/import as JSON (share entire collections) [was R5.11]
+- [ ] R6.05 Wind preset chips ("Calm", "Breeze", "Gale", "Storm") for one-tap configs [was R5.18]
 
 ### Future queue (refill when batch closes)
-- [ ] R5.06 Snapshot grid view (modal showing all 8 snapshots in a grid w/ full-res preview)
-- [ ] R5.07 Camera path animator (interpolate between saved views over N seconds)
-- [ ] R5.08 OpenGraph snapshot endpoint (server-rendered card for share URLs)
-- [ ] R5.09 Preset thumbnail rendering during carousel idle (offscreen cache)
-- [ ] R5.10 Slideshow that respects category filter chips (currently walks the whole library)
-- [ ] R5.11 Bookmark export/import as JSON (share entire collections)
-- [ ] R5.12 Random scene generator that fully randomises bookmark fields (smash → save)
-- [ ] R5.13 Cross-fade timing chips (0.5s / 2s / 5s / 10s presets in the Crossfade panel)
-- [ ] R5.14 Audio-reactive background gradient (cycle hue of the bg with beat)
-- [ ] R5.15 Echo / trail FBO that survives EffectComposer (R2.02 deferred — render pipeline refactor)
-- [ ] R5.16 Particle attractors as named objects (drag to reposition, multiple types coexist)
-- [ ] R5.17 Custom theme export / import as JSON (share a theme pack)
-- [ ] R5.18 Wind preset chips ("Calm", "Breeze", "Gale", "Storm") for one-tap configs
-- [ ] R5.19 Custom theme set as default-on-load (auto-applied if active when reloading)
-- [ ] R5.20 Mobile-only gesture hint overlay shown on first run
+- [ ] R6.06 OpenGraph snapshot endpoint (server-rendered card for share URLs) [was R5.08]
+- [ ] R6.07 Preset thumbnail rendering during carousel idle (offscreen cache) [was R5.09]
+- [ ] R6.08 Random scene generator that fully randomises bookmark fields (smash → save) [was R5.12]
+- [ ] R6.09 Cross-fade timing chips (0.5s / 2s / 5s / 10s presets in the Crossfade panel) [was R5.13]
+- [ ] R6.10 Audio-reactive background gradient (cycle hue of the bg with beat) [was R5.14]
+- [ ] R6.11 Echo / trail FBO that survives EffectComposer (R2.02 deferred — render pipeline refactor) [was R5.15]
+- [ ] R6.12 Particle attractors as named objects (drag to reposition, multiple types coexist) [was R5.16]
+- [ ] R6.13 Custom theme export / import as JSON (share a theme pack) [was R5.17]
+- [ ] R6.14 Custom theme set as default-on-load (auto-applied if active when reloading) [was R5.19]
+- [ ] R6.15 Mobile-only gesture hint overlay shown on first run [was R5.20]
+- [ ] R6.16 Keyboard remap quick-export (round-trip keymap as JSON via Settings)
+- [ ] R6.17 MIDI mapping presets (controller-specific bundles — nanoKONTROL, Launch Control)
+- [ ] R6.18 Waveform mode switch (time-domain vs frequency-spectrum bars)
+- [ ] R6.19 Preset code viewer: inline error markers on the failing line during Edit
+- [ ] R6.20 Minimap: also render saved camera views as small dots so users can see where they are
 
 ## TICK LOG
 - 2026-06-19 23:41 PT — Bootstrap + Batch 1 (5/5).
@@ -129,3 +141,9 @@ single slice. Will revisit as its own dedicated batch.
   Build: 7m 15s green (this volume is slow, not the code).
   Unit tests: 19/19 pass (added depthOfField, wind, customThemes, noiseDeformer,
   touchGestures · 119 fresh asserts this batch).
+- 2026-06-20 15:38 PT — Batch 5 (5/5).
+  Commits: 3f2a893 (R5.01 keymap), a6f1d8e (R5.02 minimap), 483708f (R5.03 MIDI),
+  df1aa6c (R5.04 editable viewer), d27a408 (R5.05 waveform overlay).
+  Gates: lint baseline preserved (23 errors, 3 warnings — all pre-existing).
+  Build: 835 ms green. Unit tests: 24/24 pass (added keymap, minimap, midiMap,
+  presetEditor, waveform · 150+ fresh asserts this batch).
