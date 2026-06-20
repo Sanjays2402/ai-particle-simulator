@@ -2,12 +2,13 @@ import { useRef, useEffect } from 'react'
 import { useStore } from '../store'
 import { presets } from '../presets'
 import { buildShareUrl } from '../lib/share'
+import { captureFromCanvas, appendSnapshot, loadSnapshots, saveSnapshots } from '../lib/snapshotGallery'
 import {
   Play, Pause, RotateCcw, Maximize2, Shuffle, Magnet, Camera, Link2,
-  Mic, Download, Settings, Repeat, Sparkles, Zap, Paintbrush, Send,
+  Mic, Download, Settings, Repeat, Sparkles, Zap, Paintbrush, Send, Images,
 } from 'lucide-react'
 
-export default function TopBar({ onSettings }) {
+export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snapshotCount }) {
   const { playing, setPlaying, loadRandom, smashRandom, mouseAttract, setMouseAttract, paintMode, setPaintMode, clearPaintPoints, audioReactive, setAudioReactive, isRecording, startRecording, stopRecording, recordingBuffer, enterReplay, isReplaying } = useStore()
   const audioCtxRef = useRef(null)
   const streamRef = useRef(null)
@@ -40,6 +41,23 @@ export default function TopBar({ onSettings }) {
     link.href = canvas.toDataURL('image/png')
     link.click()
     bumpSessionStat('screenshotsTaken', 1)
+    // Also stash the snapshot in the in-app gallery so users can
+    // revisit / re-download without re-firing the scene. Capture
+    // happens after the download so the gallery operation can't slow
+    // down the user-facing save.
+    try {
+      const entry = captureFromCanvas(canvas)
+      if (entry) {
+        const next = appendSnapshot(loadSnapshots(), {
+          ...entry,
+          label: infoTitle || currentPreset || 'particles',
+          preset: currentPreset || null,
+        })
+        saveSnapshots(next)
+        // Tell App-level overlay state if it's listening.
+        window.dispatchEvent(new CustomEvent('particle:snapshot-saved', { detail: next.length }))
+      }
+    } catch (e) { console.warn('Snapshot gallery stash failed:', e) }
   }
 
   const handleShare = () => {
@@ -252,6 +270,7 @@ export default function TopBar({ onSettings }) {
         <Btn onClick={handleMic} title="Sound Reactivity" active={audioReactive}><Mic size={14} strokeWidth={2.2} /></Btn>
         <Divider />
         <Btn onClick={handleScreenshot} title="Screenshot (S)"><Camera size={14} strokeWidth={2.2} /></Btn>
+        <GalleryBtn onClick={onToggleGallery} active={galleryOpen} count={snapshotCount} />
         <Btn onClick={handleShare} title="Share URL"><Link2 size={14} strokeWidth={2.2} /></Btn>
         <Btn onClick={handleTweet} title="Tweet this scene"><Send size={14} strokeWidth={2.2} /></Btn>
         <Btn onClick={handleExport} title="Export HTML"><Download size={14} strokeWidth={2.2} /></Btn>
@@ -301,6 +320,62 @@ function Divider() {
     background: 'linear-gradient(180deg, transparent, rgba(255,255,255,0.1) 50%, transparent)',
     margin: '0 6px',
   }} />
+}
+
+// Gallery toggle with a subtle count badge in the corner so users
+// always know how many snapshots are stashed. Looks like the other
+// toolbar buttons when count=0 and gains the badge once items exist.
+function GalleryBtn({ onClick, active, count }) {
+  return (
+    <button
+      onClick={onClick}
+      title={count > 0 ? `Snapshot Gallery (${count})` : 'Snapshot Gallery — empty'}
+      style={{
+        position: 'relative',
+        width: 30, height: 30,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        borderRadius: 9, cursor: 'pointer',
+        transition: 'all 0.18s cubic-bezier(0.2, 0.8, 0.2, 1)',
+        background: active
+          ? 'linear-gradient(135deg, rgba(139,92,246,0.25) 0%, rgba(236,72,153,0.2) 100%)'
+          : 'rgba(255,255,255,0.035)',
+        color: active ? '#e9d5ff' : '#c8c8d0',
+        border: active ? '1px solid rgba(168,85,247,0.5)' : '1px solid rgba(255,255,255,0.05)',
+        boxShadow: active ? '0 0 16px rgba(168,85,247,0.35), inset 0 1px 0 rgba(255,255,255,0.08)' : 'none',
+      }}
+      onMouseEnter={e => {
+        if (!active) {
+          e.currentTarget.style.background = 'rgba(255,255,255,0.08)'
+          e.currentTarget.style.borderColor = 'rgba(168,85,247,0.3)'
+          e.currentTarget.style.color = '#fff'
+          e.currentTarget.style.transform = 'translateY(-1px)'
+        }
+      }}
+      onMouseLeave={e => {
+        if (!active) {
+          e.currentTarget.style.background = 'rgba(255,255,255,0.035)'
+          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)'
+          e.currentTarget.style.color = '#c8c8d0'
+          e.currentTarget.style.transform = 'translateY(0)'
+        }
+      }}
+    >
+      <Images size={14} strokeWidth={2.2} />
+      {count > 0 && (
+        <span style={{
+          position: 'absolute', top: -3, right: -3,
+          minWidth: 14, height: 14, padding: '0 4px',
+          background: 'linear-gradient(135deg, #a855f7, #ec4899)',
+          color: '#fff', fontSize: 9, fontWeight: 700,
+          borderRadius: 7, display: 'inline-flex',
+          alignItems: 'center', justifyContent: 'center',
+          border: '1.5px solid rgba(10,10,16,0.95)',
+          fontFamily: 'Geist Mono, monospace',
+          lineHeight: 1,
+        }}>{count > 99 ? '99+' : count}</span>
+      )}
+    </button>
+  )
 }
 
 function Btn({ children, onClick, title, active }) {

@@ -14,12 +14,16 @@ import HelpOverlay from './components/HelpOverlay'
 import DebugHUD from './components/DebugHUD'
 import Onboarding from './components/Onboarding'
 import MouseTrail from './components/MouseTrail'
+import SnapshotGallery from './components/SnapshotGallery'
+import { loadSnapshots } from './lib/snapshotGallery'
 import { useIsMobile } from './lib/useIsMobile'
 import { Sparkles, ChevronLeft, ChevronRight } from 'lucide-react'
 
 export default function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [showSplash, setShowSplash] = useState(true)
+  const [galleryOpen, setGalleryOpen] = useState(false)
+  const [snapshotCount, setSnapshotCount] = useState(() => loadSnapshots().length)
   const isMobile = useIsMobile()
   const [leftOpen, setLeftOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 720)
   const [rightOpen, setRightOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 720)
@@ -30,6 +34,19 @@ export default function App() {
   useEffect(() => {
     const t = setTimeout(() => setShowSplash(false), 1700)
     return () => clearTimeout(t)
+  }, [])
+
+  // Keep the snapshot badge in lock-step with the gallery's localStorage
+  // state. TopBar fires this event on every successful screenshot, and
+  // the gallery panel fires it after delete / clear all.
+  useEffect(() => {
+    const refresh = () => setSnapshotCount(loadSnapshots().length)
+    window.addEventListener('particle:snapshot-saved', refresh)
+    window.addEventListener('particle:snapshot-removed', refresh)
+    return () => {
+      window.removeEventListener('particle:snapshot-saved', refresh)
+      window.removeEventListener('particle:snapshot-removed', refresh)
+    }
   }, [])
 
   useEffect(() => {
@@ -110,7 +127,7 @@ export default function App() {
       <div ref={orb3} className="orb orb-3" style={{ zIndex: 1 }} />
 
       <div className="relative z-10 flex flex-col h-full w-full pointer-events-none">
-        <div className="pointer-events-auto"><TopBar onSettings={() => setShowSettings(true)} /></div>
+        <div className="pointer-events-auto"><TopBar onSettings={() => setShowSettings(true)} onToggleGallery={() => setGalleryOpen(o => !o)} galleryOpen={galleryOpen} snapshotCount={snapshotCount} /></div>
         <div className="flex flex-1 overflow-hidden">
           {/* Left sidebar + toggle */}
           <div className="pointer-events-auto slide-in-left" style={{
@@ -189,6 +206,7 @@ export default function App() {
 
       <StatusStrip />
       <Toast />
+      <SnapshotGallery open={galleryOpen} onClose={() => setGalleryOpen(false)} />
 
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       <CommandPalette onSettings={() => setShowSettings(true)} />
