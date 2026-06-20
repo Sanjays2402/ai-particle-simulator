@@ -535,9 +535,35 @@ function CameraControls() {
   const autoRotateSpeed = useStore(s => s.autoRotateSpeed)
   const minDistance = useStore(s => s.minDistance)
   const maxDistance = useStore(s => s.maxDistance)
+  const { camera } = useThree()
+  const controlsRef = useRef()
+
+  // Expose a tiny API on `window` so non-canvas components (like the
+  // RightSidebar camera-views panel) can capture and restore the
+  // OrbitControls state without prop-drilling refs through five layers
+  // of HTML overlays. Re-installed on every mount.
+  useEffect(() => {
+    window.__particleCamera = {
+      get: () => ({
+        pos: [camera.position.x, camera.position.y, camera.position.z],
+        target: controlsRef.current
+          ? [controlsRef.current.target.x, controlsRef.current.target.y, controlsRef.current.target.z]
+          : [0, 0, 0],
+      }),
+      set: ({ pos, target }) => {
+        if (Array.isArray(pos) && pos.length === 3) camera.position.set(pos[0], pos[1], pos[2])
+        if (Array.isArray(target) && target.length === 3 && controlsRef.current) {
+          controlsRef.current.target.set(target[0], target[1], target[2])
+          controlsRef.current.update()
+        }
+      },
+    }
+    return () => { if (window.__particleCamera) window.__particleCamera = null }
+  }, [camera])
 
   return (
     <OrbitControls
+      ref={controlsRef}
       enableDamping
       dampingFactor={0.05}
       rotateSpeed={orbitSpeed}

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
-import { Activity, Sparkles, Palette, Gauge } from 'lucide-react'
+import { Activity, Sparkles, Palette, Gauge, Camera, X } from 'lucide-react'
+import { loadCameraViews, saveCameraViews, appendView, CAMERA_VIEWS_MAX } from '../lib/cameraViews'
+import { showToast } from './Toast'
 
 function SectionHeader({ children }) {
   return (
@@ -104,6 +106,11 @@ export default function RightSidebar() {
         </div>
       )}
 
+      <div style={{ padding: '2px 16px 14px' }}>
+        <SectionHeader>Camera Views</SectionHeader>
+        <CameraViews />
+      </div>
+
       {/* Keyboard shortcuts hint */}
       <div style={{ marginTop: 'auto', padding: '14px 16px', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
         <SectionHeader>Shortcuts</SectionHeader>
@@ -128,8 +135,144 @@ export default function RightSidebar() {
             <span>Fullscreen</span>
             <kbd>F</kbd>
           </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>Save camera view</span>
+            <kbd>V</kbd>
+          </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+// Saved camera views: capture orbit position+target with a name, save
+// up to CAMERA_VIEWS_MAX in localStorage, jump back with a click.
+// Keyboard `V` quick-saves the current view; works anywhere outside
+// inputs/textareas.
+function CameraViews() {
+  const [views, setViews] = useState(() => loadCameraViews())
+
+  const save = (name) => {
+    const api = window.__particleCamera
+    if (!api) {
+      showToast('Camera not ready yet')
+      return
+    }
+    const state = api.get()
+    const next = appendView(views, { name, pos: state.pos, target: state.target })
+    setViews(next)
+    saveCameraViews(next)
+    showToast(`Saved "${name}"`, <Camera size={10} color="#fff" strokeWidth={2.4} />)
+  }
+
+  const restore = (v) => {
+    const api = window.__particleCamera
+    if (!api) return
+    api.set({ pos: v.pos, target: v.target })
+    showToast(`Restored "${v.name}"`, <Camera size={10} color="#fff" strokeWidth={2.4} />)
+  }
+
+  const remove = (id) => {
+    const next = views.filter(v => v.id !== id)
+    setViews(next)
+    saveCameraViews(next)
+  }
+
+  // Keyboard quick-save on `V`. Same input-guard pattern the rest of
+  // the app uses for global shortcuts. We re-bind whenever the views
+  // list changes so the auto-incremented name reflects current count.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.key === 'v' || e.key === 'V') {
+        e.preventDefault()
+        const api = window.__particleCamera
+        if (!api) { showToast('Camera not ready yet'); return }
+        const state = api.get()
+        const name = `View ${(views[0]?.id || 0) + 1}`
+        const next = appendView(views, { name, pos: state.pos, target: state.target })
+        setViews(next)
+        saveCameraViews(next)
+        showToast(`Saved "${name}"`, <Camera size={10} color="#fff" strokeWidth={2.4} />)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [views])
+
+  const canSaveMore = views.length < CAMERA_VIEWS_MAX
+
+  return (
+    <div>
+      <button
+        onClick={() => {
+          const def = `View ${(views[0]?.id || 0) + 1}`
+          const name = window.prompt('Name this camera view:', def) || def
+          save(name.slice(0, 24))
+        }}
+        title={canSaveMore ? 'Press V to quick-save' : `Max ${CAMERA_VIEWS_MAX} views — delete one first`}
+        style={{
+          width: '100%', padding: '8px 0', marginBottom: 8,
+          borderRadius: 8, fontSize: 12, fontWeight: 550, cursor: 'pointer',
+          background: canSaveMore
+            ? 'linear-gradient(135deg, rgba(168,85,247,0.18), rgba(99,102,241,0.14))'
+            : 'rgba(255,255,255,0.03)',
+          color: canSaveMore ? '#e9d5ff' : '#5a5a70',
+          border: canSaveMore ? '1px solid rgba(168,85,247,0.35)' : '1px solid rgba(255,255,255,0.05)',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+        }}
+      >
+        <Camera size={12} strokeWidth={2.2} /> Save current view
+        {canSaveMore && <kbd style={{ marginLeft: 4 }}>V</kbd>}
+      </button>
+      {views.length === 0 ? (
+        <div style={{
+          padding: '12px 8px', borderRadius: 8, textAlign: 'center',
+          background: 'rgba(255,255,255,0.02)',
+          border: '1px dashed rgba(255,255,255,0.05)',
+          fontSize: 11, color: '#6a6a80',
+        }}>
+          No saved views yet.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {views.map(v => (
+            <div key={v.id} style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '7px 9px', borderRadius: 7,
+              background: 'rgba(255,255,255,0.025)',
+              border: '1px solid rgba(255,255,255,0.05)',
+              transition: 'all 0.15s ease-out',
+            }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(168,85,247,0.07)'; e.currentTarget.style.borderColor = 'rgba(168,85,247,0.25)' }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.025)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)' }}
+            >
+              <button onClick={() => restore(v)}
+                title={`pos: [${v.pos.map(n => n.toFixed(1)).join(', ')}]`}
+                style={{
+                  flex: 1, background: 'none', border: 'none', color: '#d8d8e0',
+                  fontSize: 12, fontWeight: 500, textAlign: 'left', cursor: 'pointer',
+                  padding: 0, display: 'inline-flex', alignItems: 'center', gap: 8,
+                }}>
+                <Camera size={11} strokeWidth={2.2} color="#c084fc" />
+                {v.name}
+                <span style={{ marginLeft: 'auto', fontSize: 10, color: '#5a5a70', fontFamily: 'Geist Mono, monospace' }}>
+                  {Math.sqrt(v.pos[0]**2 + v.pos[1]**2 + v.pos[2]**2).toFixed(1)}u
+                </span>
+              </button>
+              <button onClick={() => remove(v.id)} title="Delete"
+                style={{
+                  width: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  borderRadius: 5, background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.05)', color: '#9a9ab0', cursor: 'pointer',
+                }}>
+                <X size={9} strokeWidth={2.5} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

@@ -14,6 +14,7 @@ const SHORTCUTS = [
     ['F',           'Toggle fullscreen'],
     ['Shift + F',   'Favorite / unfavorite current preset'],
     ['S',           'Screenshot to PNG'],
+    ['V',           'Save current camera view'],
   ] },
   { group: 'Tools', items: [
     ['\u2318 K / Ctrl K', 'Open command palette'],
