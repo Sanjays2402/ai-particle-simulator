@@ -20,6 +20,11 @@ const SHORTCUTS = [
     ['\u2318 K / Ctrl K', 'Open command palette'],
     ['?',           'Toggle this help'],
   ] },
+  { group: 'Touch (mobile)', items: [
+    ['Pinch',            'Decrease / increase particle count'],
+    ['Two-finger\u00a0swipe', 'Previous / next preset'],
+    ['Double-tap',       'Play / pause'],
+  ] },
 ]
 
 export default function HelpOverlay() {

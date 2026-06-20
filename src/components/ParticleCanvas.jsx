@@ -10,6 +10,7 @@ import { resolveReducedMotion } from '../lib/reducedMotion'
 import { windVector, applyWind } from '../lib/wind'
 import { resolveTheme as resolveActiveTheme } from '../lib/customThemes'
 import { applyNoise } from '../lib/noiseDeformer'
+import { useTouchGestures } from '../lib/useTouchGestures'
 
 // FPS counter component (renders as HTML overlay)
 function FPSCounter() {
@@ -779,8 +780,14 @@ export default function ParticleCanvas() {
     }
   }
 
+  // Two-finger touch gestures: pinch = particle count, swipe = preset
+  // nav. Wired to the wrapping div so it works regardless of where the
+  // R3F canvas remounts internally.
+  const wrapRef = useRef(null)
+  useTouchGestures(wrapRef)
+
   return (
-    <div className="w-full h-full relative" onPointerUp={handleTap}>
+    <div ref={wrapRef} className="w-full h-full relative" onPointerUp={handleTap}>
       {/* Background gradient layer — sits behind the (transparent)
           canvas when the user enables it. Pure CSS so zero GPU cost
           beyond a normal compositor pass. Kept under the canvas via
