@@ -339,6 +339,10 @@ export default function LeftSidebar() {
         )}
       </Section>
 
+      <Section title="Crossfade">
+        <CrossfadeRow />
+      </Section>
+
       <Section title="Visual Style">
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
           {STYLES.map(s => (
@@ -906,6 +910,129 @@ function HueCycleRow() {
             One full rotation every {(60 / Math.max(0.5, speed)).toFixed(1)}s.
           </div>
         </>
+      )}
+    </>
+  )
+}
+
+// Crossfade — pick a blend target preset, set a duration, and the
+// renderer lerps each particle from the current preset's position +
+// color into the target's. When the ramp completes, the target
+// becomes the new current preset. Lets users build "show reel"
+// transitions without abrupt scene swaps. Cost only kicks in while
+// active; idle path is free.
+function CrossfadeRow() {
+  const blendActive   = useStore(s => s.blendActive)
+  const blendTargetId = useStore(s => s.blendTargetId)
+  const blendProgress = useStore(s => s.blendProgress)
+  const blendSeconds  = useStore(s => s.blendSeconds)
+  const setBlendSeconds = useStore(s => s.setBlendSeconds)
+  const beginBlendTo  = useStore(s => s.beginBlendTo)
+  const cancelBlend   = useStore(s => s.cancelBlend)
+  const currentPreset = useStore(s => s.currentPreset)
+  const [pickedId, setPickedId] = useState(() => {
+    // Default the dropdown to a preset that isn't the current one.
+    const first = presets.find(p => p.id !== currentPreset) || presets[0]
+    return first ? first.id : ''
+  })
+  // Keep the dropdown's default in sync as the current preset changes,
+  // but only when the user hasn't manually picked something else.
+  useEffect(() => {
+    if (pickedId === currentPreset) {
+      const next = presets.find(p => p.id !== currentPreset) || presets[0]
+      if (next) setPickedId(next.id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPreset])
+  return (
+    <>
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ fontSize: 11, color: '#7a7a90', marginBottom: 4, fontWeight: 500 }}>Target preset</div>
+        <select value={pickedId} onChange={e => setPickedId(e.target.value)}
+          disabled={blendActive}
+          style={{
+            width: '100%', padding: '7px 8px', borderRadius: 7,
+            background: 'rgba(255,255,255,0.03)', color: '#e9e9f0',
+            border: '1px solid rgba(255,255,255,0.06)',
+            fontSize: 12, fontFamily: 'inherit', cursor: 'pointer',
+            opacity: blendActive ? 0.5 : 1,
+          }}>
+          {presets.map(p => (
+            <option key={p.id} value={p.id} disabled={p.id === currentPreset}>
+              {p.emoji ? `${p.emoji} ` : ''}{p.name}{p.id === currentPreset ? ' (current)' : ''}
+            </option>
+          ))}
+        </select>
+      </div>
+      <Slider label="Duration" value={blendSeconds} min={0.5} max={10} step={0.5}
+        onChange={setBlendSeconds} display={v => `${v.toFixed(1)}s`} />
+      <div style={{ display: 'grid', gridTemplateColumns: blendActive ? '1fr 1fr' : '1fr 1fr', gap: 6, marginTop: 6 }}>
+        <button
+          onClick={() => {
+            if (blendActive) return
+            if (!pickedId || pickedId === currentPreset) return
+            beginBlendTo(pickedId)
+          }}
+          disabled={blendActive || pickedId === currentPreset}
+          style={{
+            padding: '8px 0', borderRadius: 8, fontSize: 12, fontWeight: 600,
+            cursor: (blendActive || pickedId === currentPreset) ? 'not-allowed' : 'pointer',
+            background: blendActive
+              ? 'rgba(255,255,255,0.04)'
+              : 'linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%)',
+            color: blendActive ? '#7a7a90' : '#ffffff',
+            border: blendActive ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(168,85,247,0.5)',
+            opacity: pickedId === currentPreset ? 0.5 : 1,
+            boxShadow: blendActive ? 'none' : '0 4px 14px rgba(168,85,247,0.3), inset 0 1px 0 rgba(255,255,255,0.18)',
+          }}
+        >Start Blend</button>
+        <button
+          onClick={() => {
+            // Random target that isn't the current preset.
+            const pool = presets.filter(p => p.id !== currentPreset)
+            if (pool.length === 0) return
+            const pick = pool[Math.floor(Math.random() * pool.length)].id
+            setPickedId(pick)
+            beginBlendTo(pick)
+          }}
+          disabled={blendActive || presets.length < 2}
+          style={{
+            padding: '8px 0', borderRadius: 8, fontSize: 12, fontWeight: 550,
+            cursor: blendActive ? 'not-allowed' : 'pointer',
+            background: 'rgba(255,255,255,0.04)', color: '#c8c8d0',
+            border: '1px solid rgba(255,255,255,0.06)',
+            opacity: blendActive ? 0.4 : 1,
+          }}
+        >Blend To Random</button>
+      </div>
+      {blendActive && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: '#9a9ab0', marginBottom: 4 }}>
+            <span>Blending → <span style={{ color: '#e9d5ff' }}>{presets.find(p => p.id === blendTargetId)?.name || blendTargetId}</span></span>
+            <span style={{ fontFamily: 'Geist Mono, monospace', color: '#c084fc' }}>{Math.round(blendProgress * 100)}%</span>
+          </div>
+          <div style={{
+            height: 6, borderRadius: 3, overflow: 'hidden',
+            background: 'rgba(255,255,255,0.05)',
+            border: '1px solid rgba(255,255,255,0.06)',
+          }}>
+            <div style={{
+              height: '100%', width: `${blendProgress * 100}%`,
+              background: 'linear-gradient(90deg, #6366f1, #a855f7, #ec4899)',
+              transition: 'width 0.08s linear',
+              boxShadow: '0 0 8px rgba(168,85,247,0.6)',
+            }} />
+          </div>
+          <button onClick={cancelBlend}
+            style={{
+              width: '100%', marginTop: 8, padding: '6px 0', borderRadius: 7,
+              fontSize: 11, fontWeight: 500, cursor: 'pointer',
+              background: 'rgba(239,68,68,0.06)', color: '#fca5a5',
+              border: '1px solid rgba(239,68,68,0.2)',
+            }}>
+            Cancel
+          </button>
+        </div>
       )}
     </>
   )

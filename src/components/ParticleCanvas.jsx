@@ -5,6 +5,7 @@ import { EffectComposer, Bloom, ChromaticAberration, Vignette, Noise } from '@re
 import * as THREE from 'three'
 import { useStore, THEMES } from '../store'
 import { cameraShakeOffset } from '../lib/cameraShake'
+import { smoothstep } from '../lib/crossfade'
 
 // FPS counter component (renders as HTML overlay)
 function FPSCounter() {
@@ -123,6 +124,10 @@ function Particles() {
 
   const _target = useMemo(() => new THREE.Vector3(), [])
   const _color = useMemo(() => new THREE.Color(), [])
+  // Crossfade scratchpads — reused every particle so the blend path
+  // is still allocation-free. Only touched when blendActive is true.
+  const _blendTarget = useMemo(() => new THREE.Vector3(), [])
+  const _blendColor = useMemo(() => new THREE.Color(), [])
 
   const compiledFn = useMemo(() => {
     if (!particleFnSource) return null
@@ -192,7 +197,11 @@ function Particles() {
             gravityEnabled, gravityStrength, collisionsEnabled,
             forceFieldType, forceFieldStrength, forceFieldCenter,
             kaleidoscopeEnabled, kaleidoscopeSegments,
-            hueCycleEnabled, hueCycleSpeed } = useStore.getState()
+            hueCycleEnabled, hueCycleSpeed,
+            blendActive, blendTargetFn, blendProgress, advanceBlend } = useStore.getState()
+    // Crossfade ticker — outside the per-particle loop so it advances
+    // exactly once per frame regardless of particle count.
+    if (blendActive) advanceBlend(delta)
     const themeData = THEMES[theme]
     const mousePos = window.__mousePos
     // Flat array of paint coords — avoids re-reading the .length each particle.
@@ -265,6 +274,21 @@ function Particles() {
         const srcIdx = (kaleidoSegs > 1) ? (idx % leaderCount) : idx
         const srcCount = (kaleidoSegs > 1) ? leaderCount : particleCount
         compiledFn(srcIdx, srcCount, _target, _color, t, THREE, noop, noop, dv)
+        // Crossfade overlay: if a blend is in flight, run the target
+        // preset's fn into the scratchpads and lerp into _target/_color
+        // by the blend progress. Blends with kaleidoscope just fine —
+        // the rotation happens later on the blended position.
+        if (blendActive && blendTargetFn) {
+          _blendTarget.set(0, 0, 0)
+          _blendColor.setRGB(1, 1, 1)
+          try {
+            blendTargetFn(srcIdx, srcCount, _blendTarget, _blendColor, t, THREE, noop, noop, dv)
+            // Eased ramp — feels cinematic; flat linear was abrupt at the edges.
+            const p = smoothstep(blendProgress)
+            _target.lerp(_blendTarget, p)
+            _color.lerp(_blendColor, p)
+          } catch { /* target fn errors silently — host preset keeps rendering */ }
+        }
       } catch (e) {
         if (!errorRef.current) { errorRef.current = e.message; console.error('Runtime error:', e) }
         break

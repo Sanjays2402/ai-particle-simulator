@@ -289,6 +289,55 @@ export const useStore = create((set, get) => {
   setBgGradientB: (v) => set({ bgGradientB: v }),
   setBgGradientAngle: (v) => set({ bgGradientAngle: Math.max(0, Math.min(360, v | 0)) }),
 
+  // Crossfade — render a weighted blend between the current preset
+  // and a chosen "blend target" preset. When `blendActive` is true,
+  // every particle's target position + color is `lerp(currentFn, blendFn, t)`
+  // where t ramps from 0 → 1 over blendSeconds. When the ramp finishes,
+  // the blend target becomes the current preset and the blend state
+  // resets — same UX as a single loadPreset() but smooth instead of
+  // an abrupt swap. Pure overlay on the existing pipeline; off by
+  // default so the per-particle loop cost is unchanged when unused.
+  blendTargetId: null,
+  blendTargetSource: '',
+  blendTargetFn: null,
+  blendProgress: 0,        // 0..1
+  blendSeconds: 2.0,       // default ramp duration
+  blendActive: false,
+  setBlendSeconds: (v) => set({ blendSeconds: Math.max(0.2, Math.min(20, v)) }),
+  // Start a crossfade to the given preset id. Compiles the target fn
+  // up front so the per-frame loop never has to.
+  beginBlendTo: (presetId) => {
+    const preset = presets.find(p => p.id === presetId)
+    if (!preset) return
+    const { fn } = compileParticleFn(preset.code)
+    if (!fn) return
+    set({
+      blendTargetId: presetId,
+      blendTargetSource: preset.code,
+      blendTargetFn: fn,
+      blendProgress: 0,
+      blendActive: true,
+    })
+  },
+  // Called by the renderer every frame while blendActive — advances
+  // the ramp by dt (seconds). When it finishes, swap the target into
+  // the current preset slot via loadPreset so the rest of the app
+  // (info panel, source viewer, recents) treats it as a normal swap.
+  advanceBlend: (dt) => {
+    const s = get()
+    if (!s.blendActive) return
+    const seconds = Math.max(0.2, s.blendSeconds)
+    const next = Math.min(1, s.blendProgress + dt / seconds)
+    if (next >= 1) {
+      const id = s.blendTargetId
+      set({ blendActive: false, blendProgress: 0, blendTargetId: null, blendTargetFn: null, blendTargetSource: '' })
+      if (id) get().loadPreset(id)
+    } else {
+      set({ blendProgress: next })
+    }
+  },
+  cancelBlend: () => set({ blendActive: false, blendProgress: 0, blendTargetId: null, blendTargetFn: null, blendTargetSource: '' }),
+
   // Slideshow mode — rotate through filtered/favourited presets on a
   // timer. `slideshowOrder` is one of 'sequence' | 'shuffle' | 'favourites'.
   // The driver in App.jsx watches these and rotates accordingly; we
