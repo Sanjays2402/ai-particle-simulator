@@ -7,6 +7,7 @@ import {
 import { clampFocusDistance, clampFocalLength, clampBokehScale } from './lib/depthOfField'
 import { clampIntensity as clampWindIntensity, clampAzimuth as clampWindAzimuth, clampPitch as clampWindPitch } from './lib/wind'
 import { loadThemes as loadCustomThemes, saveThemes as saveCustomThemes, addTheme as addCustomThemeHelper, removeTheme as removeCustomThemeHelper, resolveTheme as resolveThemeHelper } from './lib/customThemes'
+import { clampAmplitude as clampNoiseAmp, clampFrequency as clampNoiseFreq, clampSpeed as clampNoiseSpeed } from './lib/noiseDeformer'
 
 // Lightweight settings persistence: a subset of user-tweakable values
 // is read once on store init and written back whenever it changes.
@@ -263,6 +264,18 @@ export const useStore = create((set, get) => {
   setWindIntensity: (v) => set({ windIntensity: clampWindIntensity(v) }),
   setWindAzimuth: (v)   => set({ windAzimuth:   clampWindAzimuth(v) }),
   setWindPitch: (v)     => set({ windPitch:     clampWindPitch(v) }),
+
+  // Trig-noise deformer — a global wiggle layered on top of whatever
+  // the active preset fn produces. Amplitude 0 = invisible (the
+  // renderer skips the math entirely); higher values add shimmer.
+  noiseEnabled: false,
+  noiseAmplitude: 0.5,    // world units of peak displacement
+  noiseFrequency: 1.5,    // spatial frequency (higher = noisier)
+  noiseSpeed: 1.0,        // temporal frequency (higher = faster shimmer)
+  setNoiseEnabled: (v) => set({ noiseEnabled: !!v }),
+  setNoiseAmplitude: (v) => set({ noiseAmplitude: clampNoiseAmp(v) }),
+  setNoiseFrequency: (v) => set({ noiseFrequency: clampNoiseFreq(v) }),
+  setNoiseSpeed: (v)     => set({ noiseSpeed:     clampNoiseSpeed(v) }),
 
   // Gradient color palette — user-picked 2-stop tint applied to each
   // particle by linearly interpolating between the stops based on the

@@ -9,6 +9,7 @@ import { smoothstep } from '../lib/crossfade'
 import { resolveReducedMotion } from '../lib/reducedMotion'
 import { windVector, applyWind } from '../lib/wind'
 import { resolveTheme as resolveActiveTheme } from '../lib/customThemes'
+import { applyNoise } from '../lib/noiseDeformer'
 
 // FPS counter component (renders as HTML overlay)
 function FPSCounter() {
@@ -202,6 +203,7 @@ function Particles() {
             kaleidoscopeEnabled, kaleidoscopeSegments,
             hueCycleEnabled, hueCycleSpeed,
             windEnabled, windIntensity, windAzimuth, windPitch,
+            noiseEnabled, noiseAmplitude, noiseFrequency, noiseSpeed,
             blendActive, blendTargetFn, blendProgress, advanceBlend } = useStore.getState()
     // Crossfade ticker — outside the per-particle loop so it advances
     // exactly once per frame regardless of particle count.
@@ -284,6 +286,11 @@ function Particles() {
     const windVec = (windEnabled && !reducedMotion)
       ? windVector(windAzimuth, windPitch, windIntensity)
       : null
+
+    // Trig-noise deformer: a flag + amplitude precheck lets the
+    // per-particle path skip when the feature is off. Also suppressed
+    // under reduced motion to avoid the shimmer.
+    const noiseActive = noiseEnabled && noiseAmplitude > 0 && !reducedMotion
 
     for (let idx = 0; idx < particleCount; idx++) {
       _target.set(0, 0, 0)
@@ -427,6 +434,11 @@ function Particles() {
       // enabled, fast-pathed entirely when disabled. Time-step scaled
       // so framerate variation doesn't change perceived speed.
       if (windVec) applyWind(_target, windVec, dt)
+
+      // Trig-noise deformer — global shimmer layered on top of every
+      // preset's positional output. Cost when off: a single boolean
+      // check. Cost when on: ~6 sin/cos per particle, branch-free.
+      if (noiseActive) applyNoise(_target, idx, t, noiseAmplitude, noiseFrequency, noiseSpeed)
 
       // Paint-mode soft attractors — nudge particles toward each stamped
       // point. Capped at ~24 points in the store so this stays O(24N).

@@ -213,6 +213,10 @@ export default function LeftSidebar() {
         <WindRow />
       </Section>
 
+      <Section title="Noise Deformer">
+        <NoiseRow />
+      </Section>
+
       <Section title="Kaleidoscope">
         <KaleidoscopeRow />
       </Section>
@@ -963,6 +967,43 @@ function WindRow() {
           }}>
             Particles drift toward the compass heading every frame.
             Try Storm preset + Vortex field for a hurricane look.
+          </div>
+        </>
+      )}
+    </>
+  )
+}
+
+// Trig-noise deformer: amplitude / frequency / speed sliders for the
+// global wiggle. Off by default; sliders only appear when enabled.
+function NoiseRow() {
+  const enabled   = useStore(s => s.noiseEnabled)
+  const amplitude = useStore(s => s.noiseAmplitude)
+  const frequency = useStore(s => s.noiseFrequency)
+  const speed     = useStore(s => s.noiseSpeed)
+  const setEn  = useStore(s => s.setNoiseEnabled)
+  const setA   = useStore(s => s.setNoiseAmplitude)
+  const setF   = useStore(s => s.setNoiseFrequency)
+  const setS   = useStore(s => s.setNoiseSpeed)
+  return (
+    <>
+      <ToggleRow label="Wiggle" value={enabled} onChange={setEn} />
+      {enabled && (
+        <>
+          <Slider label="Amplitude" value={amplitude} min={0} max={2} step={0.05}
+            onChange={setA} display={v => v.toFixed(2)} />
+          <Slider label="Frequency" value={frequency} min={0.1} max={8} step={0.1}
+            onChange={setF} display={v => v.toFixed(1)} />
+          <Slider label="Speed" value={speed} min={0} max={4} step={0.1}
+            onChange={setS} display={v => v.toFixed(1)} />
+          <div style={{
+            marginTop: 4, fontSize: 11, color: '#7a7a90',
+            padding: '6px 8px', borderRadius: 6,
+            background: 'rgba(168,85,247,0.05)',
+            border: '1px solid rgba(168,85,247,0.12)',
+          }}>
+            Adds a per-particle trig wiggle on top of any preset.
+            Pair with a tight preset (e.g. Sphere) for shimmery dust.
           </div>
         </>
       )}
