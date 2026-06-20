@@ -1,7 +1,7 @@
 import { useRef, useMemo, useEffect, useCallback } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
-import { EffectComposer, Bloom, ChromaticAberration, Vignette, Noise } from '@react-three/postprocessing'
+import { EffectComposer, Bloom, ChromaticAberration, Vignette, Noise, DepthOfField } from '@react-three/postprocessing'
 import * as THREE from 'three'
 import { useStore, THEMES } from '../store'
 import { cameraShakeOffset } from '../lib/cameraShake'
@@ -692,6 +692,10 @@ export default function ParticleCanvas() {
   const vignetteIntensity = useStore(s => s.vignetteIntensity)
   const filmGrain = useStore(s => s.filmGrain)
   const filmGrainIntensity = useStore(s => s.filmGrainIntensity)
+  const depthOfField       = useStore(s => s.depthOfField)
+  const dofFocusDistance   = useStore(s => s.dofFocusDistance)
+  const dofFocalLength     = useStore(s => s.dofFocalLength)
+  const dofBokehScale      = useStore(s => s.dofBokehScale)
   const fpsRef = useRef(null)
   const audioLevel = useStore(s => s.audioLevel)
   const audioBass = useStore(s => s.audioBass)
@@ -773,6 +777,13 @@ export default function ParticleCanvas() {
         <CameraShakeFX />
         <EffectComposer>
           <Bloom intensity={glowIntensity * 0.6} luminanceThreshold={0.8} luminanceSmoothing={0.4} radius={0.3} mipmapBlur />
+          {depthOfField && (
+            <DepthOfField
+              focusDistance={dofFocusDistance}
+              focalLength={dofFocalLength}
+              bokehScale={dofBokehScale}
+            />
+          )}
           {chromaticAberration && (
             <ChromaticAberration offset={[chromaticIntensity, chromaticIntensity]} />
           )}

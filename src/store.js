@@ -4,6 +4,7 @@ import {
   loadStats, saveStats, beginSession, recordPresetLoad, bumpStat,
   addSessionSeconds,
 } from './lib/sessionStats'
+import { clampFocusDistance, clampFocalLength, clampBokehScale } from './lib/depthOfField'
 
 // Lightweight settings persistence: a subset of user-tweakable values
 // is read once on store init and written back whenever it changes.
@@ -226,12 +227,24 @@ export const useStore = create((set, get) => {
   vignetteIntensity: 0.45,
   filmGrain: false,
   filmGrainIntensity: 0.18,
+  // Depth of Field (Bokeh): out-of-focus blur with adjustable focal plane.
+  // `dofFocusDistance` is normalized 0..1 (0 = camera, 1 = far plane); the
+  // canvas converts to world units when wiring the effect. `dofBokehScale`
+  // controls the blur radius. Off by default so the base scene is sharp.
+  depthOfField: false,
+  dofFocusDistance: 0.022,   // ~near-mid camera focus by default
+  dofFocalLength: 0.05,
+  dofBokehScale: 4.0,
   setChromaticAberration: (v) => set({ chromaticAberration: v }),
   setChromaticIntensity: (v) => set({ chromaticIntensity: v }),
   setVignette: (v) => set({ vignette: v }),
   setVignetteIntensity: (v) => set({ vignetteIntensity: v }),
   setFilmGrain: (v) => set({ filmGrain: v }),
   setFilmGrainIntensity: (v) => set({ filmGrainIntensity: v }),
+  setDepthOfField: (v) => set({ depthOfField: v }),
+  setDofFocusDistance: (v) => set({ dofFocusDistance: clampFocusDistance(v) }),
+  setDofFocalLength: (v)   => set({ dofFocalLength:   clampFocalLength(v) }),
+  setDofBokehScale: (v)    => set({ dofBokehScale:    clampBokehScale(v) }),
 
   // Gradient color palette — user-picked 2-stop tint applied to each
   // particle by linearly interpolating between the stops based on the

@@ -660,12 +660,20 @@ function PostFXRow() {
   const vignetteIntensity     = useStore(s => s.vignetteIntensity)
   const filmGrain             = useStore(s => s.filmGrain)
   const filmGrainIntensity    = useStore(s => s.filmGrainIntensity)
+  const depthOfField          = useStore(s => s.depthOfField)
+  const dofFocusDistance      = useStore(s => s.dofFocusDistance)
+  const dofFocalLength        = useStore(s => s.dofFocalLength)
+  const dofBokehScale         = useStore(s => s.dofBokehScale)
   const setChromaticAberration = useStore(s => s.setChromaticAberration)
   const setChromaticIntensity  = useStore(s => s.setChromaticIntensity)
   const setVignette            = useStore(s => s.setVignette)
   const setVignetteIntensity   = useStore(s => s.setVignetteIntensity)
   const setFilmGrain           = useStore(s => s.setFilmGrain)
   const setFilmGrainIntensity  = useStore(s => s.setFilmGrainIntensity)
+  const setDepthOfField        = useStore(s => s.setDepthOfField)
+  const setDofFocusDistance    = useStore(s => s.setDofFocusDistance)
+  const setDofFocalLength      = useStore(s => s.setDofFocalLength)
+  const setDofBokehScale       = useStore(s => s.setDofBokehScale)
   return (
     <>
       <ToggleRow label="Chromatic Aberration" value={chromaticAberration} onChange={setChromaticAberration} />
@@ -682,6 +690,17 @@ function PostFXRow() {
       {filmGrain && (
         <Slider label="Grain Intensity" value={filmGrainIntensity} min={0} max={0.6} step={0.02}
           onChange={setFilmGrainIntensity} display={v => v.toFixed(2)} />
+      )}
+      <ToggleRow label="Depth of Field" value={depthOfField} onChange={setDepthOfField} />
+      {depthOfField && (
+        <>
+          <Slider label="Focus Distance" value={dofFocusDistance} min={0} max={0.2} step={0.001}
+            onChange={setDofFocusDistance} display={v => v.toFixed(3)} />
+          <Slider label="Focal Length" value={dofFocalLength} min={0} max={0.2} step={0.005}
+            onChange={setDofFocalLength} display={v => v.toFixed(3)} />
+          <Slider label="Bokeh Scale" value={dofBokehScale} min={0} max={12} step={0.5}
+            onChange={setDofBokehScale} display={v => v.toFixed(1)} />
+        </>
       )}
     </>
   )
