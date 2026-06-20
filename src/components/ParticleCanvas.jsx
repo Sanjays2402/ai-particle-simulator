@@ -6,6 +6,7 @@ import * as THREE from 'three'
 import { useStore, THEMES } from '../store'
 import { cameraShakeOffset } from '../lib/cameraShake'
 import { smoothstep } from '../lib/crossfade'
+import { resolveReducedMotion } from '../lib/reducedMotion'
 
 // FPS counter component (renders as HTML overlay)
 function FPSCounter() {
@@ -261,7 +262,13 @@ function Particles() {
     // Hue Cycle precomputation: convert cycles-per-minute to a 0..1
     // hue offset that wraps every (60 / speed) seconds. Computing this
     // once per frame keeps the per-particle work to a single offsetHSL.
-    const hueCycleOffset = hueCycleEnabled
+    // Suppressed entirely under reduced motion so colour-strobing users
+    // who flip the OS pref aren't forced into rainbow churn.
+    const reducedMotion = resolveReducedMotion(
+      useStore.getState().reducedMotionMode,
+      useStore.getState().osPrefersReducedMotion,
+    )
+    const hueCycleOffset = (hueCycleEnabled && !reducedMotion)
       ? ((t * (hueCycleSpeed / 60)) % 1 + 1) % 1
       : 0
 
@@ -591,12 +598,14 @@ function CameraShakeFX() {
   // restore on the next frame so the orbit-controls rest pose stays
   // anchored. Net effect: the camera kicks on each beat and snaps back
   // without drifting. Skipped entirely when the toggle is off so the
-  // base scene has zero overhead.
+  // base scene has zero overhead. Also suppressed under reduced motion
+  // — vestibular users get the rest of the scene without the kick.
   const { camera } = useThree()
   const lastOffset = useRef([0, 0])
   useFrame((_, delta) => {
     const { cameraShake, cameraShakeIntensity, audioReactive,
-            audioMode, audioBeat, audioBass, audioLevel } = useStore.getState()
+            audioMode, audioBeat, audioBass, audioLevel,
+            reducedMotionMode, osPrefersReducedMotion } = useStore.getState()
     // Always undo last frame's offset so we never accumulate drift,
     // even when the user toggles the feature off mid-shake.
     const [pdx, pdy] = lastOffset.current
@@ -606,6 +615,7 @@ function CameraShakeFX() {
       lastOffset.current = [0, 0]
     }
     if (!cameraShake || !audioReactive) return
+    if (resolveReducedMotion(reducedMotionMode, osPrefersReducedMotion)) return
     const impulse =
       audioMode === 'beat' ? audioBeat :
       audioMode === 'bass' ? audioBass :
@@ -628,6 +638,9 @@ function CameraControls() {
   const autoRotateSpeed = useStore(s => s.autoRotateSpeed)
   const minDistance = useStore(s => s.minDistance)
   const maxDistance = useStore(s => s.maxDistance)
+  const reducedMotionMode = useStore(s => s.reducedMotionMode)
+  const osPrefersReducedMotion = useStore(s => s.osPrefersReducedMotion)
+  const reduced = resolveReducedMotion(reducedMotionMode, osPrefersReducedMotion)
   const { camera } = useThree()
   const controlsRef = useRef()
 
@@ -661,7 +674,7 @@ function CameraControls() {
       dampingFactor={0.05}
       rotateSpeed={orbitSpeed}
       zoomSpeed={0.8}
-      autoRotate={autoRotate}
+      autoRotate={autoRotate && !reduced}
       autoRotateSpeed={autoRotateSpeed}
       minDistance={minDistance}
       maxDistance={maxDistance}

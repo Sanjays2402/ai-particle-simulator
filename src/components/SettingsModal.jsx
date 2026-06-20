@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import { useStore } from '../store'
+import { resolveReducedMotion } from '../lib/reducedMotion'
 
 export default function SettingsModal({ onClose }) {
-  const { aiApiKey, aiBaseUrl, aiModel, setAiSettings } = useStore()
+  const { aiApiKey, aiBaseUrl, aiModel, setAiSettings,
+          reducedMotionMode, setReducedMotionMode, osPrefersReducedMotion } = useStore()
   const [key, setKey] = useState(aiApiKey)
   const [url, setUrl] = useState(aiBaseUrl)
   const [model, setModel] = useState(aiModel)
+  const effective = resolveReducedMotion(reducedMotionMode, osPrefersReducedMotion)
 
   const save = () => {
     setAiSettings(key, url, model)
@@ -35,6 +38,40 @@ export default function SettingsModal({ onClose }) {
         <Field label="API Base URL" value={url} onChange={setUrl} placeholder="https://api.openai.com/v1" />
         <Field label="API Key" value={key} onChange={setKey} placeholder="sk-..." type="password" />
         <Field label="Model" value={model} onChange={setModel} placeholder="gpt-4o-mini" />
+
+        <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          <div style={{ fontSize: 12, fontWeight: 500, color: '#7a7a90', marginBottom: 8 }}>Accessibility</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 6 }}>
+            {[
+              { id: 'auto',   label: 'Auto',   desc: 'Follow OS pref' },
+              { id: 'reduce', label: 'Reduce', desc: 'Suppress animations' },
+              { id: 'full',   label: 'Full',   desc: 'Always animate' },
+            ].map(opt => {
+              const active = reducedMotionMode === opt.id
+              return (
+                <button key={opt.id} onClick={() => setReducedMotionMode(opt.id)}
+                  title={opt.desc}
+                  style={{
+                    padding: '8px 0', borderRadius: 7, fontSize: 12, fontWeight: 550,
+                    cursor: 'pointer', transition: 'all 0.15s ease-out',
+                    background: active
+                      ? 'linear-gradient(135deg, rgba(99,102,241,0.22), rgba(168,85,247,0.18))'
+                      : 'rgba(255,255,255,0.03)',
+                    color: active ? '#dbeafe' : '#8a8aa0',
+                    border: active ? '1px solid rgba(99,102,241,0.45)' : '1px solid rgba(255,255,255,0.05)',
+                  }}>{opt.label}</button>
+              )
+            })}
+          </div>
+          <p style={{ fontSize: 11, color: '#7a7a90', lineHeight: 1.5 }}>
+            Currently <span style={{ color: effective ? '#86efac' : '#fbbf24', fontWeight: 600 }}>{effective ? 'reduced motion ON' : 'full motion ON'}</span>
+            {' '}
+            <span style={{ color: '#5a5a70' }}>
+              (OS pref: {osPrefersReducedMotion ? 'reduce' : 'no-preference'}).
+            </span>
+            {' '}When reduced, hue cycle, auto-rotate, camera shake, and background parallax are suppressed.
+          </p>
+        </div>
 
         <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
           <div style={{ fontSize: 12, fontWeight: 500, color: '#7a7a90', marginBottom: 8 }}>Local Data</div>

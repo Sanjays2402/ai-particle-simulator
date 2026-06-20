@@ -338,6 +338,23 @@ export const useStore = create((set, get) => {
   },
   cancelBlend: () => set({ blendActive: false, blendProgress: 0, blendTargetId: null, blendTargetFn: null, blendTargetSource: '' }),
 
+  // Reduced motion — accessibility mode that respects the OS-level
+  // `prefers-reduced-motion: reduce` hint. UI lets the user override:
+  //   - 'auto':   follow the OS (default)
+  //   - 'reduce': force reduced motion on (great for vestibular disorders)
+  //   - 'full':   force animations on regardless of OS
+  // The boot in src/lib/reducedMotion.js reads the OS pref once at
+  // load time + subscribes to changes so we don't recheck on every frame.
+  reducedMotionMode: localStorage.getItem('reduced-motion-mode') || 'auto',
+  osPrefersReducedMotion: false,  // updated by the App-level subscriber
+  setReducedMotionMode: (m) => {
+    const allowed = m === 'reduce' || m === 'full' || m === 'auto'
+    const next = allowed ? m : 'auto'
+    try { localStorage.setItem('reduced-motion-mode', next) } catch { /* quota */ }
+    set({ reducedMotionMode: next })
+  },
+  setOSPrefersReducedMotion: (v) => set({ osPrefersReducedMotion: !!v }),
+
   // Slideshow mode — rotate through filtered/favourited presets on a
   // timer. `slideshowOrder` is one of 'sequence' | 'shuffle' | 'favourites'.
   // The driver in App.jsx watches these and rotates accordingly; we

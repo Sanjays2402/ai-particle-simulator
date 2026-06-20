@@ -18,11 +18,25 @@ import SnapshotGallery from './components/SnapshotGallery'
 import Slideshow from './components/Slideshow'
 import { loadSnapshots } from './lib/snapshotGallery'
 import { useIsMobile } from './lib/useIsMobile'
+import { getOSPrefersReduced, subscribeOSReducedMotion } from './lib/reducedMotion'
 import { Sparkles, ChevronLeft, ChevronRight } from 'lucide-react'
 
 export default function App() {
   const [showSettings, setShowSettings] = useState(false)
-  const [showSplash, setShowSplash] = useState(true)
+  // Splash is suppressed for reduced-motion users (the scale-in/fade-out
+  // is purely decorative). Initialize state from the OS pref directly
+  // so we never need a synchronous setState in an effect — that pattern
+  // triggers the cascading-render lint and means a wasted render cycle.
+  const [showSplash, setShowSplash] = useState(() => {
+    if (typeof window === 'undefined') return true
+    try {
+      const userMode = localStorage.getItem('reduced-motion-mode') || 'auto'
+      if (userMode === 'reduce') return false
+      if (userMode === 'full') return true
+      // auto: defer to OS
+      return !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+    } catch { return true }
+  })
   const [galleryOpen, setGalleryOpen] = useState(false)
   const [snapshotCount, setSnapshotCount] = useState(() => loadSnapshots().length)
   const isMobile = useIsMobile()
@@ -33,9 +47,12 @@ export default function App() {
   const orb1 = useRef(null), orb2 = useRef(null), orb3 = useRef(null)
 
   useEffect(() => {
+    // For reduced-motion users showSplash was already initialized to
+    // false; the timer only matters for full-motion users.
+    if (!showSplash) return
     const t = setTimeout(() => setShowSplash(false), 1700)
     return () => clearTimeout(t)
-  }, [])
+  }, [showSplash])
 
   // Keep the snapshot badge in lock-step with the gallery's localStorage
   // state. TopBar fires this event on every successful screenshot, and
@@ -50,8 +67,31 @@ export default function App() {
     }
   }, [])
 
+  // Reduced-motion bootstrap: seed the store with the OS pref once
+  // on mount, then subscribe so any later flip (user changes OS pref
+  // mid-session) reflects without a refresh. The actual feature gates
+  // read `reducedMotionMode` + `osPrefersReducedMotion` from the store
+  // and resolve via lib/reducedMotion.
+  useEffect(() => {
+    const seed = getOSPrefersReduced()
+    useStore.getState().setOSPrefersReducedMotion(seed)
+    const unsub = subscribeOSReducedMotion((v) => {
+      useStore.getState().setOSPrefersReducedMotion(v)
+    })
+    return unsub
+  }, [])
+
   useEffect(() => {
     const onMove = (e) => {
+      const { reducedMotionMode, osPrefersReducedMotion } = useStore.getState()
+      // Skip the parallax math entirely under reduced motion — keeps
+      // the orbs static so vestibular users don't get the drift.
+      if (reducedMotionMode === 'reduce' || (reducedMotionMode === 'auto' && osPrefersReducedMotion)) {
+        if (orb1.current) orb1.current.style.transform = 'translate(0,0)'
+        if (orb2.current) orb2.current.style.transform = 'translate(0,0)'
+        if (orb3.current) orb3.current.style.transform = 'translate(0,0)'
+        return
+      }
       const x = (e.clientX / window.innerWidth - 0.5) * 2
       const y = (e.clientY / window.innerHeight - 0.5) * 2
       if (orb1.current) orb1.current.style.transform = `translate(${x * 30}px, ${y * 30}px)`
