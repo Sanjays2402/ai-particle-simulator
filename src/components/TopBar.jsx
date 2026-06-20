@@ -32,13 +32,14 @@ export default function TopBar({ onSettings }) {
   const handleScreenshot = () => {
     const canvas = document.querySelector('#particle-canvas canvas')
     if (!canvas) return
-    const { infoTitle, currentPreset } = useStore.getState()
+    const { infoTitle, currentPreset, bumpSessionStat } = useStore.getState()
     const name = (infoTitle || currentPreset || 'particles').replace(/\s+/g, '-').toLowerCase()
     const ts = Date.now()
     const link = document.createElement('a')
     link.download = `particle-${name}-${ts}.png`
     link.href = canvas.toDataURL('image/png')
     link.click()
+    bumpSessionStat('screenshotsTaken', 1)
   }
 
   const handleShare = () => {

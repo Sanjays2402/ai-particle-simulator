@@ -1,5 +1,9 @@
 import { create } from 'zustand'
 import { presets } from './presets'
+import {
+  loadStats, saveStats, beginSession, recordPresetLoad, bumpStat,
+  addSessionSeconds,
+} from './lib/sessionStats'
 
 // Lightweight settings persistence: a subset of user-tweakable values
 // is read once on store init and written back whenever it changes.
@@ -52,6 +56,14 @@ const THEMES = {
 }
 
 export { THEMES }
+
+// Session-stats bootstrap. We bump totalSessions exactly once per page
+// load, then keep the in-memory copy on the store so panels can render
+// from a single subscription. A page-hide listener flushes accumulated
+// seconds back to disk (set up after `useStore` is created below).
+const _statsBoot = beginSession(loadStats())
+saveStats(_statsBoot)
+const _sessionStartedAt = Date.now()
 
 export const useStore = create((set, get) => {
   const persisted = loadPersisted()
@@ -182,6 +194,21 @@ export const useStore = create((set, get) => {
   aiLoading: false,
   aiError: null,
   prompt: '',
+
+  // Session stats — read once on boot, updated through helpers below
+  // and flushed back to disk on key user actions. The panel in the
+  // RightSidebar subscribes to this for its live readout.
+  sessionStats: _statsBoot,
+  bumpSessionStat: (key, by = 1) => set(s => {
+    const next = bumpStat(s.sessionStats, key, by)
+    saveStats(next)
+    return { sessionStats: next }
+  }),
+  resetSessionStats: () => {
+    const blank = beginSession({ ...loadStats(), totalSessions: 0, lifetimeSeconds: 0, presetsLoaded: 0, uniquePresets: [], gifsExported: 0, videosExported: 0, screenshotsTaken: 0, firstSeenAt: null })
+    saveStats(blank)
+    set({ sessionStats: blank })
+  },
 
   // Actions
   setParticleCount: (v) => set({ particleCount: v }),
@@ -330,6 +357,14 @@ export const useStore = create((set, get) => {
       recentPresets,
       ...physicsState,
     })
+    // Stats — bump after the scene swap so the panel reflects the
+    // preset that just rendered. Persisted on every load so a crash
+    // mid-session doesn't lose the counter.
+    set(s => {
+      const next = recordPresetLoad(s.sessionStats, presetId)
+      saveStats(next)
+      return { sessionStats: next }
+    })
     setTimeout(() => get().capturePresetThumbnail(presetId), 2000)
   },
 
@@ -447,6 +482,25 @@ useStore.subscribe((state) => {
   }
   if (dirty) savePersisted(state)
 })
+
+// Flush accumulated session seconds back to disk on page hide /
+// beforeunload. Using both events covers desktop tab-close + mobile
+// background — visibilitychange fires reliably on mobile, beforeunload
+// on desktop refresh/close.
+if (typeof window !== 'undefined') {
+  const flushSession = () => {
+    const elapsedSec = (Date.now() - _sessionStartedAt) / 1000
+    const cur = useStore.getState().sessionStats
+    const next = addSessionSeconds(cur, elapsedSec)
+    saveStats(next)
+    useStore.setState({ sessionStats: next })
+  }
+  window.addEventListener('beforeunload', flushSession)
+  window.addEventListener('pagehide', flushSession)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushSession()
+  })
+}
 
 function compileParticleFn(code) {
   const controls = []

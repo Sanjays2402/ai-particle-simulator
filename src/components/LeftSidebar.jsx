@@ -92,6 +92,7 @@ export default function LeftSidebar() {
     URL.revokeObjectURL(url)
 
     useStore.setState({ isExportingGif: false, gifProgress: null })
+    useStore.getState().bumpSessionStat('gifsExported', 1)
   }
 
   const exportVideo = async () => {
@@ -102,6 +103,7 @@ export default function LeftSidebar() {
       downloadVideoBlob(blob, mime, baseName)
       setVideoRec(null)
       setVideoElapsed(0)
+      useStore.getState().bumpSessionStat('videosExported', 1)
       return
     }
     const canvas = document.querySelector('#particle-canvas canvas')

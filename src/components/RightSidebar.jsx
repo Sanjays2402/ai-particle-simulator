@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
-import { Activity, Sparkles, Palette, Gauge, Camera, X } from 'lucide-react'
+import { Activity, Sparkles, Palette, Gauge, Camera, X, BarChart3 } from 'lucide-react'
 import { loadCameraViews, saveCameraViews, appendView, CAMERA_VIEWS_MAX } from '../lib/cameraViews'
+import { formatDuration } from '../lib/sessionStats'
 import { showToast } from './Toast'
 
 function SectionHeader({ children }) {
@@ -109,6 +110,11 @@ export default function RightSidebar() {
       <div style={{ padding: '2px 16px 14px' }}>
         <SectionHeader>Camera Views</SectionHeader>
         <CameraViews />
+      </div>
+
+      <div style={{ padding: '2px 16px 14px' }}>
+        <SectionHeader>Session Stats</SectionHeader>
+        <SessionStatsPanel />
       </div>
 
       {/* Keyboard shortcuts hint */}
@@ -273,6 +279,63 @@ function CameraViews() {
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+// Session Stats panel: shows lifetime totals (presets visited, gifs,
+// screenshots, total time across all sessions) plus a live ticker for
+// the current session. Re-subscribes to sessionStats so other call
+// sites (loadPreset, screenshot, gif export) reflect immediately.
+function SessionStatsPanel() {
+  const stats = useStore(s => s.sessionStats)
+  const resetSessionStats = useStore(s => s.resetSessionStats)
+  const [now, setNow] = useState(() => Date.now())
+  const [sessionStart] = useState(() => Date.now())
+  // Tick every 5s so the readout stays current without thrashing
+  // re-renders. The Telemetry block already does 1Hz FPS work.
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 5000)
+    return () => clearInterval(id)
+  }, [])
+  const sessionSec = Math.max(0, (now - sessionStart) / 1000)
+  const lifetimeTotal = (stats.lifetimeSeconds || 0) + Math.floor(sessionSec)
+  const rows = [
+    { label: 'Session', value: formatDuration(sessionSec), accent: '#c084fc' },
+    { label: 'Lifetime', value: formatDuration(lifetimeTotal) },
+    { label: 'Sessions', value: stats.totalSessions ?? 0 },
+    { label: 'Presets loaded', value: stats.presetsLoaded ?? 0 },
+    { label: 'Unique presets', value: (stats.uniquePresets?.length ?? 0) },
+    { label: 'Screenshots', value: stats.screenshotsTaken ?? 0 },
+    { label: 'GIFs exported', value: stats.gifsExported ?? 0 },
+    { label: 'Videos exported', value: stats.videosExported ?? 0 },
+  ]
+  return (
+    <div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {rows.map(r => (
+          <div key={r.label} className="metric-row">
+            <span className="metric-label">
+              <BarChart3 size={10} style={{ display: 'inline', verticalAlign: -1, marginRight: 4 }} />{r.label}
+            </span>
+            <span className="metric-value" style={r.accent ? { color: r.accent } : undefined}>
+              {r.value}
+            </span>
+          </div>
+        ))}
+      </div>
+      <button onClick={() => {
+        if (window.confirm('Reset all session stats? This cannot be undone.')) resetSessionStats()
+      }}
+        title="Clear lifetime counters"
+        style={{
+          width: '100%', marginTop: 10, padding: '6px 0', borderRadius: 7,
+          fontSize: 11, fontWeight: 500, cursor: 'pointer',
+          background: 'rgba(239,68,68,0.06)', color: '#fca5a5',
+          border: '1px solid rgba(239,68,68,0.2)',
+        }}>
+        Reset Stats
+      </button>
     </div>
   )
 }
