@@ -4,6 +4,7 @@ import { Activity, Sparkles, Palette, Gauge, Camera, X, BarChart3, Code2, Copy, 
 import { loadCameraViews, saveCameraViews, appendView, CAMERA_VIEWS_MAX } from '../lib/cameraViews'
 import { formatDuration } from '../lib/sessionStats'
 import { tokenize } from '../lib/codeTokens'
+import { loadKeymap, resolveAction } from '../lib/keymap'
 import {
   loadBookmarks, saveBookmarks, appendBookmark, removeBookmark,
   applyScene, captureScene, MAX_BOOKMARKS,
@@ -207,24 +208,24 @@ function CameraViews() {
     saveCameraViews(next)
   }
 
-  // Keyboard quick-save on `V`. Same input-guard pattern the rest of
-  // the app uses for global shortcuts. We re-bind whenever the views
-  // list changes so the auto-incremented name reflects current count.
+  // Keyboard quick-save on the active "saveView" binding (default V).
+  // Routed through the keymap so the rebinding UI in Settings can
+  // change which key triggers it. We re-bind whenever the views list
+  // changes so the auto-incremented name reflects current count.
   useEffect(() => {
     const onKey = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
-      if (e.metaKey || e.ctrlKey || e.altKey) return
-      if (e.key === 'v' || e.key === 'V') {
-        e.preventDefault()
-        const api = window.__particleCamera
-        if (!api) { showToast('Camera not ready yet'); return }
-        const state = api.get()
-        const name = `View ${(views[0]?.id || 0) + 1}`
-        const next = appendView(views, { name, pos: state.pos, target: state.target })
-        setViews(next)
-        saveCameraViews(next)
-        showToast(`Saved "${name}"`, <Camera size={10} color="#fff" strokeWidth={2.4} />)
-      }
+      const map = loadKeymap()
+      if (resolveAction(map, e) !== 'saveView') return
+      e.preventDefault()
+      const api = window.__particleCamera
+      if (!api) { showToast('Camera not ready yet'); return }
+      const state = api.get()
+      const name = `View ${(views[0]?.id || 0) + 1}`
+      const next = appendView(views, { name, pos: state.pos, target: state.target })
+      setViews(next)
+      saveCameraViews(next)
+      showToast(`Saved "${name}"`, <Camera size={10} color="#fff" strokeWidth={2.4} />)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -348,15 +349,17 @@ function SceneBookmarks() {
     return `Scene ${(items[0]?.id || 0) + 1}`
   }
 
-  // Keyboard: B = quick-save, Shift+B = restore most recent.
+  // Keyboard: bookmark = quick-save, bookmarkPanel = restore most recent.
+  // Routed through the keymap so Settings can rebind both.
   useEffect(() => {
     const onKey = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
-      if (e.metaKey || e.ctrlKey || e.altKey) return
-      if (e.key === 'b' && !e.shiftKey) {
+      const map = loadKeymap()
+      const action = resolveAction(map, e)
+      if (action === 'bookmark') {
         e.preventDefault()
         save(nextDefaultName())
-      } else if (e.key === 'B' && e.shiftKey) {
+      } else if (action === 'bookmarkPanel') {
         if (items.length === 0) { showToast('No bookmarks yet'); return }
         e.preventDefault()
         restore(items[0])

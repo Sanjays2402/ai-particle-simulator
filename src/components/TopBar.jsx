@@ -4,6 +4,7 @@ import { presets } from '../presets'
 import { buildShareUrl } from '../lib/share'
 import { captureFromCanvas, appendSnapshot, loadSnapshots, saveSnapshots } from '../lib/snapshotGallery'
 import { createLoop, DEMO_LOOPS } from '../lib/demoAudioLoops'
+import { loadKeymap, resolveAction } from '../lib/keymap'
 import {
   Play, Pause, RotateCcw, Maximize2, Shuffle, Magnet, Camera, Link2,
   Mic, Download, Settings, Repeat, Sparkles, Zap, Paintbrush, Send, Images, Music2,
@@ -220,39 +221,51 @@ export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snaps
   useEffect(() => () => teardownAudio(), [])
 
   useEffect(() => {
+    // Live keymap snapshot — reloaded on every keypress so a remap
+    // applied in Settings takes effect without a refresh. Cheap (one
+    // localStorage read), runs only when a non-typing keystroke hits
+    // the window.
     const handler = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
-      const { setPlaying, playing, loadRandom, loadPreset, nextPreset, prevPreset, toggleFavorite } = useStore.getState()
-      switch (e.code) {
-        case 'Space': e.preventDefault(); setPlaying(!playing); break
-        case 'KeyR': loadRandom(); break
-        case 'KeyF':
-          if (e.shiftKey) {
-            // Shift+F = star/unstar the current preset.
-            const cur = useStore.getState().currentPreset
-            if (cur) {
-              toggleFavorite(cur)
-              const notif = document.getElementById('perf-notif')
-              if (notif) {
-                const isFav = useStore.getState().favoritedPresets.includes(cur)
-                notif.textContent = isFav ? '★ Added to favorites' : '☆ Removed from favorites'
-                notif.style.opacity = '1'
-                setTimeout(() => notif.style.opacity = '0', 1500)
-              }
+      const map = loadKeymap()
+      const actionId = resolveAction(map, e)
+      if (!actionId) {
+        // Digit shortcuts (1–9, 0) are not in the remap registry yet —
+        // they preserve the legacy "jump to preset N" behaviour.
+        if (e.code && e.code.startsWith('Digit')) {
+          const num = e.code === 'Digit0' ? 9 : parseInt(e.code.slice(5)) - 1
+          if (num >= 0 && num < presets.length) {
+            useStore.getState().loadPreset(presets[num].id)
+          }
+        }
+        return
+      }
+      const { setPlaying, playing, loadRandom, nextPreset, prevPreset, toggleFavorite } = useStore.getState()
+      switch (actionId) {
+        case 'play':       e.preventDefault(); setPlaying(!playing); break
+        case 'random':     loadRandom(); break
+        case 'next':       e.preventDefault(); nextPreset(); break
+        case 'prev':       e.preventDefault(); prevPreset(); break
+        case 'fullscreen': handleFullscreen(); break
+        case 'favorite': {
+          const cur = useStore.getState().currentPreset
+          if (cur) {
+            toggleFavorite(cur)
+            const notif = document.getElementById('perf-notif')
+            if (notif) {
+              const isFav = useStore.getState().favoritedPresets.includes(cur)
+              notif.textContent = isFav ? '★ Added to favorites' : '☆ Removed from favorites'
+              notif.style.opacity = '1'
+              setTimeout(() => notif.style.opacity = '0', 1500)
             }
-          } else {
-            handleFullscreen()
           }
           break
-        case 'KeyS': handleScreenshot(); break
-        case 'ArrowLeft': e.preventDefault(); prevPreset(); break
-        case 'ArrowRight': e.preventDefault(); nextPreset(); break
-        case 'Digit1': case 'Digit2': case 'Digit3': case 'Digit4': case 'Digit5':
-        case 'Digit6': case 'Digit7': case 'Digit8': case 'Digit9': case 'Digit0': {
-          const num = e.code === 'Digit0' ? 9 : parseInt(e.code.slice(5)) - 1
-          if (num < presets.length) loadPreset(presets[num].id)
-          break
         }
+        case 'screenshot': handleScreenshot(); break
+        // saveView, bookmark, bookmarkPanel, help are handled by the
+        // components that own those features — they read the keymap
+        // themselves so the dispatcher doesn't need refs into them.
+        default: break
       }
     }
     window.addEventListener('keydown', handler)
