@@ -4,6 +4,7 @@ import { OrbitControls } from '@react-three/drei'
 import { EffectComposer, Bloom, ChromaticAberration, Vignette, Noise } from '@react-three/postprocessing'
 import * as THREE from 'three'
 import { useStore, THEMES } from '../store'
+import { cameraShakeOffset } from '../lib/cameraShake'
 
 // FPS counter component (renders as HTML overlay)
 function FPSCounter() {
@@ -561,6 +562,42 @@ function ForceFieldVisual() {
   )
 }
 
+function CameraShakeFX() {
+  // Apply a small per-frame offset when the audio beat fires, then
+  // restore on the next frame so the orbit-controls rest pose stays
+  // anchored. Net effect: the camera kicks on each beat and snaps back
+  // without drifting. Skipped entirely when the toggle is off so the
+  // base scene has zero overhead.
+  const { camera } = useThree()
+  const lastOffset = useRef([0, 0])
+  useFrame((_, delta) => {
+    const { cameraShake, cameraShakeIntensity, audioReactive,
+            audioMode, audioBeat, audioBass, audioLevel } = useStore.getState()
+    // Always undo last frame's offset so we never accumulate drift,
+    // even when the user toggles the feature off mid-shake.
+    const [pdx, pdy] = lastOffset.current
+    if (pdx !== 0 || pdy !== 0) {
+      camera.position.x -= pdx
+      camera.position.y -= pdy
+      lastOffset.current = [0, 0]
+    }
+    if (!cameraShake || !audioReactive) return
+    const impulse =
+      audioMode === 'beat' ? audioBeat :
+      audioMode === 'bass' ? audioBass :
+      audioLevel
+    if (impulse <= 0.01) return
+    const [dx, dy] = cameraShakeOffset(impulse, cameraShakeIntensity, performance.now() / 1000)
+    camera.position.x += dx
+    camera.position.y += dy
+    lastOffset.current = [dx, dy]
+    // Suppress the unused `delta` warning while leaving the param so
+    // the useFrame signature stays the standard one.
+    void delta
+  })
+  return null
+}
+
 function CameraControls() {
   const orbitSpeed = useStore(s => s.orbitSpeed)
   const autoRotate = useStore(s => s.autoRotate)
@@ -681,6 +718,7 @@ export default function ParticleCanvas() {
         <ForceFieldVisual />
         {trails && <TrailEffect />}
         <CameraControls />
+        <CameraShakeFX />
         <EffectComposer>
           <Bloom intensity={glowIntensity * 0.6} luminanceThreshold={0.8} luminanceSmoothing={0.4} radius={0.3} mipmapBlur />
           {chromaticAberration && (

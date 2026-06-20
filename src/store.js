@@ -275,6 +275,15 @@ export const useStore = create((set, get) => {
 
 
 
+  // Camera shake on beat — when audio reactivity + this toggle are on,
+  // the camera nudges on each detected beat (or bass surge). Intensity
+  // is a 0..1 scalar that the renderer multiplies by the active audio
+  // signal before applying. Default off so the baseline scene is calm.
+  cameraShake: false,
+  cameraShakeIntensity: 0.5,
+  setCameraShake: (v) => set({ cameraShake: v }),
+  setCameraShakeIntensity: (v) => set({ cameraShakeIntensity: Math.max(0, Math.min(1, v)) }),
+
   setMouseAttract: (v) => set({ mouseAttract: v }),
   paintMode: false,
   paintPoints: [], // array of [x, y, z]

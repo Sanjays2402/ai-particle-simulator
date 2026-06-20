@@ -217,6 +217,9 @@ export default function LeftSidebar() {
           Click the 🎤 toolbar button to enable. Pick how audio drives the visuals:
         </p>
         <AudioModeRow />
+        <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+          <CameraShakeRow />
+        </div>
       </Section>
 
       <Section title="Post-FX">
@@ -711,6 +714,30 @@ function AudioModeRow() {
         </div>
       )}
     </div>
+  )
+}
+
+// Camera shake on beat — couples the audio beat detector to a per-frame
+// camera nudge. Intensity slider gates the max amplitude; visible only
+// when the toggle is on so the section stays tidy by default.
+function CameraShakeRow() {
+  const enabled  = useStore(s => s.cameraShake)
+  const intensity = useStore(s => s.cameraShakeIntensity)
+  const setEnabled  = useStore(s => s.setCameraShake)
+  const setIntensity = useStore(s => s.setCameraShakeIntensity)
+  return (
+    <>
+      <ToggleRow label="Camera Shake on Beat" value={enabled} onChange={setEnabled} />
+      {enabled && (
+        <>
+          <Slider label="Shake Intensity" value={intensity} min={0} max={1} step={0.05}
+            onChange={setIntensity} display={v => `${Math.round(v * 100)}%`} />
+          <p style={{ fontSize: 11, color: '#7a7a90', marginTop: -4 }}>
+            Best paired with the <span style={{ color: '#c084fc' }}>Beat</span> mode above.
+          </p>
+        </>
+      )}
+    </>
   )
 }
 
