@@ -660,6 +660,10 @@ export default function ParticleCanvas() {
   const audioBass = useStore(s => s.audioBass)
   const audioMid = useStore(s => s.audioMid)
   const audioTreble = useStore(s => s.audioTreble)
+  const bgGradientEnabled = useStore(s => s.bgGradientEnabled)
+  const bgGradientA       = useStore(s => s.bgGradientA)
+  const bgGradientB       = useStore(s => s.bgGradientB)
+  const bgGradientAngle   = useStore(s => s.bgGradientAngle)
 
   // FPS overlay
   useEffect(() => {
@@ -706,13 +710,24 @@ export default function ParticleCanvas() {
 
   return (
     <div className="w-full h-full relative" onPointerUp={handleTap}>
+      {/* Background gradient layer — sits behind the (transparent)
+          canvas when the user enables it. Pure CSS so zero GPU cost
+          beyond a normal compositor pass. Kept under the canvas via
+          z-index so particles always render on top. */}
+      {bgGradientEnabled && (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 0,
+          background: `linear-gradient(${bgGradientAngle}deg, ${bgGradientA} 0%, ${bgGradientB} 100%)`,
+          pointerEvents: 'none',
+        }} />
+      )}
       <Canvas
         camera={{ position: [0, 5, 15], fov: 60 }}
-        gl={{ antialias: true, alpha: false, preserveDrawingBuffer: true }}
-        style={{ background: '#050508' }}
+        gl={{ antialias: true, alpha: bgGradientEnabled, preserveDrawingBuffer: true }}
+        style={{ background: bgGradientEnabled ? 'transparent' : '#050508', position: 'relative', zIndex: 1 }}
         id="particle-canvas"
       >
-        <color attach="background" args={['#0a0a0f']} />
+        {!bgGradientEnabled && <color attach="background" args={['#0a0a0f']} />}
         <Particles />
         <MouseAttractor />
         <ForceFieldVisual />

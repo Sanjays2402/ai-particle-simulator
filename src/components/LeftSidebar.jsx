@@ -403,6 +403,10 @@ export default function LeftSidebar() {
         </div>
       </Section>
 
+      <Section title="Background">
+        <BgGradientRow />
+      </Section>
+
       <Section title="Shape Presets">
         <div style={{ display: 'flex', gap: 6, marginBottom: 10, alignItems: 'center' }}>
           <div style={{ position: 'relative', flex: 1 }}>
@@ -897,6 +901,70 @@ function HueCycleRow() {
           <div style={{ marginTop: 4, fontSize: 11, color: '#7a7a90', textAlign: 'center' }}>
             One full rotation every {(60 / Math.max(0.5, speed)).toFixed(1)}s.
           </div>
+        </>
+      )}
+    </>
+  )
+}
+
+// Background gradient picker — two-stop linear gradient painted under
+// the canvas when enabled. Quick chips swap in canned nebulas; the
+// two color inputs let users pick exact endpoints; angle slider lets
+// them rotate the gradient. Designed to play nicely with all themes:
+// when off, the canvas keeps its existing #0a0a0f clear color exactly.
+const BG_GRADIENT_PRESETS = [
+  { id: 'nebula',   a: '#1e1b4b', b: '#0a0a0f', label: 'Indigo Night' },
+  { id: 'aurora',   a: '#064e3b', b: '#0c0a1e', label: 'Aurora Mist' },
+  { id: 'ember',    a: '#7c2d12', b: '#0a0a0f', label: 'Ember Glow' },
+  { id: 'twilight', a: '#1e293b', b: '#3b0764', label: 'Twilight' },
+  { id: 'inkwash',  a: '#1a1a2e', b: '#0f0f17', label: 'Ink Wash' },
+  { id: 'sunrise',  a: '#7c2d12', b: '#1e1b4b', label: 'Sunrise' },
+]
+function BgGradientRow() {
+  const enabled = useStore(s => s.bgGradientEnabled)
+  const a       = useStore(s => s.bgGradientA)
+  const b       = useStore(s => s.bgGradientB)
+  const angle   = useStore(s => s.bgGradientAngle)
+  const setEn    = useStore(s => s.setBgGradientEnabled)
+  const setA     = useStore(s => s.setBgGradientA)
+  const setB     = useStore(s => s.setBgGradientB)
+  const setAngle = useStore(s => s.setBgGradientAngle)
+  return (
+    <>
+      <ToggleRow label="Custom Gradient" value={enabled} onChange={setEn} />
+      {enabled && (
+        <>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+            <label style={{ fontSize: 11, color: '#8a8aa0' }}>From</label>
+            <input type="color" value={a} onChange={e => setA(e.target.value)}
+              style={{ width: 36, height: 26, border: '1px solid rgba(255,255,255,0.06)', borderRadius: 6, background: 'transparent', cursor: 'pointer' }} />
+            <label style={{ fontSize: 11, color: '#8a8aa0', marginLeft: 8 }}>To</label>
+            <input type="color" value={b} onChange={e => setB(e.target.value)}
+              style={{ width: 36, height: 26, border: '1px solid rgba(255,255,255,0.06)', borderRadius: 6, background: 'transparent', cursor: 'pointer' }} />
+            <div style={{
+              flex: 1, height: 24, marginLeft: 6, borderRadius: 6,
+              background: `linear-gradient(${angle}deg, ${a} 0%, ${b} 100%)`,
+              border: '1px solid rgba(255,255,255,0.06)',
+            }} />
+          </div>
+          <Slider label="Angle" value={angle} min={0} max={360} step={15}
+            onChange={setAngle} display={v => `${v}°`} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 8 }}>
+            {BG_GRADIENT_PRESETS.map(p => (
+              <button key={p.id} onClick={() => { setA(p.a); setB(p.b) }} title={p.label}
+                style={{
+                  height: 28, borderRadius: 6, cursor: 'pointer',
+                  background: `linear-gradient(${angle}deg, ${p.a} 0%, ${p.b} 100%)`,
+                  border: (a === p.a && b === p.b)
+                    ? '1px solid rgba(168,85,247,0.6)'
+                    : '1px solid rgba(255,255,255,0.08)',
+                  boxShadow: (a === p.a && b === p.b) ? '0 0 12px rgba(168,85,247,0.35)' : 'none',
+                }} />
+            ))}
+          </div>
+          <p style={{ fontSize: 11, color: '#7a7a90', marginTop: 8 }}>
+            Particles render on top — pick darks so they don&apos;t get washed out.
+          </p>
         </>
       )}
     </>

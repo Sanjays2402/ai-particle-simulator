@@ -275,6 +275,20 @@ export const useStore = create((set, get) => {
 
 
 
+  // Background gradient — replace the constant clear color (#0a0a0f)
+  // with a user-picked two-stop CSS gradient under the canvas. When
+  // enabled, the canvas clears to transparent and a positioned div
+  // behind it paints the gradient; tooltip is on the LeftSidebar.
+  // Cheap by construction — no per-frame WebGL work, just one CSS layer.
+  bgGradientEnabled: false,
+  bgGradientA: '#1e1b4b',   // top
+  bgGradientB: '#0a0a0f',   // bottom (current default)
+  bgGradientAngle: 180,     // degrees, 180 = top→bottom
+  setBgGradientEnabled: (v) => set({ bgGradientEnabled: v }),
+  setBgGradientA: (v) => set({ bgGradientA: v }),
+  setBgGradientB: (v) => set({ bgGradientB: v }),
+  setBgGradientAngle: (v) => set({ bgGradientAngle: Math.max(0, Math.min(360, v | 0)) }),
+
   // Camera shake on beat — when audio reactivity + this toggle are on,
   // the camera nudges on each detected beat (or bass surge). Intensity
   // is a 0..1 scalar that the renderer multiplies by the active audio

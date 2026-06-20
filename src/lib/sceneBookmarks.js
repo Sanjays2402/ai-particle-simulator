@@ -33,6 +33,7 @@ export const SCENE_FIELDS = [
   'forceFieldType', 'forceFieldStrength', 'forceFieldCenter',
   'cameraShake', 'cameraShakeIntensity',
   'audioMode',
+  'bgGradientEnabled', 'bgGradientA', 'bgGradientB', 'bgGradientAngle',
 ]
 
 export function loadBookmarks() {
