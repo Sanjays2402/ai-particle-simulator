@@ -87,6 +87,9 @@ export default function App() {
           s.setHueCycleEnabled(true)
           if (data.hueCycle.speed != null) s.setHueCycleSpeed(data.hueCycle.speed)
         }
+        if (Array.isArray(data.forceFieldCenter) && data.forceFieldCenter.length === 3) {
+          s.setForceFieldCenter(data.forceFieldCenter)
+        }
 
         // Load scene last so dynamic controls and infoTitle render on top.
         if (data.preset) loadPreset(data.preset)

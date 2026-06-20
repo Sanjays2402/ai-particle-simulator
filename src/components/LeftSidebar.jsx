@@ -326,8 +326,11 @@ export default function LeftSidebar() {
           ))}
         </div>
         {forceFieldType && (
-          <Slider label="Field Strength" value={forceFieldStrength} min={0} max={5} step={0.1}
-            onChange={setForceFieldStrength} display={v => v.toFixed(1)} />
+          <>
+            <Slider label="Field Strength" value={forceFieldStrength} min={0} max={5} step={0.1}
+              onChange={setForceFieldStrength} display={v => v.toFixed(1)} />
+            <PlaceFieldRow />
+          </>
         )}
       </Section>
 
@@ -868,5 +871,62 @@ function HueCycleRow() {
         </>
       )}
     </>
+  )
+}
+
+// Click-to-drop force-field center. Toggles place-field mode (a single
+// pointer-up on the canvas sets the field's origin and turns the mode
+// back off). Also shows the current center coordinates and a one-click
+// reset to origin.
+function PlaceFieldRow() {
+  const placeFieldMode = useStore(s => s.placeFieldMode)
+  const setPlaceFieldMode = useStore(s => s.setPlaceFieldMode)
+  const center = useStore(s => s.forceFieldCenter)
+  const setCenter = useStore(s => s.setForceFieldCenter)
+  const isAtOrigin = Math.abs(center[0]) < 1e-6 && Math.abs(center[1]) < 1e-6 && Math.abs(center[2]) < 1e-6
+  return (
+    <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <button onClick={() => setPlaceFieldMode(!placeFieldMode)}
+        title={placeFieldMode ? 'Click on the canvas to drop · click again to cancel' : 'Drop the field anywhere on the canvas'}
+        style={{
+          padding: '8px 0', borderRadius: 8, fontSize: 12, fontWeight: 550,
+          cursor: 'pointer', transition: 'all 0.15s ease-out',
+          background: placeFieldMode
+            ? 'linear-gradient(135deg, rgba(34,197,94,0.22), rgba(99,102,241,0.18))'
+            : 'rgba(255,255,255,0.04)',
+          color: placeFieldMode ? '#bbf7d0' : '#c8c8d0',
+          border: placeFieldMode
+            ? '1px solid rgba(34,197,94,0.4)'
+            : '1px solid rgba(255,255,255,0.06)',
+          boxShadow: placeFieldMode ? '0 0 16px rgba(34,197,94,0.3)' : 'none',
+        }}
+      >
+        {placeFieldMode ? 'Click canvas to drop field' : 'Place Field on Canvas'}
+      </button>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '6px 10px', borderRadius: 7,
+        background: 'rgba(255,255,255,0.025)',
+        border: '1px solid rgba(255,255,255,0.05)',
+        fontSize: 10.5, color: '#9a9ab0',
+        fontFamily: 'Geist Mono, monospace',
+      }}>
+        <span>center</span>
+        <span style={{ color: isAtOrigin ? '#5a5a70' : '#c084fc' }}>
+          [{center.map(n => n.toFixed(1)).join(', ')}]
+        </span>
+      </div>
+      {!isAtOrigin && (
+        <button onClick={() => setCenter([0, 0, 0])}
+          style={{
+            padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 500,
+            cursor: 'pointer',
+            background: 'rgba(239,68,68,0.06)', color: '#fca5a5',
+            border: '1px solid rgba(239,68,68,0.2)',
+          }}>
+          Reset to origin
+        </button>
+      )}
+    </div>
   )
 }

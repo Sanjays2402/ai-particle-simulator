@@ -60,17 +60,35 @@ function MouseAttractor() {
   const lastStampRef = useRef(0)
 
   // Paint-mode listeners: hold mouse and drag to stamp persistent attractors.
+  // Place-field listener: a single pointer-up while in place-field mode sets
+  // the force-field center and disables the mode again.
   useEffect(() => {
     const dom = gl.domElement
     const onDown = () => { draggingRef.current = true }
     const onUp = () => { draggingRef.current = false }
+    const onClick = (e) => {
+      const { placeFieldMode, setForceFieldCenter, setPlaceFieldMode } = useStore.getState()
+      if (!placeFieldMode) return
+      // Raycast to the same z=0 plane the rest of the canvas uses.
+      const rect = dom.getBoundingClientRect()
+      const x = ((e.clientX - rect.left) / rect.width) * 2 - 1
+      const y = -((e.clientY - rect.top) / rect.height) * 2 + 1
+      raycaster.setFromCamera({ x, y }, camera)
+      const hit = new THREE.Vector3()
+      raycaster.ray.intersectPlane(planeRef.current, hit)
+      setForceFieldCenter([hit.x, hit.y, hit.z])
+      setPlaceFieldMode(false)
+      e.stopPropagation()
+    }
     dom.addEventListener('pointerdown', onDown)
     window.addEventListener('pointerup', onUp)
+    dom.addEventListener('click', onClick)
     return () => {
       dom.removeEventListener('pointerdown', onDown)
       window.removeEventListener('pointerup', onUp)
+      dom.removeEventListener('click', onClick)
     }
-  }, [gl])
+  }, [gl, camera, raycaster])
 
   useFrame(() => {
     const { mouseAttract, paintMode, addPaintPoint } = useStore.getState()
@@ -171,7 +189,7 @@ function Particles() {
             paintPoints,
             paletteEnabled, paletteA, paletteB, paletteMix,
             gravityEnabled, gravityStrength, collisionsEnabled,
-            forceFieldType, forceFieldStrength,
+            forceFieldType, forceFieldStrength, forceFieldCenter,
             kaleidoscopeEnabled, kaleidoscopeSegments,
             hueCycleEnabled, hueCycleSpeed } = useStore.getState()
     const themeData = THEMES[theme]
@@ -277,7 +295,9 @@ function Particles() {
 
         // Force fields
         if (forceFieldType) {
-          const px = _target.x, py = _target.y, pz = _target.z
+          // Position relative to the (movable) field center.
+          const fx = forceFieldCenter[0], fy = forceFieldCenter[1], fz = forceFieldCenter[2]
+          const px = _target.x - fx, py = _target.y - fy, pz = _target.z - fz
           const dist = Math.sqrt(px * px + py * py + pz * pz) + 0.01
           const radius = 10
           if (dist < radius) {
@@ -509,6 +529,8 @@ function ForceFieldVisual() {
   const meshRef = useRef()
   const forceFieldType = useStore(s => s.forceFieldType)
   const forceFieldStrength = useStore(s => s.forceFieldStrength)
+  const forceFieldCenter = useStore(s => s.forceFieldCenter)
+  const placeFieldMode = useStore(s => s.placeFieldMode)
 
   useFrame((_, delta) => {
     if (!meshRef.current) return
@@ -520,12 +542,22 @@ function ForceFieldVisual() {
 
   const colorMap = { attractor: '#00ff88', repulsor: '#ff4444', vortex: '#8844ff', turbulence: '#ffaa00' }
   const col = colorMap[forceFieldType] || '#00ff88'
+  // Subtle pulse highlight when "Place Field" is armed.
+  const pulse = placeFieldMode ? 0.45 : 0.15 + forceFieldStrength * 0.05
 
   return (
-    <mesh ref={meshRef} position={[0, 0, 0]}>
-      <sphereGeometry args={[0.5, 16, 16]} />
-      <meshBasicMaterial color={col} transparent opacity={0.15 + forceFieldStrength * 0.05} wireframe />
-    </mesh>
+    <group position={forceFieldCenter}>
+      <mesh ref={meshRef}>
+        <sphereGeometry args={[0.5, 16, 16]} />
+        <meshBasicMaterial color={col} transparent opacity={pulse} wireframe />
+      </mesh>
+      {placeFieldMode && (
+        <mesh>
+          <sphereGeometry args={[0.7, 24, 24]} />
+          <meshBasicMaterial color={col} transparent opacity={0.12} wireframe />
+        </mesh>
+      )}
+    </group>
   )
 }
 

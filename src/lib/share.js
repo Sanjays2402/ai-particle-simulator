@@ -33,6 +33,13 @@ export function buildShareUrl(state) {
     hueCycle: s.hueCycleEnabled
       ? { speed: s.hueCycleSpeed }
       : undefined,
+    // Force field center only stored when non-origin to keep URLs short.
+    forceFieldCenter:
+      (Math.abs(s.forceFieldCenter[0]) > 1e-6 ||
+       Math.abs(s.forceFieldCenter[1]) > 1e-6 ||
+       Math.abs(s.forceFieldCenter[2]) > 1e-6)
+        ? s.forceFieldCenter
+        : undefined,
   }
   const hash = btoa(encodeURIComponent(JSON.stringify(data)))
   return `${window.location.origin}${window.location.pathname}#share=${hash}`

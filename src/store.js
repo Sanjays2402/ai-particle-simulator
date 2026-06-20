@@ -104,6 +104,15 @@ export const useStore = create((set, get) => {
   collisionsEnabled: false,
   forceFieldType: null, // 'attractor' | 'repulsor' | 'vortex' | 'turbulence' | null
   forceFieldStrength: 1.0,
+  // Position of the force-field's center in world space. Defaults to
+  // origin so legacy behavior is unchanged; users can move it by
+  // enabling "Place Field" and clicking on the canvas.
+  forceFieldCenter: [0, 0, 0],
+  // True = next canvas pointer-up sets forceFieldCenter to the
+  // intersected world point, then turns this flag off.
+  placeFieldMode: false,
+  setForceFieldCenter: (xyz) => set({ forceFieldCenter: xyz }),
+  setPlaceFieldMode: (v) => set({ placeFieldMode: v }),
 
   // Recording & Replay
   isRecording: false,
