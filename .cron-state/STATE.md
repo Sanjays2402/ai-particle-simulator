@@ -13,10 +13,10 @@ Per-frame loop in `src/components/ParticleCanvas.jsx` (`Particles` mesh):
   paint attractors, audio scaling, theme hue shift, gradient palette tint.
 
 Existing capabilities (do not re-ship):
-- 46 presets, 11 themes, 6 visual styles, 4 force-field types
+- 46 presets, 11 themes + user-authored custom themes, 6 visual styles, 4 force-field types
 - Audio reactivity (level / bass / beat) — mic OR built-in demo loops (4 kinds)
-- Gravity + collisions + spatial-hash physics
-- Post-FX: bloom + chromatic aberration + vignette + film-grain
+- Gravity + collisions + spatial-hash physics + global wind drift
+- Post-FX: bloom + chromatic aberration + vignette + film-grain + depth-of-field (Bokeh)
 - Recording / replay with timeline scrubber, GIF + WebM/MP4 export
 - Mouse attract + Paint mode (drag to drop attractors)
 - v2 share URL (round-trips palette, FX, audio, camera flags), Tweet button
@@ -33,6 +33,9 @@ Existing capabilities (do not re-ship):
 - Slideshow / auto-cycle presets (sequence / shuffle / favourites, 2-60s dwell)
 - Crossfade between presets (smoothstep ramp, 0.5-10s, progress bar + cancel)
 - Reduced-motion mode (auto/reduce/full, gates hue cycle, auto-rotate, shake, orbs, splash)
+- Trig-noise particle deformer (global wiggle layered on top of any preset)
+- Custom theme editor (name + accent + hue, 12-theme cap, localStorage)
+- Touch gestures (two-finger pinch = particle count, swipe = preset nav)
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -64,29 +67,36 @@ single slice. Will revisit as its own dedicated batch.
 - [x] **R3.04** Multi-preset blend (crossfade with smoothstep ease, 0.5-10s)  — 22e4091
 - [x] **R3.05** Reduced-motion accessibility mode (OS-aware + 3-mode override)  — 9e4239f
 
-### Batch 4 — next 5 (refilled)
-- [ ] R4.01 3D depth-of-field post-FX (Bokeh) toggle
-- [ ] R4.02 Particle "wind" — global directional drift vector + UI sliders
-- [ ] R4.03 Color theme editor (build a custom theme with picker, save to localStorage)
-- [ ] R4.04 Trigonometric noise particle deformer (global "shake" applied after the preset fn)
-- [ ] R4.05 Touch gestures: pinch zoom maps to particle count, two-finger swipe = next preset
+### Batch 4 — post-FX + physics + theming + mobile  (SHIPPED)
+- [x] **R4.01** Depth-of-field (Bokeh) post-FX toggle  — 63c2eb7
+- [x] **R4.02** Particle wind — global directional drift  — c54ae58
+- [x] **R4.03** Custom theme editor — name + accent + hue, localStorage  — 34fad36
+- [x] **R4.04** Trig-noise particle deformer — global wiggle  — f77aa66
+- [x] **R4.05** Touch gestures — pinch=count, swipe=preset  — 19decc5
+
+### Batch 5 — next 5 (refilled)
+- [ ] R5.01 Keyboard remap UI (rebind shortcuts, persist)
+- [ ] R5.02 Mini-map overlay showing camera angle vs particle bounds
+- [ ] R5.03 Web MIDI controller mapping (CC/note → live sliders)
+- [ ] R5.04 Editable preset code viewer (graduate the R2.05 viewer to contenteditable + re-compile)
+- [ ] R5.05 Audio waveform overlay (oscilloscope strip showing the actual signal)
 
 ### Future queue (refill when batch closes)
-- [ ] R4.06 Keyboard remap UI (rebind shortcuts, persist)
-- [ ] R4.07 Mini-map overlay showing camera angle vs particle bounds
-- [ ] R4.08 Onscreen MIDI controller mapping (Web MIDI) to live sliders
-- [ ] R4.09 Echo / trail FBO that survives EffectComposer (R2.02 deferred — render pipeline refactor)
-- [ ] R4.10 Editable preset code viewer (graduate the R2.05 viewer to a contenteditable + re-compile)
-- [ ] R4.11 Snapshot grid view (modal showing all 8 snapshots in a grid w/ full-res preview)
-- [ ] R4.12 Audio waveform overlay (oscilloscope strip showing the actual signal)
-- [ ] R4.13 Camera path animator (interpolate between saved views over N seconds)
-- [ ] R4.14 OpenGraph snapshot endpoint (server-rendered card for share URLs)
-- [ ] R4.15 Preset thumbnail rendering during carousel idle (offscreen cache)
-- [ ] R4.16 Slideshow that respects category filter chips (currently walks the whole library)
-- [ ] R4.17 Bookmark export/import as JSON (share entire collections)
-- [ ] R4.18 Random scene generator that fully randomises bookmark fields (smash → save)
-- [ ] R4.19 Cross-fade timing chips (0.5s / 2s / 5s / 10s presets in the Crossfade panel)
-- [ ] R4.20 Audio-reactive background gradient (cycle hue of the bg with beat)
+- [ ] R5.06 Snapshot grid view (modal showing all 8 snapshots in a grid w/ full-res preview)
+- [ ] R5.07 Camera path animator (interpolate between saved views over N seconds)
+- [ ] R5.08 OpenGraph snapshot endpoint (server-rendered card for share URLs)
+- [ ] R5.09 Preset thumbnail rendering during carousel idle (offscreen cache)
+- [ ] R5.10 Slideshow that respects category filter chips (currently walks the whole library)
+- [ ] R5.11 Bookmark export/import as JSON (share entire collections)
+- [ ] R5.12 Random scene generator that fully randomises bookmark fields (smash → save)
+- [ ] R5.13 Cross-fade timing chips (0.5s / 2s / 5s / 10s presets in the Crossfade panel)
+- [ ] R5.14 Audio-reactive background gradient (cycle hue of the bg with beat)
+- [ ] R5.15 Echo / trail FBO that survives EffectComposer (R2.02 deferred — render pipeline refactor)
+- [ ] R5.16 Particle attractors as named objects (drag to reposition, multiple types coexist)
+- [ ] R5.17 Custom theme export / import as JSON (share a theme pack)
+- [ ] R5.18 Wind preset chips ("Calm", "Breeze", "Gale", "Storm") for one-tap configs
+- [ ] R5.19 Custom theme set as default-on-load (auto-applied if active when reloading)
+- [ ] R5.20 Mobile-only gesture hint overlay shown on first run
 
 ## TICK LOG
 - 2026-06-19 23:41 PT — Bootstrap + Batch 1 (5/5).
@@ -112,3 +122,10 @@ single slice. Will revisit as its own dedicated batch.
   Build: 302ms green. Unit tests: 14/14 pass (bgGradient, cameraShake, cameraViews,
   codeTokens, crossfade, demoAudioLoops, hueCycle, kaleidoscope, presetCategories,
   reducedMotion, sceneBookmarks, sessionStats, slideshow, snapshotGallery).
+- 2026-06-20 11:24 PT — Batch 4 (5/5).
+  Commits: 63c2eb7 (R4.01 DoF/Bokeh), c54ae58 (R4.02 wind), 34fad36 (R4.03 custom themes),
+  f77aa66 (R4.04 noise deformer), 19decc5 (R4.05 touch gestures).
+  Gates: lint baseline preserved (23 errors, 3 warnings — all pre-existing).
+  Build: 7m 15s green (this volume is slow, not the code).
+  Unit tests: 19/19 pass (added depthOfField, wind, customThemes, noiseDeformer,
+  touchGestures · 119 fresh asserts this batch).
