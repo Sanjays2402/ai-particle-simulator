@@ -13,6 +13,18 @@ export const WIND_AZIMUTH_MAX   = 360
 export const WIND_PITCH_MIN     = -90
 export const WIND_PITCH_MAX     = 90
 
+// Named preset configs — one-tap weather chips. Ordered from calmest
+// to wildest so the UI reads left-to-right. Off has intensity 0 (so
+// toggling it back on doesn't surprise the user with the last wild
+// setting). Match the existing slider ranges so the chips never
+// silently violate the clamps.
+export const WIND_PRESETS = [
+  { id: 'calm',   label: 'Calm',   intensity: 0.0,  azimuth: 0,   pitch: 0,    hint: 'No drift'                 },
+  { id: 'breeze', label: 'Breeze', intensity: 0.6,  azimuth: 45,  pitch: 10,   hint: 'Gentle SE drift'          },
+  { id: 'gale',   label: 'Gale',   intensity: 2.2,  azimuth: 90,  pitch: 0,    hint: 'Strong horizontal pull'   },
+  { id: 'storm',  label: 'Storm',  intensity: 4.0,  azimuth: 200, pitch: -25,  hint: 'Hurricane: SW + downdraft' },
+]
+
 function clamp(v, lo, hi, fallback) {
   if (!Number.isFinite(v)) return fallback
   if (v < lo) return lo
@@ -23,6 +35,25 @@ function clamp(v, lo, hi, fallback) {
 export function clampIntensity(v) { return clamp(v, WIND_INTENSITY_MIN, WIND_INTENSITY_MAX, 0) }
 export function clampAzimuth(v)   { return clamp(v, WIND_AZIMUTH_MIN,  WIND_AZIMUTH_MAX,   0) }
 export function clampPitch(v)     { return clamp(v, WIND_PITCH_MIN,    WIND_PITCH_MAX,     0) }
+
+// Lookup a wind preset by id; null when unknown.
+export function findWindPreset(id) {
+  if (typeof id !== 'string') return null
+  return WIND_PRESETS.find(p => p.id === id) || null
+}
+
+// True when the live wind state matches a preset's full config
+// (intensity + azimuth + pitch within a small tolerance). Used by the
+// UI chip-active highlight so chips light up when the user happens to
+// land on those values via the sliders. Tolerance is generous because
+// the sliders have step=0.1 / step=1 which can introduce float noise.
+export function matchesWindPreset(state, preset, tol = 0.05) {
+  if (!state || !preset) return false
+  if (Math.abs(clampIntensity(state.intensity) - preset.intensity) > tol) return false
+  if (Math.abs(clampAzimuth(state.azimuth)     - preset.azimuth)   > 1.5) return false
+  if (Math.abs(clampPitch(state.pitch)         - preset.pitch)     > 1.5) return false
+  return true
+}
 
 // Convert azimuth (deg, around Y, 0 = +X) + pitch (deg, lift off XZ
 // plane) into a unit vector [x, y, z]. Returns the zero vector when

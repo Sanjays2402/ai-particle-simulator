@@ -4,7 +4,7 @@ import { presets } from '../presets'
 import { GifEncoder } from '../lib/gifEncoder'
 import { startCanvasRecording, downloadVideoBlob, isVideoExportSupported } from '../lib/videoRecorder'
 import { CATEGORIES, categoryOf, countByCategory } from '../lib/presetCategories'
-import { compassFor } from '../lib/wind'
+import { compassFor, WIND_PRESETS, matchesWindPreset } from '../lib/wind'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
 const THEME_LIST = [
@@ -954,6 +954,9 @@ function CustomThemesRow() {
 // Global wind: a constant directional drift applied to every particle.
 // Azimuth + pitch sliders are gated behind the toggle so the section
 // stays calm by default. Off → renderer takes the zero-vector fast path.
+// One-tap weather chips (Calm / Breeze / Gale / Storm) configure all
+// three sliders at once and highlight the matching chip when the live
+// state lines up with a preset.
 function WindRow() {
   const enabled   = useStore(s => s.windEnabled)
   const intensity = useStore(s => s.windIntensity)
@@ -963,9 +966,47 @@ function WindRow() {
   const setI   = useStore(s => s.setWindIntensity)
   const setAz  = useStore(s => s.setWindAzimuth)
   const setPi  = useStore(s => s.setWindPitch)
+  const applyPreset = (p) => {
+    // Auto-enable when picking anything other than Calm so the user
+    // sees the effect immediately; Calm stays a no-op (preserves the
+    // existing toggle state).
+    if (p.id !== 'calm' && !enabled) setEn(true)
+    setI(p.intensity)
+    setAz(p.azimuth)
+    setPi(p.pitch)
+  }
   return (
     <>
       <ToggleRow label="Wind" value={enabled} onChange={setEn} />
+      {/* Preset chips: surfaced even when the toggle is off so picking
+          one snaps the sliders AND turns the toggle on in a single tap. */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)',
+        gap: 6, marginTop: enabled ? 8 : 4, marginBottom: enabled ? 0 : 4,
+      }}>
+        {WIND_PRESETS.map(p => {
+          const active = enabled && matchesWindPreset({ intensity, azimuth, pitch }, p)
+          return (
+            <button key={p.id} onClick={() => applyPreset(p)} title={p.hint}
+              style={{
+                padding: '6px 0', borderRadius: 7,
+                fontSize: 11, fontWeight: 550,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease-out',
+                background: active
+                  ? 'linear-gradient(135deg, rgba(168,85,247,0.24) 0%, rgba(99,102,241,0.18) 100%)'
+                  : 'rgba(255,255,255,0.03)',
+                color: active ? '#e9d5ff' : '#9a9ab0',
+                border: active
+                  ? '1px solid rgba(168,85,247,0.45)'
+                  : '1px solid rgba(255,255,255,0.06)',
+                boxShadow: active ? '0 0 12px rgba(168,85,247,0.25)' : 'none',
+              }}>
+              {p.label}
+            </button>
+          )
+        })}
+      </div>
       {enabled && (
         <>
           <Slider label="Intensity" value={intensity} min={0} max={5} step={0.1}

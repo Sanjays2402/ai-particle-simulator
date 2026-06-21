@@ -1,8 +1,10 @@
-// wind: vector math + clamps + compass label + applyWind side-effect.
+// wind: vector math + clamps + compass label + applyWind side-effect
+// + named presets (Calm/Breeze/Gale/Storm) + matchesWindPreset.
 import {
   windVector, applyWind, compassFor,
   clampIntensity, clampAzimuth, clampPitch,
   WIND_INTENSITY_MIN, WIND_INTENSITY_MAX,
+  WIND_PRESETS, findWindPreset, matchesWindPreset,
 } from './wind.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -87,4 +89,57 @@ eq(compassFor(180), 'W',  'compass 180 → W')
 eq(compassFor(270), 'N',  'compass 270 → N')
 eq(compassFor(359), 'E',  'compass 359 → E (wrap)')
 
-console.log(`PASS: wind — vector + clamps + compass · intensity ${WIND_INTENSITY_MIN}..${WIND_INTENSITY_MAX}`)
+// --- WIND_PRESETS basic sanity ---
+{
+  const ids = WIND_PRESETS.map(p => p.id)
+  if (ids.length !== 4) fail(`expected 4 wind presets, got ${ids.length}`)
+  if (new Set(ids).size !== 4) fail('preset ids must be unique')
+  // Every preset must lie within the clamp ranges (the chips MUST NOT
+  // silently violate the slider min/max).
+  for (const p of WIND_PRESETS) {
+    if (p.intensity < WIND_INTENSITY_MIN || p.intensity > WIND_INTENSITY_MAX)
+      fail(`preset ${p.id} intensity out of range`)
+    if (p.azimuth < 0 || p.azimuth > 360)
+      fail(`preset ${p.id} azimuth out of range`)
+    if (p.pitch < -90 || p.pitch > 90)
+      fail(`preset ${p.id} pitch out of range`)
+    if (!p.label) fail(`preset ${p.id} missing label`)
+  }
+  // Ordering: calmest first, wildest last — UI reads left-to-right.
+  for (let i = 1; i < WIND_PRESETS.length; i++) {
+    if (WIND_PRESETS[i].intensity < WIND_PRESETS[i - 1].intensity)
+      fail(`presets out of order: ${WIND_PRESETS[i - 1].id} > ${WIND_PRESETS[i].id}`)
+  }
+}
+
+// --- findWindPreset ---
+eq(findWindPreset('calm').id,  'calm',  'find: calm')
+eq(findWindPreset('storm').id, 'storm', 'find: storm')
+eq(findWindPreset('nope'),     null,    'find: unknown → null')
+eq(findWindPreset(null),       null,    'find: non-string → null')
+eq(findWindPreset(42),         null,    'find: numeric → null')
+
+// --- matchesWindPreset ---
+{
+  const calm = findWindPreset('calm')
+  if (!matchesWindPreset({ intensity: 0, azimuth: 0, pitch: 0 }, calm))
+    fail('exact calm state should match calm preset')
+  if (matchesWindPreset({ intensity: 2, azimuth: 0, pitch: 0 }, calm))
+    fail('wrong intensity should NOT match calm preset')
+}
+{
+  const storm = findWindPreset('storm')
+  if (!matchesWindPreset({ intensity: 4.0, azimuth: 200, pitch: -25 }, storm))
+    fail('exact storm state should match storm preset')
+  // Tiny float jitter still matches.
+  if (!matchesWindPreset({ intensity: 4.03, azimuth: 200.5, pitch: -25 }, storm))
+    fail('storm state within tolerance should still match')
+  // Way off → no match.
+  if (matchesWindPreset({ intensity: 4.0, azimuth: 10, pitch: -25 }, storm))
+    fail('wrong azimuth should NOT match storm preset')
+}
+// Null safety.
+eq(matchesWindPreset(null, findWindPreset('calm')), false, 'matches: null state → false')
+eq(matchesWindPreset({}, null),                     false, 'matches: null preset → false')
+
+console.log(`PASS: wind — vector + clamps + compass + ${WIND_PRESETS.length} named presets · intensity ${WIND_INTENSITY_MIN}..${WIND_INTENSITY_MAX}`)
