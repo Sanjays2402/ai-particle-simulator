@@ -1,7 +1,8 @@
 // customThemesIO: build/serialise + parse + merge contract.
 import {
   buildExportPayload, serializeThemes, makeFilename, parseImport,
-  mergeImport, EXPORT_KIND, EXPORT_VERSION, MAX_IMPORT_BYTES,
+  mergeImport, summarizeImportImpact,
+  EXPORT_KIND, EXPORT_VERSION, MAX_IMPORT_BYTES,
 } from './customThemesIO.js'
 import { MAX_CUSTOM_THEMES } from './customThemes.js'
 
@@ -199,4 +200,92 @@ eq(makeFilename('2026-06-20T21:00:00.000Z'), 'particle-themes-2026-06-20.json', 
   eq(res.added, 0, 'no additions')
 }
 
-console.log(`PASS: customThemesIO build/serialise/filename + parse + merge · MAX_BYTES=${MAX_IMPORT_BYTES}`)
+// --- summarizeImportImpact: dry-run mirrors mergeImport semantics ---
+// merge mode — counts added, skipped (dupe by name), and lists conflicts.
+{
+  const existing = [
+    { id: 'custom-1', name: 'Sunset', neon: '#ff9d5c', hueShift: 15 },
+    { id: 'custom-2', name: 'Forest', neon: '#22c55e', hueShift: 120 },
+  ]
+  const imported = [
+    { name: 'Sunset',  neon: '#000000', hueShift: 0 },     // dupe → skip
+    { name: 'Aurora',  neon: '#22c55e', hueShift: 120 },   // new → add
+    { name: 'Forest',  neon: '#111111', hueShift: 0 },     // dupe → skip
+    { name: 'Plasma',  neon: '#abcdef', hueShift: 45 },    // new → add
+  ]
+  const s = summarizeImportImpact(existing, imported, 'merge')
+  eq(s.mode, 'merge', 'merge mode echoed')
+  eq(s.totalImport, 4, 'totalImport = 4')
+  eq(s.willAdd, 2, 'willAdd = 2 (Aurora, Plasma)')
+  eq(s.willSkip, 2, 'willSkip = 2 (Sunset, Forest)')
+  eq(s.willOverwrite, 0, 'merge → no overwrite')
+  eq(s.resultLength, 4, 'resultLength = 2 existing + 2 added')
+  eq(s.conflicts.length, 2, 'two name conflicts listed')
+  eq(s.conflicts.join(','), 'Sunset,Forest', 'conflicts preserve import order')
+  eq(s.willCapTo, MAX_CUSTOM_THEMES, 'cap echoed')
+}
+
+// replace mode — drops everything existing; willOverwrite = existing.length.
+{
+  const existing = [
+    { id: 'custom-1', name: 'Sunset', neon: '#ff9d5c', hueShift: 15 },
+    { id: 'custom-2', name: 'Forest', neon: '#22c55e', hueShift: 120 },
+  ]
+  const imported = [
+    { name: 'Aurora',  neon: '#22c55e', hueShift: 120 },
+    { name: 'Plasma',  neon: '#abcdef', hueShift: 45 },
+  ]
+  const s = summarizeImportImpact(existing, imported, 'replace')
+  eq(s.mode, 'replace', 'replace mode echoed')
+  eq(s.willOverwrite, 2, 'replace overwrites all 2 existing themes')
+  eq(s.willAdd, 2, 'all 2 imported get added')
+  eq(s.willSkip, 0, 'no skips under the cap')
+  eq(s.resultLength, 2, 'result is exactly the imported count')
+  // Conflicts still listed in replace mode so the UI can highlight
+  // which existing themes are about to be lost.
+  eq(s.conflicts.length, 0, 'no shared names → no conflicts')
+}
+
+// merge mode hits the cap — extra imports counted as skipped, not added.
+{
+  // Pre-fill existing with (cap - 1) themes so only ONE add is possible.
+  const existing = []
+  for (let i = 0; i < MAX_CUSTOM_THEMES - 1; i++) {
+    existing.push({ id: `custom-${i}`, name: `E${i}`, neon: '#000000', hueShift: 0 })
+  }
+  const imported = [
+    { name: 'NewOne', neon: '#abcdef', hueShift: 0 },
+    { name: 'NewTwo', neon: '#fedcba', hueShift: 0 },
+    { name: 'NewThree', neon: '#123456', hueShift: 0 },
+  ]
+  const s = summarizeImportImpact(existing, imported, 'merge')
+  eq(s.willAdd, 1, 'only one fits under the cap')
+  eq(s.willSkip, 2, 'overflow counted as skipped')
+  eq(s.resultLength, MAX_CUSTOM_THEMES, 'result lands at cap')
+}
+
+// replace mode hits the cap too — imported list capped silently.
+{
+  const imported = []
+  for (let i = 0; i < MAX_CUSTOM_THEMES + 3; i++) {
+    imported.push({ name: `I${i}`, neon: '#000000', hueShift: 0 })
+  }
+  const s = summarizeImportImpact([], imported, 'replace')
+  eq(s.willAdd, MAX_CUSTOM_THEMES, 'replace caps adds at MAX_CUSTOM_THEMES')
+  eq(s.willSkip, 3, '3 over the cap')
+}
+
+// Defensive: garbage inputs return a safe zero-result summary, not a throw.
+{
+  const s1 = summarizeImportImpact(null, null, 'merge')
+  eq(s1.totalImport, 0, 'null inputs → 0 total')
+  eq(s1.willAdd, 0,    'null inputs → 0 added')
+  eq(s1.resultLength, 0, 'null inputs → 0 result')
+
+  const s2 = summarizeImportImpact([], [null, { name: '' }, {}], 'merge')
+  eq(s2.totalImport, 3, 'totalImport counts pre-validation rows')
+  eq(s2.willAdd, 0,   'no valid rows → 0 added')
+  eq(s2.willSkip, 3,  'all three skipped (null + empty + name-less)')
+}
+
+console.log(`PASS: customThemesIO build/serialise/filename + parse + merge · MAX_BYTES=${MAX_IMPORT_BYTES} + summarizeImportImpact dry-run (R10.10)`)

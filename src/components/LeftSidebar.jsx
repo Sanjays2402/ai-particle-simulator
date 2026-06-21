@@ -6,7 +6,7 @@ import { startCanvasRecording, downloadVideoBlob, isVideoExportSupported } from 
 import { CATEGORIES, categoryOf, countByCategory } from '../lib/presetCategories'
 import { compassFor, WIND_PRESETS, matchesWindPreset } from '../lib/wind'
 import { DURATION_CHIPS as CROSSFADE_DURATION_CHIPS, matchDurationChip as matchCrossfadeChip } from '../lib/crossfade'
-import { downloadThemesFile, parseImport as parseThemesImport, mergeImport as mergeThemesImport } from '../lib/customThemesIO'
+import { downloadThemesFile, parseImport as parseThemesImport, mergeImport as mergeThemesImport, summarizeImportImpact as summarizeThemesImpact } from '../lib/customThemesIO'
 import { ATTRACTOR_TYPES, MAX_ATTRACTORS } from '../lib/namedAttractors'
 import { showToast } from './Toast'
 
@@ -822,6 +822,14 @@ function CustomThemesRow() {
   const [name, setName] = useState('My Theme')
   const [neon, setNeon] = useState('#a855f7')
   const [hueShift, setHueShift] = useState(0)
+  // Theme-pack import preview — populated by importFromFile when the
+  // user picks a JSON; cleared after they commit or cancel. Shape:
+  //   { items: parsed-themes, filename: string }
+  const [pendingPack, setPendingPack] = useState(null)
+  // Mode the preview panel will commit with — 'merge' (default, safer)
+  // or 'replace' (drops all existing custom themes). Held alongside
+  // the pack so the impact summary updates as the user flips modes.
+  const [pendingMode, setPendingMode] = useState('merge')
 
   const save = () => {
     const id = addCustomTheme({ name, neon, hueShift })
@@ -842,6 +850,10 @@ function CustomThemesRow() {
     }
   }
 
+  // Open a file picker, parse the JSON, then surface a preview panel
+  // (instead of a window.confirm) so the user can SEE the themes before
+  // committing. The actual merge/replace happens in commitPendingPack
+  // after the user clicks one of the action buttons.
   const importFromFile = () => {
     const input = document.createElement('input')
     input.type = 'file'
@@ -856,23 +868,27 @@ function CustomThemesRow() {
           showToast(`Import failed: ${res.error}`)
           return
         }
-        const mode = window.confirm(
-          `Import ${res.items.length} custom theme${res.items.length === 1 ? '' : 's'}?\n\n` +
-          `OK = Merge into existing themes (dupes by name are skipped).\n` +
-          `Cancel = Replace all current custom themes.`
-        ) ? 'merge' : 'replace'
-        const merged = mergeThemesImport(customThemes, res.items, mode)
-        setCustomThemes(merged.items)
-        const summary = mode === 'merge'
-          ? `Merged: +${merged.added}${merged.skipped ? `, ${merged.skipped} skipped` : ''}`
-          : `Replaced: ${merged.added} loaded`
-        showToast(summary)
+        setPendingPack({ items: res.items, filename: file.name })
+        setPendingMode('merge')
       } catch (e) {
         showToast(`Import error: ${e.message || 'unknown'}`)
       }
     }
     input.click()
   }
+
+  // Apply the previewed pack with the currently-selected mode.
+  const commitPendingPack = () => {
+    if (!pendingPack) return
+    const merged = mergeThemesImport(customThemes, pendingPack.items, pendingMode)
+    setCustomThemes(merged.items)
+    const summary = pendingMode === 'merge'
+      ? `Merged: +${merged.added}${merged.skipped ? `, ${merged.skipped} skipped` : ''}`
+      : `Replaced: ${merged.added} loaded`
+    showToast(summary)
+    setPendingPack(null)
+  }
+  const cancelPendingPack = () => setPendingPack(null)
 
   return (
     <div>
@@ -981,6 +997,17 @@ function CustomThemesRow() {
           }}>↑ Import Theme Pack</button>
       )}
 
+      {pendingPack && (
+        <ThemePackPreview
+          pack={pendingPack}
+          mode={pendingMode}
+          onModeChange={setPendingMode}
+          existing={customThemes}
+          onCommit={commitPendingPack}
+          onCancel={cancelPendingPack}
+        />
+      )}
+
       {open && (
         <div style={{
           marginTop: 8, padding: 10, borderRadius: 8,
@@ -1039,6 +1066,146 @@ function CustomThemesRow() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ThemePackPreview — a panel that surfaces what's INSIDE an imported
+// theme pack before the user commits. Shows up to 12 chips (one per
+// theme) with the accent color + name + hue shift, and an impact
+// summary that updates live as the user toggles merge vs replace
+// (e.g. "+3 new, 2 will overwrite, 1 won't fit"). Cancel dismisses
+// the pack without touching the live theme list; Apply runs the
+// configured merge.
+function ThemePackPreview({ pack, mode, onModeChange, existing, onCommit, onCancel }) {
+  const impact = summarizeThemesImpact(existing, pack.items, mode)
+  // Conflict lookup so we can mark colliding chips with a "exists" badge.
+  const conflictSet = new Set(impact.conflicts || [])
+  return (
+    <div style={{
+      marginTop: 10, padding: 10, borderRadius: 8,
+      background: 'rgba(99,102,241,0.07)',
+      border: '1px solid rgba(99,102,241,0.25)',
+      animation: 'theme-pack-rise 0.18s cubic-bezier(0.2,0.8,0.2,1)',
+    }}>
+      <style>{`@keyframes theme-pack-rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }`}</style>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        marginBottom: 8,
+      }}>
+        <span style={{ fontSize: 11, color: '#c7d2fe', fontWeight: 600, letterSpacing: '0.02em' }}>
+          Preview: {pack.items.length} theme{pack.items.length === 1 ? '' : 's'}
+        </span>
+        <span style={{ fontSize: 10, color: '#7a7a90', fontFamily: 'Geist Mono, monospace', maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          title={pack.filename}>
+          {pack.filename}
+        </span>
+      </div>
+      {/* Theme chips — same look as the live custom-themes grid above */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 8 }}>
+        {pack.items.map((t, i) => {
+          const isConflict = conflictSet.has(t.name)
+          return (
+            <div key={`${t.name}-${i}`}
+              title={`${t.name} · hue ${t.hueShift >= 0 ? '+' : ''}${t.hueShift || 0}°${isConflict ? ' · name already exists' : ''}`}
+              style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+                padding: '8px 4px', borderRadius: 8, fontSize: 10.5, fontWeight: 500,
+                background: isConflict ? 'rgba(245,158,11,0.07)' : 'rgba(255,255,255,0.02)',
+                border: isConflict
+                  ? '1px solid rgba(245,158,11,0.35)'
+                  : `1px solid ${t.neon || '#666'}40`,
+                color: isConflict ? '#fde68a' : '#cfcfde',
+                position: 'relative',
+              }}
+            >
+              <span style={{
+                width: 22, height: 22, borderRadius: '50%',
+                background: t.neon || '#666',
+                boxShadow: `0 0 8px ${t.neon || '#666'}, inset 0 1px 0 rgba(255,255,255,0.18)`,
+                flexShrink: 0,
+              }} />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>
+                {t.name}
+              </span>
+              {isConflict && (
+                <span style={{
+                  position: 'absolute', top: 2, right: 4,
+                  fontSize: 8, fontWeight: 700, letterSpacing: '0.05em',
+                  color: '#fde68a',
+                }}>!</span>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      {/* Mode selector */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 8 }}>
+        <button onClick={() => onModeChange('merge')}
+          title="Keep existing themes; add new ones; skip names that already exist."
+          style={{
+            padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+            cursor: 'pointer',
+            background: mode === 'merge' ? 'rgba(99,102,241,0.22)' : 'rgba(255,255,255,0.04)',
+            color: mode === 'merge' ? '#dbeafe' : '#8a8aa0',
+            border: mode === 'merge' ? '1px solid rgba(99,102,241,0.45)' : '1px solid rgba(255,255,255,0.07)',
+          }}>Merge</button>
+        <button onClick={() => onModeChange('replace')}
+          title="Drop ALL current custom themes and load just the imported pack."
+          style={{
+            padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+            cursor: 'pointer',
+            background: mode === 'replace' ? 'rgba(239,68,68,0.18)' : 'rgba(255,255,255,0.04)',
+            color: mode === 'replace' ? '#fecaca' : '#8a8aa0',
+            border: mode === 'replace' ? '1px solid rgba(239,68,68,0.4)' : '1px solid rgba(255,255,255,0.07)',
+          }}>Replace</button>
+      </div>
+      {/* Impact line — short and unambiguous so users know exactly what
+          'Apply' is about to do. Colour matches the mode: indigo when
+          additive, red when destructive. */}
+      <p style={{
+        fontSize: 10.5, color: mode === 'replace' ? '#fca5a5' : '#a5b4fc',
+        margin: 0, marginBottom: 8, lineHeight: 1.5,
+        fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+      }}>
+        {mode === 'replace'
+          ? `Replace: drops ${impact.willOverwrite} existing, loads ${impact.willAdd}${impact.willSkip ? ` (${impact.willSkip} won\u2019t fit — cap ${impact.willCapTo})` : ''}.`
+          : `Merge: +${impact.willAdd} new${impact.willSkip ? ` · ${impact.willSkip} skipped` : ''} → ${impact.resultLength}/${impact.willCapTo} total.`}
+      </p>
+      {/* Apply / Cancel */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+        <button onClick={onCancel}
+          style={{
+            padding: '7px 0', borderRadius: 7, fontSize: 11.5, fontWeight: 550,
+            cursor: 'pointer',
+            background: 'rgba(255,255,255,0.04)',
+            color: '#c8c8d4',
+            border: '1px solid rgba(255,255,255,0.07)',
+          }}>Cancel</button>
+        <button onClick={onCommit}
+          disabled={impact.willAdd === 0 && mode === 'merge'}
+          title={impact.willAdd === 0 && mode === 'merge'
+            ? 'Nothing to add — all imported names already exist or the cap is full.'
+            : `Apply ${impact.willAdd} theme${impact.willAdd === 1 ? '' : 's'} (${mode} mode).`}
+          style={{
+            padding: '7px 0', borderRadius: 7, fontSize: 11.5, fontWeight: 600,
+            cursor: (impact.willAdd === 0 && mode === 'merge') ? 'not-allowed' : 'pointer',
+            background: (impact.willAdd === 0 && mode === 'merge')
+              ? 'rgba(255,255,255,0.04)'
+              : mode === 'replace'
+                ? 'linear-gradient(135deg, rgba(239,68,68,0.22), rgba(168,85,247,0.18))'
+                : 'linear-gradient(135deg, rgba(99,102,241,0.25), rgba(168,85,247,0.2))',
+            color: (impact.willAdd === 0 && mode === 'merge')
+              ? '#7a7a90'
+              : mode === 'replace' ? '#fee2e2' : '#e9d5ff',
+            border: (impact.willAdd === 0 && mode === 'merge')
+              ? '1px solid rgba(255,255,255,0.07)'
+              : mode === 'replace'
+                ? '1px solid rgba(239,68,68,0.4)'
+                : '1px solid rgba(168,85,247,0.4)',
+            opacity: (impact.willAdd === 0 && mode === 'merge') ? 0.6 : 1,
+          }}>Apply</button>
+      </div>
     </div>
   )
 }

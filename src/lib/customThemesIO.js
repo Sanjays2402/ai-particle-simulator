@@ -158,3 +158,66 @@ export function downloadThemesFile(items, nowIso = new Date().toISOString()) {
     return filename
   } catch { return null }
 }
+
+// Dry-run summary of what mergeImport WOULD do without mutating
+// anything. Used by the theme-pack preview UI so users see "+3 new,
+// 1 will overwrite" before committing. Returns:
+//   {
+//     mode,                       // echo of requested mode
+//     totalImport,                // imported.length (post-parse)
+//     willAdd,                    // count of brand-new themes
+//     willSkip,                   // count skipped (existing name OR cap)
+//     willOverwrite,              // count whose name collides (replace mode only)
+//     willCapTo,                  // total cap (MAX_CUSTOM_THEMES)
+//     resultLength,               // expected items.length after the merge
+//     conflicts: [string, ...],   // names that already exist
+//   }
+// Pure function — never touches localStorage, never calls addTheme.
+export function summarizeImportImpact(existing, imported, mode = 'merge') {
+  const existingArr = Array.isArray(existing) ? existing : []
+  const importedArr = Array.isArray(imported) ? imported : []
+  const cap = MAX_CUSTOM_THEMES
+  const existingNames = new Set(existingArr.map(t => t && t.name).filter(Boolean))
+  const conflicts = []
+  for (const it of importedArr) {
+    if (it && existingNames.has(it.name)) conflicts.push(it.name)
+  }
+  if (mode === 'replace') {
+    const willAdd = Math.min(importedArr.length, cap)
+    return {
+      mode: 'replace',
+      totalImport: importedArr.length,
+      willAdd,
+      willSkip: importedArr.length - willAdd,
+      willOverwrite: existingArr.length,  // ALL existing themes are dropped
+      willCapTo: cap,
+      resultLength: willAdd,
+      conflicts,
+    }
+  }
+  // Merge: addTheme caps at MAX_CUSTOM_THEMES and dedupes by name.
+  // Walk in import order, mirroring mergeImport's logic so the dry-run
+  // exactly matches the live behaviour.
+  const seen = new Set(existingNames)
+  let willAdd = 0
+  let willSkip = 0
+  let len = existingArr.length
+  for (const it of importedArr) {
+    if (!it || !it.name) { willSkip++; continue }
+    if (seen.has(it.name)) { willSkip++; continue }
+    if (len >= cap)       { willSkip++; continue }
+    seen.add(it.name)
+    willAdd++
+    len++
+  }
+  return {
+    mode: 'merge',
+    totalImport: importedArr.length,
+    willAdd,
+    willSkip,
+    willOverwrite: 0,
+    willCapTo: cap,
+    resultLength: len,
+    conflicts,
+  }
+}
