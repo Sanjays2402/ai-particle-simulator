@@ -2,7 +2,7 @@
 // Run via: node src/lib/cameraViews.test.mjs (uses an in-memory shim
 // since cameraViews.js touches localStorage via the load/save fns).
 import {
-  appendView, moveView, moveViewUp, moveViewDown, CAMERA_VIEWS_MAX,
+  appendView, moveView, moveViewUp, moveViewDown, removeView, CAMERA_VIEWS_MAX,
 } from './cameraViews.js'
 
 function assertEq(actual, expected, msg) {
@@ -82,4 +82,39 @@ function assertEq(actual, expected, msg) {
   if (moveViewDown(v, 2) !== v) { console.error('FAIL: moveViewDown at bottom is a no-op (ref check)'); process.exit(1) }
 }
 
-console.log('PASS: cameraViews append/dedupe/cap + moveView reorder (boundaries, no-op ref, no-mutation)')
+// 9. removeView — R13.15 — removes by id, returns same ref when id
+// not present (so callers can skip a redundant save), preserves
+// order of the survivors, no-mutates the input.
+{
+  const v = [
+    { id: 1, name: 'a' }, { id: 2, name: 'b' }, { id: 3, name: 'c' }, { id: 4, name: 'd' },
+  ]
+  // Happy: remove middle id
+  const out = removeView(v, 2)
+  assertEq(out.map(x => x.name), ['a', 'c', 'd'], 'removeView keeps survivors in order')
+  if (out === v) { console.error('FAIL: removeView with hit must return a fresh array'); process.exit(1) }
+  assertEq(v.map(x => x.name), ['a', 'b', 'c', 'd'], 'original input untouched')
+  // No-op (id not present): same reference back
+  if (removeView(v, 999) !== v) { console.error('FAIL: removeView with missing id must return input ref'); process.exit(1) }
+  // Remove first / last
+  assertEq(removeView(v, 1).map(x => x.name), ['b', 'c', 'd'], 'removeView head')
+  assertEq(removeView(v, 4).map(x => x.name), ['a', 'b', 'c'], 'removeView tail')
+  // Defensive: non-array → []
+  assertEq(removeView(null, 1), [], 'removeView null input → empty array')
+  assertEq(removeView(undefined, 1), [], 'removeView undefined input → empty array')
+  // Defensive: null id → return input unchanged (ref-equal)
+  if (removeView(v, null) !== v) { console.error('FAIL: removeView with null id must return input ref'); process.exit(1) }
+  if (removeView(v, undefined) !== v) { console.error('FAIL: removeView with undefined id must return input ref'); process.exit(1) }
+  // Defensive: skips a corrupt nullish entry without crashing. We
+  // ask to remove a missing id (99); the null row should still be
+  // cleaned up because the helper guarantees "ref-equal only when
+  // there is nothing to remove AND nothing to clean up".
+  const dirty = [{ id: 1, name: 'a' }, null, { id: 2, name: 'b' }]
+  const cleaned = removeView(dirty, 99)
+  if (cleaned === dirty) { console.error('FAIL: removeView with corrupt rows must return a fresh array'); process.exit(1) }
+  assertEq(cleaned.map(x => x && x.name), ['a', 'b'], 'removeView cleans corrupt nullish rows on a miss')
+  // And of course removing a real id ALSO drops nullish rows.
+  assertEq(removeView(dirty, 2).map(x => x && x.name), ['a'], 'removeView drops target AND nullish row in one pass')
+}
+
+console.log('PASS: cameraViews append/dedupe/cap + moveView reorder + removeView (boundaries, no-op ref, no-mutation)')

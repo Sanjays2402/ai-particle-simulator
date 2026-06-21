@@ -58,4 +58,26 @@ export function moveViewDown(views, idx) {
   return moveView(views, idx, idx + 1)
 }
 
+// Remove a single view by id. Returns the same array reference when
+// the id isn't present so callers can compare-by-reference to skip
+// a redundant save. Tolerates non-array input (returns empty) and
+// nullish id (returns unchanged) so the minimap's Shift+click path
+// can't accidentally wipe the list on a stale event. Drops any
+// nullish entry it encounters as a side-effect — keeping corrupt
+// rows around just to honour the "ref-equal on no-op" contract
+// would be the wrong trade-off, so the contract is: ref-equal only
+// when there's nothing to remove AND nothing to clean up.
+export function removeView(views, id) {
+  if (!Array.isArray(views)) return []
+  if (id === null || id === undefined) return views
+  let changed = false
+  const next = []
+  for (const v of views) {
+    if (!v) { changed = true; continue }  // drop corrupt rows
+    if (v.id === id) { changed = true; continue }
+    next.push(v)
+  }
+  return changed ? next : views
+}
+
 export const CAMERA_VIEWS_MAX = MAX

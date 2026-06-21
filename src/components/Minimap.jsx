@@ -4,7 +4,8 @@ import {
   sampleScene, projectXZ, lookDirXZ, unprojectXZ, scaleLabelFor,
   projectSavedViews, pickNearestMarker, tooltipPlacement,
 } from '../lib/minimap'
-import { loadCameraViews } from '../lib/cameraViews'
+import { loadCameraViews, saveCameraViews, removeView } from '../lib/cameraViews'
+import { showToast } from './Toast'
 
 // Minimap overlay — a small top-down (XZ-plane) widget pinned to the
 // canvas's bottom-right corner. Shows where the camera sits relative
@@ -152,9 +153,11 @@ export default function Minimap() {
     return () => cancelAnimationFrame(rafRef.current)
   }, [enabled, hoverId])
 
-  // Click → if it lands on a saved-view dot, jump to that view.
-  // Otherwise fall back to "recenter orbit target on that XZ point"
-  // — the legacy behavior.
+  // Click → if it lands on a saved-view dot, jump to that view
+  // (Shift+click → delete the view inline, R13.15). Otherwise fall
+  // back to "recenter orbit target on that XZ point" — the legacy
+  // behavior. Shift+click on empty canvas is treated as a normal
+  // recenter so the modifier is only meaningful when it hits a dot.
   const onClick = (e) => {
     const cv = canvasRef.current
     if (!cv) return
@@ -167,6 +170,34 @@ export default function Minimap() {
     // mobile / touch users don't have to be pixel-precise.
     const hitId = pickNearestMarker(markersRef.current, px, py, 8)
     if (hitId !== null && hitId !== undefined) {
+      // R13.15 — Shift+click deletes the view inline, skipping the
+      // panel trip. We persist immediately AND fire the camera-views
+      // -changed event so RightSidebar's CameraViews list re-syncs
+      // without a refresh. Hover state is cleared so the tooltip
+      // doesn't briefly point at a ghost.
+      if (e.shiftKey) {
+        const v = viewsRef.current.find(view => view && view.id === hitId)
+        const nextViews = removeView(viewsRef.current, hitId)
+        if (nextViews === viewsRef.current) {
+          // No-op — the view was already gone (stale marker). Bail
+          // before persisting so we don't churn localStorage.
+          return
+        }
+        viewsRef.current = nextViews
+        markersRef.current = markersRef.current.filter(m => m.id !== hitId)
+        saveCameraViews(nextViews)
+        try {
+          window.dispatchEvent(new CustomEvent('particle:camera-views-changed'))
+        } catch { /* */ }
+        if (hoverId === hitId) {
+          setHoverId(null); setHoverPlace(null); setHoverName('')
+        }
+        // Inline feedback so the user knows the click registered as
+        // a delete rather than a jump. Minimap is a tiny overlay,
+        // toast is the cheapest signal that doesn't move things.
+        showToast(`Deleted "${(v && v.name) || 'view'}"`)
+        return
+      }
       // Find the original view and apply pos + target.
       const v = viewsRef.current.find(view => view && view.id === hitId)
       if (v && Array.isArray(v.pos) && Array.isArray(v.target)) {
@@ -241,7 +272,7 @@ export default function Minimap() {
           onClick={onClick}
           onMouseMove={onMouseMove}
           onMouseLeave={onMouseLeave}
-          title="Click a green dot to jump to that saved view, or anywhere else to recenter orbit"
+          title="Click a green dot to jump to that saved view (Shift+click to delete it). Click anywhere else to recenter orbit."
           style={{
             width: SIZE, height: SIZE, display: 'block',
             borderRadius: 6, cursor: 'crosshair',

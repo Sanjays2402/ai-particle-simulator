@@ -3,7 +3,7 @@ import { useStore } from '../store'
 import { Activity, Sparkles, Palette, Gauge, Camera, X, BarChart3, Code2, Copy, ChevronDown, ChevronUp, Bookmark, BookmarkPlus, Pencil, Play, RotateCcw, Route, Square, Repeat, Download, Upload, Shuffle } from 'lucide-react'
 import { presets } from '../presets'
 import { generateRandomScene, SCENE_BIASES, SCENE_BIAS_DEFAULT } from '../lib/randomScene'
-import { loadCameraViews, saveCameraViews, appendView, moveViewUp, moveViewDown, CAMERA_VIEWS_MAX } from '../lib/cameraViews'
+import { loadCameraViews, saveCameraViews, appendView, moveViewUp, moveViewDown, removeView, CAMERA_VIEWS_MAX } from '../lib/cameraViews'
 import {
   PATH_SECONDS_MIN, PATH_SECONDS_MAX, PATH_SECONDS_DEFAULT,
   PATH_MIN_WAYPOINTS, pathDuration, clampSeconds,
@@ -222,7 +222,8 @@ function CameraViews() {
   }
 
   const remove = (id) => {
-    const next = views.filter(v => v.id !== id)
+    const next = removeView(views, id)
+    if (next === views) return
     setViews(next)
     saveCameraViews(next)
   }
