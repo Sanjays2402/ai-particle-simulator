@@ -560,6 +560,21 @@ export const useStore = create((set, get) => {
     try { if (typeof localStorage !== 'undefined') localStorage.setItem('spectrum-scale-v1', next) } catch { /* */ }
     set({ spectrumScale: next })
   },
+  // Peak-hold lines on the spectrum view — a thin line stays at each
+  // bar's recent peak height and falls slowly. Classic EQ visual that
+  // makes transients legible. On by default (matches the look of most
+  // commercial visualizers); persisted across reloads.
+  spectrumPeakHolds: (() => {
+    try {
+      const v = typeof localStorage !== 'undefined' ? localStorage.getItem('spectrum-peak-holds-v1') : null
+      return v == null ? true : v !== '0'  // default ON, '0' opts out
+    } catch { return true }
+  })(),
+  setSpectrumPeakHolds: (v) => {
+    const next = !!v
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem('spectrum-peak-holds-v1', next ? '1' : '0') } catch { /* */ }
+    set({ spectrumPeakHolds: next })
+  },
 
   setMouseAttract: (v) => set({ mouseAttract: v }),
   paintMode: false,

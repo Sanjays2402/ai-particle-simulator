@@ -201,3 +201,79 @@ export function projectSpectrumToLogBars(spectrum, width, height, barCount = 32,
 export function normalizeWaveformMode(mode) {
   return WAVEFORM_MODES.includes(mode) ? mode : 'time'
 }
+
+// --- Spectrum peak-hold lines ---------------------------------------
+//
+// Classic EQ visualizers paint a thin horizontal line over each bar at
+// the bar's recent peak height, and let that line fall slowly. The
+// effect makes transients legible — a kick drum's spike sits in the air
+// for ~half a second instead of vanishing in a single 16ms frame.
+//
+// Math: each peak holds for HOLD_FRAMES of plateau (bar dipped below
+// peak), then decays at DECAY_PER_FRAME pixels per frame. A FRESH bar
+// height that exceeds the held peak instantly raises the peak (no
+// smoothing — we want the spike to read crisply).
+//
+// State shape (per bar): { peak, age }
+//   peak: held bar-pixel height (0 = floor)
+//   age:  frames since the last time the bar height >= peak. While age
+//         is below HOLD_FRAMES the peak holds; after that, it decays.
+//
+// Pure function — caller maintains the `prev` Float32Array (peaks) +
+// Int32Array (ages) and passes the freshly-rendered bars back in. Use
+// makePeakHoldState(barCount) to mint a clean slate.
+
+export const PEAK_HOLD_FRAMES = 18
+export const PEAK_DECAY_PX = 0.6
+export const PEAK_LINE_THICKNESS = 1.5
+
+export function makePeakHoldState(barCount) {
+  const n = Math.max(0, barCount | 0)
+  return {
+    peaks: new Float32Array(n),
+    ages:  new Int32Array(n),
+  }
+}
+
+// Walk one frame forward. `bars` is the output of projectSpectrumToBars
+// (or its log variant) — an array of [x, barHeight] tuples. Mutates
+// state in-place for speed (this runs at 60Hz) and returns it for
+// fluent use. New peaks lock in instantly; lower bars trigger the hold
+// timer; expired holds decay by PEAK_DECAY_PX per frame, never below 0.
+export function tickPeakHolds(state, bars, opts = {}) {
+  if (!state || !state.peaks || !state.ages) return state
+  const n = state.peaks.length
+  const holdFrames = Number.isFinite(opts.holdFrames) ? opts.holdFrames : PEAK_HOLD_FRAMES
+  const decayPx    = Number.isFinite(opts.decayPx)    ? opts.decayPx    : PEAK_DECAY_PX
+  for (let i = 0; i < n; i++) {
+    const fresh = (bars && i < bars.length) ? Math.max(0, bars[i][1] || 0) : 0
+    const prev = state.peaks[i]
+    if (fresh >= prev) {
+      // New high (or matched the previous peak) — lock it in, reset age.
+      state.peaks[i] = fresh
+      state.ages[i]  = 0
+    } else {
+      // Bar dipped below the held peak. Hold for HOLD_FRAMES, then decay.
+      const age = state.ages[i] + 1
+      state.ages[i] = age
+      if (age > holdFrames) {
+        const next = prev - decayPx
+        // Don't let the peak drop below the fresh bar (it would look
+        // wrong to have the held line below the live bar top) and never
+        // below zero.
+        state.peaks[i] = Math.max(0, next, fresh)
+      }
+    }
+  }
+  return state
+}
+
+// Reset the hold state without re-allocating — used when the bar count
+// changes or the mode flips back to time-domain (peaks shouldn't carry
+// over a mode swap and look stale).
+export function resetPeakHolds(state) {
+  if (!state || !state.peaks || !state.ages) return state
+  state.peaks.fill(0)
+  state.ages.fill(0)
+  return state
+}

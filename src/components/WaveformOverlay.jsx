@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import {
   sampleAnalyser, projectToCanvas, peakAmplitude,
   sampleAnalyserSpectrum, projectSpectrumToBars, projectSpectrumToLogBars,
+  makePeakHoldState, tickPeakHolds, resetPeakHolds, PEAK_LINE_THICKNESS,
 } from '../lib/waveform'
 
 // Audio waveform / oscilloscope overlay. Pinned to the canvas's
@@ -28,9 +29,16 @@ export default function WaveformOverlay() {
   const setMode = useStore(s => s.setWaveformMode)
   const spectrumScale = useStore(s => s.spectrumScale)
   const setSpectrumScale = useStore(s => s.setSpectrumScale)
+  const peakHolds = useStore(s => s.spectrumPeakHolds)
+  const setPeakHolds = useStore(s => s.setSpectrumPeakHolds)
   const canvasRef = useRef(null)
   const rafRef = useRef(0)
   const scratchRef = useRef(null)
+  // Peak-hold state — Float32Array of held bar heights + Int32Array of
+  // frames-since-plateau, allocated once per active session. Re-created
+  // when the bar count changes (BAR_COUNT is stable, but we still gate
+  // the alloc on first run inside the rAF tick).
+  const peakStateRef = useRef(null)
 
   const active = enabled && audioReactive
 
@@ -117,6 +125,18 @@ export default function WaveformOverlay() {
       const bars = (spectrumScale === 'log')
         ? projectSpectrumToLogBars(spectrum, WIDTH, HEIGHT, BAR_COUNT, 4)
         : projectSpectrumToBars(spectrum, WIDTH, HEIGHT, BAR_COUNT, 4)
+      // Tick the peak-hold state ONCE per frame using the freshly-
+      // projected bars. Lazy-allocate when the toggle flips ON so we
+      // don't pay the Float32Array cost when the user doesn't want peaks.
+      if (peakHolds) {
+        if (!peakStateRef.current || peakStateRef.current.peaks.length !== bars.length) {
+          peakStateRef.current = makePeakHoldState(bars.length)
+        }
+        tickPeakHolds(peakStateRef.current, bars)
+      } else if (peakStateRef.current) {
+        // Toggle just flipped off — clear so a re-enable starts fresh.
+        resetPeakHolds(peakStateRef.current)
+      }
       const colW = WIDTH / BAR_COUNT
       const barW = Math.max(1, colW - 1)
       let sumIntensity = 0
@@ -135,6 +155,18 @@ export default function WaveformOverlay() {
         // Hard cap with brighter hue.
         ctx.fillStyle = `hsla(${hueWrapped}, 95%, 70%, 0.92)`
         ctx.fillRect(x + 0.5, topY, barW, Math.min(2, h))
+        // Peak-hold line: thin horizontal slab at the held peak height.
+        // Only draws when peaks are visibly above the live bar — when
+        // the peak has caught back up to the bar there's no daylight to
+        // paint, and drawing on top of the cap looks like a fat line.
+        if (peakHolds && peakStateRef.current) {
+          const peakH = peakStateRef.current.peaks[i] || 0
+          if (peakH > h + 1) {  // ≥ 1px gap so we don't paint on top of the cap
+            const peakY = baseY - peakH
+            ctx.fillStyle = `hsla(${hueWrapped}, 100%, 84%, 0.92)`
+            ctx.fillRect(x + 0.5, peakY, barW, PEAK_LINE_THICKNESS)
+          }
+        }
         sumIntensity += (h / HEIGHT)
       }
       const avgIntensity = sumIntensity / Math.max(1, bars.length)
@@ -144,7 +176,7 @@ export default function WaveformOverlay() {
     }
     rafRef.current = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(rafRef.current)
-  }, [active, mode, spectrumScale])
+  }, [active, mode, spectrumScale, peakHolds])
 
   if (!active) return null
 
@@ -218,6 +250,31 @@ export default function WaveformOverlay() {
             cursor: 'pointer',
             backdropFilter: 'blur(4px)',
           }}>{scaleLabel}</button>
+      )}
+      {mode === 'frequency' && (
+        <button
+          type="button"
+          onClick={() => setPeakHolds(!peakHolds)}
+          title={peakHolds
+            ? 'Peak-hold lines ON — thin line stays at each bar\u2019s recent peak. Click to hide.'
+            : 'Peak-hold lines OFF — click to show classic EQ peak markers.'}
+          style={{
+            position: 'absolute', top: 8, left: 96,
+            pointerEvents: 'auto',
+            padding: '2px 8px', borderRadius: 5,
+            fontSize: 9, fontWeight: 600, letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            color: peakHolds ? '#bef264' : '#d8d8e0',
+            background: peakHolds
+              ? 'rgba(132,204,22,0.16)'
+              : 'rgba(255,255,255,0.06)',
+            border: peakHolds
+              ? '1px solid rgba(132,204,22,0.40)'
+              : '1px solid rgba(255,255,255,0.14)',
+            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+            cursor: 'pointer',
+            backdropFilter: 'blur(4px)',
+          }}>pk</button>
       )}
     </div>
   )

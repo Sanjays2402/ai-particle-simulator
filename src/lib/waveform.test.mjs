@@ -5,6 +5,8 @@ import {
   bytesToCentered, peakAmplitude, projectToCanvas, sampleAnalyser,
   WAVEFORM_MODES, bytesToSpectrum, sampleAnalyserSpectrum,
   projectSpectrumToBars, projectSpectrumToLogBars, normalizeWaveformMode,
+  makePeakHoldState, tickPeakHolds, resetPeakHolds,
+  PEAK_HOLD_FRAMES, PEAK_DECAY_PX,
 } from './waveform.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -298,4 +300,95 @@ eq(normalizeWaveformMode(undefined), 'time', 'undefined → time fallback')
   eq(bars.length, 8, 'log bad dims still emits bars')
 }
 
-console.log('PASS: waveform spectrum extensions + log-frequency bars (R9.19, ~10 fresh asserts)')
+console.log('PASS: waveform spectrum extensions + log-frequency bars (R9.19, ~10 fresh asserts) + peak holds (R10.19)')
+
+// --- peak-hold lines (R10.19) ----------------------------------------
+// State allocates the right typed arrays.
+{
+  const s = makePeakHoldState(8)
+  eq(s.peaks.length, 8, 'peaks Float32Array sized')
+  eq(s.ages.length, 8, 'ages Int32Array sized')
+  for (let i = 0; i < 8; i++) {
+    eq(s.peaks[i], 0, `peaks start at 0 [${i}]`)
+    eq(s.ages[i], 0,  `ages start at 0 [${i}]`)
+  }
+}
+eq(makePeakHoldState(-1).peaks.length, 0, 'negative bar count → 0-length')
+eq(makePeakHoldState(NaN).peaks.length, 0, 'NaN bar count → 0-length')
+
+// First tick with fresh bars locks in peaks instantly, ages reset.
+{
+  const s = makePeakHoldState(3)
+  const bars = [[0, 10], [10, 20], [20, 5]]
+  tickPeakHolds(s, bars)
+  near(s.peaks[0], 10, 'fresh peak[0] = 10')
+  near(s.peaks[1], 20, 'fresh peak[1] = 20')
+  near(s.peaks[2], 5,  'fresh peak[2] = 5')
+  eq(s.ages[0], 0, 'age[0] reset')
+  eq(s.ages[1], 0, 'age[1] reset')
+}
+
+// Bar drops below peak → age increments, peak holds during HOLD_FRAMES.
+{
+  const s = makePeakHoldState(1)
+  tickPeakHolds(s, [[0, 20]])   // lock peak at 20
+  near(s.peaks[0], 20, 'initial peak locked')
+  // Now feed a lower bar for HOLD_FRAMES frames — peak should not move.
+  for (let i = 0; i < PEAK_HOLD_FRAMES; i++) {
+    tickPeakHolds(s, [[0, 5]])
+    near(s.peaks[0], 20, `frame ${i + 1}: peak held during plateau`)
+    eq(s.ages[0], i + 1, `age tracks frames since plateau started`)
+  }
+  // Next frame decays by PEAK_DECAY_PX, never below the live bar.
+  tickPeakHolds(s, [[0, 5]])
+  near(s.peaks[0], 20 - PEAK_DECAY_PX, 'first decay step')
+  // After enough decay frames, peak settles at the live bar height (5).
+  for (let i = 0; i < 200; i++) tickPeakHolds(s, [[0, 5]])
+  near(s.peaks[0], 5, 'decay floor = live bar height')
+}
+
+// Spike higher than the held peak instantly lifts it (no smoothing).
+{
+  const s = makePeakHoldState(1)
+  tickPeakHolds(s, [[0, 10]])
+  tickPeakHolds(s, [[0, 30]])  // spike
+  near(s.peaks[0], 30, 'spike lifts peak instantly')
+  eq(s.ages[0], 0, 'spike resets age')
+}
+
+// Custom hold/decay opts work as overrides.
+{
+  const s = makePeakHoldState(1)
+  tickPeakHolds(s, [[0, 100]])
+  tickPeakHolds(s, [[0, 0]], { holdFrames: 0, decayPx: 50 })
+  // holdFrames=0 means decay starts the very next plateau frame.
+  near(s.peaks[0], 50, 'custom decay applied immediately')
+}
+
+// resetPeakHolds clears the in-place arrays without re-allocating.
+{
+  const s = makePeakHoldState(4)
+  tickPeakHolds(s, [[0, 10], [10, 20], [20, 5], [30, 8]])
+  resetPeakHolds(s)
+  for (let i = 0; i < 4; i++) {
+    eq(s.peaks[i], 0, `peaks zeroed [${i}]`)
+    eq(s.ages[i], 0, `ages zeroed [${i}]`)
+  }
+}
+
+// Defensive: null/garbage state passes through.
+eq(tickPeakHolds(null, [[0, 5]]), null, 'tickPeakHolds null state → null')
+eq(tickPeakHolds({}, [[0, 5]]).peaks, undefined, 'tickPeakHolds malformed → returns input')
+eq(resetPeakHolds(null), null, 'resetPeakHolds null → null')
+
+// Defensive: missing bars treated as zero (don't crash on transient drops).
+{
+  const s = makePeakHoldState(3)
+  tickPeakHolds(s, [[0, 10], [10, 20], [20, 5]])
+  tickPeakHolds(s, [])  // analyser blip: zero bars
+  // peaks held (no decay yet because age just hit 1, not past HOLD_FRAMES).
+  eq(s.peaks[0], 10, 'empty bars treated as fresh=0 → hold engaged')
+  eq(s.ages[0], 1,  'empty bars increments age')
+}
+
+console.log(`PASS: waveform peak-hold lines · HOLD=${PEAK_HOLD_FRAMES} frames · DECAY=${PEAK_DECAY_PX}px/frame (R10.19)`)
