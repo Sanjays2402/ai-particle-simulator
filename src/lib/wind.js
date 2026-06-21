@@ -18,12 +18,21 @@ export const WIND_PITCH_MAX     = 90
 // toggling it back on doesn't surprise the user with the last wild
 // setting). Match the existing slider ranges so the chips never
 // silently violate the clamps.
-export const WIND_PRESETS = [
+//
+// These are the SHIPPED defaults; users can override any slot
+// individually via the long-press workflow (see overrideWindPreset
+// + resolveWindPresets below).
+export const WIND_PRESETS_DEFAULT = [
   { id: 'calm',   label: 'Calm',   intensity: 0.0,  azimuth: 0,   pitch: 0,    hint: 'No drift'                 },
   { id: 'breeze', label: 'Breeze', intensity: 0.6,  azimuth: 45,  pitch: 10,   hint: 'Gentle SE drift'          },
   { id: 'gale',   label: 'Gale',   intensity: 2.2,  azimuth: 90,  pitch: 0,    hint: 'Strong horizontal pull'   },
   { id: 'storm',  label: 'Storm',  intensity: 4.0,  azimuth: 200, pitch: -25,  hint: 'Hurricane: SW + downdraft' },
 ]
+
+// Live preset list — defaults overlaid with any user overrides loaded
+// from localStorage. Components import `WIND_PRESETS` and re-call
+// `resolveWindPresets()` after `overrideWindPreset` to refresh.
+export const WIND_PRESETS = WIND_PRESETS_DEFAULT.map(p => ({ ...p }))
 
 function clamp(v, lo, hi, fallback) {
   if (!Number.isFinite(v)) return fallback
@@ -36,7 +45,9 @@ export function clampIntensity(v) { return clamp(v, WIND_INTENSITY_MIN, WIND_INT
 export function clampAzimuth(v)   { return clamp(v, WIND_AZIMUTH_MIN,  WIND_AZIMUTH_MAX,   0) }
 export function clampPitch(v)     { return clamp(v, WIND_PITCH_MIN,    WIND_PITCH_MAX,     0) }
 
-// Lookup a wind preset by id; null when unknown.
+// Lookup a wind preset by id; null when unknown. Resolves against the
+// LIVE list (defaults + overrides), so UI code that asks "what's
+// Storm right now?" gets the user's overridden Storm.
 export function findWindPreset(id) {
   if (typeof id !== 'string') return null
   return WIND_PRESETS.find(p => p.id === id) || null
@@ -89,4 +100,102 @@ export function compassFor(azimuthDeg) {
   const labels = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE']
   const idx = Math.round(az / 45) % 8
   return labels[idx]
+}
+
+// --- Custom preset overrides (R11.04) ---
+// Persist per-slot overrides so users can "save the current sliders
+// into the Gale chip" via a long-press. Stored shape:
+//   { v: 1, items: { gale: { intensity, azimuth, pitch }, ... } }
+// Only the three knob values are stored — `label` and `hint` always
+// come from the defaults so renaming a slot semantically isn't a
+// supported workflow (keeps the chips' meaning predictable).
+
+export const WIND_OVERRIDE_KEY = 'particle-wind-overrides-v1'
+
+// Coerce + sanitize an override dict so a corrupted localStorage
+// can't crash the resolver. Drops unknown ids and clamps every value
+// to the slider range.
+export function sanitizeWindOverrides(map) {
+  const out = {}
+  if (!map || typeof map !== 'object') return out
+  const validIds = new Set(WIND_PRESETS_DEFAULT.map(p => p.id))
+  for (const id of Object.keys(map)) {
+    if (!validIds.has(id)) continue
+    const v = map[id]
+    if (!v || typeof v !== 'object') continue
+    out[id] = {
+      intensity: clampIntensity(v.intensity),
+      azimuth:   clampAzimuth(v.azimuth),
+      pitch:     clampPitch(v.pitch),
+    }
+  }
+  return out
+}
+
+// Capture-the-current-sliders helper — turns a {intensity,azimuth,pitch}
+// reading into a frozen override entry. Pure.
+export function captureWindOverride(state) {
+  return {
+    intensity: clampIntensity(state?.intensity),
+    azimuth:   clampAzimuth(state?.azimuth),
+    pitch:     clampPitch(state?.pitch),
+  }
+}
+
+// Merge defaults + overrides. Mutates the exported `WIND_PRESETS`
+// array in place AND returns the new list so callers can re-render.
+// Mutation keeps existing `import { WIND_PRESETS }` consumers in
+// sync without forcing every component to subscribe.
+export function resolveWindPresets(overrides) {
+  const safe = sanitizeWindOverrides(overrides)
+  for (let i = 0; i < WIND_PRESETS_DEFAULT.length; i++) {
+    const base = WIND_PRESETS_DEFAULT[i]
+    const ov = safe[base.id]
+    WIND_PRESETS[i] = ov
+      ? { ...base, intensity: ov.intensity, azimuth: ov.azimuth, pitch: ov.pitch, hint: `Custom (${ov.intensity.toFixed(1)} · ${ov.azimuth | 0}°)` }
+      : { ...base }
+  }
+  return WIND_PRESETS
+}
+
+// True when this preset slot is currently overridden by a custom save.
+export function isWindPresetCustom(id, overrides) {
+  const safe = sanitizeWindOverrides(overrides)
+  return Object.prototype.hasOwnProperty.call(safe, id)
+}
+
+// localStorage helpers — components hold the live override dict in
+// state and persist via `saveWindOverrides`. `loadWindOverrides` is
+// always crash-safe (returns {} on any error).
+export function loadWindOverrides() {
+  if (typeof localStorage === 'undefined') return {}
+  try {
+    const raw = localStorage.getItem(WIND_OVERRIDE_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    if (!parsed || parsed.v !== 1 || !parsed.items) return {}
+    return sanitizeWindOverrides(parsed.items)
+  } catch { return {} }
+}
+
+export function saveWindOverrides(map) {
+  if (typeof localStorage === 'undefined') return false
+  try {
+    const safe = sanitizeWindOverrides(map)
+    localStorage.setItem(WIND_OVERRIDE_KEY, JSON.stringify({ v: 1, items: safe }))
+    return true
+  } catch { return false }
+}
+
+// Functional helpers — return a new overrides dict instead of mutating.
+export function setWindOverride(map, id, entry) {
+  const next = { ...sanitizeWindOverrides(map) }
+  next[id] = captureWindOverride(entry)
+  return sanitizeWindOverrides(next)
+}
+
+export function clearWindOverride(map, id) {
+  const next = { ...sanitizeWindOverrides(map) }
+  delete next[id]
+  return next
 }

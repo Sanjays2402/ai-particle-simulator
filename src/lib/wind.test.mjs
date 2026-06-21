@@ -1,10 +1,14 @@
 // wind: vector math + clamps + compass label + applyWind side-effect
-// + named presets (Calm/Breeze/Gale/Storm) + matchesWindPreset.
+// + named presets (Calm/Breeze/Gale/Storm) + matchesWindPreset
+// + custom-overrides (R11.04: long-press a chip to save sliders).
 import {
   windVector, applyWind, compassFor,
   clampIntensity, clampAzimuth, clampPitch,
   WIND_INTENSITY_MIN, WIND_INTENSITY_MAX,
-  WIND_PRESETS, findWindPreset, matchesWindPreset,
+  WIND_PRESETS, WIND_PRESETS_DEFAULT,
+  findWindPreset, matchesWindPreset,
+  sanitizeWindOverrides, captureWindOverride, resolveWindPresets,
+  setWindOverride, clearWindOverride, isWindPresetCustom,
 } from './wind.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -142,4 +146,78 @@ eq(findWindPreset(42),         null,    'find: numeric → null')
 eq(matchesWindPreset(null, findWindPreset('calm')), false, 'matches: null state → false')
 eq(matchesWindPreset({}, null),                     false, 'matches: null preset → false')
 
-console.log(`PASS: wind — vector + clamps + compass + ${WIND_PRESETS.length} named presets · intensity ${WIND_INTENSITY_MIN}..${WIND_INTENSITY_MAX}`)
+// --- Custom overrides (R11.04) ---
+// sanitizeWindOverrides drops unknown keys + clamps values.
+{
+  const dirty = {
+    storm:   { intensity: 99,  azimuth: 999, pitch: -999 },
+    bogus:   { intensity: 1,   azimuth: 0,   pitch: 0   },
+    breeze:  { intensity: NaN, azimuth: 'x', pitch: undefined },
+    junkRow: 42,
+  }
+  const clean = sanitizeWindOverrides(dirty)
+  if ('bogus' in clean)   fail('sanitize: unknown id should be dropped')
+  if ('junkRow' in clean) fail('sanitize: non-object entry should be dropped')
+  eq(clean.storm.intensity, WIND_INTENSITY_MAX, 'sanitize: clamps intensity')
+  eq(clean.storm.azimuth,   360,                'sanitize: clamps azimuth')
+  eq(clean.storm.pitch,     -90,                'sanitize: clamps pitch')
+  eq(clean.breeze.intensity, 0, 'sanitize: NaN intensity → 0')
+  eq(clean.breeze.azimuth,   0, 'sanitize: non-number azimuth → 0')
+  eq(clean.breeze.pitch,     0, 'sanitize: undefined pitch → 0')
+}
+// captureWindOverride snapshots the three knobs from a state-like object.
+{
+  const snap = captureWindOverride({ intensity: 2.5, azimuth: 180, pitch: 45 })
+  eq(snap.intensity, 2.5, 'capture: intensity copied')
+  eq(snap.azimuth,   180, 'capture: azimuth copied')
+  eq(snap.pitch,     45,  'capture: pitch copied')
+  // Out-of-range values get clamped at capture time too.
+  const out = captureWindOverride({ intensity: -2, azimuth: 999, pitch: 999 })
+  eq(out.intensity, 0,   'capture: clamps intensity below')
+  eq(out.azimuth,   360, 'capture: clamps azimuth above')
+  eq(out.pitch,     90,  'capture: clamps pitch above')
+}
+// setWindOverride + clearWindOverride return fresh sanitized maps.
+{
+  const base = {}
+  const next = setWindOverride(base, 'gale', { intensity: 1.5, azimuth: 90, pitch: 0 })
+  eq(next.gale.intensity, 1.5, 'set: gale stored')
+  if (base.gale) fail('set: original map should not be mutated')
+  const cleared = clearWindOverride(next, 'gale')
+  if (cleared.gale) fail('clear: gale should be gone')
+  eq(Object.keys(cleared).length, 0, 'clear: map back to empty')
+}
+// resolveWindPresets mutates WIND_PRESETS in place AND returns it.
+{
+  // Establish a known-good baseline first.
+  resolveWindPresets({})
+  // Snapshot the default Gale so we can prove the override changed it.
+  const baseGale = WIND_PRESETS_DEFAULT.find(p => p.id === 'gale')
+  eq(findWindPreset('gale').intensity, baseGale.intensity, 'resolve: default Gale intensity intact')
+  // Apply an override and re-resolve.
+  const list = resolveWindPresets({ gale: { intensity: 0.5, azimuth: 10, pitch: 0 } })
+  if (list !== WIND_PRESETS) fail('resolve: should return the live WIND_PRESETS array')
+  eq(WIND_PRESETS.find(p => p.id === 'gale').intensity, 0.5, 'resolve: Gale now overridden')
+  // Calm/Breeze/Storm untouched.
+  eq(WIND_PRESETS.find(p => p.id === 'calm').intensity, 0.0, 'resolve: Calm untouched')
+  eq(WIND_PRESETS.find(p => p.id === 'storm').intensity, 4.0, 'resolve: Storm untouched')
+  // isWindPresetCustom flag tracks the override map (not the live list).
+  eq(isWindPresetCustom('gale', { gale: { intensity: 0.5, azimuth: 0, pitch: 0 } }), true,  'custom flag: yes')
+  eq(isWindPresetCustom('gale', {}),                                                  false, 'custom flag: no')
+  // Reset for any downstream tests / future runs.
+  resolveWindPresets({})
+  eq(findWindPreset('gale').intensity, baseGale.intensity, 'resolve: reset restores defaults')
+}
+// matchesWindPreset uses the LIVE preset list, so an overridden Gale
+// matches the user's new values — not the original 2.2 intensity.
+{
+  resolveWindPresets({ gale: { intensity: 0.5, azimuth: 10, pitch: 0 } })
+  const liveGale = findWindPreset('gale')
+  if (!matchesWindPreset({ intensity: 0.5, azimuth: 10, pitch: 0 }, liveGale))
+    fail('matches: overridden Gale should match the overridden values')
+  if (matchesWindPreset({ intensity: 2.2, azimuth: 90, pitch: 0 }, liveGale))
+    fail('matches: original Gale values should NOT match an overridden Gale chip')
+  resolveWindPresets({})
+}
+
+console.log(`PASS: wind — vector + clamps + compass + ${WIND_PRESETS.length} named presets + custom overrides · intensity ${WIND_INTENSITY_MIN}..${WIND_INTENSITY_MAX}`)

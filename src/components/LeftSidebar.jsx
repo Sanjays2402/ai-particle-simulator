@@ -1,10 +1,15 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useStore, THEMES } from '../store'
 import { presets } from '../presets'
 import { GifEncoder } from '../lib/gifEncoder'
 import { startCanvasRecording, downloadVideoBlob, isVideoExportSupported } from '../lib/videoRecorder'
 import { CATEGORIES, categoryOf, countByCategory } from '../lib/presetCategories'
-import { compassFor, WIND_PRESETS, matchesWindPreset } from '../lib/wind'
+import {
+  compassFor, WIND_PRESETS, matchesWindPreset,
+  loadWindOverrides, saveWindOverrides,
+  setWindOverride, clearWindOverride,
+  resolveWindPresets, isWindPresetCustom,
+} from '../lib/wind'
 import { DURATION_CHIPS as CROSSFADE_DURATION_CHIPS, matchDurationChip as matchCrossfadeChip } from '../lib/crossfade'
 import { downloadThemesFile, parseImport as parseThemesImport, mergeImport as mergeThemesImport, summarizeImportImpact as summarizeThemesImpact } from '../lib/customThemesIO'
 import { ATTRACTOR_TYPES, MAX_ATTRACTORS } from '../lib/namedAttractors'
@@ -1210,12 +1215,52 @@ function ThemePackPreview({ pack, mode, onModeChange, existing, onCommit, onCanc
   )
 }
 
+// Tiny long-press hook — kept inline so chip components can share it
+// without exporting a new public module. Returns a set of handlers to
+// spread on a button; on touch + mouse alike, holds of >= ms fire
+// `onLong`. Short clicks fire `onTap` (so the chip still applies its
+// preset on a normal tap). Cancelling via leave/touchend before `ms`
+// elapses fires the tap.
+function useLongPress(onTap, onLong, ms = 600) {
+  const timerRef = useRef(null)
+  const firedRef = useRef(false)
+  const start = (e) => {
+    firedRef.current = false
+    // Right-click / multi-touch — ignore to keep behaviour predictable.
+    if (e && e.button === 2) return
+    clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => {
+      firedRef.current = true
+      onLong?.()
+    }, ms)
+  }
+  const cancel = () => {
+    clearTimeout(timerRef.current)
+    timerRef.current = null
+  }
+  const release = () => {
+    clearTimeout(timerRef.current)
+    timerRef.current = null
+    if (!firedRef.current) onTap?.()
+  }
+  return {
+    onMouseDown:  start,
+    onMouseUp:    release,
+    onMouseLeave: cancel,
+    onTouchStart: start,
+    onTouchEnd:   release,
+    onTouchCancel: cancel,
+    onContextMenu: (e) => e.preventDefault(),
+  }
+}
+
 // Global wind: a constant directional drift applied to every particle.
 // Azimuth + pitch sliders are gated behind the toggle so the section
 // stays calm by default. Off → renderer takes the zero-vector fast path.
 // One-tap weather chips (Calm / Breeze / Gale / Storm) configure all
 // three sliders at once and highlight the matching chip when the live
-// state lines up with a preset.
+// state lines up with a preset. Long-press a chip to OVERWRITE it
+// with the current sliders (R11.04) — tap the ↺ badge to reset.
 function WindRow() {
   const enabled   = useStore(s => s.windEnabled)
   const intensity = useStore(s => s.windIntensity)
@@ -1225,6 +1270,13 @@ function WindRow() {
   const setI   = useStore(s => s.setWindIntensity)
   const setAz  = useStore(s => s.setWindAzimuth)
   const setPi  = useStore(s => s.setWindPitch)
+
+  // Live overrides — kept as React state so chip rerenders cleanly.
+  // resolve once on mount so the WIND_PRESETS array reflects any
+  // overrides saved in a previous session.
+  const [overrides, setOverrides] = useState(() => loadWindOverrides())
+  useEffect(() => { resolveWindPresets(overrides) }, [overrides])
+
   const applyPreset = (p) => {
     // Auto-enable when picking anything other than Calm so the user
     // sees the effect immediately; Calm stays a no-op (preserves the
@@ -1234,35 +1286,47 @@ function WindRow() {
     setAz(p.azimuth)
     setPi(p.pitch)
   }
+  // Long-press save: write the live sliders into this chip's slot,
+  // then re-resolve WIND_PRESETS so the highlight + tooltip refresh.
+  const saveOverride = (slotId) => {
+    const next = setWindOverride(overrides, slotId, { intensity, azimuth, pitch })
+    setOverrides(next)
+    saveWindOverrides(next)
+    showToast(`Saved ${WIND_PRESETS.find(p => p.id === slotId)?.label || slotId} → ${intensity.toFixed(1)} · ${azimuth | 0}°`)
+  }
+  // Reset surfaces as a small ↺ badge on overridden chips so the
+  // user always has a one-tap undo without right-click ceremony.
+  const resetSlot = (slotId) => {
+    const next = clearWindOverride(overrides, slotId)
+    setOverrides(next)
+    saveWindOverrides(next)
+    const base = WIND_PRESETS.find(p => p.id === slotId)
+    showToast(`Reset ${base?.label || slotId} to default`)
+  }
+
   return (
     <>
       <ToggleRow label="Wind" value={enabled} onChange={setEn} />
       {/* Preset chips: surfaced even when the toggle is off so picking
-          one snaps the sliders AND turns the toggle on in a single tap. */}
+          one snaps the sliders AND turns the toggle on in a single tap.
+          Long-press to OVERWRITE the slot with current sliders. */}
       <div style={{
         display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)',
         gap: 6, marginTop: enabled ? 8 : 4, marginBottom: enabled ? 0 : 4,
       }}>
         {WIND_PRESETS.map(p => {
           const active = enabled && matchesWindPreset({ intensity, azimuth, pitch }, p)
+          const isCustom = isWindPresetCustom(p.id, overrides)
           return (
-            <button key={p.id} onClick={() => applyPreset(p)} title={p.hint}
-              style={{
-                padding: '6px 0', borderRadius: 7,
-                fontSize: 11, fontWeight: 550,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease-out',
-                background: active
-                  ? 'linear-gradient(135deg, rgba(168,85,247,0.24) 0%, rgba(99,102,241,0.18) 100%)'
-                  : 'rgba(255,255,255,0.03)',
-                color: active ? '#e9d5ff' : '#9a9ab0',
-                border: active
-                  ? '1px solid rgba(168,85,247,0.45)'
-                  : '1px solid rgba(255,255,255,0.06)',
-                boxShadow: active ? '0 0 12px rgba(168,85,247,0.25)' : 'none',
-              }}>
-              {p.label}
-            </button>
+            <WindChip
+              key={p.id}
+              preset={p}
+              active={active}
+              isCustom={isCustom}
+              onTap={() => applyPreset(p)}
+              onLong={() => saveOverride(p.id)}
+              onReset={() => resetSlot(p.id)}
+            />
           )
         })}
       </div>
@@ -1280,12 +1344,65 @@ function WindRow() {
             background: 'rgba(168,85,247,0.05)',
             border: '1px solid rgba(168,85,247,0.12)',
           }}>
-            Particles drift toward the compass heading every frame.
-            Try Storm preset + Vortex field for a hurricane look.
+            Tap a chip to apply · long-press to save current sliders into that slot.
+            Custom slots show a violet dot; tap the ↺ to reset.
           </div>
         </>
       )}
     </>
+  )
+}
+
+// A single Wind preset chip — wraps the existing styling so the
+// long-press handlers + custom-badge + reset button can live in one
+// place. Kept as a leaf component so the useLongPress hook is
+// instanced per-button (one timer + ref pair each).
+function WindChip({ preset, active, isCustom, onTap, onLong, onReset }) {
+  const handlers = useLongPress(onTap, onLong, 600)
+  return (
+    <div style={{ position: 'relative' }}>
+      <button {...handlers}
+        title={`${preset.hint}${isCustom ? ' · custom — long-press resaves, ↺ resets' : ' · long-press to save current sliders here'}`}
+        style={{
+          width: '100%',
+          padding: '6px 0', borderRadius: 7,
+          fontSize: 11, fontWeight: 550,
+          cursor: 'pointer',
+          transition: 'all 0.15s ease-out',
+          background: active
+            ? 'linear-gradient(135deg, rgba(168,85,247,0.24) 0%, rgba(99,102,241,0.18) 100%)'
+            : 'rgba(255,255,255,0.03)',
+          color: active ? '#e9d5ff' : '#9a9ab0',
+          border: active
+            ? '1px solid rgba(168,85,247,0.45)'
+            : isCustom
+              ? '1px solid rgba(168,85,247,0.30)'
+              : '1px solid rgba(255,255,255,0.06)',
+          boxShadow: active ? '0 0 12px rgba(168,85,247,0.25)' : 'none',
+          userSelect: 'none', WebkitUserSelect: 'none',
+        }}>
+        {preset.label}
+      </button>
+      {/* Custom-slot dot: small marker on the top-right corner so the
+          user knows this chip has been overridden. Doubles as a reset
+          target — click it to revert the slot to its shipped default. */}
+      {isCustom && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onReset?.() }}
+          title={`Reset ${preset.label} to default`}
+          style={{
+            position: 'absolute', top: -3, right: -3,
+            width: 12, height: 12, padding: 0,
+            borderRadius: '50%',
+            background: 'rgba(168,85,247,0.95)',
+            border: '1px solid rgba(20,20,30,0.95)',
+            color: '#fff', fontSize: 9, lineHeight: '10px',
+            cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.5)',
+          }}>↺</button>
+      )}
+    </div>
   )
 }
 
