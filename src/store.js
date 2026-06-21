@@ -182,6 +182,33 @@ export const useStore = create((set, get) => {
     saveNamedAttractors(next)
     set({ namedAttractors: next })
   },
+  // Bulk replacement — used by Scene Bookmarks to round-trip the full
+  // attractor list. Normalizes each entry through the namedAttractors
+  // lib so a bookmark from an older app version with extra/missing
+  // fields can't poison the store.
+  setNamedAttractors: (list) => {
+    // We can't import normalizeAttractor here without bloating the
+    // header; sanitize() via add+toggleHelper would loop. Easiest:
+    // run the input through saveAttractors's filter + reload by
+    // re-mapping each row through the helpers we already imported.
+    // Cheapest: lean on namedAttractors's own normalize via a fresh
+    // re-add loop. But that mints new ids, breaking bookmark fidelity.
+    // Inline a minimal validator — same shape as normalizeAttractor.
+    if (!Array.isArray(list)) {
+      saveNamedAttractors([])
+      set({ namedAttractors: [] })
+      return
+    }
+    // Use addNamedAttractorHelper to leverage validation while
+    // preserving the SOURCE ids (we pass them through partial).
+    let acc = []
+    for (const row of list) {
+      if (!row || typeof row !== 'object') continue
+      acc = addNamedAttractorHelper(acc, row)
+    }
+    saveNamedAttractors(acc)
+    set({ namedAttractors: acc })
+  },
 
   // Recording & Replay
   isRecording: false,

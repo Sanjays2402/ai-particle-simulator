@@ -36,6 +36,12 @@ export const SCENE_FIELDS = [
   'bgGradientEnabled', 'bgGradientA', 'bgGradientB', 'bgGradientAngle',
   'bgGradientAudioReactive', 'bgGradientAudioStrength',
   'slideshowEnabled', 'slideshowDwellSec', 'slideshowOrder', 'slideshowRespectCategory',
+  // Named attractors — the full list of force-field objects users
+  // composed in the Named Attractors panel. Stored as a structured
+  // array of { id, name, type, strength, position, radius, enabled };
+  // the captureScene helper deep-clones every entry so future store
+  // mutations can't leak into the saved bookmark.
+  'namedAttractors',
 ]
 
 export function loadBookmarks() {
@@ -61,11 +67,23 @@ export function saveBookmarks(items) {
 // shape — we just pick the keys we know. Force-field center is cloned
 // so future mutations of the store array don't leak into the saved
 // bookmark.
+//
+// Special-case: `namedAttractors` is a list of plain-object entries
+// whose `position` array is itself mutable. A shallow slice would
+// leak future edits into the bookmark; we deep-clone each entry's
+// `position` so the saved snapshot stays frozen even if the user
+// drags an attractor afterwards.
 export function captureScene(state) {
   const scene = {}
   for (const k of SCENE_FIELDS) {
     if (k in state) {
       const v = state[k]
+      if (k === 'namedAttractors' && Array.isArray(v)) {
+        scene[k] = v.map(a => (a && typeof a === 'object')
+          ? { ...a, position: Array.isArray(a.position) ? a.position.slice() : [0, 0, 0] }
+          : a)
+        continue
+      }
       scene[k] = Array.isArray(v) ? v.slice() : v
     }
   }

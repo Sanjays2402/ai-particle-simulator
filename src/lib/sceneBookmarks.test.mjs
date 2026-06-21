@@ -108,4 +108,67 @@ eq(applyScene(null, {}), [], 'null scene → empty applied list')
 eq(applyScene({}, null), [], 'null api → empty applied list')
 eq(applyScene({}, {}), [], 'empty scene → empty applied list')
 
-console.log(`PASS: sceneBookmarks capture/append/cap/apply · MAX=${MAX_BOOKMARKS} · fields=${SCENE_FIELDS.length}`)
+// 7. namedAttractors round-trip: list captured + restored, with deep
+// clones so future store mutations don't leak into the bookmark.
+function shapeEq(a, b, msg) {
+  if (JSON.stringify(a) !== JSON.stringify(b)) {
+    fail(`${msg} — got ${JSON.stringify(a)} expected ${JSON.stringify(b)}`)
+  }
+}
+
+{
+  // Captured shape: full list, deep-cloned positions.
+  const live = [
+    { id: 'attr-1', name: 'Eye', type: 'attractor', strength: 1.5, position: [1, 0, 2], radius: 8, enabled: true },
+    { id: 'attr-2', name: 'Wind', type: 'turbulence', strength: 0.8, position: [-3, 0, 4], radius: 12, enabled: false },
+  ]
+  const state = {
+    namedAttractors: live,
+    currentPreset: 'spiral',
+  }
+  const scene = captureScene(state)
+  if (!Array.isArray(scene.namedAttractors)) fail('namedAttractors captured as array')
+  shapeEq(scene.namedAttractors, live, 'attractor list preserved in capture')
+
+  // Mutating the LIVE store position must not affect the bookmark.
+  live[0].position[0] = 999
+  eq(scene.namedAttractors[0].position[0], 1, 'position deep-cloned (no aliasing)')
+  // Mutating the LIVE entry's strength must not affect the bookmark
+  // (we shallow-spread the entry, freezing primitive fields).
+  live[0].strength = 999
+  eq(scene.namedAttractors[0].strength, 1.5, 'entry shallow-cloned (primitives frozen)')
+}
+
+{
+  // applyScene routes the field to setNamedAttractors.
+  const calls = []
+  const api = {
+    loadPreset: () => calls.push(['loadPreset']),
+    setNamedAttractors: (list) => calls.push(['setNamedAttractors', list]),
+  }
+  const scene = {
+    namedAttractors: [
+      { id: 'attr-9', name: 'X', type: 'vortex', strength: 2, position: [0, 0, 0], radius: 10, enabled: true },
+    ],
+  }
+  const applied = applyScene(scene, api)
+  if (!applied.includes('namedAttractors')) fail('namedAttractors should appear in applied list')
+  const setterCall = calls.find(c => c[0] === 'setNamedAttractors')
+  if (!setterCall) fail('setNamedAttractors should have been invoked')
+  eq(setterCall[1].length, 1, 'setter received the list')
+  eq(setterCall[1][0].id, 'attr-9', 'first entry id forwarded')
+
+  // The handed-in array must be a CLONE — mutating it after apply
+  // can't poison the saved bookmark.
+  setterCall[1].push({ injected: true })
+  eq(scene.namedAttractors.length, 1, 'scene.namedAttractors not mutated by apply')
+}
+
+// 8. namedAttractors is on the SCENE_FIELDS whitelist (regression
+// guard — if the field name ever changes both the store and the
+// scene-bookmarks list need to update in lockstep).
+if (!SCENE_FIELDS.includes('namedAttractors')) {
+  fail('namedAttractors missing from SCENE_FIELDS whitelist')
+}
+
+console.log(`PASS: sceneBookmarks capture/append/cap/apply + namedAttractors round-trip (deep-clone position) · MAX=${MAX_BOOKMARKS} · fields=${SCENE_FIELDS.length}`)
