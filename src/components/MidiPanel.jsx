@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import {
   ACTIONS, loadMidiMap, saveMidiMap, setBinding, clearAllBindings,
-  decodeMidiMessage, applyCC,
+  decodeMidiMessage, applyCC, attractorActions,
 } from '../lib/midiMap'
 import {
   MIDI_PRESETS, applyPresetToMap, detectPresetForInput, presetBindingCount,
@@ -26,6 +26,12 @@ export default function MidiPanel({ open, onClose }) {
   const [bindings, setBindings] = useState(() => loadMidiMap())
   const [lastCC, setLastCC] = useState(null)   // {cc, value, deviceName}
   const [learnFor, setLearnFor] = useState(null) // actionId waiting for next CC
+  // Subscribe to the live attractor list so per-attractor MIDI rows
+  // appear/disappear and re-label in real time as the user adds,
+  // renames, or deletes attractors. attractorActions() is pure data
+  // (id + label + range), so this is cheap to re-derive each render.
+  const namedAttractors = useStore(s => s.namedAttractors)
+  const attractorRows = attractorActions({ namedAttractors })
   const accessRef = useRef(null)
   // refs so the message callback (registered once) sees latest state.
   const bindingsRef = useRef(bindings)
@@ -265,6 +271,81 @@ export default function MidiPanel({ open, onClose }) {
               </div>
             )
           })}
+          {/* Named attractor bindings (R12.05) — one row per attractor
+              the user has saved. Renders nothing when there are no
+              attractors so the panel stays tidy. Same Learn / clear
+              UX as the built-in actions; the action id is namespaced
+              under `attr:<id>:strength` so a deleted attractor leaves
+              a clearly-labelled stale row (still removable). */}
+          {attractorRows.length > 0 && (
+            <>
+              <div style={{
+                fontSize: 10, fontWeight: 700, letterSpacing: '0.12em',
+                textTransform: 'uppercase', color: '#a78bfa',
+                marginTop: 14, marginBottom: 6,
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                Named Attractors
+                <span style={{
+                  fontWeight: 500, color: '#7a7a90', letterSpacing: 0,
+                  textTransform: 'none', fontSize: 10,
+                }}>· strength only</span>
+              </div>
+              {attractorRows.map(a => {
+                const cc = ccFor(a.id)
+                const isLearning = learnFor === a.id
+                return (
+                  <div key={a.id} style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '7px 10px', marginBottom: 4, borderRadius: 7,
+                    background: isLearning ? 'rgba(168,85,247,0.10)' : 'rgba(168,85,247,0.04)',
+                    border: isLearning ? '1px solid rgba(168,85,247,0.40)' : '1px solid rgba(168,85,247,0.15)',
+                    fontSize: 12, color: '#e9d5ff',
+                  }}>
+                    <span>
+                      {a.label}
+                      <span style={{ color: '#6a6a80', fontSize: 10, marginLeft: 4 }}>
+                        {a.min}..{a.max}
+                      </span>
+                    </span>
+                    <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                      {cc !== null && (
+                        <span style={{
+                          padding: '2px 7px', borderRadius: 5, fontSize: 10,
+                          background: 'rgba(34,197,94,0.10)', color: '#86efac',
+                          border: '1px solid rgba(34,197,94,0.25)',
+                          fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                        }}>CC {cc}</span>
+                      )}
+                      <button onClick={() => startLearn(a.id)}
+                        title={isLearning ? 'Press a knob/slider on the controller…' : 'Click then move the controller'}
+                        style={{
+                          padding: '3px 9px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
+                          background: isLearning
+                            ? 'linear-gradient(135deg, rgba(168,85,247,0.25), rgba(99,102,241,0.18))'
+                            : 'rgba(255,255,255,0.05)',
+                          color: isLearning ? '#e9d5ff' : '#c8c8d0',
+                          border: isLearning
+                            ? '1px solid rgba(168,85,247,0.45)'
+                            : '1px solid rgba(255,255,255,0.08)',
+                          fontFamily: 'Geist Mono, monospace', minWidth: 56, textAlign: 'center',
+                        }}
+                      >{isLearning ? 'Move…' : 'Learn'}</button>
+                      {cc !== null && (
+                        <button onClick={() => clearBinding(a.id)}
+                          title="Remove this binding"
+                          style={{
+                            padding: '3px 7px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
+                            background: 'rgba(255,255,255,0.03)', color: '#9a9ab0',
+                            border: '1px solid rgba(255,255,255,0.06)',
+                          }}><X size={10} /></button>
+                      )}
+                    </span>
+                  </div>
+                )
+              })}
+            </>
+          )}
         </div>
 
         <div style={{

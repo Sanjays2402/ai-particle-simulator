@@ -5,7 +5,11 @@ import {
   decodeMidiMessage, ccToNormalized,
   loadMidiMap, saveMidiMap, setBinding, clearAllBindings,
   applyCC, actionLabel,
+  attractorActionId, parseAttractorActionId,
+  resolveActionForId, attractorActions,
+  ATTRACTOR_ACTION_PREFIX, ATTRACTOR_FIELD_STRENGTH,
 } from './midiMap.js'
+import { STRENGTH_MAX } from './namedAttractors.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
 function eq(a, b, m) { if (a !== b) fail(`${m} — got ${JSON.stringify(a)} expected ${JSON.stringify(b)}`) }
@@ -174,4 +178,133 @@ near(ccToNormalized(NaN), 0,   'NaN → 0')
 eq(actionLabel('glow'), 'Glow Intensity', 'glow label')
 eq(actionLabel('totally-fake'), 'Unmapped', 'unknown → Unmapped')
 
-console.log(`PASS: midiMap — ${ACTIONS.length} actions, decode/normalize/persist/setBinding/applyCC`)
+// --- R12.05 named attractor MIDI routing ---
+// Attractor action id format + parse.
+{
+  eq(attractorActionId('attr-3'), 'attr:attr-3:strength', 'default field = strength')
+  eq(attractorActionId('attr-7', 'strength'), 'attr:attr-7:strength', 'explicit field')
+  eq(attractorActionId(null), null, 'null id → null')
+  eq(attractorActionId(''), null, 'empty id → null')
+  // Parse round-trip.
+  const parsed = parseAttractorActionId('attr:attr-3:strength')
+  eq(parsed.attractorId, 'attr-3', 'parsed attractorId')
+  eq(parsed.field, 'strength', 'parsed field')
+  eq(parseAttractorActionId('not-an-attr'), null, 'plain string not parsed')
+  eq(parseAttractorActionId('attr:'), null, 'empty rest rejected')
+  eq(parseAttractorActionId('attr:foo'), null, 'no field rejected')
+  eq(parseAttractorActionId('attr:foo:'), null, 'trailing colon rejected')
+  eq(parseAttractorActionId(null), null, 'null rejected')
+  // Prefix exported for callers that want to filter.
+  eq(ATTRACTOR_ACTION_PREFIX, 'attr:', 'prefix value')
+  eq(ATTRACTOR_FIELD_STRENGTH, 'strength', 'field constant')
+}
+
+// resolveActionForId synthesizes per-attractor actions.
+{
+  const store = {
+    namedAttractors: [
+      { id: 'attr-1', name: 'Eye', strength: 1, type: 'attractor' },
+      { id: 'attr-2', name: 'Storm', strength: 2, type: 'vortex' },
+    ],
+    updateNamedAttractor: () => {},
+  }
+  const a = resolveActionForId('attr:attr-1:strength', store)
+  ok(a, 'resolved real attractor')
+  eq(a.label, 'Eye · Strength', 'label uses attractor name')
+  eq(a.min, 0, 'strength min')
+  eq(a.max, STRENGTH_MAX, 'strength max from namedAttractors clamp')
+  eq(a.field, 'strength', 'field')
+  eq(a.attractor.id, 'attr-1', 'attractor reference')
+  // Deleted attractor → null (no crash).
+  eq(resolveActionForId('attr:missing:strength', store), null, 'missing attractor → null')
+  // Unknown field on a real attractor → null.
+  eq(resolveActionForId('attr:attr-1:bogus', store), null, 'unknown field → null')
+  // Missing store → null (defensive — applyCC can be called early).
+  eq(resolveActionForId('attr:attr-1:strength', null), null, 'no store → null')
+  eq(resolveActionForId('attr:attr-1:strength', {}), null, 'store without attractors → null')
+  // Built-in id still resolves to the original action.
+  eq(resolveActionForId('glow', store).id, 'glow', 'built-in passes through')
+}
+
+// applyCC dispatches to the attractor setter with the right strength.
+{
+  const calls = []
+  const store = {
+    namedAttractors: [{ id: 'attr-9', name: 'Beam', strength: 0.5, type: 'attractor' }],
+    updateNamedAttractor: (id, patch) => calls.push({ id, patch }),
+  }
+  const map = { '50': 'attr:attr-9:strength' }
+  // CC 50, value 127 → strength = STRENGTH_MAX (clamped to upper bound).
+  eq(applyCC(map, 50, 127, store), 'attr:attr-9:strength', 'attractor CC dispatched')
+  eq(calls[0].id, 'attr-9', 'updated correct attractor')
+  near(calls[0].patch.strength, STRENGTH_MAX, 'strength at max')
+  // CC 50, value 0 → strength = 0.
+  applyCC(map, 50, 0, store)
+  near(calls[1].patch.strength, 0, 'strength at min')
+  // Deleted attractor → no-op call (silently fails, no entry pushed).
+  const lengthBefore = calls.length
+  applyCC({ '50': 'attr:missing:strength' }, 50, 64, store)
+  eq(calls.length, lengthBefore, 'missing attractor → no setter call')
+}
+
+// setBinding accepts attractor ids.
+{
+  const m = setBinding({}, 17, 'attr:attr-1:strength')
+  eq(m['17'], 'attr:attr-1:strength', 'attractor binding stored')
+  // Garbage attractor strings are rejected.
+  const m2 = setBinding(m, 18, 'attr:')
+  eq(m2['18'], undefined, 'malformed attractor id rejected')
+  const m3 = setBinding(m, 19, 'attr:foo')
+  eq(m3['19'], undefined, 'attractor missing field rejected')
+  // Empty/null still clears the slot.
+  const m4 = setBinding(m, 17, null)
+  eq(m4['17'], undefined, 'null clears attractor binding')
+}
+
+// Persistence: attractor ids round-trip through save/load.
+{
+  installLocalStorage()
+  saveMidiMap({ '7': 'glow', '20': 'attr:attr-3:strength', '40': 'attr:bogus' })
+  const back = loadMidiMap()
+  eq(back['7'], 'glow', 'built-in survives')
+  eq(back['20'], 'attr:attr-3:strength', 'attractor id survives')
+  eq(back['40'], undefined, 'malformed attractor id dropped on load')
+  uninstallLocalStorage()
+}
+
+// actionLabel handles attractor ids both alive and stale.
+{
+  const store = {
+    namedAttractors: [{ id: 'attr-1', name: 'Eye', strength: 1, type: 'attractor' }],
+  }
+  eq(actionLabel('attr:attr-1:strength', store), 'Eye · Strength', 'live attractor label')
+  // Deleted attractor still surfaces a removable label.
+  const stale = actionLabel('attr:gone:strength', store)
+  ok(stale.includes('missing'), `stale label flags missing — got ${stale}`)
+  // Without a store the label says missing (no live data to look up).
+  ok(actionLabel('attr:attr-1:strength', null).includes('missing'), 'no store → labelled missing')
+  // Built-in id still works without a store (back-compat).
+  eq(actionLabel('glow'), 'Glow Intensity', 'built-in label without store')
+}
+
+// attractorActions exposes a UI-shaped list.
+{
+  const store = {
+    namedAttractors: [
+      { id: 'attr-1', name: 'Eye', strength: 1, type: 'attractor' },
+      { id: 'attr-9', name: 'Beam', strength: 2, type: 'vortex' },
+    ],
+  }
+  const rows = attractorActions(store)
+  eq(rows.length, 2, 'one row per attractor')
+  eq(rows[0].id, 'attr:attr-1:strength', 'row id matches attractor 1')
+  eq(rows[1].id, 'attr:attr-9:strength', 'row id matches attractor 9')
+  eq(rows[0].label, 'Eye · Strength', 'row label uses live name')
+  eq(rows[0].max, STRENGTH_MAX, 'row carries the slider range')
+  eq(rows[0].attractorId, 'attr-1', 'row exposes attractorId for the UI')
+  // Empty / missing input is safe.
+  eq(attractorActions(null).length, 0, 'null store → empty')
+  eq(attractorActions({}).length, 0, 'no list → empty')
+}
+
+console.log(`PASS: midiMap — ${ACTIONS.length} actions, decode/normalize/persist/setBinding/applyCC + attractor routing`)
