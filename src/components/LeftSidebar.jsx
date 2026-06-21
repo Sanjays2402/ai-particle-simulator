@@ -6,6 +6,8 @@ import { startCanvasRecording, downloadVideoBlob, isVideoExportSupported } from 
 import { CATEGORIES, categoryOf, countByCategory } from '../lib/presetCategories'
 import { compassFor, WIND_PRESETS, matchesWindPreset } from '../lib/wind'
 import { DURATION_CHIPS as CROSSFADE_DURATION_CHIPS, matchDurationChip as matchCrossfadeChip } from '../lib/crossfade'
+import { downloadThemesFile, parseImport as parseThemesImport, mergeImport as mergeThemesImport } from '../lib/customThemesIO'
+import { showToast } from './Toast'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
 const THEME_LIST = [
@@ -810,6 +812,7 @@ function CustomThemesRow() {
   const setTheme     = useStore(s => s.setTheme)
   const addCustomTheme = useStore(s => s.addCustomTheme)
   const removeCustomTheme = useStore(s => s.removeCustomTheme)
+  const setCustomThemes   = useStore(s => s.setCustomThemes)
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('My Theme')
   const [neon, setNeon] = useState('#a855f7')
@@ -819,6 +822,51 @@ function CustomThemesRow() {
     const id = addCustomTheme({ name, neon, hueShift })
     if (id) setTheme(id)
     setOpen(false)
+  }
+
+  const exportNow = () => {
+    if (customThemes.length === 0) {
+      showToast('No custom themes to export')
+      return
+    }
+    const filename = downloadThemesFile(customThemes)
+    if (filename) {
+      showToast(`Exported ${customThemes.length} → ${filename}`)
+    } else {
+      showToast('Export failed — check console')
+    }
+  }
+
+  const importFromFile = () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'application/json,.json'
+    input.onchange = async () => {
+      const file = input.files?.[0]
+      if (!file) return
+      try {
+        const text = await file.text()
+        const res = parseThemesImport(text)
+        if (!res.ok) {
+          showToast(`Import failed: ${res.error}`)
+          return
+        }
+        const mode = window.confirm(
+          `Import ${res.items.length} custom theme${res.items.length === 1 ? '' : 's'}?\n\n` +
+          `OK = Merge into existing themes (dupes by name are skipped).\n` +
+          `Cancel = Replace all current custom themes.`
+        ) ? 'merge' : 'replace'
+        const merged = mergeThemesImport(customThemes, res.items, mode)
+        setCustomThemes(merged.items)
+        const summary = mode === 'merge'
+          ? `Merged: +${merged.added}${merged.skipped ? `, ${merged.skipped} skipped` : ''}`
+          : `Replaced: ${merged.added} loaded`
+        showToast(summary)
+      } catch (e) {
+        showToast(`Import error: ${e.message || 'unknown'}`)
+      }
+    }
+    input.click()
   }
 
   return (
@@ -888,6 +936,44 @@ function CustomThemesRow() {
             )
           })}
         </div>
+      )}
+
+      {customThemes.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: open ? 10 : 8 }}>
+          <button onClick={exportNow}
+            title={`Download ${customThemes.length} custom theme${customThemes.length === 1 ? '' : 's'} as JSON`}
+            style={{
+              padding: '6px 0', borderRadius: 7, fontSize: 10.5, fontWeight: 550,
+              cursor: 'pointer',
+              background: 'rgba(168,85,247,0.10)',
+              color: '#e9d5ff',
+              border: '1px solid rgba(168,85,247,0.22)',
+              letterSpacing: '0.02em',
+            }}>↓ Export</button>
+          <button onClick={importFromFile}
+            title="Load custom themes from a JSON file"
+            style={{
+              padding: '6px 0', borderRadius: 7, fontSize: 10.5, fontWeight: 550,
+              cursor: 'pointer',
+              background: 'rgba(99,102,241,0.10)',
+              color: '#c7d2fe',
+              border: '1px solid rgba(99,102,241,0.25)',
+              letterSpacing: '0.02em',
+            }}>↑ Import</button>
+        </div>
+      )}
+      {customThemes.length === 0 && !open && (
+        <button onClick={importFromFile}
+          title="Load a theme pack from a JSON file"
+          style={{
+            width: '100%', marginTop: 4,
+            padding: '6px 0', borderRadius: 7, fontSize: 10.5, fontWeight: 550,
+            cursor: 'pointer',
+            background: 'rgba(99,102,241,0.08)',
+            color: '#c7d2fe',
+            border: '1px solid rgba(99,102,241,0.2)',
+            letterSpacing: '0.02em',
+          }}>↑ Import Theme Pack</button>
       )}
 
       {open && (

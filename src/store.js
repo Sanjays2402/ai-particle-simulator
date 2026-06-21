@@ -522,6 +522,15 @@ export const useStore = create((set, get) => {
     }
   },
   refreshCustomThemes: () => set({ customThemes: loadCustomThemes() }),
+  // Replace the entire custom theme list — used by the JSON import
+  // path so it doesn't have to call addCustomTheme N times (each of
+  // those triggers a saveCustomThemes + setState, churn for nothing
+  // when the import already produced a clean cap-respecting list).
+  setCustomThemes: (next) => {
+    const safe = Array.isArray(next) ? next.slice() : []
+    saveCustomThemes(safe)
+    set({ customThemes: safe })
+  },
 
   setAiSettings: (key, baseUrl, model) => {
     localStorage.setItem('ai-api-key', key)
