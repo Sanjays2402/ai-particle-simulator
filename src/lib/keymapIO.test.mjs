@@ -4,7 +4,7 @@
 import {
   EXPORT_KIND, EXPORT_VERSION, MAX_IMPORT_BYTES,
   buildExportPayload, serializeKeymap, makeFilename,
-  parseImport, mergeImport,
+  parseImport, mergeImport, summarizeImportImpact,
 } from './keymapIO.js'
 import { defaultsByAction, ACTIONS } from './keymap.js'
 
@@ -155,4 +155,79 @@ function ok(c, m) { if (!c) fail(m) }
   }
 }
 
-console.log('PASS: keymapIO — envelope build/parse/merge/replace + round-trip')
+// --- R13.04: summarizeImportImpact — merge mode shows the diff ---
+{
+  // Start from a map where the user has rebound play=KeyP.
+  const existing = { ...defaultsByAction(), play: 'KeyP' }
+  // Import wants to: change random to KeyZ, change play BACK to Space.
+  const imported = { random: 'KeyZ', play: 'Space' }
+  const s = summarizeImportImpact(existing, imported, 'merge')
+  eq(s.mode, 'merge', 'mode echoed')
+  eq(s.totalImport, 2, 'two valid imports')
+  eq(s.willChange, 2, 'both imports change something (random + play)')
+  // Both diffs are present in stable order.
+  const ids = s.diffs.map(d => d.id).sort()
+  eq(JSON.stringify(ids), JSON.stringify(['play', 'random']), 'diffs include both ids')
+  const playDiff = s.diffs.find(d => d.id === 'play')
+  eq(playDiff.fromCode, 'KeyP', 'play before = KeyP')
+  eq(playDiff.toCode, 'Space', 'play after = Space')
+  eq(playDiff.label, 'Play / pause', 'diff includes the human label')
+  // willKeep counts no-op overlays.
+  const s2 = summarizeImportImpact(existing, { play: 'KeyP' }, 'merge')
+  eq(s2.willChange, 0, 'no-op overlay → 0 changes')
+  eq(s2.willKeep, 1, 'no-op overlay → 1 willKeep')
+  // resetIds is empty in merge mode regardless of input.
+  eq(s.resetIds.length, 0, 'merge mode never lists resets')
+}
+
+// --- R13.04: summarizeImportImpact — replace mode lists resets ---
+{
+  // User has rebound play=KeyP AND random=KeyQ.
+  const existing = { ...defaultsByAction(), play: 'KeyP', random: 'KeyQ' }
+  // File only mentions play — replace mode resets random back to default.
+  const imported = { play: 'Space' }
+  const s = summarizeImportImpact(existing, imported, 'replace')
+  eq(s.mode, 'replace', 'replace mode echoed')
+  eq(s.totalImport, 1, 'one valid import')
+  // Two changes: play (KeyP → Space), random (KeyQ → KeyR default).
+  eq(s.willChange, 2, 'two diffs in replace mode')
+  // Reset list flags random specifically — it's the action NOT in the
+  // file that nonetheless will change because of replace.
+  eq(s.willReset, 1, 'one reset in replace mode')
+  eq(s.resetIds.length, 1, 'one reset id')
+  eq(s.resetIds[0], 'random', 'random is the reset id')
+  // play is in the file so it's NOT a reset (even though it's also
+  // moving back to its default).
+  ok(!s.resetIds.includes('play'), 'play not flagged as reset (was in file)')
+}
+
+// --- R13.04: summarizeImportImpact — empty/null/garbage tolerated ---
+{
+  const s = summarizeImportImpact(null, null, 'merge')
+  eq(s.totalImport, 0, 'null in → 0 imports')
+  eq(s.willChange, 0, 'null in → 0 changes')
+  eq(s.diffs.length, 0, 'null in → 0 diffs')
+  const s2 = summarizeImportImpact({}, { bogus: 'KeyZ' }, 'merge')
+  eq(s2.totalImport, 0, 'unknown id filtered out of count')
+  eq(s2.willChange, 0, 'unknown id has no effect')
+  const s3 = summarizeImportImpact({}, { random: 123 }, 'merge')
+  eq(s3.totalImport, 0, 'non-string value filtered out')
+}
+
+// --- R13.04: summarizeImportImpact — diffs are stable + ordered ---
+{
+  // ACTIONS in keymap.js is declared in a specific order; the diffs
+  // array must follow that order so the UI display doesn't shuffle.
+  const existing = { ...defaultsByAction() }
+  // Touch the FIRST action (play) and the LAST one (help) — diff
+  // order should match ACTIONS declaration order, NOT input order.
+  const imported = { help: 'KeyH', play: 'KeyP' }
+  const s = summarizeImportImpact(existing, imported, 'merge')
+  eq(s.diffs.length, 2, 'two diffs')
+  // play comes BEFORE help in ACTIONS declaration (play is index 0).
+  const order = s.diffs.map(d => d.id)
+  eq(order[0], 'play', 'first diff matches first action order in ACTIONS')
+  eq(order[order.length - 1], 'help', 'help diff lands later in the list')
+}
+
+console.log('PASS: keymapIO — envelope build/parse/merge/replace + round-trip + summarizeImportImpact diff/reset')

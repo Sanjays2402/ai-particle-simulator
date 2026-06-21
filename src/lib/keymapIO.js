@@ -127,6 +127,81 @@ export function mergeImport(existing, imported, mode = 'merge') {
   return { map, changed, total }
 }
 
+// Dry-run summary for a preview UI (R13.04). Mirrors the pattern in
+// customThemesIO / windOverridesIO / crossfadeOverridesIO so the
+// Settings modal can show the user what will change BEFORE they
+// commit. Pure — never touches storage.
+//
+// Returns:
+//   {
+//     mode,         // echo of requested mode
+//     totalImport,  // count of valid imported ids (after whitelist)
+//     willChange,   // count of bindings that will actually move
+//     willKeep,     // count of bindings that match existing already
+//     willReset,    // count of EXISTING actions that will reset to
+//                   //   default (replace mode only — every action
+//                   //   not in the file goes back to default)
+//     diffs: [{ id, label, fromCode, toCode }, ...]  // bindings that
+//                   //   will actually change, ordered by ACTIONS so
+//                   //   the UI display stays stable
+//     resetIds: [string, ...]  // ids that will reset to default in
+//                   //   replace mode (empty in merge mode)
+//   }
+export function summarizeImportImpact(existing, imported, mode = 'merge') {
+  const liveMap = (existing && typeof existing === 'object') ? existing : defaultsByAction()
+  const defaults = defaultsByAction()
+  // Filter the import to known action ids and string values only.
+  const cleanImport = {}
+  let totalImport = 0
+  if (imported && typeof imported === 'object') {
+    for (const id of Object.keys(imported)) {
+      if (!ACTION_IDS.has(id)) continue
+      const v = imported[id]
+      if (typeof v !== 'string' || v.length === 0) continue
+      cleanImport[id] = v
+      totalImport++
+    }
+  }
+  // Build the projected post-merge map without committing it.
+  const projected = mode === 'replace' ? { ...defaults, ...cleanImport } : { ...liveMap, ...cleanImport }
+  const diffs = []
+  let willChange = 0
+  let willKeep = 0
+  for (const a of ACTIONS) {
+    const before = liveMap[a.id] || defaults[a.id]
+    const after  = projected[a.id] || defaults[a.id]
+    if (before !== after) {
+      diffs.push({ id: a.id, label: a.label, fromCode: before, toCode: after })
+      willChange++
+    } else if (cleanImport[a.id] !== undefined && cleanImport[a.id] === before) {
+      // Import touched this action but with the same code → no-op.
+      willKeep++
+    }
+  }
+  // In replace mode, every action NOT in the file resets to default.
+  // Those resets are already reflected in `willChange`, but the UI
+  // wants a separate count + id list so we can hint "X bindings will
+  // reset to defaults" distinctly from "X bindings move to new keys".
+  const resetIds = []
+  if (mode === 'replace') {
+    for (const a of ACTIONS) {
+      if (cleanImport[a.id] !== undefined) continue
+      if ((liveMap[a.id] || defaults[a.id]) !== defaults[a.id]) {
+        resetIds.push(a.id)
+      }
+    }
+  }
+  return {
+    mode,
+    totalImport,
+    willChange,
+    willKeep,
+    willReset: resetIds.length,
+    diffs,
+    resetIds,
+  }
+}
+
 // Trigger a browser download of the JSON envelope. Returns the
 // filename used, or null when something went wrong (no document).
 export function downloadKeymapFile(map, nowIso = new Date().toISOString()) {
