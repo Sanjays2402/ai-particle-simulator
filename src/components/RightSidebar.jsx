@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { Activity, Sparkles, Palette, Gauge, Camera, X, BarChart3, Code2, Copy, ChevronDown, ChevronUp, Bookmark, BookmarkPlus, Pencil, Play, RotateCcw, Route, Square, Repeat, Download, Upload, Shuffle } from 'lucide-react'
 import { presets } from '../presets'
-import { generateRandomScene } from '../lib/randomScene'
+import { generateRandomScene, SCENE_BIASES, SCENE_BIAS_DEFAULT } from '../lib/randomScene'
 import { loadCameraViews, saveCameraViews, appendView, moveViewUp, moveViewDown, CAMERA_VIEWS_MAX } from '../lib/cameraViews'
 import {
   PATH_SECONDS_MIN, PATH_SECONDS_MAX, PATH_SECONDS_DEFAULT,
@@ -530,6 +530,22 @@ function SceneBookmarks() {
   const [items, setItems] = useState(() => loadBookmarks())
   const currentPreset = useStore(s => s.currentPreset)
   const infoTitle     = useStore(s => s.infoTitle)
+  // Smash & Save bias (R12.04) — pre-selects a range profile so the
+  // user can roll within "Mostly Calm" or "Mostly Wild" instead of a
+  // pure surprise every time. Persists across sessions so a user who
+  // prefers wild scenes doesn't have to re-select between visits.
+  const [smashBias, setSmashBias] = useState(() => {
+    try {
+      const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('smash-bias') : null
+      if (stored && SCENE_BIASES.some(b => b.id === stored)) return stored
+    } catch { /* ignore */ }
+    return SCENE_BIAS_DEFAULT
+  })
+  const pickBias = (id) => {
+    setSmashBias(id)
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem('smash-bias', id) }
+    catch { /* quota / private mode */ }
+  }
 
   const save = (name) => {
     const scene = captureScene(useStore.getState())
@@ -687,7 +703,37 @@ function SceneBookmarks() {
       {/* Smash & Save — roll a fully-randomised scene (preset + style +
           palette + FX + physics + camera shake + bg gradient) AND
           immediately save it as a bookmark, so users can A/B compare
-          surprise configurations without losing the previous winner. */}
+          surprise configurations without losing the previous winner.
+          The bias chip rail below pre-selects a range profile so
+          "Mostly Calm" produces gentle scenes and "Mostly Wild"
+          cranks every dial. Selection persists across sessions. */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: `repeat(${SCENE_BIASES.length}, 1fr)`,
+        gap: 4, marginBottom: 6,
+      }}>
+        {SCENE_BIASES.map(b => {
+          const active = smashBias === b.id
+          return (
+            <button key={b.id}
+              onClick={() => pickBias(b.id)}
+              title={b.hint}
+              style={{
+                padding: '5px 0', borderRadius: 6, fontSize: 10, fontWeight: 600,
+                cursor: 'pointer', transition: 'all 0.12s ease-out',
+                background: active
+                  ? 'linear-gradient(135deg, rgba(236,72,153,0.22), rgba(245,158,11,0.18))'
+                  : 'rgba(255,255,255,0.04)',
+                color: active ? '#fde68a' : '#9a9ab0',
+                border: active
+                  ? '1px solid rgba(236,72,153,0.4)'
+                  : '1px solid rgba(255,255,255,0.06)',
+                boxShadow: active ? '0 0 10px rgba(236,72,153,0.2)' : 'none',
+              }}>
+              {b.label}
+            </button>
+          )
+        })}
+      </div>
       <button
         onClick={() => {
           if (!canSaveMore) {
@@ -696,7 +742,7 @@ function SceneBookmarks() {
           }
           try {
             const presetIds = presets.map(p => p.id)
-            const { name, scene } = generateRandomScene(presetIds)
+            const { name, scene } = generateRandomScene(presetIds, { bias: smashBias })
             // Apply first so the user sees the result instantly...
             applyScene(scene, useStore.getState())
             // ...then save it (use the freshly-applied store state so
@@ -705,12 +751,13 @@ function SceneBookmarks() {
             const next = appendBookmark(items, { name, scene })
             setItems(next)
             saveBookmarks(next)
-            showToast(`Smashed → "${name.replace(/^Smash /, '')}"`, <Shuffle size={10} color="#fff" strokeWidth={2.4} />)
+            const biasLabel = SCENE_BIASES.find(b => b.id === smashBias)?.label || ''
+            showToast(`Smashed (${biasLabel}) → "${name.replace(/^Smash /, '')}"`, <Shuffle size={10} color="#fff" strokeWidth={2.4} />)
           } catch (e) {
             showToast(`Smash failed: ${e.message || 'unknown'}`)
           }
         }}
-        title={canSaveMore ? 'Roll a completely random scene and save it as a bookmark' : `Max ${MAX_BOOKMARKS} bookmarks — delete one first`}
+        title={canSaveMore ? `Roll a ${SCENE_BIASES.find(b => b.id === smashBias)?.label || 'random'} scene and save it as a bookmark` : `Max ${MAX_BOOKMARKS} bookmarks — delete one first`}
         disabled={!canSaveMore}
         style={{
           width: '100%', padding: '8px 0', marginBottom: 8,

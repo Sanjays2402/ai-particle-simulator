@@ -4,6 +4,8 @@
 import {
   generateRandomScene, makeSmashName,
   PALETTE_PAIRS, BG_GRADIENT_PAIRS,
+  SCENE_BIASES, SCENE_BIAS_DEFAULT,
+  isValidSceneBias, getSceneBias,
 } from './randomScene.js'
 import { SCENE_FIELDS, appendBookmark } from './sceneBookmarks.js'
 
@@ -120,4 +122,87 @@ const presetIds = ['spiral-galaxy', 'starfield', 'aurora', 'storm', 'helix']
   if (typeof makeSmashName(null) !== 'string') fail('makeSmashName must always return a string')
 }
 
-console.log(`PASS: randomScene — determinism + clamps + roundtrip · palettes=${PALETTE_PAIRS.length} · bgPairs=${BG_GRADIENT_PAIRS.length}`)
+// --- R12.04 bias chips ---
+// 8. Bias roster + validation.
+{
+  eq(SCENE_BIAS_DEFAULT, 'surprise', 'default bias is surprise')
+  if (SCENE_BIASES.length !== 3) fail(`expected 3 bias chips, got ${SCENE_BIASES.length}`)
+  const ids = SCENE_BIASES.map(b => b.id)
+  for (const id of ['calm', 'surprise', 'wild']) {
+    if (!ids.includes(id)) fail(`missing bias ${id}`)
+    if (!isValidSceneBias(id)) fail(`isValidSceneBias(${id}) should be true`)
+    const b = getSceneBias(id)
+    if (!b || b.id !== id) fail(`getSceneBias(${id}) wrong shape`)
+    // Every bias must define every keyed range so the generator never
+    // hits an undefined index.
+    for (const k of ['counts', 'speedRange', 'glowRange', 'attractRange']) {
+      if (!Array.isArray(b[k]) || b[k].length !== 2) fail(`bias ${id} ${k} not [min,max]`)
+      if (b[k][0] > b[k][1]) fail(`bias ${id} ${k} reversed`)
+    }
+    for (const k of ['bgChance', 'forceFieldChance', 'kaleidoChance', 'hueCycleChance',
+                     'trailsChance', 'shakeChance', 'reactiveBgChance',
+                     'chromaChance', 'vignetteChance', 'grainChance']) {
+      if (b[k] < 0 || b[k] > 1) fail(`bias ${id} ${k} out of [0,1]`)
+    }
+  }
+  eq(isValidSceneBias('nope'), false, 'unknown id rejected')
+  eq(isValidSceneBias(null), false, 'null rejected')
+  // Bogus id falls back to default — caller never gets undefined.
+  if (getSceneBias('nope').id !== SCENE_BIAS_DEFAULT) fail('getSceneBias falls back to default')
+}
+
+// 9. Calm bias produces noticeably lower particle counts than wild.
+// Average 30 rolls of each bias with the same seed family.
+{
+  function avgCount(biasId) {
+    let total = 0
+    for (let i = 0; i < 30; i++) {
+      const { scene } = generateRandomScene(presetIds, { rng: mulberry32(1000 + i), bias: biasId })
+      total += scene.particleCount
+    }
+    return total / 30
+  }
+  const calmAvg = avgCount('calm')
+  const wildAvg = avgCount('wild')
+  if (calmAvg >= wildAvg) fail(`calm avg ${calmAvg} should be < wild avg ${wildAvg}`)
+  if (calmAvg > 14000) fail(`calm avg ${calmAvg} > calm.counts[1]=14000`)
+  if (wildAvg < 25000) fail(`wild avg ${wildAvg} < wild.counts[0]=25000`)
+}
+
+// 10. Calm bias rarely turns on kaleidoscope; wild often does.
+{
+  let calmK = 0, wildK = 0
+  for (let i = 0; i < 60; i++) {
+    if (generateRandomScene(presetIds, { rng: mulberry32(7000 + i), bias: 'calm' }).scene.kaleidoscopeEnabled) calmK++
+    if (generateRandomScene(presetIds, { rng: mulberry32(7000 + i), bias: 'wild' }).scene.kaleidoscopeEnabled) wildK++
+  }
+  if (calmK >= wildK) fail(`kaleido calm=${calmK} should be < wild=${wildK}`)
+}
+
+// 11. Bias is opt-in — omitting it = 'surprise' (default, historic).
+{
+  const a = generateRandomScene(presetIds, { rng: mulberry32(123) })
+  const b = generateRandomScene(presetIds, { rng: mulberry32(123), bias: 'surprise' })
+  eq(JSON.stringify(a.scene), JSON.stringify(b.scene), 'no bias = surprise')
+}
+
+// 12. Calm bias produces speed/glow/attract within the calm band.
+{
+  for (let i = 0; i < 20; i++) {
+    const { scene } = generateRandomScene(presetIds, { rng: mulberry32(8000 + i), bias: 'calm' })
+    if (scene.speed < 0.3 || scene.speed > 0.9) fail(`calm speed ${scene.speed} out of band`)
+    if (scene.glowIntensity < 0.1 || scene.glowIntensity > 0.45) fail(`calm glow ${scene.glowIntensity} out of band`)
+    if (scene.attractStrength < 0.5 || scene.attractStrength > 1.6) fail(`calm attract ${scene.attractStrength} out of band`)
+  }
+}
+
+// 13. Wild bias produces values in the wild bands.
+{
+  for (let i = 0; i < 20; i++) {
+    const { scene } = generateRandomScene(presetIds, { rng: mulberry32(9000 + i), bias: 'wild' })
+    if (scene.speed < 1.5 || scene.speed > 2.5) fail(`wild speed ${scene.speed} out of band`)
+    if (scene.glowIntensity < 0.55 || scene.glowIntensity > 0.9) fail(`wild glow ${scene.glowIntensity} out of band`)
+  }
+}
+
+console.log(`PASS: randomScene — determinism + clamps + roundtrip · palettes=${PALETTE_PAIRS.length} · bgPairs=${BG_GRADIENT_PAIRS.length} · biases=${SCENE_BIASES.length}`)
