@@ -223,3 +223,97 @@ export function toTransform(state) {
 export function navAllowed(state) {
   return state.scale <= MIN_SCALE
 }
+
+// --- Desktop keyboard / wheel zoom (R11.15) ---
+// Multiplier per +/- press. 1.25x feels right — three taps gets you
+// roughly to DOUBLE_TAP_SCALE (1.25^3 ≈ 1.95). Mirrors the pinch
+// behaviour: zoom is centered on the stage centre because we don't
+// know where the cursor is for keyboard input.
+export const KEYBOARD_ZOOM_STEP = 1.25
+
+// Apply a multiplicative zoom factor. When `anchor` is provided
+// (e.g. wheel events with the mouse cursor coords), keep the world
+// point under the anchor stable — same math the double-tap helper
+// uses. When `anchor` is null, scale around the stage centre.
+// Always clamps + bounds-checks the resulting translate.
+export function applyZoomBy(state, factor, anchor, stageW, stageH) {
+  if (!Number.isFinite(factor) || factor <= 0) return state
+  const prevScale = clampScale(state.scale)
+  const nextScale = clampScale(prevScale * factor)
+  // No-op when clamped at the boundary in this direction.
+  if (nextScale === prevScale) return state
+  const w = (stageW > 0 && Number.isFinite(stageW)) ? stageW : 0
+  const h = (stageH > 0 && Number.isFinite(stageH)) ? stageH : 0
+  const cx = w / 2
+  const cy = h / 2
+  // Snap back to idle when scale falls back to MIN_SCALE — keeps the
+  // image perfectly centered (no stale translate from a previous pan).
+  if (nextScale <= MIN_SCALE) {
+    return { ...idleState() }
+  }
+  // When anchor is missing fall back to the stage centre — the same
+  // point we already use as transform origin so the visual stays
+  // centred. Same algebra as applyDoubleTap.
+  const a = anchor || { x: cx, y: cy }
+  const k = nextScale / prevScale
+  // Current world coord under anchor (stage centre origin):
+  //   world = (anchor - centre - translate_prev) / prevScale
+  // After scaling, we want the same world coord still under anchor:
+  //   anchor = world * nextScale + translate_next + centre
+  // ⇒ translate_next = anchor - centre - world * nextScale
+  //                  = (anchor - centre) - ((anchor - centre - tPrev) * k)
+  //                  = (anchor - centre)(1 - k) + tPrev * k
+  const dx = (a.x - cx) * (1 - k) + state.translateX * k
+  const dy = (a.y - cy) * (1 - k) + state.translateY * k
+  const desired = clampTranslate(dx, dy, nextScale, w, h)
+  return {
+    ...state,
+    gesture: 'idle',
+    scale: nextScale,
+    translateX: desired.x,
+    translateY: desired.y,
+    startCenter: null,
+    startDist: 0,
+    startTranslate: { x: desired.x, y: desired.y },
+  }
+}
+
+// Convenience wrappers for keyboard handlers. `applyResetZoom` is just
+// idleState() but exported under a descriptive name so the React layer
+// reads cleanly: handlers map intent → helper → state.
+export function applyKeyboardZoomIn(state, stageW, stageH) {
+  return applyZoomBy(state, KEYBOARD_ZOOM_STEP, null, stageW, stageH)
+}
+export function applyKeyboardZoomOut(state, stageW, stageH) {
+  return applyZoomBy(state, 1 / KEYBOARD_ZOOM_STEP, null, stageW, stageH)
+}
+export function applyResetZoom() {
+  return idleState()
+}
+
+// Convert a wheel deltaY into a zoom factor — small steps so a single
+// trackpad gesture doesn't snap from 1x to 5x. anchor is the cursor
+// position in stage-local coords so the world point under the mouse
+// stays fixed (the standard "zoom to cursor" feel).
+export function applyWheelZoom(state, deltaY, anchor, stageW, stageH) {
+  if (!Number.isFinite(deltaY) || deltaY === 0) return state
+  // Sign convention: wheel up (negative deltaY) zooms IN, wheel down
+  // (positive deltaY) zooms OUT — matches every major browser's
+  // page-zoom binding.
+  // Factor per tick: a "natural" trackpad scroll fires lots of small
+  // deltas; clamp the per-event multiplier to a polite range so the
+  // result feels controllable.
+  const intensity = Math.min(Math.abs(deltaY) / 200, 0.5)
+  const factor = deltaY < 0 ? 1 + intensity : 1 / (1 + intensity)
+  return applyZoomBy(state, factor, anchor, stageW, stageH)
+}
+
+// Map a KeyboardEvent.key to a zoom intent. Returns null for keys
+// we don't care about so the lightbox can early-out. Accepts '+',
+// '=' (same key on US layout, no shift required), '-', '_', '0'.
+export function classifyZoomKey(key) {
+  if (key === '+' || key === '=') return 'in'
+  if (key === '-' || key === '_') return 'out'
+  if (key === '0') return 'reset'
+  return null
+}

@@ -1,10 +1,12 @@
 // pinchZoom — math + state-machine tests. No DOM required.
 import {
-  MIN_SCALE, MAX_SCALE, DOUBLE_TAP_SCALE,
+  MIN_SCALE, MAX_SCALE, DOUBLE_TAP_SCALE, KEYBOARD_ZOOM_STEP,
   clampScale, distance, midpoint, clampTranslate,
   idleState, beginPinch, updatePinch, beginPan, updatePan,
   endGesture, applyDoubleTap, shouldInterceptWheel,
   toTransform, navAllowed,
+  applyZoomBy, applyKeyboardZoomIn, applyKeyboardZoomOut,
+  applyResetZoom, applyWheelZoom, classifyZoomKey,
 } from './pinchZoom.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -203,4 +205,89 @@ eq(idle.gesture, 'idle',  'idleState: gesture idle')
   if (!navAllowed(edge)) fail('navAllowed: exactly MIN_SCALE counts as idle')
 }
 
-console.log(`PASS: pinchZoom — clamp/distance/midpoint/clampTranslate/idleState/beginPinch/updatePinch (centroid follow)/beginPan/updatePan/endGesture/applyDoubleTap/shouldInterceptWheel/toTransform/navAllowed · MIN=${MIN_SCALE} MAX=${MAX_SCALE} DOUBLE=${DOUBLE_TAP_SCALE}`)
+// --- applyZoomBy / keyboard helpers (R11.15) ---
+{
+  // From idle, zoom in by KEYBOARD_ZOOM_STEP — scale moves up, image
+  // stays centered (no anchor → stage centre).
+  const next = applyKeyboardZoomIn(idleState(), 200, 100)
+  approx(next.scale, MIN_SCALE * KEYBOARD_ZOOM_STEP, 'keyboard +: scale steps by 1.25x')
+  eq(next.translateX, 0, 'keyboard +: stays centered (translate 0)')
+  eq(next.translateY, 0, 'keyboard +: stays centered (translate 0)')
+}
+{
+  // Zoom-out from idle is a no-op (already at MIN).
+  const next = applyKeyboardZoomOut(idleState(), 200, 100)
+  eq(next.scale, MIN_SCALE, 'keyboard -: no-op at MIN_SCALE')
+}
+{
+  // Zoom-out from a deep zoom brings us back below MIN → snap to idle.
+  const deep = { ...idleState(), scale: 1.2, translateX: 5, translateY: 5 }
+  const next = applyKeyboardZoomOut(deep, 200, 100)
+  eq(next.scale, MIN_SCALE, 'keyboard -: snaps back to MIN when crossing it')
+  eq(next.translateX, 0, 'keyboard -: snap to idle clears translateX')
+  eq(next.translateY, 0, 'keyboard -: snap to idle clears translateY')
+}
+{
+  // At MAX_SCALE, zoom-in is a no-op.
+  const maxed = { ...idleState(), scale: MAX_SCALE }
+  const next = applyKeyboardZoomIn(maxed, 200, 100)
+  eq(next.scale, MAX_SCALE, 'keyboard +: no-op at MAX_SCALE')
+}
+{
+  // Reset returns a fresh idleState (regardless of input).
+  const dirty = { ...idleState(), scale: 3, translateX: 20, translateY: -10 }
+  const reset = applyResetZoom(dirty)
+  eq(reset.scale, MIN_SCALE, 'reset: scale → MIN')
+  eq(reset.translateX, 0, 'reset: translateX → 0')
+  eq(reset.translateY, 0, 'reset: translateY → 0')
+}
+{
+  // applyZoomBy with an anchor keeps the world coord under the anchor
+  // stable. Stage 200x100; anchor at (200, 50) (right edge centre).
+  // Zoom in 2x → translateX should be (200 - 100) * (1 - 2) = -100 (clamped).
+  const next = applyZoomBy(idleState(), 2, { x: 200, y: 50 }, 200, 100)
+  approx(next.scale, 2, 'zoom-by anchor: scale doubles')
+  approx(next.translateX, -100, 'zoom-by anchor: world point under anchor preserved (within bounds)')
+  approx(next.translateY, 0,    'zoom-by anchor: y unchanged (anchor on centre line)')
+}
+{
+  // Invalid factor → no-op.
+  const before = idleState()
+  eq(applyZoomBy(before, 0, null, 200, 100),   before, 'zoom-by: factor 0 → no-op')
+  eq(applyZoomBy(before, NaN, null, 200, 100), before, 'zoom-by: NaN factor → no-op')
+  eq(applyZoomBy(before, -1, null, 200, 100),  before, 'zoom-by: negative factor → no-op')
+}
+
+// --- applyWheelZoom ---
+{
+  // Wheel-up (negative deltaY) zooms in around anchor.
+  const next = applyWheelZoom(idleState(), -100, { x: 100, y: 50 }, 200, 100)
+  if (next.scale <= MIN_SCALE) fail('wheel up: scale should grow')
+}
+{
+  // Wheel-down at idle is no-op (can't zoom out below 1).
+  const next = applyWheelZoom(idleState(), 100, { x: 100, y: 50 }, 200, 100)
+  eq(next.scale, MIN_SCALE, 'wheel down at idle: no-op')
+}
+{
+  // Larger deltaY clamped to the polite-cap factor (0.5 intensity max).
+  const huge = applyWheelZoom(idleState(), -10000, { x: 100, y: 50 }, 200, 100)
+  // intensity capped at 0.5 → factor = 1.5; scale = 1 * 1.5 = 1.5.
+  approx(huge.scale, 1.5, 'wheel: per-event factor caps at 1.5x', 1e-6)
+}
+{
+  // Zero deltaY → no change.
+  const before = idleState()
+  eq(applyWheelZoom(before, 0, null, 200, 100), before, 'wheel: zero delta no-op')
+}
+
+// --- classifyZoomKey ---
+eq(classifyZoomKey('+'), 'in',    'classify: + → in')
+eq(classifyZoomKey('='), 'in',    'classify: = → in (no-shift on US layout)')
+eq(classifyZoomKey('-'), 'out',   'classify: - → out')
+eq(classifyZoomKey('_'), 'out',   'classify: _ → out (shifted -)')
+eq(classifyZoomKey('0'), 'reset', 'classify: 0 → reset')
+eq(classifyZoomKey('a'), null,    'classify: unrelated key → null')
+eq(classifyZoomKey(''),  null,    'classify: empty → null')
+
+console.log(`PASS: pinchZoom — clamp/distance/midpoint/clampTranslate/idleState/beginPinch/updatePinch (centroid follow)/beginPan/updatePan/endGesture/applyDoubleTap/shouldInterceptWheel/toTransform/navAllowed + keyboard+wheel zoom (applyZoomBy/applyKeyboardZoomIn/Out/Reset/applyWheelZoom/classifyZoomKey) · MIN=${MIN_SCALE} MAX=${MAX_SCALE} DOUBLE=${DOUBLE_TAP_SCALE} STEP=${KEYBOARD_ZOOM_STEP}`)

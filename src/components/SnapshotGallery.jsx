@@ -9,6 +9,8 @@ import {
   beginPan, updatePan, endGesture, applyDoubleTap,
   toTransform as zoomToTransform, navAllowed as zoomNavAllowed,
   MIN_SCALE as ZOOM_MIN, DOUBLE_TAP_MS,
+  applyKeyboardZoomIn, applyKeyboardZoomOut, applyResetZoom,
+  applyWheelZoom, classifyZoomKey,
 } from '../lib/pinchZoom'
 import { showToast } from './Toast'
 
@@ -426,6 +428,8 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
   }
 
   // Keyboard nav lives in the lightbox itself so we can gate it by zoom.
+  // R11.15: +/=/- and 0 also drive desktop zoom — mirrors the pinch
+  // behaviour for users without a touchscreen.
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
@@ -438,11 +442,36 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
         e.preventDefault()
         if (e.key === 'ArrowRight') onNext()
         else onPrev()
+        return
       }
+      // Desktop zoom shortcuts. Ignore when a text input has focus so
+      // typing "+" / "-" in a search box (none today, but defensive)
+      // doesn't accidentally zoom the image.
+      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return
+      const intent = classifyZoomKey(e.key)
+      if (!intent) return
+      const el = stageRef.current
+      const r = el ? el.getBoundingClientRect() : { width: 0, height: 0 }
+      e.preventDefault()
+      if (intent === 'in')    setZoom(prev => applyKeyboardZoomIn(prev, r.width, r.height))
+      else if (intent === 'out') setZoom(prev => applyKeyboardZoomOut(prev, r.width, r.height))
+      else if (intent === 'reset') setZoom(applyResetZoom())
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onNext, onPrev])
+
+  // Wheel zoom on the stage — desktop equivalent of pinch. Anchor at
+  // the cursor's position (in stage-local coords) so the world point
+  // under the mouse stays fixed.
+  const onWheel = (e) => {
+    const el = stageRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    const anchor = { x: e.clientX - r.left, y: e.clientY - r.top }
+    setZoom(prev => applyWheelZoom(prev, e.deltaY, anchor, r.width, r.height))
+    e.preventDefault()
+  }
 
   const isZoomed = zoom.scale > ZOOM_MIN
   // While zoomed, swallow backdrop-click-to-close so the user can pan
@@ -485,7 +514,7 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
             </span>
           )}
           {isZoomed && (
-            <span title="Pinch zoom is active. Double-tap or press Reset to zoom out."
+            <span title="Pinch / wheel zoom is active. Double-tap, press 0, or click Reset to zoom out."
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 4,
                 padding: '2px 7px', borderRadius: 5,
@@ -501,7 +530,7 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
         </div>
         <div style={{ display: 'inline-flex', gap: 6 }}>
           {isZoomed && (
-            <button onClick={resetZoom} title="Reset zoom"
+            <button onClick={resetZoom} title="Reset zoom (0)"
               style={lightboxBtn('rgba(168,85,247,0.18)', 'rgba(168,85,247,0.4)', '#e9d5ff')}>
               Reset
             </button>
@@ -532,6 +561,7 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
         onTouchCancel={onTouchEnd}
+        onWheel={onWheel}
         style={{
           flex: 1, position: 'relative',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
