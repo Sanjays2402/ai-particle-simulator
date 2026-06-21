@@ -74,6 +74,11 @@ Existing capabilities (do not re-ship):
 - MIDI controller can route a CC to a specific named attractor's STRENGTH (e.g. `attr:attr-3:strength`); per-attractor rows appear in the MIDI panel below the built-in bindings; deleted attractor → silent no-op + "missing" label; saves through localStorage round-trip.
 - Wind chip overrides export/import as portable JSON envelope (kind=`ai-particle-simulator/wind-overrides`, v1); 3-button row (Export / Import-merge / Import-replace) below the Wind sliders; parses bare-items shorthand too; size cap 32 KB.
 - Snapshot lightbox: WASD pan when zoomed (+ hjkl for vim users); each press moves ~15% of stage scaled by current zoom; preventDefault only when zoomed so WASD stays free at idle; bound to existing clampTranslate so image can't float off stage.
+- Crossfade chip overrides export/import as portable JSON envelope (kind=`ai-particle-simulator/crossfade-overrides`, v1); direct parallel to wind IO — same 3-button row below the chip grid, same merge-vs-replace modes, same 32 KB cap, bare-items shorthand, sanitize-on-load clamping.
+- Minimap: shift+click a green saved-view dot to delete it inline (skips the trip to RightSidebar → CameraViews → trash); fires particle:camera-views-changed so RightSidebar re-syncs without refresh; new removeView helper in cameraViews.js with ref-equal-on-no-op contract; tooltip updated to advertise the gesture.
+- MIDI per-attractor routing now supports STRENGTH + RADIUS + X + Y + Z (was strength-only); each field gets its own row grouped under the attractor's name in the MIDI panel; x/y/z setter reads the LIVE position triple at apply-time so concurrent axis sweeps don't undo each other; parseAttractorActionId now validates the field too so stale action ids become silent no-ops.
+- Keymap import: live diff PREVIEW panel before committing (replaces the old window.confirm flow); shows which bindings will change with fromCode → toCode chips; replace mode flags resets with an amber RESET tag; merge/replace toggle recomputes the diff in-place; Apply gated on willChange > 0; new summarizeImportImpact() helper in keymapIO.js with stable ACTIONS-order diffs.
+- MIDI user-authored controller preset bundle EDITOR: save the current binding map as a named bundle (vendor='Custom'), see your bundles in a second row of the chip bar (pink-keyed to distinguish from shipped), apply with the same merge/replace gesture, delete inline; capped at 8 with FIFO-drop-oldest; load/save round-trip sanitizes corrupt rows; "+ Save current as bundle" button with inline name input.
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -200,29 +205,43 @@ dedicated render-pipeline / r3f-gizmo batches. Substituted R12.17 and
 R12.19 from the future queue to keep the batch at 5 great slices
 instead of padding.
 
-### Batch 13 — next 5 (refilled)
-- [ ] R13.01 Echo / trail FBO that survives EffectComposer (carried over — render pipeline refactor, dedicated batch)
-- [ ] R13.02 Named attractor 3D drag handle (carried over — needs r3f gizmo handles, dedicated batch)
-- [ ] R13.03 OpenGraph snapshot endpoint (server-rendered card for share URLs) — needs backend [was R12.06]
-- [ ] R13.04 Keymap import: live diff preview before committing [was R12.07]
-- [ ] R13.05 MIDI controller preset bundle EDITOR (let users save a custom map as their own bundle) [was R12.08]
+### Batch 13 — crossfade IO + minimap delete + per-attractor MIDI axes + keymap diff preview + user bundle editor  (SHIPPED)
+- [x] **R13.14** Crossfade chip overrides: export/import the override map as JSON — 909743a
+- [x] **R13.15** Minimap: shift+click a green dot to delete the saved view inline — 3621083
+- [x] **R13.18** Per-attractor MIDI: route a CC to RADIUS or X/Y/Z (currently strength-only) — f10372c
+- [x] **R13.04** Keymap import: live diff preview before committing — b5e7778
+- [x] **R13.05** MIDI controller preset bundle EDITOR (save current mapping as user's own bundle) — ea06bf9
+
+Note: R13.01 (Echo / trail FBO that survives EffectComposer) and R13.02
+(Named attractor 3D drag handle) deferred again — both need their own
+dedicated render-pipeline / r3f-gizmo batches. R13.03 (server-rendered
+OG snapshot endpoint) still deferred — static Vite app, no backend
+runtime available. Substituted R13.14, R13.15, R13.18 from the future
+queue to keep the batch at 5 great slices instead of padding.
+
+### Batch 14 — next 5 (refilled)
+- [ ] R14.01 Echo / trail FBO that survives EffectComposer (carried over — render pipeline refactor, dedicated batch)
+- [ ] R14.02 Named attractor 3D drag handle (carried over — needs r3f gizmo handles, dedicated batch)
+- [ ] R14.03 OpenGraph snapshot endpoint (server-rendered card for share URLs) — needs backend [carried over]
+- [ ] R14.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [was R13.06]
+- [ ] R14.05 Named attractor type-specific color cues in the UI (vortex purple, repulsor red, etc.) [was R13.07]
 
 ### Future queue (refill when batch closes)
-- [ ] R13.06 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [was R12.09]
-- [ ] R13.07 Named attractor type-specific color cues in the UI (vortex purple, repulsor red, etc.) [was R12.10]
-- [ ] R13.08 Carousel: bulk "rebuild all stale thumbs" action in the filter button menu [was R12.11]
-- [ ] R13.09 Spectrum peak-holds: per-bar fade-out tail (last 200ms still painted at low alpha) for an even more cinematic look [was R12.12]
-- [ ] R13.10 Theme pack preview: drag a JSON onto the sidebar to preview without the file picker [was R12.13]
-- [ ] R13.11 Camera path: drag-and-drop reorder (graduates from arrow-button slice R10.03) [was R12.14]
-- [ ] R13.12 Snapshot grid: long-press a tile to multi-select for bulk delete [was R12.15]
-- [ ] R13.13 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view [was R12.16]
-- [ ] R13.14 Crossfade chip overrides: export/import the override map as JSON (matches wind) [was R12.18]
-- [ ] R13.15 Minimap: shift+click a green dot to delete the saved view inline (skip the panel trip) [was R12.20]
-- [ ] R13.16 Audio-reactive bg curve chips → add a custom curve editor for power users (visual spline / 3-knot bezier)
-- [ ] R13.17 Smash bias: user-editable per-chip ranges (open the bias as JSON, tweak, re-save)
-- [ ] R13.18 Per-attractor MIDI: route a CC to RADIUS or X/Y/Z (currently strength-only)
-- [ ] R13.19 Lightbox WASD pan: hold to repeat (auto-repeat on key-held for smoother sweeps)
-- [ ] R13.20 Wind override import: preview panel (diff against current overrides) before committing
+- [ ] R14.06 Carousel: bulk "rebuild all stale thumbs" action in the filter button menu [was R13.08]
+- [ ] R14.07 Spectrum peak-holds: per-bar fade-out tail (last 200ms still painted at low alpha) for an even more cinematic look [was R13.09]
+- [ ] R14.08 Theme pack preview: drag a JSON onto the sidebar to preview without the file picker [was R13.10]
+- [ ] R14.09 Camera path: drag-and-drop reorder (graduates from arrow-button slice R10.03) [was R13.11]
+- [ ] R14.10 Snapshot grid: long-press a tile to multi-select for bulk delete [was R13.12]
+- [ ] R14.11 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view [was R13.13]
+- [ ] R14.12 Audio-reactive bg curve chips → add a custom curve editor for power users (visual spline / 3-knot bezier) [was R13.16]
+- [ ] R14.13 Smash bias: user-editable per-chip ranges (open the bias as JSON, tweak, re-save) [was R13.17]
+- [ ] R14.14 Lightbox WASD pan: hold to repeat (auto-repeat on key-held for smoother sweeps) [was R13.19]
+- [ ] R14.15 Wind override import: preview panel (diff against current overrides) before committing [was R13.20]
+- [ ] R14.16 Crossfade override import: preview panel (diff against current overrides) — parallel to keymap R13.04 + wind R13.20
+- [ ] R14.17 MIDI user bundle: export/import a single bundle as a JSON file (share between machines)
+- [ ] R14.18 MIDI user bundle: rename in-place (currently delete + re-save is the only path)
+- [ ] R14.19 Minimap: hover a saved-view dot for ~1s shows a thumbnail preview (canvas2D sample of the scene from that camera)
+- [ ] R14.20 Per-attractor MIDI: route CC to ENABLED toggle (button-style with hysteresis around 0.5)
 
 ## TICK LOG
 - 2026-06-19 23:41 PT — Bootstrap + Batch 1 (5/5).
@@ -377,3 +396,53 @@ instead of padding.
   KeyboardPan/PAN_STEP_FRACTION · ~260 fresh asserts this batch).
   SCENE_FIELDS up to 49 (bgGradientAudioCurve round-trips through
   bookmarks).
+- 2026-06-21 16:23 PT — Batch 13 (5/5).
+  Commits: 909743a (R13.14 crossfade chip overrides IO — new
+  crossfadeOverridesIO.js module + CrossfadeOverrideIO leaf under
+  the chip grid, parallels wind IO), 3621083 (R13.15 minimap
+  shift+click delete — new removeView helper in cameraViews.js
+  with ref-equal-on-no-op contract; shift+click in Minimap onClick
+  + showToast feedback + dispatches particle:camera-views-changed;
+  RightSidebar's existing trash button switched to the helper too
+  as a drive-by), f10372c (R13.18 per-attractor MIDI for RADIUS +
+  X + Y + Z — ATTRACTOR_FIELDS expanded from [strength] to 5
+  entries; resolveActionForId / attractorActions / parse
+  AttractorActionId / labelForAttractorField all extended; x/y/z
+  setter reads LIVE position at apply-time so concurrent axis
+  sweeps don't undo each other; MidiPanel groups per-attractor
+  rows visually with attractor name as header), b5e7778 (R13.04
+  keymap import live diff preview — new summarizeImportImpact()
+  in keymapIO.js returns ordered diffs + reset list; window.confirm
+  gone, replaced by KeymapImportPreview panel with merge/replace
+  toggle + fromCode→toCode chip diff list + RESET tag for amber
+  collateral resets + Apply gated on willChange>0), ea06bf9
+  (R13.05 MIDI user bundle editor — new loadUserPresets /
+  saveUserPresets / buildUserPresetFromMap / addUserPreset /
+  removeUserPreset / nextUserPresetId / isUserPresetId in
+  midiPresets.js with v1 envelope, cap 8, FIFO drop, sanitize-on-
+  load; getMidiPreset / buildMidiMapFromPreset / applyPresetToMap
+  / presetBindingCount all extended with optional userPresets
+  arg; PresetBar gets "Your Bundles" second row + "+ Save current
+  as bundle" button + inline name form).
+  R13.01 (Echo / trail FBO) and R13.02 (3D drag handle) deferred
+  yet again — both need their own dedicated render-pipeline /
+  r3f-gizmo batches. R13.03 (server-rendered OG endpoint) still
+  deferred — no backend runtime. Substituted R13.14, R13.15,
+  R13.18 from the future queue to keep the batch at 5 great
+  slices instead of padding.
+  Gates: lint 23 errors / 3 warnings — exactly matches baseline
+  (zero new errors in any of the 9 modified .js/.jsx files +
+  2 new .js files + 2 new .test.mjs files; transient unused
+  import error in MidiPanel caught during the gate and removed
+  before commit by dropping isUserPresetId from the import
+  destructure). Build: 1.21 s green (1.69 MB bundle, gzip
+  504 KB — +4 KB for crossfadeOverridesIO + midiPresets editor
+  + keymap diff preview + per-attractor MIDI 5-field expansion).
+  Unit tests: 38/38 files pass (added crossfadeOverridesIO;
+  extended cameraViews with removeView + boundary/no-mutation /
+  ref-equal asserts, keymapIO with summarizeImportImpact
+  merge/replace/reset/ordering coverage, midiMap with the new
+  4 ATTRACTOR_FIELDS routings + concurrent-axis preserve
+  regression, midiPresets with the full user-bundle CRUD +
+  round-trip + corrupt-row sanitization + extended preset
+  lookup w/ userPresets arg · ~110 fresh asserts this batch).
