@@ -4,7 +4,10 @@ import {
   ACTIONS, loadMidiMap, saveMidiMap, setBinding, clearAllBindings,
   decodeMidiMessage, applyCC,
 } from '../lib/midiMap'
-import { Music4, X, CheckCircle2, AlertCircle } from 'lucide-react'
+import {
+  MIDI_PRESETS, applyPresetToMap, detectPresetForInput, presetBindingCount,
+} from '../lib/midiPresets'
+import { Music4, X, CheckCircle2, AlertCircle, Zap } from 'lucide-react'
 
 // Floating Web MIDI control panel. Opens from the LeftSidebar's
 // "MIDI Controller" button. Connects to navigator.requestMIDIAccess,
@@ -116,6 +119,26 @@ export default function MidiPanel({ open, onClose }) {
     setBindings(clearAllBindings())
   }
 
+  // Apply a controller preset. mode = 'replace' wipes existing
+  // bindings; 'merge' keeps untouched CCs intact. We persist
+  // immediately so a refresh keeps the preset live.
+  const applyPreset = (presetId, mode) => {
+    const next = applyPresetToMap(bindings, presetId, mode)
+    setBindings(next)
+    saveMidiMap(next)
+  }
+
+  // Try to auto-detect a likely preset from the connected inputs.
+  // Returns the preset id of the FIRST match, or null. Surface only —
+  // we don't auto-apply, the user has to opt in.
+  const detectedPresetId = (() => {
+    for (const inp of inputs) {
+      const id = detectPresetForInput(inp.name)
+      if (id) return id
+    }
+    return null
+  })()
+
   // For each action, find the CC currently bound to it (first match wins).
   const ccFor = (actionId) => {
     for (const [cc, id] of Object.entries(bindings)) {
@@ -171,6 +194,13 @@ export default function MidiPanel({ open, onClose }) {
 
         {/* Status banner */}
         <StatusBanner status={status} message={errorMsg} inputs={inputs} lastCC={lastCC} />
+
+        {/* Controller presets — pre-baked CC→action maps for common hardware */}
+        <PresetBar
+          presets={MIDI_PRESETS}
+          detectedId={detectedPresetId}
+          onApply={applyPreset}
+        />
 
         {/* Action list */}
         <div style={{ marginTop: 12 }}>
@@ -289,5 +319,78 @@ function Banner({ color, icon, children }) {
       background: bg, color: fg, border: `1px solid ${bd}`, fontSize: 11,
       display: 'inline-flex', alignItems: 'center', gap: 6,
     }}>{icon}{children}</div>
+  )
+}
+
+// Controller-preset bar — one chip per shipped bundle plus a tiny
+// "auto-detected" badge when one of the connected inputs matches by
+// name. Click the chip to apply the bundle (Replace mode); Shift-click
+// to merge into the existing map without wiping pre-existing bindings.
+function PresetBar({ presets, detectedId, onApply }) {
+  return (
+    <div style={{
+      padding: '10px 12px', marginBottom: 10, borderRadius: 8,
+      background: 'rgba(168,85,247,0.06)',
+      border: '1px solid rgba(168,85,247,0.18)',
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        marginBottom: 6,
+      }}>
+        <span style={{
+          fontSize: 10, fontWeight: 700, letterSpacing: '0.12em',
+          textTransform: 'uppercase', color: '#c4b5fd',
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+        }}>
+          <Zap size={11} strokeWidth={2.4} />
+          Controller Presets
+        </span>
+        <span style={{
+          fontSize: 10, color: '#8a8aa0', fontFamily: 'Geist Mono, monospace',
+        }}>
+          shift-click to merge
+        </span>
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {presets.map(p => {
+          const isDetected = detectedId === p.id
+          return (
+            <button
+              key={p.id}
+              onClick={(e) => onApply(p.id, e.shiftKey ? 'merge' : 'replace')}
+              title={`${p.description} — ${presetBindingCount(p.id)} bindings. Shift-click to merge.`}
+              style={{
+                padding: '5px 9px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
+                background: isDetected
+                  ? 'linear-gradient(135deg, rgba(34,197,94,0.18), rgba(168,85,247,0.14))'
+                  : 'rgba(255,255,255,0.04)',
+                color: isDetected ? '#bbf7d0' : '#c8c8d0',
+                border: isDetected
+                  ? '1px solid rgba(34,197,94,0.45)'
+                  : '1px solid rgba(255,255,255,0.10)',
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                fontFamily: 'Geist, system-ui, sans-serif',
+                transition: 'background 0.12s ease',
+              }}
+            >
+              {p.name}
+              <span style={{
+                fontSize: 9, fontFamily: 'Geist Mono, monospace',
+                color: isDetected ? '#86efac' : '#8a8aa0',
+              }}>
+                {presetBindingCount(p.id)}
+              </span>
+              {isDetected && (
+                <span style={{
+                  fontSize: 9, padding: '1px 5px', borderRadius: 4,
+                  background: 'rgba(34,197,94,0.22)', color: '#86efac',
+                  fontFamily: 'Geist Mono, monospace',
+                }}>detected</span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+    </div>
   )
 }
