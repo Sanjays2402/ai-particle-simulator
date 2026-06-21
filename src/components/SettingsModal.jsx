@@ -5,6 +5,11 @@ import {
   ACTIONS, loadKeymap, saveKeymap, resetKeymap, setBinding, conflictsFor,
   labelForBinding, labelForCode,
 } from '../lib/keymap'
+import {
+  downloadKeymapFile, parseImport as parseKeymapImport,
+  mergeImport as mergeKeymapImport,
+} from '../lib/keymapIO'
+import { showToast } from './Toast'
 
 export default function SettingsModal({ onClose }) {
   const { aiApiKey, aiBaseUrl, aiModel, setAiSettings,
@@ -140,6 +145,54 @@ export default function SettingsModal({ onClose }) {
                 background: 'rgba(255,255,255,0.04)', color: '#9a9ab0',
                 border: '1px solid rgba(255,255,255,0.06)',
               }}>Reset to defaults</button>
+          </div>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+            <button
+              onClick={() => {
+                const filename = downloadKeymapFile(keymap)
+                if (filename) showToast(`Exported keymap to ${filename}`)
+              }}
+              title="Download the current bindings as JSON"
+              style={{
+                flex: 1, padding: '6px 0', borderRadius: 6, fontSize: 11, fontWeight: 500,
+                background: 'rgba(99,102,241,0.10)', color: '#a5b4fc',
+                border: '1px solid rgba(99,102,241,0.25)', cursor: 'pointer',
+              }}>Export keymap</button>
+            <label
+              title="Load a previously exported keymap JSON file"
+              style={{
+                flex: 1, padding: '6px 0', borderRadius: 6, fontSize: 11, fontWeight: 500,
+                background: 'rgba(34,197,94,0.08)', color: '#86efac',
+                border: '1px solid rgba(34,197,94,0.25)', cursor: 'pointer',
+                textAlign: 'center',
+              }}>
+              Import keymap
+              <input
+                type="file"
+                accept="application/json,.json"
+                style={{ display: 'none' }}
+                onChange={async (e) => {
+                  const f = e.target.files && e.target.files[0]
+                  if (!f) return
+                  try {
+                    const text = await f.text()
+                    const res = parseKeymapImport(text)
+                    if (!res.ok) { window.alert('Could not import keymap: ' + res.error); return }
+                    const mode = window.confirm(
+                      `Import ${Object.keys(res.bindings).length} bindings.\n\nOK = MERGE (only override the bindings in the file).\nCancel = REPLACE (reset everything to defaults first, then apply the file).`
+                    ) ? 'merge' : 'replace'
+                    const merged = mergeKeymapImport(keymap, res.bindings, mode)
+                    setKeymap(merged.map)
+                    showToast(`${mode === 'replace' ? 'Replaced' : 'Merged'} ${merged.changed} keybind${merged.changed === 1 ? '' : 's'}`)
+                  } catch (err) {
+                    window.alert('Could not import keymap: ' + (err.message || err))
+                  } finally {
+                    // Clear the input so picking the same file twice fires onChange again.
+                    e.target.value = ''
+                  }
+                }}
+              />
+            </label>
           </div>
           {groups.map(group => (
             <div key={group.group} style={{ marginBottom: 10 }}>
