@@ -64,6 +64,11 @@ Existing capabilities (do not re-ship):
 - Camera path: per-view up/down arrow reorder (also: monospace path-order index column on every saved view row, reorder helpers in cameraViews.js)
 - Carousel: per-preset thumbnail rebuild button (hover-shown ↻ on top-left of each tile, spinning while busy, dim overlay during compile)
 - Theme pack import: preview panel before commit (chips with colour + name, name-collision badges, live impact line per mode, Apply disabled when no-op)
+- Bookmark export bundles saved camera views in a single v2 JSON envelope (combined "particle-scenes+views-…json"; import absorbs both via mergeImportViews + saveCameraViews and fires particle:camera-views-changed)
+- Wind preset chips support long-press to overwrite a slot with current sliders (per-slot localStorage overrides, violet ↺ reset badge, resolveWindPresets mutates the live WIND_PRESETS in place)
+- Crossfade duration chips support long-press to bind seconds to the slider value (pink ↺ reset badge, parallel override storage, disabled-while-blend-active gating)
+- Snapshot lightbox keyboard zoom (+/=/-/_/0) + cursor-anchored mouse-wheel zoom on desktop (mirrors the pinch state machine — same anchor math, MIN/MAX bounds, snap-to-idle on cross-back)
+- Minimap saved-view dots now show a small floating tooltip on hover with the view name (tooltipPlacement helper handles edge-flipping + horizontal slide-into-bounds + tiny-canvas fallback; hovered dot also paints brighter + larger)
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -164,29 +169,42 @@ dedicated render-pipeline / r3f-gizmo batches. Substituted R10.11,
 R10.19, R10.10 from the future queue to keep the batch at 5 great
 slices instead of padding.
 
-### Batch 11 — next 5 (refilled)
-- [ ] R11.01 Echo / trail FBO that survives EffectComposer (carried over — render pipeline refactor, dedicated batch)
-- [ ] R11.02 Named attractor 3D drag handle (carried over — needs r3f gizmo handles, dedicated batch)
-- [ ] R11.03 Bookmark export includes the live camera-view list (one combined file) [was R10.06]
-- [ ] R11.04 Wind preset chips become custom-named (long-press a slot to save sliders) [was R10.07]
-- [ ] R11.05 Crossfade chips: long-press a slot to bind its seconds to the current slider value [was R10.09]
+### Batch 11 — combined bookmarks IO + wind/crossfade long-press + lightbox keyboard zoom + minimap tooltips  (SHIPPED)
+- [x] **R11.03** Bookmark export includes the live camera-view list (one combined file)  — 7ef133b
+- [x] **R11.04** Wind preset chips become custom-named (long-press a slot to save sliders)  — 5318503
+- [x] **R11.05** Crossfade chips: long-press a slot to bind its seconds to the current slider value  — 0008aa6
+- [x] **R11.15** Snapshot lightbox: keyboard zoom-in/out via +/-/0 when on desktop (mirrors pinch behaviour)  — 8196251
+- [x] **R11.13** Minimap: per-view labels on hover (small floating tooltip with view name)  — e2e9781
+
+Note: R11.01 (Echo / trail FBO that survives EffectComposer) and R11.02
+(Named attractor 3D drag handle) deferred again — both need their own
+dedicated render-pipeline / r3f-gizmo batches. Substituted R11.15 and
+R11.13 from the future queue to keep the batch at 5 great slices
+instead of padding.
+
+### Batch 12 — next 5 (refilled)
+- [ ] R12.01 Echo / trail FBO that survives EffectComposer (carried over — render pipeline refactor, dedicated batch)
+- [ ] R12.02 Named attractor 3D drag handle (carried over — needs r3f gizmo handles, dedicated batch)
+- [ ] R12.03 Audio reactive bg: animation curve preset chips (Pulse / Ramp / Hold) [was R11.07]
+- [ ] R12.04 Smash & Save: bias chips ("Mostly Calm", "Mostly Wild") to constrain the random ranges [was R11.08]
+- [ ] R12.05 Named attractor → MIDI: route a CC to a specific attractor's strength [was R11.09]
 
 ### Future queue (refill when batch closes)
-- [ ] R11.06 OpenGraph snapshot endpoint (server-rendered card for share URLs) — needs backend [was R10.08]
-- [ ] R11.07 Audio reactive bg: animation curve preset chips (Pulse / Ramp / Hold) [was R10.12]
-- [ ] R11.08 Smash & Save: bias chips ("Mostly Calm", "Mostly Wild") to constrain the random ranges [was R10.13]
-- [ ] R11.09 Named attractor → MIDI: route a CC to a specific attractor's strength [was R10.14]
-- [ ] R11.10 Keymap import: live diff preview before committing [was R10.15]
-- [ ] R11.11 MIDI controller preset bundle EDITOR (let users save a custom map as their own bundle) [was R10.16]
-- [ ] R11.12 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [was R10.17]
-- [ ] R11.13 Minimap: per-view labels on hover (small floating tooltip with view name) [was R10.18]
-- [ ] R11.14 Named attractor type-specific color cues in the UI (vortex purple, repulsor red, etc.) [was R10.20]
-- [ ] R11.15 Snapshot lightbox: keyboard zoom-in/out via +/- when on desktop (mirrors pinch behaviour)
-- [ ] R11.16 Carousel: bulk "rebuild all stale thumbs" action in the filter button menu
-- [ ] R11.17 Spectrum peak-holds: per-bar fade-out tail (last 200ms still painted at low alpha) for an even more cinematic look
-- [ ] R11.18 Theme pack preview: drag a JSON onto the sidebar to preview without the file picker
-- [ ] R11.19 Camera path: drag-and-drop reorder (graduates from arrow-button slice R10.03)
-- [ ] R11.20 Snapshot grid: long-press a tile to multi-select for bulk delete
+- [ ] R12.06 OpenGraph snapshot endpoint (server-rendered card for share URLs) — needs backend [was R11.06]
+- [ ] R12.07 Keymap import: live diff preview before committing [was R11.10]
+- [ ] R12.08 MIDI controller preset bundle EDITOR (let users save a custom map as their own bundle) [was R11.11]
+- [ ] R12.09 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [was R11.12]
+- [ ] R12.10 Named attractor type-specific color cues in the UI (vortex purple, repulsor red, etc.) [was R11.14]
+- [ ] R12.11 Carousel: bulk "rebuild all stale thumbs" action in the filter button menu [was R11.16]
+- [ ] R12.12 Spectrum peak-holds: per-bar fade-out tail (last 200ms still painted at low alpha) for an even more cinematic look [was R11.17]
+- [ ] R12.13 Theme pack preview: drag a JSON onto the sidebar to preview without the file picker [was R11.18]
+- [ ] R12.14 Camera path: drag-and-drop reorder (graduates from arrow-button slice R10.03) [was R11.19]
+- [ ] R12.15 Snapshot grid: long-press a tile to multi-select for bulk delete [was R11.20]
+- [ ] R12.16 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view
+- [ ] R12.17 Wind chip overrides: export/import the override map as JSON (parallels customThemes pack IO)
+- [ ] R12.18 Crossfade chip overrides: export/import the override map as JSON (matches wind)
+- [ ] R12.19 Lightbox: pan with WASD when zoomed (desktop alternative to drag)
+- [ ] R12.20 Minimap: shift+click a green dot to delete the saved view inline (skip the panel trip)
 
 ## TICK LOG
 - 2026-06-19 23:41 PT — Bootstrap + Batch 1 (5/5).
@@ -290,3 +308,25 @@ slices instead of padding.
   clearThumbnail/recaptureThumbnail, waveform with peak-hold state
   machine, customThemesIO with summarizeImportImpact dry-run · ~150
   fresh asserts this batch).
+- 2026-06-21 09:31 PT — Batch 11 (5/5).
+  Commits: 7ef133b (R11.03 combined bookmark + camera-views export),
+  5318503 (R11.04 wind chip long-press overrides + WindChip leaf +
+  useLongPress hook), 0008aa6 (R11.05 crossfade chip long-press
+  overrides + CrossfadeChip leaf), 8196251 (R11.15 lightbox keyboard
+  +/=/-/_/0 zoom + cursor-anchored wheel zoom), e2e9781 (R11.13
+  minimap per-view hover tooltips with edge-aware placement).
+  R11.01 and R11.02 deferred again — render pipeline refactor and 3D
+  drag-handle each need their own dedicated batch. Substituted R11.15
+  and R11.13 from the future queue to keep the batch at 5 great slices.
+  Gates: lint 23 errors / 3 warnings — exactly matches baseline (zero
+  new errors in any of the 9 modified .js/.jsx files; Minimap.jsx
+  caught a react-hooks/refs error during the gate and was refactored
+  to capture hoverName at hover-time instead of reading viewsRef
+  during render). Build: 21.05 s green (cold) / 1.15 s warm (1.66 MB
+  bundle, gzip 497 KB). Unit tests: 36/36 files pass (added asserts
+  for: bookmarksIO v2 envelope + mergeImportViews, wind overrides
+  resolver + sanitize/capture/set/clear/isCustom, crossfade overrides
+  parallel, pinchZoom applyZoomBy/applyKeyboardZoomIn/Out/Reset/
+  applyWheelZoom/classifyZoomKey, minimap tooltipPlacement edge
+  cases · ~120 fresh asserts this batch). Combined bookmark file
+  is now v2 with optional `views` array; v1 imports still accepted.
