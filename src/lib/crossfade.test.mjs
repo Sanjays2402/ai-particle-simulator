@@ -1,7 +1,8 @@
-// crossfade: clamp, smoothstep, tickProgress.
+// crossfade: clamp, smoothstep, tickProgress, duration chips.
 import {
   clampSeconds, smoothstep, tickProgress,
   BLEND_MIN_SEC, BLEND_MAX_SEC,
+  DURATION_CHIPS, matchDurationChip,
 } from './crossfade.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -65,4 +66,29 @@ eq(smoothstep(NaN), 0, 'smoothstep handles NaN')
   eq(progress, 0.5, 'tickProgress: NaN dt no-op')
 }
 
-console.log(`PASS: crossfade — clamp/smoothstep/tick · bounds [${BLEND_MIN_SEC}, ${BLEND_MAX_SEC}]`)
+// --- DURATION_CHIPS / matchDurationChip ---
+eq(DURATION_CHIPS.length, 4, 'four chips ship')
+{
+  const ids = DURATION_CHIPS.map(c => c.id)
+  if (new Set(ids).size !== ids.length) fail('chip ids must be unique')
+}
+for (const chip of DURATION_CHIPS) {
+  if (chip.seconds < BLEND_MIN_SEC) fail(`chip ${chip.id} below BLEND_MIN_SEC`)
+  if (chip.seconds > BLEND_MAX_SEC) fail(`chip ${chip.id} above BLEND_MAX_SEC`)
+  if (typeof chip.label !== 'string' || !chip.label) fail(`chip ${chip.id} missing label`)
+  // Each chip's seconds value should be exactly recoverable.
+  const m = matchDurationChip(chip.seconds)
+  if (!m || m.id !== chip.id) fail(`chip ${chip.id} not matchable from its seconds`)
+}
+// Tolerates small floating-point drift.
+{
+  const m = matchDurationChip(2.0001)
+  if (!m || m.id !== 'fast') fail('match tolerates eps drift')
+}
+// Mismatched seconds → null so the UI knows none is active.
+{
+  if (matchDurationChip(3.0) !== null) fail('mismatched seconds returns null')
+  if (matchDurationChip(NaN) !== null) fail('NaN returns null')
+}
+
+console.log(`PASS: crossfade — clamp/smoothstep/tick · bounds [${BLEND_MIN_SEC}, ${BLEND_MAX_SEC}] · chips ${DURATION_CHIPS.length}`)

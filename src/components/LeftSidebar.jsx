@@ -5,6 +5,7 @@ import { GifEncoder } from '../lib/gifEncoder'
 import { startCanvasRecording, downloadVideoBlob, isVideoExportSupported } from '../lib/videoRecorder'
 import { CATEGORIES, categoryOf, countByCategory } from '../lib/presetCategories'
 import { compassFor, WIND_PRESETS, matchesWindPreset } from '../lib/wind'
+import { DURATION_CHIPS as CROSSFADE_DURATION_CHIPS, matchDurationChip as matchCrossfadeChip } from '../lib/crossfade'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
 const THEME_LIST = [
@@ -1280,6 +1281,31 @@ function CrossfadeRow() {
       </div>
       <Slider label="Duration" value={blendSeconds} min={0.5} max={10} step={0.5}
         onChange={setBlendSeconds} display={v => `${v.toFixed(1)}s`} />
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${CROSSFADE_DURATION_CHIPS.length}, 1fr)`, gap: 6, marginTop: 4, marginBottom: 6 }}>
+        {CROSSFADE_DURATION_CHIPS.map(chip => {
+          const active = matchCrossfadeChip(blendSeconds)?.id === chip.id
+          return (
+            <button
+              key={chip.id}
+              onClick={() => setBlendSeconds(chip.seconds)}
+              disabled={blendActive}
+              title={`${chip.label} — ${chip.seconds}s blend`}
+              style={{
+                padding: '5px 0', borderRadius: 6, fontSize: 10.5, fontWeight: 600,
+                letterSpacing: '0.02em',
+                cursor: blendActive ? 'not-allowed' : 'pointer',
+                transition: 'all 0.15s ease-out',
+                background: active
+                  ? 'linear-gradient(135deg, rgba(168,85,247,0.22) 0%, rgba(236,72,153,0.18) 100%)'
+                  : 'rgba(255,255,255,0.03)',
+                color: blendActive ? '#5a5a6a' : active ? '#f3e8ff' : '#9a9ab0',
+                border: active ? '1px solid rgba(168,85,247,0.45)' : '1px solid rgba(255,255,255,0.05)',
+                opacity: blendActive ? 0.55 : 1,
+              }}
+            >{chip.label}<span style={{ display: 'block', fontSize: 9, marginTop: 1, opacity: 0.65, fontFamily: 'Geist Mono, monospace' }}>{chip.seconds}s</span></button>
+          )
+        })}
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: blendActive ? '1fr 1fr' : '1fr 1fr', gap: 6, marginTop: 6 }}>
         <button
           onClick={() => {
