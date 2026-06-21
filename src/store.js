@@ -403,12 +403,16 @@ export const useStore = create((set, get) => {
   // timer. `slideshowOrder` is one of 'sequence' | 'shuffle' | 'favourites'.
   // The driver in App.jsx watches these and rotates accordingly; we
   // keep all state here so any UI surface can pause / change cadence.
+  // `slideshowRespectCategory` scopes sequence + shuffle to the active
+  // LeftSidebar category chip (favourites order intentionally bypasses).
   slideshowEnabled: false,
   slideshowDwellSec: 8,
   slideshowOrder: 'sequence',
+  slideshowRespectCategory: false,
   setSlideshowEnabled: (v) => set({ slideshowEnabled: v }),
   setSlideshowDwellSec: (v) => set({ slideshowDwellSec: Math.max(2, Math.min(120, v)) }),
   setSlideshowOrder: (v) => set({ slideshowOrder: v }),
+  setSlideshowRespectCategory: (v) => set({ slideshowRespectCategory: !!v }),
 
   // Camera shake on beat — when audio reactivity + this toggle are on,
   // the camera nudges on each detected beat (or bass surge). Intensity

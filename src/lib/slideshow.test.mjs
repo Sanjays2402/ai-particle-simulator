@@ -1,6 +1,7 @@
-// slideshow: pickNext across the three orders + clamp behaviour.
+// slideshow: pickNext across the three orders + clamp behaviour +
+// categoryFilter scoping.
 import {
-  pickNext, clampDwell,
+  pickNext, clampDwell, filterByCategory,
   SLIDESHOW_ORDERS, DWELL_MIN_SEC, DWELL_MAX_SEC,
 } from './slideshow.js'
 
@@ -123,4 +124,72 @@ eq(clampDwell(DWELL_MAX_SEC + 50), DWELL_MAX_SEC, 'clamp: above max')
 eq(clampDwell(NaN), DWELL_MIN_SEC, 'clamp: NaN → min')
 eq(clampDwell(15), 15, 'clamp: in-range value preserved')
 
-console.log(`PASS: slideshow — ${SLIDESHOW_ORDERS.length} orders · dwell [${DWELL_MIN_SEC}, ${DWELL_MAX_SEC}]`)
+// --- Category filter ---
+// Use REAL preset ids that exist in lib/presetCategories MAP so
+// filterByCategory exercises the live mapping (not a stub).
+const REAL = [
+  { id: 'spiral-galaxy' },  // space
+  { id: 'aurora' },         // space
+  { id: 'vortex' },         // physics
+  { id: 'tornado' },        // physics
+  { id: 'rain' },           // nature
+  { id: 'fire' },           // nature
+  { id: 'fireworks' },      // energy
+]
+// 'all' or undefined → no filter (passthrough).
+eq(filterByCategory(REAL, 'all').length,   REAL.length, 'filterByCategory: all → passthrough')
+eq(filterByCategory(REAL, undefined).length, REAL.length, 'filterByCategory: undefined → passthrough')
+// Real category scoping.
+eq(filterByCategory(REAL, 'space').length,   2, 'filterByCategory: space → 2 hits')
+eq(filterByCategory(REAL, 'physics').length, 2, 'filterByCategory: physics → 2 hits')
+eq(filterByCategory(REAL, 'energy').length,  1, 'filterByCategory: energy → 1 hit')
+// Empty match falls back to the full list (so the slideshow never gets stuck).
+eq(filterByCategory(REAL, 'no-such-cat').length, REAL.length, 'filterByCategory: zero matches → full list fallback')
+// Empty input is just empty.
+eq(filterByCategory([], 'space').length, 0, 'filterByCategory: empty in → empty out')
+
+// pickNext SEQUENCE respects categoryFilter — alpha-galaxy → aurora is the
+// only forward step inside the 'space' subset.
+eq(
+  pickNext({ presets: REAL, order: 'sequence', currentId: 'spiral-galaxy', categoryFilter: 'space' }),
+  'aurora',
+  'sequence + space filter: spiral-galaxy → aurora',
+)
+// Wraps within the filtered subset.
+eq(
+  pickNext({ presets: REAL, order: 'sequence', currentId: 'aurora', categoryFilter: 'space' }),
+  'spiral-galaxy',
+  'sequence + space filter: wraps within subset',
+)
+// Currently-loaded preset is outside the filter → unknown index, fallback to first of subset.
+eq(
+  pickNext({ presets: REAL, order: 'sequence', currentId: 'fire', categoryFilter: 'space' }),
+  'spiral-galaxy',
+  'sequence + space filter: out-of-subset current → first of subset',
+)
+// SHUFFLE respects the filter (random=0 → first matching item).
+eq(
+  pickNext({
+    presets: REAL, order: 'shuffle', currentId: 'fire',
+    categoryFilter: 'physics', random: () => 0,
+  }),
+  'vortex',
+  'shuffle + physics filter: first of subset',
+)
+// FAVOURITES intentionally bypasses categoryFilter — explicit user picks win.
+eq(
+  pickNext({
+    presets: REAL, order: 'favourites', currentId: 'fire',
+    favouriteIds: ['fire', 'fireworks'], categoryFilter: 'space',
+  }),
+  'fireworks',
+  'favourites + space filter: filter bypassed, walks favourites',
+)
+// Empty filter result falls back to the full list (no stuck loop).
+eq(
+  pickNext({ presets: REAL, order: 'sequence', currentId: 'spiral-galaxy', categoryFilter: 'no-such' }),
+  'aurora',
+  'sequence + unknown cat: falls back to full list (no stuck loop)',
+)
+
+console.log(`PASS: slideshow — ${SLIDESHOW_ORDERS.length} orders · dwell [${DWELL_MIN_SEC}, ${DWELL_MAX_SEC}] · categoryFilter`)

@@ -34,7 +34,7 @@ export const SCENE_FIELDS = [
   'cameraShake', 'cameraShakeIntensity',
   'audioMode',
   'bgGradientEnabled', 'bgGradientA', 'bgGradientB', 'bgGradientAngle',
-  'slideshowEnabled', 'slideshowDwellSec', 'slideshowOrder',
+  'slideshowEnabled', 'slideshowDwellSec', 'slideshowOrder', 'slideshowRespectCategory',
 ]
 
 export function loadBookmarks() {

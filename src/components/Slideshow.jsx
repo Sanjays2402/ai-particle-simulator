@@ -6,6 +6,10 @@
 // (via clicking, the carousel, R-key, etc.) — so the slideshow doesn't
 // immediately yank away a scene the user just chose; they get the full
 // dwell on their pick before the next rotation.
+//
+// Category scoping: when `slideshowRespectCategory` is true, the
+// rotation is scoped to the currently-active preset category filter
+// (the LeftSidebar chips). Favourites order intentionally ignores it.
 import { useEffect, useRef } from 'react'
 import { useStore } from '../store'
 import { presets } from '../presets'
@@ -19,21 +23,28 @@ export default function Slideshow() {
   // Track favourites so the 'favourites' order keeps up with toggles
   // mid-slideshow without forcing the user to restart it.
   const favouriteIds = useStore(s => s.favoritedPresets)
+  // Category filter scoping — respects the active LeftSidebar chips
+  // when the user opts in. Off by default for backwards compatibility.
+  const respectCategory = useStore(s => s.slideshowRespectCategory)
+  const presetCategory  = useStore(s => s.presetCategory)
 
   // Keep refs alongside state so the timer callback always reads the
   // latest values without re-creating the interval on every change.
-  const stateRef = useRef({ order, currentId, favouriteIds })
+  const stateRef = useRef({ order, currentId, favouriteIds, respectCategory, presetCategory })
   useEffect(() => {
-    stateRef.current = { order, currentId, favouriteIds }
-  }, [order, currentId, favouriteIds])
+    stateRef.current = { order, currentId, favouriteIds, respectCategory, presetCategory }
+  }, [order, currentId, favouriteIds, respectCategory, presetCategory])
 
   // The interval reset on currentId change is the "user manual load"
   // pause — when they pick a scene, they get the full dwell on it.
   useEffect(() => {
     if (!enabled) return
     const tick = () => {
-      const { order: o, currentId: c, favouriteIds: f } = stateRef.current
-      const nextId = pickNext({ presets, order: o, currentId: c, favouriteIds: f })
+      const { order: o, currentId: c, favouriteIds: f, respectCategory: r, presetCategory: cat } = stateRef.current
+      const nextId = pickNext({
+        presets, order: o, currentId: c, favouriteIds: f,
+        categoryFilter: r ? cat : undefined,
+      })
       if (!nextId) return
       useStore.getState().loadPreset(nextId)
     }

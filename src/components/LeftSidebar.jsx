@@ -1314,7 +1314,9 @@ function CrossfadeRow() {
 // Slideshow mode — rotate through the preset library on a timer.
 // Order chips pick between sequence, shuffle, and favourites; the
 // dwell slider sets seconds per preset. The actual rotation lives
-// in <Slideshow /> (mounted in App.jsx).
+// in <Slideshow /> (mounted in App.jsx). The "Respect category chip"
+// toggle scopes sequence + shuffle to the active LeftSidebar category
+// filter (favourites order always bypasses — explicit picks win).
 function SlideshowRow() {
   const enabled  = useStore(s => s.slideshowEnabled)
   const dwell    = useStore(s => s.slideshowDwellSec)
@@ -1323,11 +1325,20 @@ function SlideshowRow() {
   const setDwell = useStore(s => s.setSlideshowDwellSec)
   const setOrder = useStore(s => s.setSlideshowOrder)
   const favCount = useStore(s => s.favoritedPresets.length)
+  const respectCat = useStore(s => s.slideshowRespectCategory)
+  const setRespectCat = useStore(s => s.setSlideshowRespectCategory)
+  const activeCat = useStore(s => s.presetCategory || 'all')
+  const activeCatLabel = (CATEGORIES.find(c => c.id === activeCat) || { label: 'All' }).label
   const ORDERS = [
     { id: 'sequence',   label: 'Order' },
     { id: 'shuffle',    label: 'Shuffle' },
-    { id: 'favourites', label: `★ Favs${favCount ? ` (${favCount})` : ''}` },
+    { id: 'favourites', label: `Favs${favCount ? ` (${favCount})` : ''}` },
   ]
+  // The category-scope toggle is meaningful for sequence + shuffle.
+  // It's still shown in 'favourites' (the label explains what happens)
+  // but the driver bypasses it; documenting that inline keeps users
+  // from being surprised when the rotation looks the same.
+  const catScopeActuallyApplied = respectCat && activeCat !== 'all' && order !== 'favourites'
   return (
     <>
       <ToggleRow label="Auto-cycle" value={enabled} onChange={setEn} />
@@ -1361,8 +1372,17 @@ function SlideshowRow() {
               )
             })}
           </div>
+          {/* Respect category-chip filter */}
+          <div style={{ marginTop: 10 }}>
+            <ToggleRow label="Respect category chip" value={respectCat} onChange={setRespectCat} />
+          </div>
           <p style={{ fontSize: 11, color: '#7a7a90', marginTop: 8 }}>
-            New scene every {dwell}s. Manually loading a preset pauses the timer until the next dwell.
+            New scene every {dwell}s.{' '}
+            {catScopeActuallyApplied
+              ? <>Scoped to <strong style={{ color: '#c4b5fd' }}>{activeCatLabel}</strong>.</>
+              : respectCat && order === 'favourites'
+                ? <>Favourites bypass category — toggle is honoured for Order &amp; Shuffle.</>
+                : <>Manually loading a preset pauses the timer until the next dwell.</>}
           </p>
         </>
       )}
