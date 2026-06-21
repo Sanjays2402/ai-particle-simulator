@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
-import { Activity, Sparkles, Palette, Gauge, Camera, X, BarChart3, Code2, Copy, ChevronDown, ChevronUp, Bookmark, BookmarkPlus, Pencil, Play, RotateCcw } from 'lucide-react'
+import { Activity, Sparkles, Palette, Gauge, Camera, X, BarChart3, Code2, Copy, ChevronDown, ChevronUp, Bookmark, BookmarkPlus, Pencil, Play, RotateCcw, Route, Square, Repeat } from 'lucide-react'
 import { loadCameraViews, saveCameraViews, appendView, CAMERA_VIEWS_MAX } from '../lib/cameraViews'
+import {
+  PATH_SECONDS_MIN, PATH_SECONDS_MAX, PATH_SECONDS_DEFAULT,
+  PATH_MIN_WAYPOINTS, pathDuration, clampSeconds,
+} from '../lib/cameraPath'
 import { formatDuration } from '../lib/sessionStats'
 import { tokenize } from '../lib/codeTokens'
 import { loadKeymap, resolveAction } from '../lib/keymap'
@@ -304,6 +308,135 @@ function CameraViews() {
           ))}
         </div>
       )}
+      {views.length >= PATH_MIN_WAYPOINTS && (
+        <CameraPathPanel views={views} />
+      )}
+    </div>
+  )
+}
+
+// Camera Path Player — interpolate between the saved views in order
+// over `secondsPerSegment` seconds each. Loop toggle keeps it cycling
+// indefinitely for kiosk-style installs; off → stops at the last view.
+// While playing, OrbitControls is being driven externally so the user
+// shouldn't drag the camera; we surface a Stop button that cancels.
+function CameraPathPanel({ views }) {
+  const [seconds, setSeconds] = useState(PATH_SECONDS_DEFAULT)
+  const [loop, setLoop] = useState(false)
+  const [playing, setPlaying] = useState(false)
+
+  const start = () => {
+    if (views.length < PATH_MIN_WAYPOINTS) return
+    // Snapshot the waypoint poses by value so later edits to the
+    // views array don't yank the path mid-flight.
+    const waypoints = views.map(v => ({
+      pos: v.pos.slice(),
+      target: v.target.slice(),
+      name: v.name,
+    }))
+    setPlaying(true)
+    window.dispatchEvent(new CustomEvent('particle:camera-path-start', {
+      detail: {
+        waypoints, secondsPerSegment: clampSeconds(seconds), loop,
+        onDone: () => setPlaying(false),
+      },
+    }))
+    showToast(`Playing path · ${views.length} views`, <Route size={10} color="#fff" strokeWidth={2.4} />)
+  }
+  const stop = () => {
+    window.dispatchEvent(new Event('particle:camera-path-stop'))
+    setPlaying(false)
+  }
+
+  // If the views list shrinks below 2 while we're playing, stop on the
+  // next microtask so we never call setState directly in the effect body
+  // (react-hooks/set-state-in-effect lint rule).
+  useEffect(() => {
+    if (views.length < PATH_MIN_WAYPOINTS && playing) {
+      queueMicrotask(() => {
+        window.dispatchEvent(new Event('particle:camera-path-stop'))
+        setPlaying(false)
+      })
+    }
+  }, [views.length, playing])
+
+  const totalSec = pathDuration(views, seconds, loop)
+  return (
+    <div style={{
+      marginTop: 10, paddingTop: 10,
+      borderTop: '1px solid rgba(255,255,255,0.06)',
+      display: 'flex', flexDirection: 'column', gap: 8,
+    }}>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        fontSize: 11, color: '#9a9ab0', fontWeight: 600, letterSpacing: '0.02em',
+      }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Route size={11} strokeWidth={2.2} color="#a78bfa" />
+          Path Player
+        </span>
+        <span style={{ fontFamily: 'Geist Mono, monospace', fontSize: 10, color: '#7a7a90' }}>
+          {loop ? '~loop' : `~${totalSec.toFixed(1)}s`}
+        </span>
+      </div>
+      {/* Seconds-per-segment slider */}
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <span style={{ fontSize: 11, color: '#8a8aa0' }}>Per view</span>
+          <span style={{ fontSize: 10.5, color: '#c4b5fd', fontFamily: 'Geist Mono, monospace' }}>
+            {seconds.toFixed(1)}s
+          </span>
+        </div>
+        <input type="range"
+          min={PATH_SECONDS_MIN} max={PATH_SECONDS_MAX} step={0.5}
+          value={seconds} onChange={e => setSeconds(parseFloat(e.target.value))}
+          disabled={playing}
+          style={{
+            width: '100%',
+            '--val': `${((seconds - PATH_SECONDS_MIN) / (PATH_SECONDS_MAX - PATH_SECONDS_MIN)) * 100}%`,
+            opacity: playing ? 0.5 : 1,
+          }} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 6 }}>
+        {playing ? (
+          <button onClick={stop} title="Stop the path"
+            style={{
+              padding: '8px 0', borderRadius: 7, fontSize: 12, fontWeight: 550,
+              cursor: 'pointer',
+              background: 'linear-gradient(135deg, rgba(239,68,68,0.18), rgba(168,85,247,0.14))',
+              color: '#fecaca', border: '1px solid rgba(239,68,68,0.35)',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            }}>
+            <Square size={11} strokeWidth={2.4} /> Stop
+          </button>
+        ) : (
+          <button onClick={start} title={`Play through ${views.length} views`}
+            style={{
+              padding: '8px 0', borderRadius: 7, fontSize: 12, fontWeight: 550,
+              cursor: 'pointer',
+              background: 'linear-gradient(135deg, rgba(99,102,241,0.22), rgba(168,85,247,0.18))',
+              color: '#e9d5ff', border: '1px solid rgba(168,85,247,0.4)',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            }}>
+            <Play size={11} strokeWidth={2.4} /> Play path
+          </button>
+        )}
+        <button onClick={() => setLoop(v => !v)} title={loop ? 'Loop: on (cycles forever)' : 'Loop: off (stops at last view)'}
+          style={{
+            width: 30, height: 30,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            borderRadius: 7,
+            background: loop ? 'rgba(168,85,247,0.22)' : 'rgba(255,255,255,0.03)',
+            color: loop ? '#e9d5ff' : '#8a8aa0',
+            border: loop ? '1px solid rgba(168,85,247,0.4)' : '1px solid rgba(255,255,255,0.06)',
+            cursor: 'pointer',
+          }}>
+          <Repeat size={11} strokeWidth={2.4} />
+        </button>
+      </div>
+      <p style={{ fontSize: 10.5, color: '#6a6a80', margin: 0, lineHeight: 1.5 }}>
+        Smooth-eases between every saved view in order. Drag to reorder isn&apos;t in this slice — for now, the path follows the list as shown.
+      </p>
     </div>
   )
 }
