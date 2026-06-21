@@ -31,4 +31,31 @@ export function appendView(views, { name, pos, target }) {
   return next.slice(0, MAX)
 }
 
+// Reorder helpers — the Camera Path Player walks `views` in array order,
+// so changing the array changes the path. Returns a fresh array (never
+// mutates the input) so React state updates stay clean. Out-of-range
+// or no-op moves return the input unchanged so callers can compare by
+// reference to detect "nothing happened".
+
+export function moveView(views, fromIdx, toIdx) {
+  if (!Array.isArray(views)) return views
+  const n = views.length
+  if (!Number.isFinite(fromIdx) || !Number.isFinite(toIdx)) return views
+  if (fromIdx < 0 || fromIdx >= n) return views
+  if (toIdx < 0 || toIdx >= n) return views
+  if (fromIdx === toIdx) return views
+  const next = views.slice()
+  const [picked] = next.splice(fromIdx, 1)
+  next.splice(toIdx, 0, picked)
+  return next
+}
+
+export function moveViewUp(views, idx) {
+  return moveView(views, idx, idx - 1)
+}
+
+export function moveViewDown(views, idx) {
+  return moveView(views, idx, idx + 1)
+}
+
 export const CAMERA_VIEWS_MAX = MAX

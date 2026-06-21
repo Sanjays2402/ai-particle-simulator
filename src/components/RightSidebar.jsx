@@ -3,7 +3,7 @@ import { useStore } from '../store'
 import { Activity, Sparkles, Palette, Gauge, Camera, X, BarChart3, Code2, Copy, ChevronDown, ChevronUp, Bookmark, BookmarkPlus, Pencil, Play, RotateCcw, Route, Square, Repeat, Download, Upload, Shuffle } from 'lucide-react'
 import { presets } from '../presets'
 import { generateRandomScene } from '../lib/randomScene'
-import { loadCameraViews, saveCameraViews, appendView, CAMERA_VIEWS_MAX } from '../lib/cameraViews'
+import { loadCameraViews, saveCameraViews, appendView, moveViewUp, moveViewDown, CAMERA_VIEWS_MAX } from '../lib/cameraViews'
 import {
   PATH_SECONDS_MIN, PATH_SECONDS_MAX, PATH_SECONDS_DEFAULT,
   PATH_MIN_WAYPOINTS, pathDuration, clampSeconds,
@@ -218,6 +218,22 @@ function CameraViews() {
     saveCameraViews(next)
   }
 
+  // Reorder helpers — push the picked view up or down in the array.
+  // The Camera Path Player walks this list in order, so reordering
+  // here directly reorders the played path. No-op at boundaries.
+  const moveUp = (idx) => {
+    const next = moveViewUp(views, idx)
+    if (next === views) return
+    setViews(next)
+    saveCameraViews(next)
+  }
+  const moveDown = (idx) => {
+    const next = moveViewDown(views, idx)
+    if (next === views) return
+    setViews(next)
+    saveCameraViews(next)
+  }
+
   // Keyboard quick-save on the active "saveView" binding (default V).
   // Routed through the keymap so the rebinding UI in Settings can
   // change which key triggers it. We re-bind whenever the views list
@@ -277,7 +293,7 @@ function CameraViews() {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {views.map(v => (
+          {views.map((v, idx) => (
             <div key={v.id} style={{
               display: 'flex', alignItems: 'center', gap: 6,
               padding: '7px 9px', borderRadius: 7,
@@ -288,6 +304,18 @@ function CameraViews() {
               onMouseEnter={e => { e.currentTarget.style.background = 'rgba(168,85,247,0.07)'; e.currentTarget.style.borderColor = 'rgba(168,85,247,0.25)' }}
               onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.025)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)' }}
             >
+              {/* Play order index — also serves as the drop target label when
+                  we eventually wire drag-and-drop. Monospace so the column
+                  stays aligned even with 10+ views. */}
+              <span title={`Path order ${idx + 1}`}
+                style={{
+                  width: 16, textAlign: 'center',
+                  fontSize: 9.5, fontWeight: 600,
+                  color: '#7a7a90', fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                  letterSpacing: '0.04em',
+                }}>
+                {idx + 1}
+              </span>
               <button onClick={() => restore(v)}
                 title={`pos: [${v.pos.map(n => n.toFixed(1)).join(', ')}]`}
                 style={{
@@ -301,6 +329,43 @@ function CameraViews() {
                   {Math.sqrt(v.pos[0]**2 + v.pos[1]**2 + v.pos[2]**2).toFixed(1)}u
                 </span>
               </button>
+              {/* Reorder controls — only meaningful when there's more than
+                  one view (top can't go up; bottom can't go down). Disabled
+                  states stay clickable-but-faded so the column doesn't jump. */}
+              {views.length > 1 && (
+                <div style={{ display: 'inline-flex', flexDirection: 'column', gap: 1 }}>
+                  <button onClick={() => moveUp(idx)}
+                    disabled={idx === 0}
+                    title={idx === 0 ? 'Already at top' : 'Move up in path order'}
+                    style={{
+                      width: 16, height: 12, display: 'inline-flex',
+                      alignItems: 'center', justifyContent: 'center',
+                      borderRadius: 3, background: 'rgba(255,255,255,0.04)',
+                      border: '1px solid rgba(255,255,255,0.05)',
+                      color: idx === 0 ? '#3a3a4a' : '#9a9ab0',
+                      cursor: idx === 0 ? 'default' : 'pointer',
+                      opacity: idx === 0 ? 0.45 : 1,
+                      padding: 0,
+                    }}>
+                    <ChevronUp size={9} strokeWidth={2.5} />
+                  </button>
+                  <button onClick={() => moveDown(idx)}
+                    disabled={idx === views.length - 1}
+                    title={idx === views.length - 1 ? 'Already at bottom' : 'Move down in path order'}
+                    style={{
+                      width: 16, height: 12, display: 'inline-flex',
+                      alignItems: 'center', justifyContent: 'center',
+                      borderRadius: 3, background: 'rgba(255,255,255,0.04)',
+                      border: '1px solid rgba(255,255,255,0.05)',
+                      color: idx === views.length - 1 ? '#3a3a4a' : '#9a9ab0',
+                      cursor: idx === views.length - 1 ? 'default' : 'pointer',
+                      opacity: idx === views.length - 1 ? 0.45 : 1,
+                      padding: 0,
+                    }}>
+                    <ChevronDown size={9} strokeWidth={2.5} />
+                  </button>
+                </div>
+              )}
               <button onClick={() => remove(v.id)} title="Delete"
                 style={{
                   width: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -440,7 +505,7 @@ function CameraPathPanel({ views }) {
         </button>
       </div>
       <p style={{ fontSize: 10.5, color: '#6a6a80', margin: 0, lineHeight: 1.5 }}>
-        Smooth-eases between every saved view in order. Drag to reorder isn&apos;t in this slice — for now, the path follows the list as shown.
+        Smooth-eases between every saved view in order. Use the up/down arrows on each view to reorder the path.
       </p>
     </div>
   )
