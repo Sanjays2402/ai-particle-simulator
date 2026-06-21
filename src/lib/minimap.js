@@ -156,3 +156,45 @@ export function pickNearestMarker(markers, clickPx, clickPy, radiusPx = 8) {
   }
   return bestId
 }
+
+// --- Hover tooltip placement (R11.13) ----------------------------
+// Given a marker's pixel position + the canvas size, decide where to
+// anchor a small floating tooltip so it stays inside the minimap and
+// doesn't cover the marker itself. Default placement is "above the
+// marker, slightly to the right"; we mirror to the other side when
+// the marker is close to an edge.
+//
+// Returns { left, top, side } in pixel coords relative to the canvas
+// top-left. `side` is one of 'top'|'bottom'|'left'|'right' so the
+// renderer can position a little arrow / caret if it wants.
+export function tooltipPlacement(marker, canvasSize, tooltipW = 90, tooltipH = 22) {
+  if (!marker) return null
+  const sz = (canvasSize > 0 && Number.isFinite(canvasSize)) ? canvasSize : 132
+  const gap = 6      // distance from marker to tooltip edge
+  const margin = 4   // keep this far from canvas border
+  // Default: tooltip ABOVE the marker, horizontally centered.
+  let left = marker.px - tooltipW / 2
+  let top  = marker.py - tooltipH - gap
+  let side = 'top'
+  // Flip to BELOW if it'd cross the top edge.
+  if (top < margin) {
+    top = marker.py + gap
+    side = 'bottom'
+  }
+  // Constrain horizontally — slide into bounds when necessary.
+  if (left < margin) left = margin
+  if (left + tooltipW > sz - margin) left = sz - margin - tooltipW
+  // If the tooltip still doesn't fit vertically (very small canvas),
+  // place to the right instead.
+  if (top + tooltipH > sz - margin && side === 'bottom') {
+    top = Math.max(margin, marker.py - tooltipH / 2)
+    if (marker.px + tooltipW + gap < sz - margin) {
+      left = marker.px + gap
+      side = 'right'
+    } else if (marker.px - tooltipW - gap > margin) {
+      left = marker.px - tooltipW - gap
+      side = 'left'
+    }
+  }
+  return { left, top, side }
+}

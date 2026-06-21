@@ -1,8 +1,8 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import {
   sampleScene, projectXZ, lookDirXZ, unprojectXZ, scaleLabelFor,
-  projectSavedViews, pickNearestMarker,
+  projectSavedViews, pickNearestMarker, tooltipPlacement,
 } from '../lib/minimap'
 import { loadCameraViews } from '../lib/cameraViews'
 
@@ -27,6 +27,14 @@ export default function Minimap() {
   const viewsRef = useRef([])
   const markersRef = useRef([])
   const viewsTickRef = useRef(0)
+  // Hover state for R11.13 tooltips. `hoverId` identifies the marker
+  // the cursor is over; `hoverPlace` is the {left, top, side} placement
+  // for the floating label; `hoverName` is the view's friendly label
+  // captured at hover-time so the render path never has to read the
+  // viewsRef (which the react-hooks/refs rule forbids during render).
+  const [hoverId, setHoverId] = useState(null)
+  const [hoverPlace, setHoverPlace] = useState(null)
+  const [hoverName, setHoverName] = useState('')
 
   useEffect(() => {
     if (!enabled) return
@@ -79,20 +87,27 @@ export default function Minimap() {
       // Saved camera view markers — small dots under the camera dot
       // so the user's current position always stays the prominent
       // feature. We project them with the SAME sceneHalf the camera
-      // is using so dots track the camera's zoom.
+      // is using so dots track the camera's zoom. Hovered marker
+      // (R11.13) gets a brighter ring + thicker stroke so the user
+      // sees the connection between dot and label.
       if (snap && viewsRef.current.length > 0) {
         const markers = projectSavedViews(viewsRef.current, snap.sceneHalf, SIZE)
         markersRef.current = markers
         for (const m of markers) {
+          const isHover = m.id === hoverId
           // Stroke ring — dimmer when out of bounds (camera zoomed in
           // tight) so the user knows the view exists but is far away.
-          const ringColor = m.inBounds ? 'rgba(34,197,94,0.85)' : 'rgba(34,197,94,0.30)'
-          const fillColor = m.inBounds ? 'rgba(34,197,94,0.18)' : 'rgba(34,197,94,0.06)'
+          const ringColor = isHover
+            ? 'rgba(167,243,208,0.95)'
+            : m.inBounds ? 'rgba(34,197,94,0.85)' : 'rgba(34,197,94,0.30)'
+          const fillColor = isHover
+            ? 'rgba(167,243,208,0.45)'
+            : m.inBounds ? 'rgba(34,197,94,0.18)' : 'rgba(34,197,94,0.06)'
           ctx.fillStyle = fillColor
           ctx.strokeStyle = ringColor
-          ctx.lineWidth = 1
+          ctx.lineWidth = isHover ? 1.6 : 1
           ctx.beginPath()
-          ctx.arc(m.px, m.py, 3, 0, Math.PI * 2)
+          ctx.arc(m.px, m.py, isHover ? 4 : 3, 0, Math.PI * 2)
           ctx.fill()
           ctx.stroke()
         }
@@ -135,7 +150,7 @@ export default function Minimap() {
     }
     rafRef.current = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(rafRef.current)
-  }, [enabled])
+  }, [enabled, hoverId])
 
   // Click → if it lands on a saved-view dot, jump to that view.
   // Otherwise fall back to "recenter orbit target on that XZ point"
@@ -166,7 +181,45 @@ export default function Minimap() {
     api.set({ pos: snap.camera, target: [wx, snap.target[1], wz] })
   }
 
+  // Mouse-move hit test → drives the hover-tooltip state. We use the
+  // same pickNearestMarker helper as the click handler so the hit
+  // geometry is exactly consistent; a marker the user can click on
+  // will be the one whose tooltip is shown.
+  const onMouseMove = (e) => {
+    const cv = canvasRef.current
+    if (!cv) return
+    const rect = cv.getBoundingClientRect()
+    const px = e.clientX - rect.left
+    const py = e.clientY - rect.top
+    const id = pickNearestMarker(markersRef.current, px, py, 10)
+    if (id === null || id === undefined) {
+      if (hoverId !== null) { setHoverId(null); setHoverPlace(null) }
+      return
+    }
+    if (id !== hoverId) {
+      const marker = markersRef.current.find(m => m.id === id)
+      const view = viewsRef.current.find(v => v && v.id === id)
+      if (marker) {
+        setHoverId(id)
+        setHoverPlace(tooltipPlacement(marker, SIZE))
+        setHoverName(view?.name || 'View')
+      }
+    }
+  }
+  const onMouseLeave = () => {
+    if (hoverId !== null) {
+      setHoverId(null)
+      setHoverPlace(null)
+      setHoverName('')
+    }
+  }
+
   if (!enabled) return null
+
+  // hoverName was captured at hover-time (see onMouseMove), so the
+  // render path doesn't have to read viewsRef.current — keeps the
+  // react-hooks/refs rule happy.
+  const hoverLabel = hoverName || 'View'
 
   return (
     <div style={{
@@ -180,16 +233,48 @@ export default function Minimap() {
       border: '1px solid rgba(168,85,247,0.18)',
       boxShadow: '0 10px 30px rgba(0,0,0,0.4), 0 0 18px rgba(99,102,241,0.08)',
     }}>
-      <canvas
-        ref={canvasRef}
-        onClick={onClick}
-        title="Click a green dot to jump to that saved view, or anywhere else to recenter orbit"
-        style={{
-          width: SIZE, height: SIZE, display: 'block',
-          borderRadius: 6, cursor: 'crosshair',
-          background: 'rgba(2,2,6,0.72)',
-        }}
-      />
+      {/* Wrapper has position:relative so the absolute tooltip pins
+          to the same coordinate space as our canvas pixel math. */}
+      <div style={{ position: 'relative', width: SIZE, height: SIZE }}>
+        <canvas
+          ref={canvasRef}
+          onClick={onClick}
+          onMouseMove={onMouseMove}
+          onMouseLeave={onMouseLeave}
+          title="Click a green dot to jump to that saved view, or anywhere else to recenter orbit"
+          style={{
+            width: SIZE, height: SIZE, display: 'block',
+            borderRadius: 6, cursor: 'crosshair',
+            background: 'rgba(2,2,6,0.72)',
+          }}
+        />
+        {hoverPlace && hoverName && (
+          <div
+            // pointerEvents:none so the tooltip never steals the marker's
+            // own hover hit-test — the cursor still drives the canvas.
+            style={{
+              position: 'absolute',
+              left: hoverPlace.left, top: hoverPlace.top,
+              maxWidth: 90,
+              padding: '3px 7px', borderRadius: 6,
+              background: 'rgba(20,20,30,0.92)',
+              color: '#e9d5ff',
+              border: '1px solid rgba(34,197,94,0.45)',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.55)',
+              fontSize: 10, fontWeight: 600, letterSpacing: '0.02em',
+              fontFamily: 'Geist, system-ui, sans-serif',
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              pointerEvents: 'none',
+              // Subtle fade so the label doesn't pop in jarringly when
+              // hovering across multiple dots.
+              animation: 'minimap-tip-fade 0.12s ease-out',
+            }}
+          >
+            <style>{`@keyframes minimap-tip-fade { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: translateY(0); } }`}</style>
+            {hoverLabel}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

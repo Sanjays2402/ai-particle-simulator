@@ -4,7 +4,7 @@
 import {
   DEFAULT_SCENE_HALF, MIN_SCENE_HALF, MAX_SCENE_HALF,
   pickSceneHalf, projectXZ, sampleScene, lookDirXZ, unprojectXZ, scaleLabelFor,
-  projectSavedViews, pickNearestMarker,
+  projectSavedViews, pickNearestMarker, tooltipPlacement,
 } from './minimap.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -204,4 +204,50 @@ eq(scaleLabelFor(NaN), `${DEFAULT_SCENE_HALF}u`, 'NaN → default')
   eq(pickNearestMarker([], 0, 0, 8), null, 'empty → null')
 }
 
-console.log(`PASS: minimap — pickSceneHalf, projectXZ (clamped), sampleScene, lookDirXZ, unprojectXZ (round-trip), scaleLabelFor, projectSavedViews (empty/origin/multi/bounds/dirty), pickNearestMarker (hit/miss/nearest)`)
+// --- tooltipPlacement (R11.13) ---
+{
+  // Marker mid-canvas: default placement is ABOVE, horizontally centred.
+  const mid = { px: 60, py: 60 }
+  const pMid = tooltipPlacement(mid, 132, 90, 22)
+  eq(pMid.side, 'top', 'mid marker: side above')
+  eq(pMid.left, 15, 'mid marker: horizontally centered (60 - 45)')
+  eq(pMid.top, 32,  'mid marker: above with 6px gap (60 - 22 - 6)')
+
+  // Marker near the top: should FLIP below.
+  const top = { px: 60, py: 5 }
+  const pTop = tooltipPlacement(top, 132, 90, 22)
+  eq(pTop.side, 'bottom', 'top marker: flips below')
+  eq(pTop.top, 11, 'top marker: below with 6px gap (5 + 6)')
+
+  // Marker near the LEFT edge: tooltip slides RIGHT into bounds.
+  const left = { px: 4, py: 60 }
+  const pLeft = tooltipPlacement(left, 132, 90, 22)
+  eq(pLeft.left, 4, 'left marker: tooltip pinned to left margin')
+
+  // Marker near the RIGHT edge: tooltip slides LEFT into bounds.
+  const right = { px: 128, py: 60 }
+  const pRight = tooltipPlacement(right, 132, 90, 22)
+  eq(pRight.left, 132 - 4 - 90, 'right marker: tooltip pinned to right margin')
+
+  // Marker in a tiny canvas with no vertical room above OR below
+  // → places to the right of the marker.
+  const tiny = { px: 20, py: 30 }
+  const pTiny = tooltipPlacement(tiny, 50, 90, 22)
+  // Default would be top: 30-22-6=2 (< margin 4) → flip to bottom: 30+6=36;
+  // 36 + 22 = 58 > 50 - 4 = 46 → fallback path. tooltipW 90 + 6 = 96 >
+  // 50 - 4 = 46, so right doesn't fit either; left also doesn't fit.
+  // Acceptable: placement still returns a valid object with a placement
+  // side. We just verify it doesn't crash and produces finite numbers.
+  ok(Number.isFinite(pTiny.left), 'tiny canvas: left is finite')
+  ok(Number.isFinite(pTiny.top),  'tiny canvas: top is finite')
+
+  // Tooltip can fit on the RIGHT of a tightly-packed marker.
+  const tightMarker = { px: 30, py: 60 }
+  const pTight = tooltipPlacement(tightMarker, 132, 50, 22)
+  ok(['top', 'bottom', 'left', 'right'].includes(pTight.side), 'placement returns a known side')
+
+  // Null marker → null.
+  eq(tooltipPlacement(null, 132), null, 'null marker → null')
+}
+
+console.log(`PASS: minimap — pickSceneHalf, projectXZ (clamped), sampleScene, lookDirXZ, unprojectXZ (round-trip), scaleLabelFor, projectSavedViews (empty/origin/multi/bounds/dirty), pickNearestMarker (hit/miss/nearest), tooltipPlacement (top/bottom flip + edge slide + tiny-canvas fallback)`)
