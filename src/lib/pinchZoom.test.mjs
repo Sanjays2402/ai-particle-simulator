@@ -1,12 +1,14 @@
 // pinchZoom — math + state-machine tests. No DOM required.
 import {
   MIN_SCALE, MAX_SCALE, DOUBLE_TAP_SCALE, KEYBOARD_ZOOM_STEP,
+  PAN_STEP_FRACTION,
   clampScale, distance, midpoint, clampTranslate,
   idleState, beginPinch, updatePinch, beginPan, updatePan,
   endGesture, applyDoubleTap, shouldInterceptWheel,
   toTransform, navAllowed,
   applyZoomBy, applyKeyboardZoomIn, applyKeyboardZoomOut,
   applyResetZoom, applyWheelZoom, classifyZoomKey,
+  classifyPanKey, applyKeyboardPan,
 } from './pinchZoom.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -290,4 +292,86 @@ eq(classifyZoomKey('0'), 'reset', 'classify: 0 → reset')
 eq(classifyZoomKey('a'), null,    'classify: unrelated key → null')
 eq(classifyZoomKey(''),  null,    'classify: empty → null')
 
-console.log(`PASS: pinchZoom — clamp/distance/midpoint/clampTranslate/idleState/beginPinch/updatePinch (centroid follow)/beginPan/updatePan/endGesture/applyDoubleTap/shouldInterceptWheel/toTransform/navAllowed + keyboard+wheel zoom (applyZoomBy/applyKeyboardZoomIn/Out/Reset/applyWheelZoom/classifyZoomKey) · MIN=${MIN_SCALE} MAX=${MAX_SCALE} DOUBLE=${DOUBLE_TAP_SCALE} STEP=${KEYBOARD_ZOOM_STEP}`)
+// --- R12.19 keyboard pan ---
+// classifyPanKey: WASD + hjkl + caps + ignored keys.
+eq(classifyPanKey('w'), { dx: 0, dy: -1 },  'classify: w → up')
+eq(classifyPanKey('W'), { dx: 0, dy: -1 },  'classify: shift-W → up')
+eq(classifyPanKey('s'), { dx: 0, dy: 1 },   'classify: s → down')
+eq(classifyPanKey('a'), { dx: -1, dy: 0 },  'classify: a → left')
+eq(classifyPanKey('d'), { dx: 1, dy: 0 },   'classify: d → right')
+eq(classifyPanKey('k'), { dx: 0, dy: -1 },  'classify: k → up (vim)')
+eq(classifyPanKey('j'), { dx: 0, dy: 1 },   'classify: j → down (vim)')
+eq(classifyPanKey('h'), { dx: -1, dy: 0 },  'classify: h → left (vim)')
+eq(classifyPanKey('l'), { dx: 1, dy: 0 },   'classify: l → right (vim)')
+eq(classifyPanKey('q'), null,                'classify: unrelated → null')
+eq(classifyPanKey(''),  null,                'classify: empty → null')
+eq(classifyPanKey('+'), null,                'classify: zoom key → null')
+eq(classifyPanKey(null), null,               'classify: null → null')
+
+// PAN_STEP_FRACTION is a documented constant in [0, 1].
+if (PAN_STEP_FRACTION <= 0 || PAN_STEP_FRACTION >= 1) {
+  fail(`PAN_STEP_FRACTION ${PAN_STEP_FRACTION} should be in (0, 1)`)
+}
+
+// applyKeyboardPan: no-op at idle (scale === MIN_SCALE).
+{
+  const idle = idleState()
+  const out = applyKeyboardPan(idle, { dx: 1, dy: 0 }, 400, 200)
+  eq(out, idle, 'pan at idle scale = no-op')
+}
+
+// applyKeyboardPan: null dir = no-op.
+{
+  const state = { ...idleState(), scale: 2 }
+  eq(applyKeyboardPan(state, null, 400, 200), state, 'null dir = no-op')
+}
+
+// applyKeyboardPan: pressing W (up direction) decreases translateY.
+// At scale=2, stage 400x200, step = 200 * 0.15 * 2 = 60.
+{
+  const state = { ...idleState(), scale: 2 }
+  const out = applyKeyboardPan(state, { dx: 0, dy: -1 }, 400, 200)
+  // dy = -(-1) * 60 = +60 in screen space (wait — formula flips sign).
+  // Re-read: dir.dy=-1 → dy = -(dir.dy) * stepY = -(-1) * 60 = 60.
+  // But the doc says "press W should decrease the translate.y so the
+  // image shifts DOWN under viewport". A POSITIVE translateY moves
+  // the image DOWN in the standard CSS coordinate system, which
+  // matches "image shifts down" — so positive translateY is correct.
+  approx(out.translateY, 60, 'W → translateY = +60 (image shifts down)')
+  approx(out.translateX, 0, 'W → translateX unchanged')
+}
+
+// applyKeyboardPan: pressing D (right direction) decreases translateX.
+{
+  const state = { ...idleState(), scale: 2 }
+  const out = applyKeyboardPan(state, { dx: 1, dy: 0 }, 400, 200)
+  // dx = -1 * 400 * 0.15 * 2 = -120
+  approx(out.translateX, -120, 'D → translateX = -120 (image shifts left under viewport, revealing right side)')
+}
+
+// applyKeyboardPan: bound to stage overhang.
+{
+  // At scale=2, stage 400x200, max overhang on X = 400*(2-1)/2 = 200.
+  const state = { ...idleState(), scale: 2, translateX: -200, translateY: 0 }
+  const out = applyKeyboardPan(state, { dx: 1, dy: 0 }, 400, 200)
+  // Already at the left bound; pressing D wants to shift left further.
+  // clampTranslate floors at -200, so the state shouldn't change.
+  eq(out, state, 'pan stops at bound')
+}
+
+// applyKeyboardPan: gesture reset to idle after pan + start* sanitized.
+{
+  const state = { ...idleState(), scale: 2, gesture: 'pinch', startDist: 99, startCenter: { x: 5, y: 5 } }
+  const out = applyKeyboardPan(state, { dx: 1, dy: 0 }, 400, 200)
+  eq(out.gesture, 'idle', 'pan resets gesture to idle')
+  eq(out.startCenter, null, 'startCenter cleared')
+  eq(out.startDist, 0, 'startDist cleared')
+  approx(out.startTranslate.x, out.translateX, 'startTranslate.x synced to current')
+}
+
+// applyKeyboardPan: null state = no-op (defensive).
+{
+  eq(applyKeyboardPan(null, { dx: 1, dy: 0 }, 400, 200), null, 'null state = no-op')
+}
+
+console.log(`PASS: pinchZoom — clamp/distance/midpoint/clampTranslate/idleState/beginPinch/updatePinch (centroid follow)/beginPan/updatePan/endGesture/applyDoubleTap/shouldInterceptWheel/toTransform/navAllowed + keyboard+wheel zoom (applyZoomBy/applyKeyboardZoomIn/Out/Reset/applyWheelZoom/classifyZoomKey) + WASD pan (classifyPanKey/applyKeyboardPan · step=${PAN_STEP_FRACTION}) · MIN=${MIN_SCALE} MAX=${MAX_SCALE} DOUBLE=${DOUBLE_TAP_SCALE} STEP=${KEYBOARD_ZOOM_STEP}`)

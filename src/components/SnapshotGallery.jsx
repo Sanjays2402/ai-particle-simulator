@@ -11,6 +11,7 @@ import {
   MIN_SCALE as ZOOM_MIN, DOUBLE_TAP_MS,
   applyKeyboardZoomIn, applyKeyboardZoomOut, applyResetZoom,
   applyWheelZoom, classifyZoomKey,
+  classifyPanKey, applyKeyboardPan,
 } from '../lib/pinchZoom'
 import { showToast } from './Toast'
 
@@ -448,6 +449,27 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
       // typing "+" / "-" in a search box (none today, but defensive)
       // doesn't accidentally zoom the image.
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return
+      // WASD pan (R12.19) — desktop alternative to drag when zoomed.
+      // Checked BEFORE the zoom intent so 'a' / 'd' (which look like
+      // unrelated letters) don't accidentally trigger zoom logic.
+      // Only intercept the key when actually zoomed in — at idle
+      // scale we let WASD fall through to the rest of the app so
+      // future shortcuts can claim them. zoomRef.current keeps us
+      // in sync with the latest state without re-binding this
+      // listener every zoom change.
+      const panDir = classifyPanKey(e.key)
+      if (panDir) {
+        if (zoomRef.current && zoomRef.current.scale > ZOOM_MIN) {
+          const el = stageRef.current
+          const r = el ? el.getBoundingClientRect() : { width: 0, height: 0 }
+          e.preventDefault()
+          setZoom(prev => applyKeyboardPan(prev, panDir, r.width, r.height))
+        }
+        // At idle: don't preventDefault, don't return — but also
+        // don't fall through to the zoom classifier (none of WASD
+        // map to a zoom intent anyway). Safe to early-out.
+        return
+      }
       const intent = classifyZoomKey(e.key)
       if (!intent) return
       const el = stageRef.current
@@ -514,7 +536,7 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
             </span>
           )}
           {isZoomed && (
-            <span title="Pinch / wheel zoom is active. Double-tap, press 0, or click Reset to zoom out."
+            <span title="Pinch / wheel zoom is active. Use WASD or hjkl to pan. Double-tap, press 0, or click Reset to zoom out."
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 4,
                 padding: '2px 7px', borderRadius: 5,
@@ -524,7 +546,7 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
                 letterSpacing: '0.04em', textTransform: 'uppercase',
               }}>
               <ZoomIn size={9} strokeWidth={2.4} />
-              {zoom.scale.toFixed(1)}x
+              {zoom.scale.toFixed(1)}x · WASD
             </span>
           )}
         </div>

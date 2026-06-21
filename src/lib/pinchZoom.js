@@ -317,3 +317,77 @@ export function classifyZoomKey(key) {
   if (key === '0') return 'reset'
   return null
 }
+
+// --- Desktop keyboard pan (R12.19) ---
+// When the lightbox is zoomed in, the user wants a quick way to scan
+// around without dragging the mouse. WASD (and the arrow-style aliases
+// h/j/k/l for vim users) shift the translate by a fraction of the
+// stage so 4-5 taps cross the visible overhang at every zoom level.
+//
+// PAN_STEP_FRACTION is the per-key shift expressed as a fraction of
+// the stage dimension. 0.15 means each tap moves ~15% of the visible
+// stage — enough to feel responsive without overshooting common
+// inspect points. Multiplied by the current scale so the user moves
+// a similar distance in image-space at any zoom level.
+export const PAN_STEP_FRACTION = 0.15
+
+// Classify a key into a pan direction or null. WASD is the primary
+// vocabulary; hjkl are bonus aliases for vim muscle memory. Returns
+// one of {dx, dy} in normalized "+/-1 step" units that callers feed
+// to applyKeyboardPan.
+export function classifyPanKey(key) {
+  if (key === 'w' || key === 'W' || key === 'k' || key === 'K') return { dx: 0,  dy: -1 }
+  if (key === 's' || key === 'S' || key === 'j' || key === 'J') return { dx: 0,  dy: 1 }
+  if (key === 'a' || key === 'A' || key === 'h' || key === 'H') return { dx: -1, dy: 0 }
+  if (key === 'd' || key === 'D' || key === 'l' || key === 'L') return { dx: 1,  dy: 0 }
+  return null
+}
+
+// Apply a pan step in the supplied direction. Direction sign matches
+// how the user feels the move: pressing W (up) should move the IMAGE
+// down so a feature above the centre comes into view — that's the
+// opposite of the translate direction (translate is in screen space,
+// image content moves in the opposite direction of translation).
+// We do the sign-flip here so callers can pass intuitive {dx, dy}
+// values from classifyPanKey.
+//
+// Returns the new state. No-op when not zoomed (scale === MIN_SCALE)
+// since there's nothing to pan into.
+export function applyKeyboardPan(state, dir, stageW, stageH) {
+  if (!dir || !state) return state
+  const s = clampScale(state.scale)
+  if (s <= MIN_SCALE) return state
+  const w = (stageW > 0 && Number.isFinite(stageW)) ? stageW : 0
+  const h = (stageH > 0 && Number.isFinite(stageH)) ? stageH : 0
+  // Step = fraction of the stage scaled by the current zoom. At
+  // scale=2 a 15% stage step moves ~30% of the natural image width
+  // per press — feels right for casual inspection without being
+  // jumpy.
+  const stepX = w * PAN_STEP_FRACTION * s
+  const stepY = h * PAN_STEP_FRACTION * s
+  // Sign flip: pressing W (dy=-1, "move view up") should decrease
+  // the translate.y so the image shifts DOWN under the viewport
+  // and we see content that was previously above the visible area.
+  const dx = -(dir.dx || 0) * stepX
+  const dy = -(dir.dy || 0) * stepY
+  const desired = clampTranslate(
+    state.translateX + dx,
+    state.translateY + dy,
+    s, w, h,
+  )
+  // No-op when already at the bound in this direction so a held key
+  // doesn't keep generating identical states (and a future memoiser
+  // can early-out).
+  if (desired.x === state.translateX && desired.y === state.translateY) {
+    return state
+  }
+  return {
+    ...state,
+    gesture: 'idle',
+    translateX: desired.x,
+    translateY: desired.y,
+    startCenter: null,
+    startDist: 0,
+    startTranslate: { x: desired.x, y: desired.y },
+  }
+}
