@@ -56,6 +56,14 @@ Existing capabilities (do not re-ship):
 - Mobile gesture hint overlay (first-run, auto-dismiss after both gestures shown)
 - Custom theme survives reload (boot-time resolver — handles deleted themes too)
 - Named attractors — multiple coexisting force-field objects (per-attractor type/strength/radius/place-on-canvas, up to 12, persisted, round-trip through scene bookmarks)
+- MIDI controller preset bundles (nanoKONTROL2 / LCXL / MPK Mini / Generic-8, auto-detect by device name, one-tap apply)
+- Preset editor inline error line marker + jump-to-line button
+- Minimap renders saved camera views as clickable green dots
+- Spectrum waveform: log-frequency scale mode + peak-hold lines that decay slowly (R10.19, hold + decay state machine, classic EQ visual, hsla tint per bar, persisted `pk` chip in overlay)
+- Snapshot lightbox: pinch-zoom 1x-5x + drag-pan when zoomed + double-tap toggle (zoomed-in/idle, tap-centered), mobile touch + desktop wheel intent helper, header zoom badge + Reset, nav suppressed while zoomed
+- Camera path: per-view up/down arrow reorder (also: monospace path-order index column on every saved view row, reorder helpers in cameraViews.js)
+- Carousel: per-preset thumbnail rebuild button (hover-shown ↻ on top-left of each tile, spinning while busy, dim overlay during compile)
+- Theme pack import: preview panel before commit (chips with colour + name, name-collision badges, live impact line per mode, Apply disabled when no-op)
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -143,29 +151,42 @@ drag-handle is its own batch (needs r3f gizmo integration). Substituted
 R9.17 and R9.19 from the future queue to keep the batch at 5 great
 slices instead of padding.
 
-### Batch 10 — next 5 (refilled)
-- [ ] R10.01 Echo / trail FBO that survives EffectComposer (R9.01 — render pipeline refactor, dedicated batch)
-- [ ] R10.02 Named attractor 3D drag handle (R9.02 — needs r3f gizmo handles, dedicated batch)
-- [ ] R10.03 Camera path waypoint reorder (drag to rearrange, drop to commit) [was R9.06]
-- [ ] R10.04 Snapshot lightbox: pinch-zoom on mobile (CSS transform handles) [was R9.07]
-- [ ] R10.05 Slideshow respect-category in command palette (quick-toggle without LeftSidebar) [was R9.08]
+### Batch 10 — camera-path reorder + lightbox pinch-zoom + per-preset thumb rebuild + spectrum peak-holds + theme pack preview  (SHIPPED)
+- [x] **R10.03** Camera path waypoint reorder (up/down arrows on each saved view, monospace index column)  — fe7688d
+- [x] **R10.04** Snapshot lightbox: pinch-zoom 1x-5x + drag-pan + double-tap toggle (mobile)  — 1770bf3
+- [x] **R10.11** Per-preset thumbnail rebuild button in the carousel  — 0a39b5c
+- [x] **R10.19** Spectrum waveform: peak-hold lines that decay slowly (classic EQ look)  — d035cc0
+- [x] **R10.10** Theme pack browser — preview a JSON pack's themes before importing  — 0f50192
+
+Note: R10.01 (Echo / trail FBO that survives EffectComposer) and R10.02
+(Named attractor 3D drag handle) deferred again — both need their own
+dedicated render-pipeline / r3f-gizmo batches. Substituted R10.11,
+R10.19, R10.10 from the future queue to keep the batch at 5 great
+slices instead of padding.
+
+### Batch 11 — next 5 (refilled)
+- [ ] R11.01 Echo / trail FBO that survives EffectComposer (carried over — render pipeline refactor, dedicated batch)
+- [ ] R11.02 Named attractor 3D drag handle (carried over — needs r3f gizmo handles, dedicated batch)
+- [ ] R11.03 Bookmark export includes the live camera-view list (one combined file) [was R10.06]
+- [ ] R11.04 Wind preset chips become custom-named (long-press a slot to save sliders) [was R10.07]
+- [ ] R11.05 Crossfade chips: long-press a slot to bind its seconds to the current slider value [was R10.09]
 
 ### Future queue (refill when batch closes)
-- [ ] R10.06 Bookmark export includes the live camera-view list (one combined file) [was R9.09]
-- [ ] R10.07 Wind preset chips become custom-named (long-press a slot to save sliders) [was R9.10]
-- [ ] R10.08 OpenGraph snapshot endpoint (server-rendered card for share URLs) — needs backend [was R9.11]
-- [ ] R10.09 Crossfade chips: long-press a slot to bind its seconds to the current slider value [was R9.12]
-- [ ] R10.10 Theme pack browser — preview a JSON pack's themes before importing [was R9.13]
-- [ ] R10.11 Per-preset thumbnail re-render button in the carousel (rebuild a single stale thumb) [was R9.14]
-- [ ] R10.12 Audio reactive bg: animation curve preset chips (Pulse / Ramp / Hold) [was R9.15]
-- [ ] R10.13 Smash & Save: bias chips ("Mostly Calm", "Mostly Wild") to constrain the random ranges [was R9.16]
-- [ ] R10.14 Named attractor → MIDI: route a CC to a specific attractor's strength [was R9.18]
-- [ ] R10.15 Keymap import: live diff preview before committing [was R9.20]
-- [ ] R10.16 MIDI controller preset bundle EDITOR (let users save a custom map as their own bundle)
-- [ ] R10.17 Preset editor: gutter overlay highlighting all error lines (multi-error mode)
-- [ ] R10.18 Minimap: per-view labels on hover (small floating tooltip with view name)
-- [ ] R10.19 Spectrum waveform: peak hold lines that decay slowly (classic EQ look)
-- [ ] R10.20 Named attractor type-specific color cues in the UI (vortex purple, repulsor red, etc.)
+- [ ] R11.06 OpenGraph snapshot endpoint (server-rendered card for share URLs) — needs backend [was R10.08]
+- [ ] R11.07 Audio reactive bg: animation curve preset chips (Pulse / Ramp / Hold) [was R10.12]
+- [ ] R11.08 Smash & Save: bias chips ("Mostly Calm", "Mostly Wild") to constrain the random ranges [was R10.13]
+- [ ] R11.09 Named attractor → MIDI: route a CC to a specific attractor's strength [was R10.14]
+- [ ] R11.10 Keymap import: live diff preview before committing [was R10.15]
+- [ ] R11.11 MIDI controller preset bundle EDITOR (let users save a custom map as their own bundle) [was R10.16]
+- [ ] R11.12 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [was R10.17]
+- [ ] R11.13 Minimap: per-view labels on hover (small floating tooltip with view name) [was R10.18]
+- [ ] R11.14 Named attractor type-specific color cues in the UI (vortex purple, repulsor red, etc.) [was R10.20]
+- [ ] R11.15 Snapshot lightbox: keyboard zoom-in/out via +/- when on desktop (mirrors pinch behaviour)
+- [ ] R11.16 Carousel: bulk "rebuild all stale thumbs" action in the filter button menu
+- [ ] R11.17 Spectrum peak-holds: per-bar fade-out tail (last 200ms still painted at low alpha) for an even more cinematic look
+- [ ] R11.18 Theme pack preview: drag a JSON onto the sidebar to preview without the file picker
+- [ ] R11.19 Camera path: drag-and-drop reorder (graduates from arrow-button slice R10.03)
+- [ ] R11.20 Snapshot grid: long-press a tile to multi-select for bulk delete
 
 ## TICK LOG
 - 2026-06-19 23:41 PT — Bootstrap + Batch 1 (5/5).
@@ -251,3 +272,21 @@ slices instead of padding.
   projectSavedViews/pickNearestMarker, sceneBookmarks with namedAttractors
   round-trip, waveform with projectSpectrumToLogBars · ~90 fresh asserts this
   batch). SCENE_FIELDS up to 48 (namedAttractors round-trips through bookmarks).
+- 2026-06-21 06:31 PT — Batch 10 (5/5).
+  Commits: fe7688d (R10.03 camera path waypoint reorder),
+  1770bf3 (R10.04 snapshot lightbox pinch-zoom + drag-pan + double-tap),
+  0a39b5c (R10.11 per-preset thumbnail rebuild button),
+  d035cc0 (R10.19 spectrum peak-hold lines), 0f50192 (R10.10 theme pack
+  preview panel — substituted from future queue).
+  R10.01 and R10.02 deferred again — render pipeline refactor and 3D
+  drag-handle each need their own dedicated batch. Substituted R10.11,
+  R10.19, R10.10 from the future queue.
+  Gates: lint 23 errors / 3 warnings — exactly matches baseline (zero new
+  errors in any of the 8 modified .js/.jsx files; new `react-hooks/refs`
+  fix on Lightbox and `react-hooks/set-state-in-effect` fix via
+  queueMicrotask). Build: 1.03 s green (1.65 MB bundle, gzip 495 KB).
+  Unit tests: 36/36 files pass (added pinchZoom; extended cameraViews
+  with moveView/moveViewUp/moveViewDown reorder, presetThumbnails with
+  clearThumbnail/recaptureThumbnail, waveform with peak-hold state
+  machine, customThemesIO with summarizeImportImpact dry-run · ~150
+  fresh asserts this batch).
