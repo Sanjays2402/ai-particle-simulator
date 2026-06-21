@@ -32,7 +32,7 @@
 //      drives the strength slider of the attractor with id `attr-3`).
 //      These are resolved through resolveActionForId(id, store).
 
-import { clampStrength, STRENGTH_MAX } from './namedAttractors.js'
+import { clampStrength, clampRadius, clampPositionScalar, STRENGTH_MAX, RADIUS_MIN, RADIUS_MAX, POSITION_MIN, POSITION_MAX } from './namedAttractors.js'
 
 export const STORAGE_KEY = 'particle-midi-map-v1'
 
@@ -41,23 +41,47 @@ export const STORAGE_KEY = 'particle-midi-map-v1'
 // historic 14 static ids (none of which contain a colon).
 export const ATTRACTOR_ACTION_PREFIX = 'attr:'
 export const ATTRACTOR_FIELD_STRENGTH = 'strength'
+// R13.18 — extend the per-attractor field family beyond strength.
+// Each field gets its own CC routing slot in the UI; the action
+// id format is `attr:<id>:<field>` so existing strength bindings
+// keep working unchanged. Fields:
+//   - strength  → 0..3   (R12.05, existing)
+//   - radius    → 4..16  (R13.18, new — sculpt influence size live)
+//   - x / y / z → ±50    (R13.18, new — sweep the field through 3D)
+export const ATTRACTOR_FIELD_RADIUS = 'radius'
+export const ATTRACTOR_FIELD_X = 'x'
+export const ATTRACTOR_FIELD_Y = 'y'
+export const ATTRACTOR_FIELD_Z = 'z'
+export const ATTRACTOR_FIELDS = [
+  ATTRACTOR_FIELD_STRENGTH,
+  ATTRACTOR_FIELD_RADIUS,
+  ATTRACTOR_FIELD_X,
+  ATTRACTOR_FIELD_Y,
+  ATTRACTOR_FIELD_Z,
+]
+const ATTRACTOR_FIELD_SET = new Set(ATTRACTOR_FIELDS)
 
 // Build the namespaced action id for a given attractor + field.
-// We only expose `strength` today (the most useful slider to live-mix),
-// but the format is open for future fields (radius, x/y/z, enabled).
+// Validates against ATTRACTOR_FIELDS so a typo in caller code can't
+// silently produce a binding that resolves to null at apply time.
 export function attractorActionId(attractorId, field = ATTRACTOR_FIELD_STRENGTH) {
   if (typeof attractorId !== 'string' || !attractorId) return null
+  if (!ATTRACTOR_FIELD_SET.has(field)) return null
   return `${ATTRACTOR_ACTION_PREFIX}${attractorId}:${field}`
 }
 
 // Parse an action id back into { attractorId, field } or null when
-// not an attractor action. Pure — no store lookup, no validation.
+// not an attractor action. Pure — no store lookup. Returns null on
+// an unknown field so a stale binding to an old field name (e.g.
+// if we later rename one) becomes a silent no-op.
 export function parseAttractorActionId(id) {
   if (typeof id !== 'string' || !id.startsWith(ATTRACTOR_ACTION_PREFIX)) return null
   const rest = id.slice(ATTRACTOR_ACTION_PREFIX.length)
   const idx = rest.indexOf(':')
   if (idx <= 0 || idx === rest.length - 1) return null
-  return { attractorId: rest.slice(0, idx), field: rest.slice(idx + 1) }
+  const field = rest.slice(idx + 1)
+  if (!ATTRACTOR_FIELD_SET.has(field)) return null
+  return { attractorId: rest.slice(0, idx), field }
 }
 
 // Registry of bindable built-in actions. Each entry maps a stable id
@@ -90,6 +114,13 @@ const ACTION_BY_ID = new Map(ACTIONS.map(a => [a.id, a]))
 // from the current store state. Returns null when the id is unknown
 // OR when an attractor action references an attractor that no longer
 // exists (so a stale binding becomes a no-op instead of crashing).
+//
+// R13.18 — supports all five attractor fields: strength, radius,
+// x, y, z. The setter for x/y/z patches the `position` triple in
+// place so the renderer can pick up the swept axis on the next
+// frame without resetting the others. Each field uses a `set`
+// closure over its own clamp + range so the CC normalisation
+// (0..1) maps to the right native scale.
 export function resolveActionForId(id, store) {
   if (typeof id !== 'string') return null
   const builtin = ACTION_BY_ID.get(id)
@@ -105,12 +136,43 @@ export function resolveActionForId(id, store) {
       label: `${target.name} · Strength`,
       min: 0, max: STRENGTH_MAX,
       set: (v01, s) => {
-        // updateNamedAttractor is the store-level setter for a
-        // per-attractor field; namedAttractors.js clamps for us so
-        // we pass the value straight through.
         if (typeof s.updateNamedAttractor === 'function') {
           s.updateNamedAttractor(target.id, { strength: clampStrength(v01 * STRENGTH_MAX) })
         }
+      },
+    }
+  }
+  if (parsed.field === ATTRACTOR_FIELD_RADIUS) {
+    return {
+      id, attractor: target, field: parsed.field,
+      label: `${target.name} · Radius`,
+      min: RADIUS_MIN, max: RADIUS_MAX,
+      set: (v01, s) => {
+        if (typeof s.updateNamedAttractor === 'function') {
+          const next = RADIUS_MIN + v01 * (RADIUS_MAX - RADIUS_MIN)
+          s.updateNamedAttractor(target.id, { radius: clampRadius(next) })
+        }
+      },
+    }
+  }
+  if (parsed.field === ATTRACTOR_FIELD_X || parsed.field === ATTRACTOR_FIELD_Y || parsed.field === ATTRACTOR_FIELD_Z) {
+    const axis = parsed.field
+    const axisIdx = axis === 'x' ? 0 : axis === 'y' ? 1 : 2
+    return {
+      id, attractor: target, field: axis,
+      label: `${target.name} · ${axis.toUpperCase()}`,
+      min: POSITION_MIN, max: POSITION_MAX,
+      set: (v01, s) => {
+        if (typeof s.updateNamedAttractor !== 'function') return
+        // Look up the LIVE attractor at apply-time (not the closed-over
+        // snapshot) so concurrent updates to other axes aren't undone.
+        const live = Array.isArray(s.namedAttractors)
+          ? s.namedAttractors.find(a => a && a.id === target.id)
+          : null
+        const basePos = Array.isArray(live && live.position) ? live.position : [0, 0, 0]
+        const nextPos = [basePos[0], basePos[1], basePos[2]]
+        nextPos[axisIdx] = clampPositionScalar(POSITION_MIN + v01 * (POSITION_MAX - POSITION_MIN))
+        s.updateNamedAttractor(target.id, { position: nextPos })
       },
     }
   }
@@ -233,21 +295,43 @@ export function actionLabel(id, store) {
 
 export function labelForAttractorField(field) {
   if (field === ATTRACTOR_FIELD_STRENGTH) return 'Strength'
+  if (field === ATTRACTOR_FIELD_RADIUS)   return 'Radius'
+  if (field === ATTRACTOR_FIELD_X)        return 'X'
+  if (field === ATTRACTOR_FIELD_Y)        return 'Y'
+  if (field === ATTRACTOR_FIELD_Z)        return 'Z'
   return field || '?'
 }
 
 // Build the live list of attractor actions for a given store snapshot.
-// Used by the MIDI panel UI to render a per-attractor binding row
+// Used by the MIDI panel UI to render per-attractor binding rows
 // alongside the built-in ones. Returns an array shaped like ACTIONS
 // so the renderer can iterate uniformly.
+//
+// R13.18 — emits one row PER FIELD per attractor (strength + radius +
+// x + y + z), so a 12-attractor scene yields up to 60 rows. The UI
+// groups them visually by attractor, but the data shape stays flat so
+// the existing Learn-tap flow keeps working without any refactor.
 export function attractorActions(store) {
   if (!store || !Array.isArray(store.namedAttractors)) return []
-  return store.namedAttractors.map(att => ({
-    id: attractorActionId(att.id, ATTRACTOR_FIELD_STRENGTH),
-    label: `${att.name} · Strength`,
-    min: 0, max: STRENGTH_MAX,
-    attractorId: att.id,
-    attractor: att,
-    field: ATTRACTOR_FIELD_STRENGTH,
-  }))
+  const out = []
+  for (const att of store.namedAttractors) {
+    if (!att || typeof att.id !== 'string') continue
+    for (const field of ATTRACTOR_FIELDS) {
+      const id = attractorActionId(att.id, field)
+      if (!id) continue
+      let min = 0, max = 1
+      if (field === ATTRACTOR_FIELD_STRENGTH) { min = 0; max = STRENGTH_MAX }
+      else if (field === ATTRACTOR_FIELD_RADIUS) { min = RADIUS_MIN; max = RADIUS_MAX }
+      else { min = POSITION_MIN; max = POSITION_MAX } // x/y/z share the same span
+      out.push({
+        id,
+        label: `${att.name} · ${labelForAttractorField(field)}`,
+        min, max,
+        attractorId: att.id,
+        attractor: att,
+        field,
+      })
+    }
+  }
+  return out
 }

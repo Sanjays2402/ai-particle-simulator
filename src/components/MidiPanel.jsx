@@ -271,81 +271,116 @@ export default function MidiPanel({ open, onClose }) {
               </div>
             )
           })}
-          {/* Named attractor bindings (R12.05) — one row per attractor
-              the user has saved. Renders nothing when there are no
-              attractors so the panel stays tidy. Same Learn / clear
-              UX as the built-in actions; the action id is namespaced
-              under `attr:<id>:strength` so a deleted attractor leaves
-              a clearly-labelled stale row (still removable). */}
-          {attractorRows.length > 0 && (
-            <>
-              <div style={{
-                fontSize: 10, fontWeight: 700, letterSpacing: '0.12em',
-                textTransform: 'uppercase', color: '#a78bfa',
-                marginTop: 14, marginBottom: 6,
-                display: 'flex', alignItems: 'center', gap: 6,
-              }}>
-                Named Attractors
-                <span style={{
-                  fontWeight: 500, color: '#7a7a90', letterSpacing: 0,
-                  textTransform: 'none', fontSize: 10,
-                }}>· strength only</span>
-              </div>
-              {attractorRows.map(a => {
-                const cc = ccFor(a.id)
-                const isLearning = learnFor === a.id
-                return (
-                  <div key={a.id} style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '7px 10px', marginBottom: 4, borderRadius: 7,
-                    background: isLearning ? 'rgba(168,85,247,0.10)' : 'rgba(168,85,247,0.04)',
-                    border: isLearning ? '1px solid rgba(168,85,247,0.40)' : '1px solid rgba(168,85,247,0.15)',
-                    fontSize: 12, color: '#e9d5ff',
+          {/* Named attractor bindings (R12.05 + R13.18) — one row per
+              field per attractor the user has saved. We group them
+              visually by attractor so the panel stays readable even
+              with a 12-attractor scene × 5 fields = 60 rows. Same
+              Learn / clear UX as the built-in actions; action ids
+              are namespaced under `attr:<id>:<field>` so a deleted
+              attractor leaves a clearly-labelled stale row (still
+              removable). */}
+          {attractorRows.length > 0 && (() => {
+            // Group by attractorId so each attractor's 5 field rows
+            // sit under a single header. Preserves the array order
+            // (which matches the user's saved attractor order) so
+            // long-press / drag ordering work in tandem with this UI.
+            const grouped = []
+            const seen = new Map()
+            for (const r of attractorRows) {
+              let bucket = seen.get(r.attractorId)
+              if (!bucket) {
+                bucket = { attractorId: r.attractorId, name: r.attractor?.name || r.attractorId, rows: [] }
+                seen.set(r.attractorId, bucket)
+                grouped.push(bucket)
+              }
+              bucket.rows.push(r)
+            }
+            return (
+              <>
+                <div style={{
+                  fontSize: 10, fontWeight: 700, letterSpacing: '0.12em',
+                  textTransform: 'uppercase', color: '#a78bfa',
+                  marginTop: 14, marginBottom: 6,
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}>
+                  Named Attractors
+                  <span style={{
+                    fontWeight: 500, color: '#7a7a90', letterSpacing: 0,
+                    textTransform: 'none', fontSize: 10,
+                  }}>· strength / radius / x / y / z</span>
+                </div>
+                {grouped.map(group => (
+                  <div key={group.attractorId} style={{
+                    border: '1px solid rgba(168,85,247,0.18)',
+                    borderRadius: 8,
+                    padding: '6px 8px',
+                    marginBottom: 6,
+                    background: 'rgba(168,85,247,0.03)',
                   }}>
-                    <span>
-                      {a.label}
-                      <span style={{ color: '#6a6a80', fontSize: 10, marginLeft: 4 }}>
-                        {a.min}..{a.max}
-                      </span>
-                    </span>
-                    <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                      {cc !== null && (
-                        <span style={{
-                          padding: '2px 7px', borderRadius: 5, fontSize: 10,
-                          background: 'rgba(34,197,94,0.10)', color: '#86efac',
-                          border: '1px solid rgba(34,197,94,0.25)',
-                          fontFamily: 'Geist Mono, JetBrains Mono, monospace',
-                        }}>CC {cc}</span>
-                      )}
-                      <button onClick={() => startLearn(a.id)}
-                        title={isLearning ? 'Press a knob/slider on the controller…' : 'Click then move the controller'}
-                        style={{
-                          padding: '3px 9px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
-                          background: isLearning
-                            ? 'linear-gradient(135deg, rgba(168,85,247,0.25), rgba(99,102,241,0.18))'
-                            : 'rgba(255,255,255,0.05)',
-                          color: isLearning ? '#e9d5ff' : '#c8c8d0',
-                          border: isLearning
-                            ? '1px solid rgba(168,85,247,0.45)'
-                            : '1px solid rgba(255,255,255,0.08)',
-                          fontFamily: 'Geist Mono, monospace', minWidth: 56, textAlign: 'center',
-                        }}
-                      >{isLearning ? 'Move…' : 'Learn'}</button>
-                      {cc !== null && (
-                        <button onClick={() => clearBinding(a.id)}
-                          title="Remove this binding"
-                          style={{
-                            padding: '3px 7px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
-                            background: 'rgba(255,255,255,0.03)', color: '#9a9ab0',
-                            border: '1px solid rgba(255,255,255,0.06)',
-                          }}><X size={10} /></button>
-                      )}
-                    </span>
+                    <div style={{
+                      fontSize: 11, fontWeight: 600, color: '#e9d5ff',
+                      marginBottom: 4, padding: '2px 0',
+                    }}>{group.name}</div>
+                    {group.rows.map(a => {
+                      const cc = ccFor(a.id)
+                      const isLearning = learnFor === a.id
+                      return (
+                        <div key={a.id} style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          padding: '5px 6px', marginBottom: 3, borderRadius: 6,
+                          background: isLearning ? 'rgba(168,85,247,0.14)' : 'rgba(255,255,255,0.02)',
+                          border: isLearning ? '1px solid rgba(168,85,247,0.40)' : '1px solid rgba(255,255,255,0.03)',
+                          fontSize: 11, color: '#d8d8e0',
+                        }}>
+                          <span>
+                            {a.field === 'strength' ? 'Strength'
+                              : a.field === 'radius' ? 'Radius'
+                              : a.field.toUpperCase()}
+                            <span style={{ color: '#6a6a80', fontSize: 10, marginLeft: 6 }}>
+                              {a.min}..{a.max}
+                            </span>
+                          </span>
+                          <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                            {cc !== null && (
+                              <span style={{
+                                padding: '2px 7px', borderRadius: 5, fontSize: 10,
+                                background: 'rgba(34,197,94,0.10)', color: '#86efac',
+                                border: '1px solid rgba(34,197,94,0.25)',
+                                fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                              }}>CC {cc}</span>
+                            )}
+                            <button onClick={() => startLearn(a.id)}
+                              title={isLearning ? 'Press a knob/slider on the controller…' : 'Click then move the controller'}
+                              style={{
+                                padding: '2px 8px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
+                                background: isLearning
+                                  ? 'linear-gradient(135deg, rgba(168,85,247,0.25), rgba(99,102,241,0.18))'
+                                  : 'rgba(255,255,255,0.05)',
+                                color: isLearning ? '#e9d5ff' : '#c8c8d0',
+                                border: isLearning
+                                  ? '1px solid rgba(168,85,247,0.45)'
+                                  : '1px solid rgba(255,255,255,0.08)',
+                                fontFamily: 'Geist Mono, monospace', minWidth: 54, textAlign: 'center',
+                              }}
+                            >{isLearning ? 'Move…' : 'Learn'}</button>
+                            {cc !== null && (
+                              <button onClick={() => clearBinding(a.id)}
+                                title="Remove this binding"
+                                style={{
+                                  padding: '2px 6px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
+                                  background: 'rgba(255,255,255,0.03)', color: '#9a9ab0',
+                                  border: '1px solid rgba(255,255,255,0.06)',
+                                }}><X size={10} /></button>
+                            )}
+                          </span>
+                        </div>
+                      )
+                    })}
                   </div>
-                )
-              })}
-            </>
-          )}
+                ))}
+              </>
+            )
+          })()}
         </div>
 
         <div style={{

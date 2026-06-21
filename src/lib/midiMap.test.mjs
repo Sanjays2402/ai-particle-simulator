@@ -8,8 +8,10 @@ import {
   attractorActionId, parseAttractorActionId,
   resolveActionForId, attractorActions,
   ATTRACTOR_ACTION_PREFIX, ATTRACTOR_FIELD_STRENGTH,
+  ATTRACTOR_FIELD_RADIUS, ATTRACTOR_FIELD_X, ATTRACTOR_FIELD_Y, ATTRACTOR_FIELD_Z,
+  ATTRACTOR_FIELDS, labelForAttractorField,
 } from './midiMap.js'
-import { STRENGTH_MAX } from './namedAttractors.js'
+import { STRENGTH_MAX, RADIUS_MIN, RADIUS_MAX, POSITION_MIN, POSITION_MAX } from './namedAttractors.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
 function eq(a, b, m) { if (a !== b) fail(`${m} — got ${JSON.stringify(a)} expected ${JSON.stringify(b)}`) }
@@ -288,6 +290,8 @@ eq(actionLabel('totally-fake'), 'Unmapped', 'unknown → Unmapped')
 }
 
 // attractorActions exposes a UI-shaped list.
+// R13.18 — now emits one row PER FIELD per attractor (strength,
+// radius, x, y, z = 5 rows each).
 {
   const store = {
     namedAttractors: [
@@ -296,15 +300,128 @@ eq(actionLabel('totally-fake'), 'Unmapped', 'unknown → Unmapped')
     ],
   }
   const rows = attractorActions(store)
-  eq(rows.length, 2, 'one row per attractor')
-  eq(rows[0].id, 'attr:attr-1:strength', 'row id matches attractor 1')
-  eq(rows[1].id, 'attr:attr-9:strength', 'row id matches attractor 9')
-  eq(rows[0].label, 'Eye · Strength', 'row label uses live name')
-  eq(rows[0].max, STRENGTH_MAX, 'row carries the slider range')
+  eq(rows.length, 2 * ATTRACTOR_FIELDS.length, '5 rows per attractor (strength/radius/x/y/z)')
+  // First attractor's first row is still strength (back-compat with
+  // R12.05 — strength is field index 0 in ATTRACTOR_FIELDS).
+  eq(rows[0].id, 'attr:attr-1:strength', 'row 0 is strength of attractor 1')
+  eq(rows[0].label, 'Eye · Strength', 'row label uses live name + field')
+  eq(rows[0].max, STRENGTH_MAX, 'strength row carries the strength slider range')
   eq(rows[0].attractorId, 'attr-1', 'row exposes attractorId for the UI')
+  // Field 1 is radius.
+  eq(rows[1].id, 'attr:attr-1:radius', 'row 1 is radius of attractor 1')
+  eq(rows[1].label, 'Eye · Radius', 'radius label')
+  eq(rows[1].min, RADIUS_MIN, 'radius min')
+  eq(rows[1].max, RADIUS_MAX, 'radius max')
+  // Fields 2-4 are x/y/z and share the position range.
+  eq(rows[2].id, 'attr:attr-1:x', 'row 2 is x')
+  eq(rows[2].label, 'Eye · X', 'x label')
+  eq(rows[2].min, POSITION_MIN, 'x min = POSITION_MIN')
+  eq(rows[2].max, POSITION_MAX, 'x max = POSITION_MAX')
+  eq(rows[3].id, 'attr:attr-1:y', 'row 3 is y')
+  eq(rows[4].id, 'attr:attr-1:z', 'row 4 is z')
+  // Second attractor starts at index 5.
+  eq(rows[5].id, 'attr:attr-9:strength', 'second attractor begins after first')
+  eq(rows[5].label, 'Beam · Strength', 'second attractor strength label')
   // Empty / missing input is safe.
   eq(attractorActions(null).length, 0, 'null store → empty')
   eq(attractorActions({}).length, 0, 'no list → empty')
+  // Corrupt entry (no id) is dropped without breaking the loop.
+  const corrupt = { namedAttractors: [{ id: 'attr-7', name: 'Good' }, { name: 'broken' }] }
+  eq(attractorActions(corrupt).length, ATTRACTOR_FIELDS.length, 'corrupt entry dropped, valid one keeps all 5 fields')
 }
 
-console.log(`PASS: midiMap — ${ACTIONS.length} actions, decode/normalize/persist/setBinding/applyCC + attractor routing`)
+// --- R13.18 — radius routing ---
+{
+  const calls = []
+  const store = {
+    namedAttractors: [{ id: 'attr-5', name: 'Halo', strength: 1, type: 'attractor', radius: 10 }],
+    updateNamedAttractor: (id, patch) => calls.push({ id, patch }),
+  }
+  const a = resolveActionForId('attr:attr-5:radius', store)
+  ok(a, 'radius action resolves')
+  eq(a.label, 'Halo · Radius', 'radius label')
+  eq(a.min, RADIUS_MIN, 'radius min from namedAttractors clamp')
+  eq(a.max, RADIUS_MAX, 'radius max from namedAttractors clamp')
+  eq(a.field, 'radius', 'field')
+  // CC sweep
+  const map = { '12': 'attr:attr-5:radius' }
+  applyCC(map, 12, 127, store)
+  near(calls[0].patch.radius, RADIUS_MAX, 'CC 127 → RADIUS_MAX')
+  applyCC(map, 12, 0, store)
+  near(calls[1].patch.radius, RADIUS_MIN, 'CC 0 → RADIUS_MIN')
+  // Midpoint
+  applyCC(map, 12, 64, store)
+  const mid = RADIUS_MIN + (64 / 127) * (RADIUS_MAX - RADIUS_MIN)
+  near(calls[2].patch.radius, mid, 'CC 64 → midpoint of radius range', 1e-6)
+}
+
+// --- R13.18 — position axis routing (x/y/z) ---
+{
+  const calls = []
+  // Live position so the per-axis setter has a base to merge into.
+  const store = {
+    namedAttractors: [{
+      id: 'attr-8', name: 'Drift', strength: 1, type: 'attractor',
+      position: [10, 20, 30],
+    }],
+    updateNamedAttractor: (id, patch) => calls.push({ id, patch }),
+  }
+  for (const axis of ['x', 'y', 'z']) {
+    const a = resolveActionForId(`attr:attr-8:${axis}`, store)
+    ok(a, `${axis} action resolves`)
+    eq(a.label, `Drift · ${axis.toUpperCase()}`, `${axis} label`)
+    eq(a.min, POSITION_MIN, `${axis} min`)
+    eq(a.max, POSITION_MAX, `${axis} max`)
+  }
+  // Sweep X to max — Y and Z should be PRESERVED from the live attractor.
+  applyCC({ '20': 'attr:attr-8:x' }, 20, 127, store)
+  const xPatch = calls[calls.length - 1].patch
+  ok(Array.isArray(xPatch.position), 'x setter writes a position array')
+  near(xPatch.position[0], POSITION_MAX, 'x at CC 127 → POSITION_MAX')
+  eq(xPatch.position[1], 20, 'y preserved from live state')
+  eq(xPatch.position[2], 30, 'z preserved from live state')
+  // Now sweep Y — but mutate the live store first to simulate the
+  // r12.05 strength sweep happening concurrently. The y setter must
+  // read the CURRENT position triple, not its closed-over snapshot.
+  store.namedAttractors[0].position = [POSITION_MAX, 20, 30]
+  applyCC({ '21': 'attr:attr-8:y' }, 21, 0, store)
+  const yPatch = calls[calls.length - 1].patch
+  near(yPatch.position[1], POSITION_MIN, 'y at CC 0 → POSITION_MIN')
+  eq(yPatch.position[0], POSITION_MAX, 'x stays at the live POSITION_MAX (not 10)')
+  eq(yPatch.position[2], 30, 'z still preserved')
+}
+
+// --- R13.18 — setBinding accepts the new attractor fields ---
+{
+  for (const field of ['radius', 'x', 'y', 'z']) {
+    const m = setBinding({}, 30, `attr:attr-1:${field}`)
+    eq(m['30'], `attr:attr-1:${field}`, `setBinding accepts attr:${field}`)
+  }
+  // Unknown field still rejected.
+  const m2 = setBinding({}, 31, 'attr:attr-1:enabled')
+  eq(m2['31'], undefined, 'unknown field still rejected (no `enabled` route yet)')
+}
+
+// --- R13.18 — parseAttractorActionId validates the field too ---
+{
+  ok(parseAttractorActionId('attr:attr-1:radius'), 'radius parses')
+  ok(parseAttractorActionId('attr:attr-1:x'), 'x parses')
+  eq(parseAttractorActionId('attr:attr-1:enabled'), null, 'unknown field rejected')
+  eq(parseAttractorActionId('attr:attr-1:STRENGTH'), null, 'case-sensitive — uppercase rejected')
+}
+
+// --- R13.18 — labelForAttractorField covers all five ---
+{
+  eq(labelForAttractorField(ATTRACTOR_FIELD_STRENGTH), 'Strength', 'strength label')
+  eq(labelForAttractorField(ATTRACTOR_FIELD_RADIUS),   'Radius',   'radius label')
+  eq(labelForAttractorField(ATTRACTOR_FIELD_X),        'X',        'x label')
+  eq(labelForAttractorField(ATTRACTOR_FIELD_Y),        'Y',        'y label')
+  eq(labelForAttractorField(ATTRACTOR_FIELD_Z),        'Z',        'z label')
+  // Unknown field falls back to its raw value.
+  eq(labelForAttractorField('mystery'), 'mystery', 'unknown field passes through')
+  // Empty / nullish → fallback question mark.
+  eq(labelForAttractorField(''), '?', 'empty → ?')
+  eq(labelForAttractorField(null), '?', 'null → ?')
+}
+
+console.log(`PASS: midiMap — ${ACTIONS.length} actions, decode/normalize/persist/setBinding/applyCC + attractor routing (${ATTRACTOR_FIELDS.length} fields per attractor)`)
