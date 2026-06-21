@@ -9,7 +9,7 @@ import {
   PATH_MIN_WAYPOINTS, pathDuration, clampSeconds,
 } from '../lib/cameraPath'
 import {
-  downloadBookmarksFile, parseImport, mergeImport,
+  downloadBookmarksFile, parseImport, mergeImport, mergeImportViews,
 } from '../lib/bookmarksIO'
 import { formatDuration } from '../lib/sessionStats'
 import { tokenize } from '../lib/codeTokens'
@@ -191,6 +191,15 @@ export default function RightSidebar() {
 // inputs/textareas.
 function CameraViews() {
   const [views, setViews] = useState(() => loadCameraViews())
+
+  // Listen for external view-list changes (e.g. bookmark-bundle import
+  // injecting new views from a combined v2 file). Re-read from storage
+  // instead of trusting the event payload so it can't desync.
+  useEffect(() => {
+    const onChanged = () => setViews(loadCameraViews())
+    window.addEventListener('particle:camera-views-changed', onChanged)
+    return () => window.removeEventListener('particle:camera-views-changed', onChanged)
+  }, [])
 
   const save = (name) => {
     const api = window.__particleCamera
@@ -576,15 +585,21 @@ function SceneBookmarks() {
 
   const canSaveMore = items.length < MAX_BOOKMARKS
 
-  // --- Export / Import (R6.04) ---
+  // --- Export / Import (R6.04 + R11.03 combined views bundle) ---
+  // Export packages bookmarks AND the live saved camera-view list into
+  // a single v2 envelope so share-a-show flows are one file instead of
+  // two. When the user has zero views saved the file falls back to v1
+  // (bookmarks only) for back-compat with anything reading older exports.
   const exportNow = () => {
     if (items.length === 0) {
       showToast('No bookmarks to export')
       return
     }
-    const filename = downloadBookmarksFile(items)
+    const views = loadCameraViews()
+    const filename = downloadBookmarksFile(items, undefined, views)
     if (filename) {
-      showToast(`Exported ${items.length} → ${filename}`, <Download size={10} color="#fff" strokeWidth={2.4} />)
+      const viewsTag = views.length > 0 ? ` + ${views.length} view${views.length === 1 ? '' : 's'}` : ''
+      showToast(`Exported ${items.length} bookmark${items.length === 1 ? '' : 's'}${viewsTag} → ${filename}`, <Download size={10} color="#fff" strokeWidth={2.4} />)
     } else {
       showToast('Export failed — check console')
     }
@@ -603,19 +618,37 @@ function SceneBookmarks() {
           showToast(`Import failed: ${res.error}`)
           return
         }
+        const incomingViews = Array.isArray(res.views) ? res.views : []
         // Ask once: merge vs replace. Plain confirm keeps the UI calm
         // and matches the existing "Clear All" pattern elsewhere.
+        // Combined files (v2) get a clearer prompt so the user knows
+        // both bookmarks AND camera views are about to be touched.
+        const viewsTag = incomingViews.length > 0
+          ? ` + ${incomingViews.length} camera view${incomingViews.length === 1 ? '' : 's'}`
+          : ''
         const mode = window.confirm(
-          `Import ${res.items.length} bookmark${res.items.length === 1 ? '' : 's'}?\n\n` +
+          `Import ${res.items.length} bookmark${res.items.length === 1 ? '' : 's'}${viewsTag}?\n\n` +
           `OK = Merge into existing list (dupes by name are skipped).\n` +
           `Cancel = Replace the entire list.`
         ) ? 'merge' : 'replace'
         const merge = mergeImport(items, res.items, mode)
         setItems(merge.items)
         saveBookmarks(merge.items)
-        const summary = mode === 'merge'
+        // Apply the views half of the bundle the same way.
+        let viewSummary = ''
+        if (incomingViews.length > 0) {
+          const existingViews = loadCameraViews()
+          const viewMerge = mergeImportViews(existingViews, incomingViews, mode)
+          saveCameraViews(viewMerge.views)
+          // Tell other surfaces (CameraViews panel, Minimap) to refresh.
+          window.dispatchEvent(new CustomEvent('particle:camera-views-changed'))
+          viewSummary = mode === 'merge'
+            ? `, +${viewMerge.added} view${viewMerge.added === 1 ? '' : 's'}`
+            : `, ${viewMerge.added} view${viewMerge.added === 1 ? '' : 's'} (replaced)`
+        }
+        const summary = (mode === 'merge'
           ? `Imported ${merge.added}, skipped ${merge.skipped}`
-          : `Replaced with ${merge.added}`
+          : `Replaced with ${merge.added}`) + viewSummary
         showToast(summary, <Upload size={10} color="#fff" strokeWidth={2.4} />)
       } catch (e) {
         showToast(`Import error: ${e.message || 'unknown'}`)
