@@ -450,6 +450,20 @@ export const useStore = create((set, get) => {
   // default; zero cost when off.
   waveformEnabled: false,
   setWaveformEnabled: (v) => set({ waveformEnabled: !!v }),
+  // Mode = 'time' (oscilloscope polyline) or 'frequency' (32-bar
+  // spectrum). Persisted in localStorage so users don't have to
+  // re-pick after every reload.
+  waveformMode: (() => {
+    try {
+      const v = typeof localStorage !== 'undefined' ? localStorage.getItem('waveform-mode-v1') : null
+      return (v === 'time' || v === 'frequency') ? v : 'time'
+    } catch { return 'time' }
+  })(),
+  setWaveformMode: (v) => {
+    const next = (v === 'frequency') ? 'frequency' : 'time'
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem('waveform-mode-v1', next) } catch { /* */ }
+    set({ waveformMode: next })
+  },
 
   setMouseAttract: (v) => set({ mouseAttract: v }),
   paintMode: false,

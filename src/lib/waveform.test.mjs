@@ -3,6 +3,8 @@
 import {
   SILENCE_BYTE, FULL_AMPLITUDE,
   bytesToCentered, peakAmplitude, projectToCanvas, sampleAnalyser,
+  WAVEFORM_MODES, bytesToSpectrum, sampleAnalyserSpectrum,
+  projectSpectrumToBars, normalizeWaveformMode,
 } from './waveform.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -119,6 +121,112 @@ eq(peakAmplitude(new Float32Array(0)), 0, 'empty → 0')
   eq(out.length, 4, 'mismatched scratch → reallocated to fftSize')
 }
 
-console.log(`PASS: waveform — bytesToCentered (silence/peak/bad), peakAmplitude, projectToCanvas (silence/+1/-1/clamp/empty), sampleAnalyser (null/fake)`)
+console.log(`PASS: waveform — bytesToCentered (silence/peak/bad), peakAmplitude, projectToCanvas (silence/+1/-1/clamp/empty), sampleAnalyser (null/fake), bytesToSpectrum + sampleAnalyserSpectrum + projectSpectrumToBars (spectrum mode), normalizeWaveformMode`)
 eq(SILENCE_BYTE, 128, 'silence byte constant')
 eq(FULL_AMPLITUDE, 127, 'full-amplitude constant')
+
+// --- WAVEFORM_MODES contract ---
+eq(WAVEFORM_MODES.includes('time'), true, 'time mode listed')
+eq(WAVEFORM_MODES.includes('frequency'), true, 'frequency mode listed')
+eq(WAVEFORM_MODES.length, 2, 'exactly two documented modes')
+
+// --- bytesToSpectrum: 0..255 → 0..1 ---
+{
+  const buf = new Uint8Array([0, 64, 128, 192, 255])
+  const s = bytesToSpectrum(buf)
+  eq(s.length, 5, 'spectrum length preserved')
+  near(s[0], 0, 'byte 0 → 0')
+  near(s[1], 64 / 255, 'byte 64 → ~0.25')
+  near(s[2], 128 / 255, 'byte 128 → ~0.5')
+  near(s[4], 1, 'byte 255 → 1')
+}
+{
+  eq(bytesToSpectrum(null).length, 0, 'null → empty')
+  eq(bytesToSpectrum({}).length, 0, 'bad shape → empty')
+}
+
+// --- sampleAnalyserSpectrum ---
+{
+  eq(sampleAnalyserSpectrum(null).length, 0, 'null analyser → empty')
+  eq(sampleAnalyserSpectrum({}).length, 0, 'no method → empty')
+  const noFreqFn = { fftSize: 8 }
+  eq(sampleAnalyserSpectrum(noFreqFn).length, 0, 'time-only analyser → empty for spectrum')
+}
+{
+  // Fake analyser with a known frequency response.
+  const fake = {
+    frequencyBinCount: 4,
+    fftSize: 8,
+    getByteFrequencyData(buf) {
+      buf[0] = 200  // bass
+      buf[1] = 100  // low-mid
+      buf[2] = 50   // mid
+      buf[3] = 0    // treble
+    },
+  }
+  const s = sampleAnalyserSpectrum(fake)
+  eq(s.length, 4, 'length matches frequencyBinCount')
+  near(s[0], 200 / 255, 'bass bin normalized')
+  near(s[3], 0, 'silent treble bin')
+}
+{
+  // Scratch reuse — wrong-size scratch gets replaced.
+  const fake = {
+    frequencyBinCount: 4,
+    fftSize: 8,
+    getByteFrequencyData(buf) { for (let i = 0; i < buf.length; i++) buf[i] = 128 },
+  }
+  const bigBuf = new Uint8Array(16)
+  const out = sampleAnalyserSpectrum(fake, bigBuf)
+  eq(out.length, 4, 'mismatched scratch → reallocated')
+}
+
+// --- projectSpectrumToBars ---
+{
+  // 16 bins → 4 bars: each bar averages 4 bins.
+  const s = new Float32Array(16).fill(0)
+  s[0] = 1; s[1] = 1; s[2] = 1; s[3] = 1     // bar 0: avg 1
+  s[4] = 0.5                                  // bar 1: avg 0.125
+  // bars 2 and 3 stay at 0
+  const bars = projectSpectrumToBars(s, 100, 40, 4, 4)
+  eq(bars.length, 4, 'bar count = 4')
+  near(bars[0][0], 0, 'bar 0 starts at x=0')
+  near(bars[0][1], 32, 'bar 0 full-height (40 - 8 pad = 32)')
+  near(bars[1][0], 25, 'bar 1 starts at x=25 (100 / 4)')
+  near(bars[1][1], 4, 'bar 1 quarter-height (0.125 * 32)')
+  near(bars[2][1], 0, 'bar 2 silent')
+  near(bars[3][1], 0, 'bar 3 silent')
+}
+{
+  // Clamped: values above 1 cap at maxBarPx, negative values floor at 0.
+  const s = new Float32Array([5, -3])
+  const bars = projectSpectrumToBars(s, 100, 40, 2, 4)
+  near(bars[0][1], 32, 'huge value clamped to max height')
+  near(bars[1][1], 0, 'negative value floored to 0')
+}
+{
+  // Empty input → empty output.
+  eq(projectSpectrumToBars(null, 100, 40, 8).length, 0, 'null → empty')
+  eq(projectSpectrumToBars(new Float32Array(0), 100, 40, 8).length, 0, 'empty → empty')
+}
+{
+  // Bad dimensions → defaults.
+  const s = new Float32Array(8).fill(0.5)
+  const bars = projectSpectrumToBars(s, 0, 0, 4)
+  eq(bars.length, 4, 'bad dims still emits bars')
+}
+{
+  // Bar count must be at least 1.
+  const s = new Float32Array(8).fill(0.5)
+  const bars = projectSpectrumToBars(s, 100, 40, 0)
+  eq(bars.length, 1, 'barCount=0 clamped to 1')
+}
+
+// --- normalizeWaveformMode ---
+eq(normalizeWaveformMode('time'), 'time', 'time → time')
+eq(normalizeWaveformMode('frequency'), 'frequency', 'frequency → frequency')
+eq(normalizeWaveformMode('garbage'), 'time', 'unknown → time fallback')
+eq(normalizeWaveformMode(null), 'time', 'null → time fallback')
+eq(normalizeWaveformMode(undefined), 'time', 'undefined → time fallback')
+
+console.log('PASS: waveform spectrum extensions')
