@@ -1,9 +1,17 @@
 import { useRef, useMemo, useEffect, useCallback } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
-import { EffectComposer, Bloom, ChromaticAberration, Vignette, Noise } from '@react-three/postprocessing'
+import { EffectComposer, Bloom, ChromaticAberration, Vignette, Noise, DepthOfField } from '@react-three/postprocessing'
 import * as THREE from 'three'
 import { useStore, THEMES } from '../store'
+import { cameraShakeOffset } from '../lib/cameraShake'
+import { smoothstep } from '../lib/crossfade'
+import { resolveReducedMotion } from '../lib/reducedMotion'
+import { windVector, applyWind } from '../lib/wind'
+import { resolveTheme as resolveActiveTheme } from '../lib/customThemes'
+import { applyNoise } from '../lib/noiseDeformer'
+import { useTouchGestures } from '../lib/useTouchGestures'
+import { buildHueFilterCss, computeReactiveHueDeg, pickAudioSignal } from '../lib/bgGradient'
 
 // FPS counter component (renders as HTML overlay)
 function FPSCounter() {
@@ -60,17 +68,46 @@ function MouseAttractor() {
   const lastStampRef = useRef(0)
 
   // Paint-mode listeners: hold mouse and drag to stamp persistent attractors.
+  // Place-field listener: a single pointer-up while in place-field mode sets
+  // the force-field center and disables the mode again.
   useEffect(() => {
     const dom = gl.domElement
     const onDown = () => { draggingRef.current = true }
     const onUp = () => { draggingRef.current = false }
+    const onClick = (e) => {
+      const {
+        placeFieldMode, setForceFieldCenter, setPlaceFieldMode,
+        placingAttractorId, moveNamedAttractor, setPlacingAttractorId,
+      } = useStore.getState()
+      // Either legacy place-field mode OR named-attractor place mode
+      // claims the next click; legacy wins if both are accidentally
+      // armed at once.
+      if (!placeFieldMode && !placingAttractorId) return
+      // Raycast to the same z=0 plane the rest of the canvas uses.
+      const rect = dom.getBoundingClientRect()
+      const x = ((e.clientX - rect.left) / rect.width) * 2 - 1
+      const y = -((e.clientY - rect.top) / rect.height) * 2 + 1
+      raycaster.setFromCamera({ x, y }, camera)
+      const hit = new THREE.Vector3()
+      raycaster.ray.intersectPlane(planeRef.current, hit)
+      if (placeFieldMode) {
+        setForceFieldCenter([hit.x, hit.y, hit.z])
+        setPlaceFieldMode(false)
+      } else if (placingAttractorId) {
+        moveNamedAttractor(placingAttractorId, [hit.x, hit.y, hit.z])
+        setPlacingAttractorId(null)
+      }
+      e.stopPropagation()
+    }
     dom.addEventListener('pointerdown', onDown)
     window.addEventListener('pointerup', onUp)
+    dom.addEventListener('click', onClick)
     return () => {
       dom.removeEventListener('pointerdown', onDown)
       window.removeEventListener('pointerup', onUp)
+      dom.removeEventListener('click', onClick)
     }
-  }, [gl])
+  }, [gl, camera, raycaster])
 
   useFrame(() => {
     const { mouseAttract, paintMode, addPaintPoint } = useStore.getState()
@@ -104,6 +141,10 @@ function Particles() {
 
   const _target = useMemo(() => new THREE.Vector3(), [])
   const _color = useMemo(() => new THREE.Color(), [])
+  // Crossfade scratchpads — reused every particle so the blend path
+  // is still allocation-free. Only touched when blendActive is true.
+  const _blendTarget = useMemo(() => new THREE.Vector3(), [])
+  const _blendColor = useMemo(() => new THREE.Color(), [])
 
   const compiledFn = useMemo(() => {
     if (!particleFnSource) return null
@@ -171,8 +212,18 @@ function Particles() {
             paintPoints,
             paletteEnabled, paletteA, paletteB, paletteMix,
             gravityEnabled, gravityStrength, collisionsEnabled,
-            forceFieldType, forceFieldStrength } = useStore.getState()
-    const themeData = THEMES[theme]
+            forceFieldType, forceFieldStrength, forceFieldCenter,
+            namedAttractors,
+            kaleidoscopeEnabled, kaleidoscopeSegments,
+            hueCycleEnabled, hueCycleSpeed,
+            windEnabled, windIntensity, windAzimuth, windPitch,
+            noiseEnabled, noiseAmplitude, noiseFrequency, noiseSpeed,
+            blendActive, blendTargetFn, blendProgress, advanceBlend } = useStore.getState()
+    // Crossfade ticker — outside the per-particle loop so it advances
+    // exactly once per frame regardless of particle count.
+    if (blendActive) advanceBlend(delta)
+    const customThemes = useStore.getState().customThemes
+    const themeData = resolveActiveTheme(theme, THEMES, customThemes)
     const mousePos = window.__mousePos
     // Flat array of paint coords — avoids re-reading the .length each particle.
     const paintLen = paintPoints.length
@@ -198,7 +249,25 @@ function Particles() {
       prevCountRef.current = particleCount
     }
     const vel = velocitiesRef.current
-    const physicsActive = gravityEnabled || collisionsEnabled || forceFieldType
+    // Pre-filter active named attractors once per frame — avoids
+    // walking the disabled / zero-strength ones N times per particle.
+    // Each entry becomes [type, strengthScaled, cx, cy, cz, radiusSq].
+    const namedActive = []
+    if (Array.isArray(namedAttractors)) {
+      for (let i = 0; i < namedAttractors.length; i++) {
+        const a = namedAttractors[i]
+        if (!a || !a.enabled) continue
+        if (!a.strength || a.strength <= 0) continue
+        const r = typeof a.radius === 'number' ? a.radius : 10
+        namedActive.push([
+          a.type,
+          a.strength,
+          a.position[0], a.position[1], a.position[2],
+          r * r,
+        ])
+      }
+    }
+    const physicsActive = gravityEnabled || collisionsEnabled || forceFieldType || namedActive.length > 0
     const dt = Math.min(delta, 0.05) // cap delta
 
     // Spatial hash for collisions
@@ -216,14 +285,87 @@ function Particles() {
       }
     }
 
+    // Kaleidoscope precomputation: leaderCount is the number of unique
+    // particles we actually run the preset fn for; the rest are mirrors
+    // of those leaders rotated around the Y axis. We use a single Math.
+    // floor + atan2 trick to keep per-particle cost a few floats.
+    const kaleidoSegs = (kaleidoscopeEnabled && kaleidoscopeSegments >= 2)
+      ? kaleidoscopeSegments | 0
+      : 1
+    const leaderCount = (kaleidoSegs > 1)
+      ? Math.max(1, Math.floor(particleCount / kaleidoSegs))
+      : particleCount
+    const kaleidoStep = (Math.PI * 2) / Math.max(1, kaleidoSegs)
+
+    // Hue Cycle precomputation: convert cycles-per-minute to a 0..1
+    // hue offset that wraps every (60 / speed) seconds. Computing this
+    // once per frame keeps the per-particle work to a single offsetHSL.
+    // Suppressed entirely under reduced motion so colour-strobing users
+    // who flip the OS pref aren't forced into rainbow churn.
+    const reducedMotion = resolveReducedMotion(
+      useStore.getState().reducedMotionMode,
+      useStore.getState().osPrefersReducedMotion,
+    )
+    const hueCycleOffset = (hueCycleEnabled && !reducedMotion)
+      ? ((t * (hueCycleSpeed / 60)) % 1 + 1) % 1
+      : 0
+
+    // Wind precomputation: one vector + magnitude per frame, used by
+    // every particle. windEnabled+intensity=0 short-circuits to a zero
+    // vector inside windVector(), so the per-particle applyWind() is
+    // a single zero-check when wind is "off". Suppressed under reduced
+    // motion — vestibular users skip the constant scene drift.
+    const windVec = (windEnabled && !reducedMotion)
+      ? windVector(windAzimuth, windPitch, windIntensity)
+      : null
+
+    // Trig-noise deformer: a flag + amplitude precheck lets the
+    // per-particle path skip when the feature is off. Also suppressed
+    // under reduced motion to avoid the shimmer.
+    const noiseActive = noiseEnabled && noiseAmplitude > 0 && !reducedMotion
+
     for (let idx = 0; idx < particleCount; idx++) {
       _target.set(0, 0, 0)
       _color.setRGB(1, 1, 1)
       try {
-        compiledFn(idx, particleCount, _target, _color, t, THREE, noop, noop, dv)
+        // In kaleidoscope mode, every slice computes positions for the
+        // same `leaderCount` source indices, then rotates the output.
+        const srcIdx = (kaleidoSegs > 1) ? (idx % leaderCount) : idx
+        const srcCount = (kaleidoSegs > 1) ? leaderCount : particleCount
+        compiledFn(srcIdx, srcCount, _target, _color, t, THREE, noop, noop, dv)
+        // Crossfade overlay: if a blend is in flight, run the target
+        // preset's fn into the scratchpads and lerp into _target/_color
+        // by the blend progress. Blends with kaleidoscope just fine —
+        // the rotation happens later on the blended position.
+        if (blendActive && blendTargetFn) {
+          _blendTarget.set(0, 0, 0)
+          _blendColor.setRGB(1, 1, 1)
+          try {
+            blendTargetFn(srcIdx, srcCount, _blendTarget, _blendColor, t, THREE, noop, noop, dv)
+            // Eased ramp — feels cinematic; flat linear was abrupt at the edges.
+            const p = smoothstep(blendProgress)
+            _target.lerp(_blendTarget, p)
+            _color.lerp(_blendColor, p)
+          } catch { /* target fn errors silently — host preset keeps rendering */ }
+        }
       } catch (e) {
         if (!errorRef.current) { errorRef.current = e.message; console.error('Runtime error:', e) }
         break
+      }
+
+      // Apply rotational symmetry: every particle beyond the leader
+      // slice gets its (x, z) rotated by (segId * 2π/N). Y stays put
+      // so the symmetry axis is upright (matches the camera default).
+      if (kaleidoSegs > 1) {
+        const segId = Math.floor(idx / leaderCount)
+        if (segId > 0 && segId < kaleidoSegs) {
+          const ang = segId * kaleidoStep
+          const c = Math.cos(ang), s = Math.sin(ang)
+          const rx = _target.x * c - _target.z * s
+          const rz = _target.x * s + _target.z * c
+          _target.x = rx
+          _target.z = rz
+        }
       }
 
       const i3 = idx * 3
@@ -237,7 +379,9 @@ function Particles() {
 
         // Force fields
         if (forceFieldType) {
-          const px = _target.x, py = _target.y, pz = _target.z
+          // Position relative to the (movable) field center.
+          const fx = forceFieldCenter[0], fy = forceFieldCenter[1], fz = forceFieldCenter[2]
+          const px = _target.x - fx, py = _target.y - fy, pz = _target.z - fz
           const dist = Math.sqrt(px * px + py * py + pz * pz) + 0.01
           const radius = 10
           if (dist < radius) {
@@ -259,6 +403,39 @@ function Particles() {
               vel[i3 + 1] += Math.cos(pz * 3 + t * 1.7) * strength * 5
               vel[i3 + 2] += Math.sin(px * 3 + t * 2.3) * strength * 5
             }
+          }
+        }
+
+        // Named attractors — additive force-field objects that layer
+        // on top of the single legacy field. Squared-distance gate
+        // keeps the per-attractor cost negligible far from each one;
+        // the active set is pre-filtered once per frame.
+        for (let ai = 0; ai < namedActive.length; ai++) {
+          const a = namedActive[ai]
+          const aType = a[0]
+          const aStr  = a[1]
+          const apx = _target.x - a[2]
+          const apy = _target.y - a[3]
+          const apz = _target.z - a[4]
+          const ad2 = apx * apx + apy * apy + apz * apz
+          if (ad2 >= a[5]) continue
+          const ad = Math.sqrt(ad2) + 0.01
+          const aS = aStr * dt
+          if (aType === 'attractor') {
+            vel[i3]     -= (apx / ad) * aS * 3
+            vel[i3 + 1] -= (apy / ad) * aS * 3
+            vel[i3 + 2] -= (apz / ad) * aS * 3
+          } else if (aType === 'repulsor') {
+            vel[i3]     += (apx / ad) * aS * 3
+            vel[i3 + 1] += (apy / ad) * aS * 3
+            vel[i3 + 2] += (apz / ad) * aS * 3
+          } else if (aType === 'vortex') {
+            vel[i3]     += (-apz / ad) * aS * 4
+            vel[i3 + 2] += ( apx / ad) * aS * 4
+          } else if (aType === 'turbulence') {
+            vel[i3]     += Math.sin(apy * 3 + t * 2)   * aS * 5
+            vel[i3 + 1] += Math.cos(apz * 3 + t * 1.7) * aS * 5
+            vel[i3 + 2] += Math.sin(apx * 3 + t * 2.3) * aS * 5
           }
         }
 
@@ -318,6 +495,16 @@ function Particles() {
         }
       }
 
+      // Global wind drift — single vector mul + add per particle when
+      // enabled, fast-pathed entirely when disabled. Time-step scaled
+      // so framerate variation doesn't change perceived speed.
+      if (windVec) applyWind(_target, windVec, dt)
+
+      // Trig-noise deformer — global shimmer layered on top of every
+      // preset's positional output. Cost when off: a single boolean
+      // check. Cost when on: ~6 sin/cos per particle, branch-free.
+      if (noiseActive) applyNoise(_target, idx, t, noiseAmplitude, noiseFrequency, noiseSpeed)
+
       // Paint-mode soft attractors — nudge particles toward each stamped
       // point. Capped at ~24 points in the store so this stays O(24N).
       if (paintLen > 0) {
@@ -364,6 +551,13 @@ function Particles() {
         } else {
           _color.offsetHSL(themeData.hueShift / 360, 0, 0)
         }
+      }
+
+      // Hue Cycle — global continuous hue drift layered on top of any
+      // theme. Speed is in cycles per minute, so divide by 60 to get
+      // cycles per second. Computed once per frame above and reused.
+      if (hueCycleEnabled) {
+        _color.offsetHSL(hueCycleOffset, 0, 0)
       }
 
       // Gradient palette tint — lerp each particle's color toward a
@@ -462,6 +656,8 @@ function ForceFieldVisual() {
   const meshRef = useRef()
   const forceFieldType = useStore(s => s.forceFieldType)
   const forceFieldStrength = useStore(s => s.forceFieldStrength)
+  const forceFieldCenter = useStore(s => s.forceFieldCenter)
+  const placeFieldMode = useStore(s => s.placeFieldMode)
 
   useFrame((_, delta) => {
     if (!meshRef.current) return
@@ -473,13 +669,62 @@ function ForceFieldVisual() {
 
   const colorMap = { attractor: '#00ff88', repulsor: '#ff4444', vortex: '#8844ff', turbulence: '#ffaa00' }
   const col = colorMap[forceFieldType] || '#00ff88'
+  // Subtle pulse highlight when "Place Field" is armed.
+  const pulse = placeFieldMode ? 0.45 : 0.15 + forceFieldStrength * 0.05
 
   return (
-    <mesh ref={meshRef} position={[0, 0, 0]}>
-      <sphereGeometry args={[0.5, 16, 16]} />
-      <meshBasicMaterial color={col} transparent opacity={0.15 + forceFieldStrength * 0.05} wireframe />
-    </mesh>
+    <group position={forceFieldCenter}>
+      <mesh ref={meshRef}>
+        <sphereGeometry args={[0.5, 16, 16]} />
+        <meshBasicMaterial color={col} transparent opacity={pulse} wireframe />
+      </mesh>
+      {placeFieldMode && (
+        <mesh>
+          <sphereGeometry args={[0.7, 24, 24]} />
+          <meshBasicMaterial color={col} transparent opacity={0.12} wireframe />
+        </mesh>
+      )}
+    </group>
   )
+}
+
+function CameraShakeFX() {
+  // Apply a small per-frame offset when the audio beat fires, then
+  // restore on the next frame so the orbit-controls rest pose stays
+  // anchored. Net effect: the camera kicks on each beat and snaps back
+  // without drifting. Skipped entirely when the toggle is off so the
+  // base scene has zero overhead. Also suppressed under reduced motion
+  // — vestibular users get the rest of the scene without the kick.
+  const { camera } = useThree()
+  const lastOffset = useRef([0, 0])
+  useFrame((_, delta) => {
+    const { cameraShake, cameraShakeIntensity, audioReactive,
+            audioMode, audioBeat, audioBass, audioLevel,
+            reducedMotionMode, osPrefersReducedMotion } = useStore.getState()
+    // Always undo last frame's offset so we never accumulate drift,
+    // even when the user toggles the feature off mid-shake.
+    const [pdx, pdy] = lastOffset.current
+    if (pdx !== 0 || pdy !== 0) {
+      camera.position.x -= pdx
+      camera.position.y -= pdy
+      lastOffset.current = [0, 0]
+    }
+    if (!cameraShake || !audioReactive) return
+    if (resolveReducedMotion(reducedMotionMode, osPrefersReducedMotion)) return
+    const impulse =
+      audioMode === 'beat' ? audioBeat :
+      audioMode === 'bass' ? audioBass :
+      audioLevel
+    if (impulse <= 0.01) return
+    const [dx, dy] = cameraShakeOffset(impulse, cameraShakeIntensity, performance.now() / 1000)
+    camera.position.x += dx
+    camera.position.y += dy
+    lastOffset.current = [dx, dy]
+    // Suppress the unused `delta` warning while leaving the param so
+    // the useFrame signature stays the standard one.
+    void delta
+  })
+  return null
 }
 
 function CameraControls() {
@@ -488,14 +733,43 @@ function CameraControls() {
   const autoRotateSpeed = useStore(s => s.autoRotateSpeed)
   const minDistance = useStore(s => s.minDistance)
   const maxDistance = useStore(s => s.maxDistance)
+  const reducedMotionMode = useStore(s => s.reducedMotionMode)
+  const osPrefersReducedMotion = useStore(s => s.osPrefersReducedMotion)
+  const reduced = resolveReducedMotion(reducedMotionMode, osPrefersReducedMotion)
+  const { camera } = useThree()
+  const controlsRef = useRef()
+
+  // Expose a tiny API on `window` so non-canvas components (like the
+  // RightSidebar camera-views panel) can capture and restore the
+  // OrbitControls state without prop-drilling refs through five layers
+  // of HTML overlays. Re-installed on every mount.
+  useEffect(() => {
+    window.__particleCamera = {
+      get: () => ({
+        pos: [camera.position.x, camera.position.y, camera.position.z],
+        target: controlsRef.current
+          ? [controlsRef.current.target.x, controlsRef.current.target.y, controlsRef.current.target.z]
+          : [0, 0, 0],
+      }),
+      set: ({ pos, target }) => {
+        if (Array.isArray(pos) && pos.length === 3) camera.position.set(pos[0], pos[1], pos[2])
+        if (Array.isArray(target) && target.length === 3 && controlsRef.current) {
+          controlsRef.current.target.set(target[0], target[1], target[2])
+          controlsRef.current.update()
+        }
+      },
+    }
+    return () => { if (window.__particleCamera) window.__particleCamera = null }
+  }, [camera])
 
   return (
     <OrbitControls
+      ref={controlsRef}
       enableDamping
       dampingFactor={0.05}
       rotateSpeed={orbitSpeed}
       zoomSpeed={0.8}
-      autoRotate={autoRotate}
+      autoRotate={autoRotate && !reduced}
       autoRotateSpeed={autoRotateSpeed}
       minDistance={minDistance}
       maxDistance={maxDistance}
@@ -513,11 +787,35 @@ export default function ParticleCanvas() {
   const vignetteIntensity = useStore(s => s.vignetteIntensity)
   const filmGrain = useStore(s => s.filmGrain)
   const filmGrainIntensity = useStore(s => s.filmGrainIntensity)
+  const depthOfField       = useStore(s => s.depthOfField)
+  const dofFocusDistance   = useStore(s => s.dofFocusDistance)
+  const dofFocalLength     = useStore(s => s.dofFocalLength)
+  const dofBokehScale      = useStore(s => s.dofBokehScale)
   const fpsRef = useRef(null)
   const audioLevel = useStore(s => s.audioLevel)
   const audioBass = useStore(s => s.audioBass)
   const audioMid = useStore(s => s.audioMid)
   const audioTreble = useStore(s => s.audioTreble)
+  const audioBeat   = useStore(s => s.audioBeat)
+  const audioMode   = useStore(s => s.audioMode)
+  const bgGradientEnabled = useStore(s => s.bgGradientEnabled)
+  const bgGradientA       = useStore(s => s.bgGradientA)
+  const bgGradientB       = useStore(s => s.bgGradientB)
+  const bgGradientAngle   = useStore(s => s.bgGradientAngle)
+  const bgGradientAudioReactive = useStore(s => s.bgGradientAudioReactive)
+  const bgGradientAudioStrength = useStore(s => s.bgGradientAudioStrength)
+
+  // Audio-reactive hue rotation on the gradient layer. Cheap pure
+  // math: only kicks in when both reactivity flags are on AND the
+  // gradient is showing. The CSS filter is recomputed each render the
+  // audio signal changes (which the subscribed `audio*` selectors
+  // already trigger).
+  const bgFilter = (bgGradientEnabled && bgGradientAudioReactive && audioReactive)
+    ? buildHueFilterCss(computeReactiveHueDeg(
+        pickAudioSignal(audioMode, { level: audioLevel, bass: audioBass, beat: audioBeat }),
+        bgGradientAudioStrength,
+      ))
+    : ''
 
   // FPS overlay
   useEffect(() => {
@@ -562,22 +860,49 @@ export default function ParticleCanvas() {
     }
   }
 
+  // Two-finger touch gestures: pinch = particle count, swipe = preset
+  // nav. Wired to the wrapping div so it works regardless of where the
+  // R3F canvas remounts internally.
+  const wrapRef = useRef(null)
+  useTouchGestures(wrapRef)
+
   return (
-    <div className="w-full h-full relative" onPointerUp={handleTap}>
+    <div ref={wrapRef} className="w-full h-full relative" onPointerUp={handleTap}>
+      {/* Background gradient layer — sits behind the (transparent)
+          canvas when the user enables it. Pure CSS so zero GPU cost
+          beyond a normal compositor pass. Kept under the canvas via
+          z-index so particles always render on top. */}
+      {bgGradientEnabled && (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 0,
+          background: `linear-gradient(${bgGradientAngle}deg, ${bgGradientA} 0%, ${bgGradientB} 100%)`,
+          pointerEvents: 'none',
+          filter: bgFilter || undefined,
+          transition: bgGradientAudioReactive ? 'filter 80ms linear' : 'none',
+        }} />
+      )}
       <Canvas
         camera={{ position: [0, 5, 15], fov: 60 }}
-        gl={{ antialias: true, alpha: false, preserveDrawingBuffer: true }}
-        style={{ background: '#050508' }}
+        gl={{ antialias: true, alpha: bgGradientEnabled, preserveDrawingBuffer: true }}
+        style={{ background: bgGradientEnabled ? 'transparent' : '#050508', position: 'relative', zIndex: 1 }}
         id="particle-canvas"
       >
-        <color attach="background" args={['#0a0a0f']} />
+        {!bgGradientEnabled && <color attach="background" args={['#0a0a0f']} />}
         <Particles />
         <MouseAttractor />
         <ForceFieldVisual />
         {trails && <TrailEffect />}
         <CameraControls />
+        <CameraShakeFX />
         <EffectComposer>
           <Bloom intensity={glowIntensity * 0.6} luminanceThreshold={0.8} luminanceSmoothing={0.4} radius={0.3} mipmapBlur />
+          {depthOfField && (
+            <DepthOfField
+              focusDistance={dofFocusDistance}
+              focalLength={dofFocalLength}
+              bokehScale={dofBokehScale}
+            />
+          )}
           {chromaticAberration && (
             <ChromaticAberration offset={[chromaticIntensity, chromaticIntensity]} />
           )}

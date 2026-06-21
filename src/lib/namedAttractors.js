@@ -1,0 +1,193 @@
+// Named force fields — first-class attractor / repulsor / vortex /
+// turbulence objects that coexist alongside the legacy single
+// `forceFieldType` and `forceFieldCenter`. Pure helpers live here so
+// the per-frame canvas loop can call them without React imports and
+// the store can hand-roll a single subscribe.
+//
+// Each named attractor:
+//   {
+//     id: 'attr-<n>',     // stable, minted by nextAttractorId
+//     name: 'Eye',        // user-editable, sanitized
+//     type: 'attractor' | 'repulsor' | 'vortex' | 'turbulence',
+//     strength: 0..3,     // local multiplier, applied with the same
+//                         // shape as the legacy field
+//     position: [x, y, z],// world-space center
+//     radius: 4..16,      // local influence radius (the legacy field
+//                         // is hard-coded to 10; per-attractor radius
+//                         // lets users sculpt overlap & layering)
+//     enabled: boolean,   // mute without losing the entry
+//   }
+//
+// The list is persisted to localStorage so a power-user can build a
+// preset of attractors, leave the app, and resume mid-thought.
+
+export const STORAGE_KEY = 'named-attractors-v1'
+
+export const ATTRACTOR_TYPES = ['attractor', 'repulsor', 'vortex', 'turbulence']
+
+export const MAX_ATTRACTORS = 12
+export const NAME_MAX = 24
+export const STRENGTH_MIN = 0
+export const STRENGTH_MAX = 3
+export const RADIUS_MIN = 4
+export const RADIUS_MAX = 16
+export const POSITION_MIN = -50
+export const POSITION_MAX = 50
+
+const HEX_NAME_FALLBACK = 'Attractor'
+
+export function isValidType(t) {
+  return typeof t === 'string' && ATTRACTOR_TYPES.includes(t)
+}
+
+export function clampStrength(v) {
+  if (!Number.isFinite(v)) return 1
+  if (v < STRENGTH_MIN) return STRENGTH_MIN
+  if (v > STRENGTH_MAX) return STRENGTH_MAX
+  return v
+}
+
+export function clampRadius(v) {
+  if (!Number.isFinite(v)) return 10
+  if (v < RADIUS_MIN) return RADIUS_MIN
+  if (v > RADIUS_MAX) return RADIUS_MAX
+  return v
+}
+
+export function clampPositionScalar(v) {
+  if (!Number.isFinite(v)) return 0
+  if (v < POSITION_MIN) return POSITION_MIN
+  if (v > POSITION_MAX) return POSITION_MAX
+  return v
+}
+
+export function sanitizePosition(p) {
+  if (!Array.isArray(p) || p.length !== 3) return [0, 0, 0]
+  return [clampPositionScalar(p[0]), clampPositionScalar(p[1]), clampPositionScalar(p[2])]
+}
+
+export function sanitizeName(s) {
+  if (typeof s !== 'string') return HEX_NAME_FALLBACK
+  const t = s.trim().slice(0, NAME_MAX)
+  return t.length > 0 ? t : HEX_NAME_FALLBACK
+}
+
+// Normalize one stored entry to the canonical shape. Returns null
+// when the input is unsalvageable so loadAttractors() can drop
+// corrupted rows.
+export function normalizeAttractor(input) {
+  if (!input || typeof input !== 'object') return null
+  if (typeof input.id !== 'string' || !input.id.startsWith('attr-')) return null
+  if (!isValidType(input.type)) return null
+  return {
+    id: input.id,
+    name: sanitizeName(input.name),
+    type: input.type,
+    strength: clampStrength(input.strength),
+    position: sanitizePosition(input.position),
+    radius: clampRadius(input.radius),
+    enabled: input.enabled !== false,  // default true unless explicitly false
+  }
+}
+
+// Mint a fresh id from an existing list. Numbered for stable URLs.
+export function nextAttractorId(existing) {
+  const ids = new Set((existing || []).map(a => a && a.id))
+  for (let i = 1; i <= MAX_ATTRACTORS + 64; i++) {
+    const id = `attr-${i}`
+    if (!ids.has(id)) return id
+  }
+  return `attr-${Date.now()}`
+}
+
+// Default factory — give a sensible new entry the UI can drop in.
+// Caller decides position (e.g. canvas click intersection).
+export function defaultAttractor(existing, partial = {}) {
+  const id = (partial && typeof partial.id === 'string' && partial.id.startsWith('attr-'))
+    ? partial.id
+    : nextAttractorId(existing)
+  const base = {
+    id,
+    name: partial.name || `Field ${(existing && existing.length ? existing.length + 1 : 1)}`,
+    type: isValidType(partial.type) ? partial.type : 'attractor',
+    strength: partial.strength !== undefined ? clampStrength(partial.strength) : 1,
+    position: sanitizePosition(partial.position),
+    radius: partial.radius !== undefined ? clampRadius(partial.radius) : 10,
+    enabled: partial.enabled !== false,
+  }
+  return normalizeAttractor(base)
+}
+
+// Load + parse the persisted list. Returns [] on any failure so the
+// UI never has to defensively `?? []`. Drops corrupted rows silently.
+export function loadAttractors(storage) {
+  const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null)
+  if (!store) return []
+  try {
+    const raw = store.getItem(STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    const out = []
+    for (const row of parsed) {
+      const n = normalizeAttractor(row)
+      if (n) out.push(n)
+      if (out.length >= MAX_ATTRACTORS) break
+    }
+    return out
+  } catch { return [] }
+}
+
+export function saveAttractors(list, storage) {
+  const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null)
+  if (!store) return false
+  try {
+    const cleaned = (Array.isArray(list) ? list : [])
+      .map(normalizeAttractor)
+      .filter(Boolean)
+      .slice(0, MAX_ATTRACTORS)
+    store.setItem(STORAGE_KEY, JSON.stringify(cleaned))
+    return true
+  } catch { return false }
+}
+
+// Add a new attractor — returns a new array. Caps at MAX_ATTRACTORS
+// (oldest drops off the end). Refuses to add an invalid entry.
+export function addAttractor(list, partial) {
+  const base = Array.isArray(list) ? list : []
+  const next = defaultAttractor(base, partial || {})
+  if (!next) return base
+  const filtered = base.filter(a => a.id !== next.id)
+  return [...filtered, next].slice(-MAX_ATTRACTORS)
+}
+
+export function removeAttractor(list, id) {
+  if (!Array.isArray(list)) return []
+  return list.filter(a => a && a.id !== id)
+}
+
+// Patch a single field on an attractor by id — returns a new array
+// with the entry updated AND re-normalized so the patch is safe.
+export function updateAttractor(list, id, patch) {
+  if (!Array.isArray(list) || !id || !patch) return list
+  let changed = false
+  const next = list.map(a => {
+    if (!a || a.id !== id) return a
+    const merged = normalizeAttractor({ ...a, ...patch, id: a.id })
+    if (!merged) return a
+    changed = true
+    return merged
+  })
+  return changed ? next : list
+}
+
+// Toggle the enabled flag for a single attractor.
+export function toggleAttractor(list, id) {
+  return updateAttractor(list, id, { enabled: !(list || []).find(a => a && a.id === id)?.enabled })
+}
+
+// Move an attractor to a new world-space position. Validates first
+// so calling code can pass raw raycast intersections.
+export function moveAttractor(list, id, position) {
+  return updateAttractor(list, id, { position: sanitizePosition(position) })
+}

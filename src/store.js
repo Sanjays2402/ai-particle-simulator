@@ -1,5 +1,23 @@
 import { create } from 'zustand'
 import { presets } from './presets'
+import {
+  loadStats, saveStats, beginSession, recordPresetLoad, bumpStat,
+  addSessionSeconds,
+} from './lib/sessionStats'
+import { clampFocusDistance, clampFocalLength, clampBokehScale } from './lib/depthOfField'
+import { clampIntensity as clampWindIntensity, clampAzimuth as clampWindAzimuth, clampPitch as clampWindPitch } from './lib/wind'
+import { loadThemes as loadCustomThemes, saveThemes as saveCustomThemes, addTheme as addCustomThemeHelper, removeTheme as removeCustomThemeHelper, resolveTheme as resolveThemeHelper } from './lib/customThemes'
+import { clampAmplitude as clampNoiseAmp, clampFrequency as clampNoiseFreq, clampSpeed as clampNoiseSpeed } from './lib/noiseDeformer'
+import {
+  loadAttractors as loadNamedAttractors,
+  saveAttractors as saveNamedAttractors,
+  addAttractor as addNamedAttractorHelper,
+  removeAttractor as removeNamedAttractorHelper,
+  updateAttractor as updateNamedAttractorHelper,
+  toggleAttractor as toggleNamedAttractorHelper,
+  moveAttractor as moveNamedAttractorHelper,
+} from './lib/namedAttractors'
+import { clampHueReactiveStrength as clampBgGradientStrength } from './lib/bgGradient'
 
 // Lightweight settings persistence: a subset of user-tweakable values
 // is read once on store init and written back whenever it changes.
@@ -53,6 +71,14 @@ const THEMES = {
 
 export { THEMES }
 
+// Session-stats bootstrap. We bump totalSessions exactly once per page
+// load, then keep the in-memory copy on the store so panels can render
+// from a single subscription. A page-hide listener flushes accumulated
+// seconds back to disk (set up after `useStore` is created below).
+const _statsBoot = beginSession(loadStats())
+saveStats(_statsBoot)
+const _sessionStartedAt = Date.now()
+
 export const useStore = create((set, get) => {
   const persisted = loadPersisted()
   return {
@@ -104,6 +130,58 @@ export const useStore = create((set, get) => {
   collisionsEnabled: false,
   forceFieldType: null, // 'attractor' | 'repulsor' | 'vortex' | 'turbulence' | null
   forceFieldStrength: 1.0,
+  // Position of the force-field's center in world space. Defaults to
+  // origin so legacy behavior is unchanged; users can move it by
+  // enabling "Place Field" and clicking on the canvas.
+  forceFieldCenter: [0, 0, 0],
+  // True = next canvas pointer-up sets forceFieldCenter to the
+  // intersected world point, then turns this flag off.
+  placeFieldMode: false,
+  setForceFieldCenter: (xyz) => set({ forceFieldCenter: xyz }),
+  setPlaceFieldMode: (v) => set({ placeFieldMode: v }),
+
+  // Named attractors — first-class force-field OBJECTS that coexist
+  // alongside the legacy single forceFieldType. Each entry has its
+  // own type / strength / position / radius / enabled flag so users
+  // can compose multiple effects (e.g. a vortex + a repulsor) in one
+  // scene. Persisted to localStorage via lib/namedAttractors.
+  namedAttractors: loadNamedAttractors(),
+  // When non-null, the next canvas pointer-up will move this
+  // attractor's center to the intersected world point, then clear
+  // this flag. null = not placing anything. The string is the
+  // attractor id so multiple slots can each enter "place" mode
+  // independently without sharing a single placeFieldMode flag.
+  placingAttractorId: null,
+  setPlacingAttractorId: (id) => set({ placingAttractorId: id || null }),
+  addNamedAttractor: (partial) => {
+    const next = addNamedAttractorHelper(get().namedAttractors, partial)
+    saveNamedAttractors(next)
+    set({ namedAttractors: next })
+    return next[next.length - 1] ? next[next.length - 1].id : null
+  },
+  removeNamedAttractor: (id) => {
+    const next = removeNamedAttractorHelper(get().namedAttractors, id)
+    saveNamedAttractors(next)
+    set({ namedAttractors: next })
+  },
+  updateNamedAttractor: (id, patch) => {
+    const next = updateNamedAttractorHelper(get().namedAttractors, id, patch)
+    if (next === get().namedAttractors) return
+    saveNamedAttractors(next)
+    set({ namedAttractors: next })
+  },
+  toggleNamedAttractor: (id) => {
+    const next = toggleNamedAttractorHelper(get().namedAttractors, id)
+    if (next === get().namedAttractors) return
+    saveNamedAttractors(next)
+    set({ namedAttractors: next })
+  },
+  moveNamedAttractor: (id, position) => {
+    const next = moveNamedAttractorHelper(get().namedAttractors, id, position)
+    if (next === get().namedAttractors) return
+    saveNamedAttractors(next)
+    set({ namedAttractors: next })
+  },
 
   // Recording & Replay
   isRecording: false,
@@ -138,6 +216,8 @@ export const useStore = create((set, get) => {
   recentPresets: JSON.parse(localStorage.getItem('recent-presets') || '[]'),
   presetSearch: '',
   showFavoritesOnly: false,
+  presetCategory: 'all',
+  setPresetCategory: (v) => set({ presetCategory: v }),
 
   toggleFavorite: (id) => set(s => {
     const favs = s.favoritedPresets.includes(id)
@@ -172,6 +252,21 @@ export const useStore = create((set, get) => {
   aiError: null,
   prompt: '',
 
+  // Session stats — read once on boot, updated through helpers below
+  // and flushed back to disk on key user actions. The panel in the
+  // RightSidebar subscribes to this for its live readout.
+  sessionStats: _statsBoot,
+  bumpSessionStat: (key, by = 1) => set(s => {
+    const next = bumpStat(s.sessionStats, key, by)
+    saveStats(next)
+    return { sessionStats: next }
+  }),
+  resetSessionStats: () => {
+    const blank = beginSession({ ...loadStats(), totalSessions: 0, lifetimeSeconds: 0, presetsLoaded: 0, uniquePresets: [], gifsExported: 0, videosExported: 0, screenshotsTaken: 0, firstSeenAt: null })
+    saveStats(blank)
+    set({ sessionStats: blank })
+  },
+
   // Actions
   setParticleCount: (v) => set({ particleCount: v }),
   setSpeed: (v) => set({ speed: v }),
@@ -188,12 +283,52 @@ export const useStore = create((set, get) => {
   vignetteIntensity: 0.45,
   filmGrain: false,
   filmGrainIntensity: 0.18,
+  // Depth of Field (Bokeh): out-of-focus blur with adjustable focal plane.
+  // `dofFocusDistance` is normalized 0..1 (0 = camera, 1 = far plane); the
+  // canvas converts to world units when wiring the effect. `dofBokehScale`
+  // controls the blur radius. Off by default so the base scene is sharp.
+  depthOfField: false,
+  dofFocusDistance: 0.022,   // ~near-mid camera focus by default
+  dofFocalLength: 0.05,
+  dofBokehScale: 4.0,
   setChromaticAberration: (v) => set({ chromaticAberration: v }),
   setChromaticIntensity: (v) => set({ chromaticIntensity: v }),
   setVignette: (v) => set({ vignette: v }),
   setVignetteIntensity: (v) => set({ vignetteIntensity: v }),
   setFilmGrain: (v) => set({ filmGrain: v }),
   setFilmGrainIntensity: (v) => set({ filmGrainIntensity: v }),
+  setDepthOfField: (v) => set({ depthOfField: v }),
+  setDofFocusDistance: (v) => set({ dofFocusDistance: clampFocusDistance(v) }),
+  setDofFocalLength: (v)   => set({ dofFocalLength:   clampFocalLength(v) }),
+  setDofBokehScale: (v)    => set({ dofBokehScale:    clampBokehScale(v) }),
+
+  // Wind — a global drift vector applied to every particle each
+  // frame. Useful for storm / atmospheric / floating-dust looks
+  // without having to author it into each preset fn. Azimuth +
+  // pitch live in degrees so the UI feels predictable; the
+  // renderer converts to a unit vector via lib/wind.js per frame.
+  // Off (intensity = 0) by default → renderer takes the zero-vector
+  // fast path and the per-particle loop is unchanged.
+  windEnabled: false,
+  windIntensity: 1.0,
+  windAzimuth: 0,     // degrees on XZ plane, 0 = +X axis (east)
+  windPitch: 0,       // degrees lift off XZ plane, +90 = straight up
+  setWindEnabled: (v) => set({ windEnabled: !!v }),
+  setWindIntensity: (v) => set({ windIntensity: clampWindIntensity(v) }),
+  setWindAzimuth: (v)   => set({ windAzimuth:   clampWindAzimuth(v) }),
+  setWindPitch: (v)     => set({ windPitch:     clampWindPitch(v) }),
+
+  // Trig-noise deformer — a global wiggle layered on top of whatever
+  // the active preset fn produces. Amplitude 0 = invisible (the
+  // renderer skips the math entirely); higher values add shimmer.
+  noiseEnabled: false,
+  noiseAmplitude: 0.5,    // world units of peak displacement
+  noiseFrequency: 1.5,    // spatial frequency (higher = noisier)
+  noiseSpeed: 1.0,        // temporal frequency (higher = faster shimmer)
+  setNoiseEnabled: (v) => set({ noiseEnabled: !!v }),
+  setNoiseAmplitude: (v) => set({ noiseAmplitude: clampNoiseAmp(v) }),
+  setNoiseFrequency: (v) => set({ noiseFrequency: clampNoiseFreq(v) }),
+  setNoiseSpeed: (v)     => set({ noiseSpeed:     clampNoiseSpeed(v) }),
 
   // Gradient color palette — user-picked 2-stop tint applied to each
   // particle by linearly interpolating between the stops based on the
@@ -214,8 +349,173 @@ export const useStore = create((set, get) => {
   mouseTrail: false,
   setMouseTrail: (v) => set({ mouseTrail: v }),
 
+  // Kaleidoscope: N-fold rotational symmetry around the Y axis. When
+  // enabled, particles are partitioned into N slices; each slice's
+  // index is folded onto the first ("leader") slice before the preset
+  // fn runs, then its computed position is rotated by slice * 2π/N.
+  // The result is a perfectly symmetric kaleidoscope that costs the
+  // same as the original scene (no extra particle work).
+  kaleidoscopeEnabled: false,
+  kaleidoscopeSegments: 6,
+  setKaleidoscopeEnabled: (v) => set({ kaleidoscopeEnabled: v }),
+  setKaleidoscopeSegments: (v) => set({ kaleidoscopeSegments: Math.max(2, Math.min(16, Math.round(v))) }),
+
+  // Hue Cycle: continuously offset the global hue over time. Layered
+  // on top of whatever theme is active so users get a slow rainbow
+  // drift without giving up Sunset/Forest/Arctic/etc. Speed is in
+  // "full cycles per minute" so the slider has an intuitive scale.
+  hueCycleEnabled: false,
+  hueCycleSpeed: 6,  // cycles per minute
+  setHueCycleEnabled: (v) => set({ hueCycleEnabled: v }),
+  setHueCycleSpeed: (v) => set({ hueCycleSpeed: Math.max(0.5, Math.min(60, v)) }),
 
 
+
+
+  // Background gradient — replace the constant clear color (#0a0a0f)
+  // with a user-picked two-stop CSS gradient under the canvas. When
+  // enabled, the canvas clears to transparent and a positioned div
+  // behind it paints the gradient; tooltip is on the LeftSidebar.
+  // Cheap by construction — no per-frame WebGL work, just one CSS layer.
+  bgGradientEnabled: false,
+  bgGradientA: '#1e1b4b',   // top
+  bgGradientB: '#0a0a0f',   // bottom (current default)
+  bgGradientAngle: 180,     // degrees, 180 = top→bottom
+  // Audio-reactive hue rotation on the gradient layer — when both
+  // this and `audioReactive` are on, the gradient div gets a
+  // `filter: hue-rotate(<deg>)` driven by the active audio signal
+  // (level / bass / beat per audioMode). Strength is 0..1; 0 mutes
+  // the reactivity entirely. Idle path is unchanged (renderer skips
+  // the filter when the toggle is off).
+  bgGradientAudioReactive: false,
+  bgGradientAudioStrength: 0.5,
+  setBgGradientEnabled: (v) => set({ bgGradientEnabled: v }),
+  setBgGradientA: (v) => set({ bgGradientA: v }),
+  setBgGradientB: (v) => set({ bgGradientB: v }),
+  setBgGradientAngle: (v) => set({ bgGradientAngle: Math.max(0, Math.min(360, v | 0)) }),
+  setBgGradientAudioReactive: (v) => set({ bgGradientAudioReactive: !!v }),
+  setBgGradientAudioStrength: (v) => set({
+    bgGradientAudioStrength: clampBgGradientStrength(v),
+  }),
+
+  // Crossfade — render a weighted blend between the current preset
+  // and a chosen "blend target" preset. When `blendActive` is true,
+  // every particle's target position + color is `lerp(currentFn, blendFn, t)`
+  // where t ramps from 0 → 1 over blendSeconds. When the ramp finishes,
+  // the blend target becomes the current preset and the blend state
+  // resets — same UX as a single loadPreset() but smooth instead of
+  // an abrupt swap. Pure overlay on the existing pipeline; off by
+  // default so the per-particle loop cost is unchanged when unused.
+  blendTargetId: null,
+  blendTargetSource: '',
+  blendTargetFn: null,
+  blendProgress: 0,        // 0..1
+  blendSeconds: 2.0,       // default ramp duration
+  blendActive: false,
+  setBlendSeconds: (v) => set({ blendSeconds: Math.max(0.2, Math.min(20, v)) }),
+  // Start a crossfade to the given preset id. Compiles the target fn
+  // up front so the per-frame loop never has to.
+  beginBlendTo: (presetId) => {
+    const preset = presets.find(p => p.id === presetId)
+    if (!preset) return
+    const { fn } = compileParticleFn(preset.code)
+    if (!fn) return
+    set({
+      blendTargetId: presetId,
+      blendTargetSource: preset.code,
+      blendTargetFn: fn,
+      blendProgress: 0,
+      blendActive: true,
+    })
+  },
+  // Called by the renderer every frame while blendActive — advances
+  // the ramp by dt (seconds). When it finishes, swap the target into
+  // the current preset slot via loadPreset so the rest of the app
+  // (info panel, source viewer, recents) treats it as a normal swap.
+  advanceBlend: (dt) => {
+    const s = get()
+    if (!s.blendActive) return
+    const seconds = Math.max(0.2, s.blendSeconds)
+    const next = Math.min(1, s.blendProgress + dt / seconds)
+    if (next >= 1) {
+      const id = s.blendTargetId
+      set({ blendActive: false, blendProgress: 0, blendTargetId: null, blendTargetFn: null, blendTargetSource: '' })
+      if (id) get().loadPreset(id)
+    } else {
+      set({ blendProgress: next })
+    }
+  },
+  cancelBlend: () => set({ blendActive: false, blendProgress: 0, blendTargetId: null, blendTargetFn: null, blendTargetSource: '' }),
+
+  // Reduced motion — accessibility mode that respects the OS-level
+  // `prefers-reduced-motion: reduce` hint. UI lets the user override:
+  //   - 'auto':   follow the OS (default)
+  //   - 'reduce': force reduced motion on (great for vestibular disorders)
+  //   - 'full':   force animations on regardless of OS
+  // The boot in src/lib/reducedMotion.js reads the OS pref once at
+  // load time + subscribes to changes so we don't recheck on every frame.
+  reducedMotionMode: localStorage.getItem('reduced-motion-mode') || 'auto',
+  osPrefersReducedMotion: false,  // updated by the App-level subscriber
+  setReducedMotionMode: (m) => {
+    const allowed = m === 'reduce' || m === 'full' || m === 'auto'
+    const next = allowed ? m : 'auto'
+    try { localStorage.setItem('reduced-motion-mode', next) } catch { /* quota */ }
+    set({ reducedMotionMode: next })
+  },
+  setOSPrefersReducedMotion: (v) => set({ osPrefersReducedMotion: !!v }),
+
+  // Slideshow mode — rotate through filtered/favourited presets on a
+  // timer. `slideshowOrder` is one of 'sequence' | 'shuffle' | 'favourites'.
+  // The driver in App.jsx watches these and rotates accordingly; we
+  // keep all state here so any UI surface can pause / change cadence.
+  // `slideshowRespectCategory` scopes sequence + shuffle to the active
+  // LeftSidebar category chip (favourites order intentionally bypasses).
+  slideshowEnabled: false,
+  slideshowDwellSec: 8,
+  slideshowOrder: 'sequence',
+  slideshowRespectCategory: false,
+  setSlideshowEnabled: (v) => set({ slideshowEnabled: v }),
+  setSlideshowDwellSec: (v) => set({ slideshowDwellSec: Math.max(2, Math.min(120, v)) }),
+  setSlideshowOrder: (v) => set({ slideshowOrder: v }),
+  setSlideshowRespectCategory: (v) => set({ slideshowRespectCategory: !!v }),
+
+  // Camera shake on beat — when audio reactivity + this toggle are on,
+  // the camera nudges on each detected beat (or bass surge). Intensity
+  // is a 0..1 scalar that the renderer multiplies by the active audio
+  // signal before applying. Default off so the baseline scene is calm.
+  cameraShake: false,
+  cameraShakeIntensity: 0.5,
+  setCameraShake: (v) => set({ cameraShake: v }),
+  setCameraShakeIntensity: (v) => set({ cameraShakeIntensity: Math.max(0, Math.min(1, v)) }),
+
+  // Mini-map overlay — small top-down XZ widget pinned to the bottom-
+  // right of the canvas. Shows where the camera sits vs the scene
+  // origin and lets the user click to recenter the orbit target.
+  // Off by default; zero cost when off (component returns null).
+  minimapEnabled: false,
+  setMinimapEnabled: (v) => set({ minimapEnabled: !!v }),
+
+  // Waveform overlay — small oscilloscope strip pinned to the top-
+  // right of the canvas whenever audio reactivity is on AND this
+  // toggle is enabled. Renders the live time-domain signal so users
+  // can SEE what the audio reactivity is responding to. Off by
+  // default; zero cost when off.
+  waveformEnabled: false,
+  setWaveformEnabled: (v) => set({ waveformEnabled: !!v }),
+  // Mode = 'time' (oscilloscope polyline) or 'frequency' (32-bar
+  // spectrum). Persisted in localStorage so users don't have to
+  // re-pick after every reload.
+  waveformMode: (() => {
+    try {
+      const v = typeof localStorage !== 'undefined' ? localStorage.getItem('waveform-mode-v1') : null
+      return (v === 'time' || v === 'frequency') ? v : 'time'
+    } catch { return 'time' }
+  })(),
+  setWaveformMode: (v) => {
+    const next = (v === 'frequency') ? 'frequency' : 'time'
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem('waveform-mode-v1', next) } catch { /* */ }
+    set({ waveformMode: next })
+  },
 
   setMouseAttract: (v) => set({ mouseAttract: v }),
   paintMode: false,
@@ -257,8 +557,45 @@ export const useStore = create((set, get) => {
 
   setTheme: (t) => {
     set({ theme: t })
-    const theme = THEMES[t]
-    if (theme) document.documentElement.style.setProperty('--neon', theme.neon)
+    // Resolve against built-ins first, then custom themes so a saved
+    // custom theme can also drive the --neon CSS variable.
+    const resolved = resolveThemeHelper(t, THEMES, get().customThemes)
+    if (resolved) document.documentElement.style.setProperty('--neon', resolved.neon)
+  },
+
+  // Custom theme editor — user-authored themes with their own neon
+  // accent + hue shift, persisted to localStorage via lib/customThemes.
+  // ParticleCanvas resolves the active theme via the same helper so
+  // built-ins and custom themes paint identically.
+  customThemes: loadCustomThemes(),
+  addCustomTheme: (partial) => {
+    const next = addCustomThemeHelper(get().customThemes, partial)
+    saveCustomThemes(next)
+    set({ customThemes: next })
+    return next[0] ? next[0].id : null
+  },
+  removeCustomTheme: (id) => {
+    const next = removeCustomThemeHelper(get().customThemes, id)
+    saveCustomThemes(next)
+    // If the deleted theme was active, fall back to neon so the UI
+    // doesn't end up pointing at a non-existent theme id.
+    const active = get().theme
+    if (active === id) {
+      set({ theme: 'neon', customThemes: next })
+      document.documentElement.style.setProperty('--neon', THEMES.neon.neon)
+    } else {
+      set({ customThemes: next })
+    }
+  },
+  refreshCustomThemes: () => set({ customThemes: loadCustomThemes() }),
+  // Replace the entire custom theme list — used by the JSON import
+  // path so it doesn't have to call addCustomTheme N times (each of
+  // those triggers a saveCustomThemes + setState, churn for nothing
+  // when the import already produced a clean cap-respecting list).
+  setCustomThemes: (next) => {
+    const safe = Array.isArray(next) ? next.slice() : []
+    saveCustomThemes(safe)
+    set({ customThemes: safe })
   },
 
   setAiSettings: (key, baseUrl, model) => {
@@ -298,6 +635,14 @@ export const useStore = create((set, get) => {
       infoDesc: description || preset.description,
       recentPresets,
       ...physicsState,
+    })
+    // Stats — bump after the scene swap so the panel reflects the
+    // preset that just rendered. Persisted on every load so a crash
+    // mid-session doesn't lose the counter.
+    set(s => {
+      const next = recordPresetLoad(s.sessionStats, presetId)
+      saveStats(next)
+      return { sessionStats: next }
     })
     setTimeout(() => get().capturePresetThumbnail(presetId), 2000)
   },
@@ -416,6 +761,25 @@ useStore.subscribe((state) => {
   }
   if (dirty) savePersisted(state)
 })
+
+// Flush accumulated session seconds back to disk on page hide /
+// beforeunload. Using both events covers desktop tab-close + mobile
+// background — visibilitychange fires reliably on mobile, beforeunload
+// on desktop refresh/close.
+if (typeof window !== 'undefined') {
+  const flushSession = () => {
+    const elapsedSec = (Date.now() - _sessionStartedAt) / 1000
+    const cur = useStore.getState().sessionStats
+    const next = addSessionSeconds(cur, elapsedSec)
+    saveStats(next)
+    useStore.setState({ sessionStats: next })
+  }
+  window.addEventListener('beforeunload', flushSession)
+  window.addEventListener('pagehide', flushSession)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushSession()
+  })
+}
 
 function compileParticleFn(code) {
   const controls = []

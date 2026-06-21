@@ -1,0 +1,98 @@
+// Mini-map projection helpers.
+//
+// The minimap is a small XZ-plane overlay (top-down view) that shows
+// where the camera sits relative to the particle "scene radius". It
+// renders to a fixed-size canvas the consumer creates; this lib only
+// owns the math: world-space → pixel-space projection, scene-radius
+// estimation, and a thin sampler the React layer can call once per
+// frame without allocations.
+//
+// All projection happens on the XZ plane (Y is up in the simulator);
+// the world bounds we project span [-SCENE_HALF .. +SCENE_HALF] mapped
+// to [0 .. size] in pixel space. Outside-the-bounds coords are clamped
+// so the camera dot stays visible even if the user dollies way out.
+
+export const DEFAULT_SCENE_HALF = 30          // world units shown per side
+export const MIN_SCENE_HALF     = 4
+export const MAX_SCENE_HALF     = 200
+
+// Pick a scene-half value from a camera distance — picks a half that
+// keeps the camera dot roughly inside the inner 60% of the minimap.
+// `dist` is the camera's distance from the orbit target (sqrt of
+// pos.x^2 + pos.y^2 + pos.z^2 when target is the origin).
+export function pickSceneHalf(dist) {
+  if (!Number.isFinite(dist) || dist <= 0) return DEFAULT_SCENE_HALF
+  const target = dist / 0.6
+  if (target < MIN_SCENE_HALF) return MIN_SCENE_HALF
+  if (target > MAX_SCENE_HALF) return MAX_SCENE_HALF
+  return target
+}
+
+// Project a world XZ coord into pixel space for a `size`x`size` canvas
+// where the origin is the canvas center and +X goes right, +Z goes DOWN
+// (so the top-down map matches "north is +Z forward" intuition). Returns
+// [px, py] clamped to [0, size].
+export function projectXZ(worldX, worldZ, sceneHalf, size) {
+  const sh = (sceneHalf > 0 && Number.isFinite(sceneHalf)) ? sceneHalf : DEFAULT_SCENE_HALF
+  const sz = (size > 0 && Number.isFinite(size)) ? size : 100
+  // Map [-sh, +sh] → [0, sz]; clamp outside to the edges.
+  const nx = (worldX + sh) / (2 * sh)
+  const ny = (worldZ + sh) / (2 * sh)
+  const px = Math.max(0, Math.min(sz, nx * sz))
+  const py = Math.max(0, Math.min(sz, ny * sz))
+  return [px, py]
+}
+
+// Compute a sampled view of the simulator's state suitable for one
+// minimap render. Returns { camera, target, dist, sceneHalf }.
+// `cameraApi` is the window.__particleCamera object (or any object
+// with a .get() returning {pos, target}). Returns null when the API
+// is missing so the renderer can fall back to a placeholder dot.
+export function sampleScene(cameraApi) {
+  if (!cameraApi || typeof cameraApi.get !== 'function') return null
+  let snap
+  try { snap = cameraApi.get() } catch { return null }
+  if (!snap || !Array.isArray(snap.pos)) return null
+  const [cx, cy, cz] = snap.pos
+  const [tx, ty, tz] = Array.isArray(snap.target) ? snap.target : [0, 0, 0]
+  const dx = cx - tx, dy = cy - ty, dz = cz - tz
+  const dist = Math.sqrt(dx * dx + dy * dy + dz * dz)
+  return {
+    camera: [cx, cy, cz],
+    target: [tx, ty, tz],
+    dist,
+    sceneHalf: pickSceneHalf(dist),
+  }
+}
+
+// Camera "look direction" as a unit vector on the XZ plane. The
+// renderer draws a short line from the camera dot toward this
+// direction to show where the camera is pointing. Returns [0, 0] when
+// camera and target coincide on the XZ plane.
+export function lookDirXZ(camera, target) {
+  if (!Array.isArray(camera) || !Array.isArray(target)) return [0, 0]
+  const dx = target[0] - camera[0]
+  const dz = target[2] - camera[2]
+  const len = Math.sqrt(dx * dx + dz * dz)
+  if (len < 1e-6) return [0, 0]
+  return [dx / len, dz / len]
+}
+
+// Convert a click on the minimap into a target XZ world coord. Used
+// by the consumer to let users click anywhere on the minimap to recenter
+// the camera's orbit target. `px`, `py` are pixel coords measured from
+// the top-left of the canvas. Returns [worldX, worldZ].
+export function unprojectXZ(px, py, sceneHalf, size) {
+  const sh = (sceneHalf > 0 && Number.isFinite(sceneHalf)) ? sceneHalf : DEFAULT_SCENE_HALF
+  const sz = (size > 0 && Number.isFinite(size)) ? size : 100
+  const nx = (px / sz) * 2 - 1   // -1..+1
+  const ny = (py / sz) * 2 - 1
+  return [nx * sh, ny * sh]
+}
+
+// Distance scale label for the minimap (e.g. "30u" / "120u"). Keeps
+// it short for the small overlay footprint.
+export function scaleLabelFor(sceneHalf) {
+  const sh = (sceneHalf > 0 && Number.isFinite(sceneHalf)) ? sceneHalf : DEFAULT_SCENE_HALF
+  return `${Math.round(sh)}u`
+}

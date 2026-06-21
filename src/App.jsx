@@ -14,12 +14,52 @@ import HelpOverlay from './components/HelpOverlay'
 import DebugHUD from './components/DebugHUD'
 import Onboarding from './components/Onboarding'
 import MouseTrail from './components/MouseTrail'
+import SnapshotGallery from './components/SnapshotGallery'
+import Slideshow from './components/Slideshow'
+import Minimap from './components/Minimap'
+import MidiPanel from './components/MidiPanel'
+import WaveformOverlay from './components/WaveformOverlay'
+import CameraPathPlayer from './components/CameraPathPlayer'
+import PresetThumbnailPrerenderer from './components/PresetThumbnailPrerenderer'
+import MobileGestureHint from './components/MobileGestureHint'
+import { useGlobalMidi } from './lib/useGlobalMidi'
+import { loadSnapshots } from './lib/snapshotGallery'
 import { useIsMobile } from './lib/useIsMobile'
+import { getOSPrefersReduced, subscribeOSReducedMotion } from './lib/reducedMotion'
+import { pickBootTheme, applyThemeToElement } from './lib/activeThemeBoot'
+import { THEMES } from './store'
 import { Sparkles, ChevronLeft, ChevronRight } from 'lucide-react'
 
 export default function App() {
   const [showSettings, setShowSettings] = useState(false)
-  const [showSplash, setShowSplash] = useState(true)
+  const [midiOpen, setMidiOpen] = useState(false)
+  // Listen for the global "open MIDI panel" event so any UI surface
+  // (LeftSidebar button, command palette later) can trigger it.
+  useEffect(() => {
+    const onOpen = () => setMidiOpen(true)
+    window.addEventListener('particle:open-midi', onOpen)
+    return () => window.removeEventListener('particle:open-midi', onOpen)
+  }, [])
+  // Always-on Web MIDI listener — only requests access if the user
+  // already has saved bindings (so a no-controller user never sees a
+  // permission prompt).
+  useGlobalMidi()
+  // Splash is suppressed for reduced-motion users (the scale-in/fade-out
+  // is purely decorative). Initialize state from the OS pref directly
+  // so we never need a synchronous setState in an effect — that pattern
+  // triggers the cascading-render lint and means a wasted render cycle.
+  const [showSplash, setShowSplash] = useState(() => {
+    if (typeof window === 'undefined') return true
+    try {
+      const userMode = localStorage.getItem('reduced-motion-mode') || 'auto'
+      if (userMode === 'reduce') return false
+      if (userMode === 'full') return true
+      // auto: defer to OS
+      return !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+    } catch { return true }
+  })
+  const [galleryOpen, setGalleryOpen] = useState(false)
+  const [snapshotCount, setSnapshotCount] = useState(() => loadSnapshots().length)
   const isMobile = useIsMobile()
   const [leftOpen, setLeftOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 720)
   const [rightOpen, setRightOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 720)
@@ -28,12 +68,72 @@ export default function App() {
   const orb1 = useRef(null), orb2 = useRef(null), orb3 = useRef(null)
 
   useEffect(() => {
+    // For reduced-motion users showSplash was already initialized to
+    // false; the timer only matters for full-motion users.
+    if (!showSplash) return
     const t = setTimeout(() => setShowSplash(false), 1700)
     return () => clearTimeout(t)
+  }, [showSplash])
+
+  // Keep the snapshot badge in lock-step with the gallery's localStorage
+  // state. TopBar fires this event on every successful screenshot, and
+  // the gallery panel fires it after delete / clear all.
+  useEffect(() => {
+    const refresh = () => setSnapshotCount(loadSnapshots().length)
+    window.addEventListener('particle:snapshot-saved', refresh)
+    window.addEventListener('particle:snapshot-removed', refresh)
+    return () => {
+      window.removeEventListener('particle:snapshot-saved', refresh)
+      window.removeEventListener('particle:snapshot-removed', refresh)
+    }
+  }, [])
+
+  // Reduced-motion bootstrap: seed the store with the OS pref once
+  // on mount, then subscribe so any later flip (user changes OS pref
+  // mid-session) reflects without a refresh. The actual feature gates
+  // read `reducedMotionMode` + `osPrefersReducedMotion` from the store
+  // and resolve via lib/reducedMotion.
+  useEffect(() => {
+    const seed = getOSPrefersReduced()
+    useStore.getState().setOSPrefersReducedMotion(seed)
+    const unsub = subscribeOSReducedMotion((v) => {
+      useStore.getState().setOSPrefersReducedMotion(v)
+    })
+    return unsub
+  }, [])
+
+  // Active theme bootstrap: the store hydrates `theme` from
+  // particle-settings-v1 BEFORE customThemes are available to its
+  // setTheme side-effect, so the persisted theme ID (which may be
+  // a 'custom-*' id) never gets to write the --neon CSS variable on
+  // boot. This effect runs once after mount with both sides loaded
+  // and re-routes the persisted id through pickBootTheme — falling
+  // back to the default if the theme was deleted between sessions.
+  useEffect(() => {
+    const { theme, customThemes, setTheme } = useStore.getState()
+    const picked = pickBootTheme(theme, THEMES, customThemes)
+    // If the persisted id resolved cleanly we still need to apply
+    // the CSS variable; if it fell back, also flip the store to the
+    // resolved id so the UI doesn't show a phantom selection on a
+    // theme that no longer exists.
+    if (picked.fellBack && picked.id !== theme) {
+      setTheme(picked.id)
+    } else {
+      applyThemeToElement(picked, document.documentElement)
+    }
   }, [])
 
   useEffect(() => {
     const onMove = (e) => {
+      const { reducedMotionMode, osPrefersReducedMotion } = useStore.getState()
+      // Skip the parallax math entirely under reduced motion — keeps
+      // the orbs static so vestibular users don't get the drift.
+      if (reducedMotionMode === 'reduce' || (reducedMotionMode === 'auto' && osPrefersReducedMotion)) {
+        if (orb1.current) orb1.current.style.transform = 'translate(0,0)'
+        if (orb2.current) orb2.current.style.transform = 'translate(0,0)'
+        if (orb3.current) orb3.current.style.transform = 'translate(0,0)'
+        return
+      }
       const x = (e.clientX / window.innerWidth - 0.5) * 2
       const y = (e.clientY / window.innerHeight - 0.5) * 2
       if (orb1.current) orb1.current.style.transform = `translate(${x * 30}px, ${y * 30}px)`
@@ -79,6 +179,17 @@ export default function App() {
           if (data.fx.fg != null)  s.setFilmGrain(data.fx.fg)
           if (data.fx.fgI != null) s.setFilmGrainIntensity(data.fx.fgI)
         }
+        if (data.kaleido) {
+          s.setKaleidoscopeEnabled(true)
+          if (data.kaleido.segs != null) s.setKaleidoscopeSegments(data.kaleido.segs)
+        }
+        if (data.hueCycle) {
+          s.setHueCycleEnabled(true)
+          if (data.hueCycle.speed != null) s.setHueCycleSpeed(data.hueCycle.speed)
+        }
+        if (Array.isArray(data.forceFieldCenter) && data.forceFieldCenter.length === 3) {
+          s.setForceFieldCenter(data.forceFieldCenter)
+        }
 
         // Load scene last so dynamic controls and infoTitle render on top.
         if (data.preset) loadPreset(data.preset)
@@ -99,7 +210,7 @@ export default function App() {
       <div ref={orb3} className="orb orb-3" style={{ zIndex: 1 }} />
 
       <div className="relative z-10 flex flex-col h-full w-full pointer-events-none">
-        <div className="pointer-events-auto"><TopBar onSettings={() => setShowSettings(true)} /></div>
+        <div className="pointer-events-auto"><TopBar onSettings={() => setShowSettings(true)} onToggleGallery={() => setGalleryOpen(o => !o)} galleryOpen={galleryOpen} snapshotCount={snapshotCount} /></div>
         <div className="flex flex-1 overflow-hidden">
           {/* Left sidebar + toggle */}
           <div className="pointer-events-auto slide-in-left" style={{
@@ -178,6 +289,7 @@ export default function App() {
 
       <StatusStrip />
       <Toast />
+      <SnapshotGallery open={galleryOpen} onClose={() => setGalleryOpen(false)} />
 
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       <CommandPalette onSettings={() => setShowSettings(true)} />
@@ -185,6 +297,13 @@ export default function App() {
       <DebugHUD />
       <Onboarding />
       <MouseTrail />
+      <Slideshow />
+      <Minimap />
+      <WaveformOverlay />
+      <CameraPathPlayer />
+      <PresetThumbnailPrerenderer />
+      <MobileGestureHint />
+      <MidiPanel open={midiOpen} onClose={() => setMidiOpen(false)} />
 
       {showSplash && (
         <div className="splash">

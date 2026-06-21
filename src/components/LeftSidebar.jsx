@@ -1,8 +1,14 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useStore, THEMES } from '../store'
 import { presets } from '../presets'
 import { GifEncoder } from '../lib/gifEncoder'
 import { startCanvasRecording, downloadVideoBlob, isVideoExportSupported } from '../lib/videoRecorder'
+import { CATEGORIES, categoryOf, countByCategory } from '../lib/presetCategories'
+import { compassFor, WIND_PRESETS, matchesWindPreset } from '../lib/wind'
+import { DURATION_CHIPS as CROSSFADE_DURATION_CHIPS, matchDurationChip as matchCrossfadeChip } from '../lib/crossfade'
+import { downloadThemesFile, parseImport as parseThemesImport, mergeImport as mergeThemesImport } from '../lib/customThemesIO'
+import { ATTRACTOR_TYPES, MAX_ATTRACTORS } from '../lib/namedAttractors'
+import { showToast } from './Toast'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
 const THEME_LIST = [
@@ -91,6 +97,7 @@ export default function LeftSidebar() {
     URL.revokeObjectURL(url)
 
     useStore.setState({ isExportingGif: false, gifProgress: null })
+    useStore.getState().bumpSessionStat('gifsExported', 1)
   }
 
   const exportVideo = async () => {
@@ -101,6 +108,7 @@ export default function LeftSidebar() {
       downloadVideoBlob(blob, mime, baseName)
       setVideoRec(null)
       setVideoElapsed(0)
+      useStore.getState().bumpSessionStat('videosExported', 1)
       return
     }
     const canvas = document.querySelector('#particle-canvas canvas')
@@ -195,6 +203,11 @@ export default function LeftSidebar() {
           onChange={setMinDistance} display={v => `${v}`} />
         <Slider label="Max Zoom" value={maxDistance} min={20} max={100} step={5}
           onChange={setMaxDistance} display={v => `${v}`} />
+        <ToggleRow
+          label="Mini-map"
+          value={useStore(s => s.minimapEnabled)}
+          onChange={useStore(s => s.setMinimapEnabled)}
+        />
       </Section>
 
       <Section title="Cursor">
@@ -205,11 +218,36 @@ export default function LeftSidebar() {
         />
       </Section>
 
+      <Section title="Wind">
+        <WindRow />
+      </Section>
+
+      <Section title="Noise Deformer">
+        <NoiseRow />
+      </Section>
+
+      <Section title="Kaleidoscope">
+        <KaleidoscopeRow />
+      </Section>
+
       <Section title="Audio Reactivity">
         <p style={{ fontSize: 11, color: '#7a7a90', marginBottom: 8 }}>
           Click the 🎤 toolbar button to enable. Pick how audio drives the visuals:
         </p>
         <AudioModeRow />
+        <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+          <CameraShakeRow />
+        </div>
+        <div style={{ marginTop: 8 }}>
+          <ToggleRow
+            label="Waveform overlay"
+            value={useStore(s => s.waveformEnabled)}
+            onChange={useStore(s => s.setWaveformEnabled)}
+          />
+        </div>
+        <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+          <MidiButton />
+        </div>
       </Section>
 
       <Section title="Post-FX">
@@ -321,9 +359,20 @@ export default function LeftSidebar() {
           ))}
         </div>
         {forceFieldType && (
-          <Slider label="Field Strength" value={forceFieldStrength} min={0} max={5} step={0.1}
-            onChange={setForceFieldStrength} display={v => v.toFixed(1)} />
+          <>
+            <Slider label="Field Strength" value={forceFieldStrength} min={0} max={5} step={0.1}
+              onChange={setForceFieldStrength} display={v => v.toFixed(1)} />
+            <PlaceFieldRow />
+          </>
         )}
+      </Section>
+
+      <Section title="Named Attractors">
+        <NamedAttractorsBlock />
+      </Section>
+
+      <Section title="Crossfade">
+        <CrossfadeRow />
       </Section>
 
       <Section title="Visual Style">
@@ -385,6 +434,20 @@ export default function LeftSidebar() {
             </button>
           ))}
         </div>
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+          <CustomThemesRow />
+        </div>
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+          <HueCycleRow />
+        </div>
+      </Section>
+
+      <Section title="Background">
+        <BgGradientRow />
+      </Section>
+
+      <Section title="Slideshow">
+        <SlideshowRow />
       </Section>
 
       <Section title="Shape Presets">
@@ -412,44 +475,15 @@ export default function LeftSidebar() {
               transition: 'all 0.15s ease-out', whiteSpace: 'nowrap',
             }}>★ Favs</button>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {presets.filter(p => {
-            const matchSearch = !presetSearch || p.name.toLowerCase().includes(presetSearch.toLowerCase())
-            const matchFav = !showFavoritesOnly || favoritedPresets.includes(p.id)
-            return matchSearch && matchFav
-          }).map(p => (
-            <button key={p.id} onClick={() => loadPreset(p.id)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                padding: '10px 12px',
-                borderRadius: 8,
-                textAlign: 'left',
-                fontSize: 13,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease-out',
-                background: currentPreset === p.id ? 'rgba(99,102,241,0.08)' : 'transparent',
-                color: currentPreset === p.id ? '#818cf8' : '#7a7a90',
-                border: currentPreset === p.id ? '1px solid rgba(99,102,241,0.2)' : '1px solid transparent',
-              }}
-              onMouseEnter={e => {
-                if (currentPreset !== p.id) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
-              }}
-              onMouseLeave={e => {
-                if (currentPreset !== p.id) e.currentTarget.style.background = 'transparent'
-              }}
-            >
-              <span style={{ fontSize: 16 }}>{p.emoji}</span>
-              <span style={{ flex: 1 }}>{p.name}</span>
-              <span onClick={e => { e.stopPropagation(); toggleFavorite(p.id); }}
-                style={{ fontSize: 14, cursor: 'pointer', color: favoritedPresets.includes(p.id) ? '#f59e0b' : '#4a4a60',
-                  transition: 'color 0.15s ease-out' }}>
-                {favoritedPresets.includes(p.id) ? '★' : '☆'}
-              </span>
-            </button>
-          ))}
-        </div>
+        <CategoryChips />
+        <PresetList
+          presetSearch={presetSearch}
+          showFavoritesOnly={showFavoritesOnly}
+          favoritedPresets={favoritedPresets}
+          currentPreset={currentPreset}
+          loadPreset={loadPreset}
+          toggleFavorite={toggleFavorite}
+        />
       </Section>
 
       <Section title="Smart Text Engine">
@@ -661,12 +695,20 @@ function PostFXRow() {
   const vignetteIntensity     = useStore(s => s.vignetteIntensity)
   const filmGrain             = useStore(s => s.filmGrain)
   const filmGrainIntensity    = useStore(s => s.filmGrainIntensity)
+  const depthOfField          = useStore(s => s.depthOfField)
+  const dofFocusDistance      = useStore(s => s.dofFocusDistance)
+  const dofFocalLength        = useStore(s => s.dofFocalLength)
+  const dofBokehScale         = useStore(s => s.dofBokehScale)
   const setChromaticAberration = useStore(s => s.setChromaticAberration)
   const setChromaticIntensity  = useStore(s => s.setChromaticIntensity)
   const setVignette            = useStore(s => s.setVignette)
   const setVignetteIntensity   = useStore(s => s.setVignetteIntensity)
   const setFilmGrain           = useStore(s => s.setFilmGrain)
   const setFilmGrainIntensity  = useStore(s => s.setFilmGrainIntensity)
+  const setDepthOfField        = useStore(s => s.setDepthOfField)
+  const setDofFocusDistance    = useStore(s => s.setDofFocusDistance)
+  const setDofFocalLength      = useStore(s => s.setDofFocalLength)
+  const setDofBokehScale       = useStore(s => s.setDofBokehScale)
   return (
     <>
       <ToggleRow label="Chromatic Aberration" value={chromaticAberration} onChange={setChromaticAberration} />
@@ -683,6 +725,17 @@ function PostFXRow() {
       {filmGrain && (
         <Slider label="Grain Intensity" value={filmGrainIntensity} min={0} max={0.6} step={0.02}
           onChange={setFilmGrainIntensity} display={v => v.toFixed(2)} />
+      )}
+      <ToggleRow label="Depth of Field" value={depthOfField} onChange={setDepthOfField} />
+      {depthOfField && (
+        <>
+          <Slider label="Focus Distance" value={dofFocusDistance} min={0} max={0.2} step={0.001}
+            onChange={setDofFocusDistance} display={v => v.toFixed(3)} />
+          <Slider label="Focal Length" value={dofFocalLength} min={0} max={0.2} step={0.005}
+            onChange={setDofFocalLength} display={v => v.toFixed(3)} />
+          <Slider label="Bokeh Scale" value={dofBokehScale} min={0} max={12} step={0.5}
+            onChange={setDofBokehScale} display={v => v.toFixed(1)} />
+        </>
       )}
     </>
   )
@@ -726,6 +779,1179 @@ function AudioModeRow() {
           <span>beat <span style={{ color: audioBeat > 0.5 ? '#86efac' : '#a8a8b8' }}>{audioBeat.toFixed(2)}</span></span>
         </div>
       )}
+    </div>
+  )
+}
+
+// Camera shake on beat — couples the audio beat detector to a per-frame
+// camera nudge. Intensity slider gates the max amplitude; visible only
+// when the toggle is on so the section stays tidy by default.
+function CameraShakeRow() {
+  const enabled  = useStore(s => s.cameraShake)
+  const intensity = useStore(s => s.cameraShakeIntensity)
+  const setEnabled  = useStore(s => s.setCameraShake)
+  const setIntensity = useStore(s => s.setCameraShakeIntensity)
+  return (
+    <>
+      <ToggleRow label="Camera Shake on Beat" value={enabled} onChange={setEnabled} />
+      {enabled && (
+        <>
+          <Slider label="Shake Intensity" value={intensity} min={0} max={1} step={0.05}
+            onChange={setIntensity} display={v => `${Math.round(v * 100)}%`} />
+          <p style={{ fontSize: 11, color: '#7a7a90', marginTop: -4 }}>
+            Best paired with the <span style={{ color: '#c084fc' }}>Beat</span> mode above.
+          </p>
+        </>
+      )}
+    </>
+  )
+}
+
+// User-authored themes — name + accent color + hue shift, persisted
+// via `lib/customThemes`. Lives at the bottom of the Theme section so
+// the built-in chips remain the primary surface; the editor only
+// surfaces when the user wants to create / pick a custom theme.
+function CustomThemesRow() {
+  const customThemes = useStore(s => s.customThemes)
+  const activeTheme  = useStore(s => s.theme)
+  const setTheme     = useStore(s => s.setTheme)
+  const addCustomTheme = useStore(s => s.addCustomTheme)
+  const removeCustomTheme = useStore(s => s.removeCustomTheme)
+  const setCustomThemes   = useStore(s => s.setCustomThemes)
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState('My Theme')
+  const [neon, setNeon] = useState('#a855f7')
+  const [hueShift, setHueShift] = useState(0)
+
+  const save = () => {
+    const id = addCustomTheme({ name, neon, hueShift })
+    if (id) setTheme(id)
+    setOpen(false)
+  }
+
+  const exportNow = () => {
+    if (customThemes.length === 0) {
+      showToast('No custom themes to export')
+      return
+    }
+    const filename = downloadThemesFile(customThemes)
+    if (filename) {
+      showToast(`Exported ${customThemes.length} → ${filename}`)
+    } else {
+      showToast('Export failed — check console')
+    }
+  }
+
+  const importFromFile = () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'application/json,.json'
+    input.onchange = async () => {
+      const file = input.files?.[0]
+      if (!file) return
+      try {
+        const text = await file.text()
+        const res = parseThemesImport(text)
+        if (!res.ok) {
+          showToast(`Import failed: ${res.error}`)
+          return
+        }
+        const mode = window.confirm(
+          `Import ${res.items.length} custom theme${res.items.length === 1 ? '' : 's'}?\n\n` +
+          `OK = Merge into existing themes (dupes by name are skipped).\n` +
+          `Cancel = Replace all current custom themes.`
+        ) ? 'merge' : 'replace'
+        const merged = mergeThemesImport(customThemes, res.items, mode)
+        setCustomThemes(merged.items)
+        const summary = mode === 'merge'
+          ? `Merged: +${merged.added}${merged.skipped ? `, ${merged.skipped} skipped` : ''}`
+          : `Replaced: ${merged.added} loaded`
+        showToast(summary)
+      } catch (e) {
+        showToast(`Import error: ${e.message || 'unknown'}`)
+      }
+    }
+    input.click()
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <span style={{ fontSize: 11.5, fontWeight: 550, color: '#a8a8b8', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
+          Custom Themes
+        </span>
+        <button
+          onClick={() => setOpen(o => !o)}
+          style={{
+            fontSize: 11, padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
+            background: open ? 'rgba(168,85,247,0.18)' : 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(168,85,247,0.25)', color: '#d8b4fe',
+          }}
+        >{open ? 'Close' : '+ New'}</button>
+      </div>
+
+      {customThemes.length === 0 && !open && (
+        <p style={{ fontSize: 11, color: '#7a7a90', margin: 0 }}>
+          No custom themes yet. Click <span style={{ color: '#c084fc' }}>+ New</span> to create one.
+        </p>
+      )}
+
+      {customThemes.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: open ? 10 : 0 }}>
+          {customThemes.map(t => {
+            const active = activeTheme === t.id
+            return (
+              <div key={t.id} style={{ position: 'relative' }}>
+                <button
+                  onClick={() => setTheme(t.id)}
+                  title={`${t.name} · hue ${t.hueShift >= 0 ? '+' : ''}${t.hueShift}°`}
+                  style={{
+                    width: '100%',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+                    padding: '8px 4px', borderRadius: 8, fontSize: 10.5, fontWeight: 500,
+                    cursor: 'pointer', transition: 'all 0.2s cubic-bezier(0.2,0.8,0.2,1)',
+                    background: active ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.02)',
+                    border: active ? `1px solid ${t.neon}80` : '1px solid rgba(255,255,255,0.04)',
+                    color: active ? '#eeeef0' : '#8a8aa0',
+                    boxShadow: active ? `0 0 12px ${t.neon}40` : 'none',
+                  }}
+                >
+                  <span style={{
+                    width: 22, height: 22, borderRadius: '50%',
+                    background: t.neon,
+                    boxShadow: `0 0 8px ${t.neon}, inset 0 1px 0 rgba(255,255,255,0.18)`,
+                    flexShrink: 0,
+                  }} />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>
+                    {t.name}
+                  </span>
+                </button>
+                <button
+                  onClick={() => removeCustomTheme(t.id)}
+                  title="Delete"
+                  style={{
+                    position: 'absolute', top: 2, right: 2,
+                    width: 18, height: 18, padding: 0, lineHeight: 1,
+                    borderRadius: 4, cursor: 'pointer', fontSize: 11,
+                    background: 'rgba(0,0,0,0.5)', color: '#f0abfc',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                  }}
+                >×</button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {customThemes.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: open ? 10 : 8 }}>
+          <button onClick={exportNow}
+            title={`Download ${customThemes.length} custom theme${customThemes.length === 1 ? '' : 's'} as JSON`}
+            style={{
+              padding: '6px 0', borderRadius: 7, fontSize: 10.5, fontWeight: 550,
+              cursor: 'pointer',
+              background: 'rgba(168,85,247,0.10)',
+              color: '#e9d5ff',
+              border: '1px solid rgba(168,85,247,0.22)',
+              letterSpacing: '0.02em',
+            }}>↓ Export</button>
+          <button onClick={importFromFile}
+            title="Load custom themes from a JSON file"
+            style={{
+              padding: '6px 0', borderRadius: 7, fontSize: 10.5, fontWeight: 550,
+              cursor: 'pointer',
+              background: 'rgba(99,102,241,0.10)',
+              color: '#c7d2fe',
+              border: '1px solid rgba(99,102,241,0.25)',
+              letterSpacing: '0.02em',
+            }}>↑ Import</button>
+        </div>
+      )}
+      {customThemes.length === 0 && !open && (
+        <button onClick={importFromFile}
+          title="Load a theme pack from a JSON file"
+          style={{
+            width: '100%', marginTop: 4,
+            padding: '6px 0', borderRadius: 7, fontSize: 10.5, fontWeight: 550,
+            cursor: 'pointer',
+            background: 'rgba(99,102,241,0.08)',
+            color: '#c7d2fe',
+            border: '1px solid rgba(99,102,241,0.2)',
+            letterSpacing: '0.02em',
+          }}>↑ Import Theme Pack</button>
+      )}
+
+      {open && (
+        <div style={{
+          marginTop: 8, padding: 10, borderRadius: 8,
+          background: 'rgba(168,85,247,0.06)',
+          border: '1px solid rgba(168,85,247,0.18)',
+        }}>
+          <label style={{ fontSize: 11, color: '#a8a8b8', display: 'block', marginBottom: 4 }}>
+            Name
+          </label>
+          <input
+            value={name}
+            onChange={e => setName(e.target.value.slice(0, 32))}
+            placeholder="My Theme"
+            style={{
+              width: '100%', padding: '6px 8px', borderRadius: 6,
+              background: 'rgba(0,0,0,0.3)', color: '#eeeef0', fontSize: 12,
+              border: '1px solid rgba(255,255,255,0.08)', marginBottom: 10,
+            }}
+          />
+          <label style={{ fontSize: 11, color: '#a8a8b8', display: 'block', marginBottom: 4 }}>
+            Accent Color
+          </label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <input type="color" value={neon}
+              onChange={e => setNeon(e.target.value)}
+              style={{ width: 36, height: 28, border: 'none', cursor: 'pointer', background: 'transparent' }} />
+            <input value={neon}
+              onChange={e => setNeon(e.target.value)}
+              maxLength={7}
+              style={{
+                flex: 1, padding: '6px 8px', borderRadius: 6,
+                background: 'rgba(0,0,0,0.3)', color: '#eeeef0', fontSize: 12,
+                fontFamily: 'JetBrains Mono, monospace',
+                border: '1px solid rgba(255,255,255,0.08)',
+              }} />
+          </div>
+          <Slider label="Hue Shift" value={hueShift} min={-180} max={180} step={5}
+            onChange={setHueShift} display={v => `${v >= 0 ? '+' : ''}${v}°`} />
+          <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+            <button
+              onClick={save}
+              style={{
+                flex: 1, padding: '8px 0', borderRadius: 6, fontSize: 12, fontWeight: 600,
+                background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%)',
+                border: 'none', color: '#fff', cursor: 'pointer',
+              }}
+            >Save Theme</button>
+            <button
+              onClick={() => setOpen(false)}
+              style={{
+                padding: '8px 14px', borderRadius: 6, fontSize: 12,
+                background: 'rgba(255,255,255,0.04)', color: '#8a8aa0',
+                border: '1px solid rgba(255,255,255,0.08)', cursor: 'pointer',
+              }}
+            >Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Global wind: a constant directional drift applied to every particle.
+// Azimuth + pitch sliders are gated behind the toggle so the section
+// stays calm by default. Off → renderer takes the zero-vector fast path.
+// One-tap weather chips (Calm / Breeze / Gale / Storm) configure all
+// three sliders at once and highlight the matching chip when the live
+// state lines up with a preset.
+function WindRow() {
+  const enabled   = useStore(s => s.windEnabled)
+  const intensity = useStore(s => s.windIntensity)
+  const azimuth   = useStore(s => s.windAzimuth)
+  const pitch     = useStore(s => s.windPitch)
+  const setEn  = useStore(s => s.setWindEnabled)
+  const setI   = useStore(s => s.setWindIntensity)
+  const setAz  = useStore(s => s.setWindAzimuth)
+  const setPi  = useStore(s => s.setWindPitch)
+  const applyPreset = (p) => {
+    // Auto-enable when picking anything other than Calm so the user
+    // sees the effect immediately; Calm stays a no-op (preserves the
+    // existing toggle state).
+    if (p.id !== 'calm' && !enabled) setEn(true)
+    setI(p.intensity)
+    setAz(p.azimuth)
+    setPi(p.pitch)
+  }
+  return (
+    <>
+      <ToggleRow label="Wind" value={enabled} onChange={setEn} />
+      {/* Preset chips: surfaced even when the toggle is off so picking
+          one snaps the sliders AND turns the toggle on in a single tap. */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)',
+        gap: 6, marginTop: enabled ? 8 : 4, marginBottom: enabled ? 0 : 4,
+      }}>
+        {WIND_PRESETS.map(p => {
+          const active = enabled && matchesWindPreset({ intensity, azimuth, pitch }, p)
+          return (
+            <button key={p.id} onClick={() => applyPreset(p)} title={p.hint}
+              style={{
+                padding: '6px 0', borderRadius: 7,
+                fontSize: 11, fontWeight: 550,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease-out',
+                background: active
+                  ? 'linear-gradient(135deg, rgba(168,85,247,0.24) 0%, rgba(99,102,241,0.18) 100%)'
+                  : 'rgba(255,255,255,0.03)',
+                color: active ? '#e9d5ff' : '#9a9ab0',
+                border: active
+                  ? '1px solid rgba(168,85,247,0.45)'
+                  : '1px solid rgba(255,255,255,0.06)',
+                boxShadow: active ? '0 0 12px rgba(168,85,247,0.25)' : 'none',
+              }}>
+              {p.label}
+            </button>
+          )
+        })}
+      </div>
+      {enabled && (
+        <>
+          <Slider label="Intensity" value={intensity} min={0} max={5} step={0.1}
+            onChange={setI} display={v => v.toFixed(1)} />
+          <Slider label="Azimuth" value={azimuth} min={0} max={360} step={1}
+            onChange={setAz} display={v => `${v | 0}° (${compassFor(v)})`} />
+          <Slider label="Pitch" value={pitch} min={-90} max={90} step={1}
+            onChange={setPi} display={v => `${v | 0}°`} />
+          <div style={{
+            marginTop: 4, fontSize: 11, color: '#7a7a90',
+            padding: '6px 8px', borderRadius: 6,
+            background: 'rgba(168,85,247,0.05)',
+            border: '1px solid rgba(168,85,247,0.12)',
+          }}>
+            Particles drift toward the compass heading every frame.
+            Try Storm preset + Vortex field for a hurricane look.
+          </div>
+        </>
+      )}
+    </>
+  )
+}
+
+// Trig-noise deformer: amplitude / frequency / speed sliders for the
+// global wiggle. Off by default; sliders only appear when enabled.
+function NoiseRow() {
+  const enabled   = useStore(s => s.noiseEnabled)
+  const amplitude = useStore(s => s.noiseAmplitude)
+  const frequency = useStore(s => s.noiseFrequency)
+  const speed     = useStore(s => s.noiseSpeed)
+  const setEn  = useStore(s => s.setNoiseEnabled)
+  const setA   = useStore(s => s.setNoiseAmplitude)
+  const setF   = useStore(s => s.setNoiseFrequency)
+  const setS   = useStore(s => s.setNoiseSpeed)
+  return (
+    <>
+      <ToggleRow label="Wiggle" value={enabled} onChange={setEn} />
+      {enabled && (
+        <>
+          <Slider label="Amplitude" value={amplitude} min={0} max={2} step={0.05}
+            onChange={setA} display={v => v.toFixed(2)} />
+          <Slider label="Frequency" value={frequency} min={0.1} max={8} step={0.1}
+            onChange={setF} display={v => v.toFixed(1)} />
+          <Slider label="Speed" value={speed} min={0} max={4} step={0.1}
+            onChange={setS} display={v => v.toFixed(1)} />
+          <div style={{
+            marginTop: 4, fontSize: 11, color: '#7a7a90',
+            padding: '6px 8px', borderRadius: 6,
+            background: 'rgba(168,85,247,0.05)',
+            border: '1px solid rgba(168,85,247,0.12)',
+          }}>
+            Adds a per-particle trig wiggle on top of any preset.
+            Pair with a tight preset (e.g. Sphere) for shimmery dust.
+          </div>
+        </>
+      )}
+    </>
+  )
+}
+
+// Kaleidoscope: N-fold radial symmetry mode. Sliders are gated so the
+// segment count is only shown when the mode is on, keeping the sidebar
+// quiet in the default configuration.
+function KaleidoscopeRow() {
+  const enabled  = useStore(s => s.kaleidoscopeEnabled)
+  const segments = useStore(s => s.kaleidoscopeSegments)
+  const setEn    = useStore(s => s.setKaleidoscopeEnabled)
+  const setSeg   = useStore(s => s.setKaleidoscopeSegments)
+  return (
+    <>
+      <ToggleRow label="Radial Symmetry" value={enabled} onChange={setEn} />
+      {enabled && (
+        <>
+          <Slider label="Segments" value={segments} min={2} max={12} step={1}
+            onChange={setSeg} display={v => `${v}-fold`} />
+          <div style={{
+            marginTop: 4, fontSize: 11, color: '#7a7a90',
+            padding: '6px 8px', borderRadius: 6,
+            background: 'rgba(168,85,247,0.05)',
+            border: '1px solid rgba(168,85,247,0.12)',
+          }}>
+            Particles are partitioned into {segments} rotated slices.
+            Effective unique particles: ~{Math.floor((useStore.getState().particleCount || 0) / Math.max(1, segments) / 1000)}K.
+          </div>
+        </>
+      )}
+    </>
+  )
+}
+
+// Category filter chips that drive the Shape Presets list. Reads the
+// active category from the store so the list and the chips stay in
+// lock-step across re-renders.
+function CategoryChips() {
+  const active = useStore(s => s.presetCategory || 'all')
+  const setActive = useStore(s => s.setPresetCategory)
+  const counts = countByCategory(presets)
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 10 }}>
+      {CATEGORIES.map(c => {
+        const isActive = active === c.id
+        const n = counts[c.id] || 0
+        if (n === 0) return null
+        return (
+          <button key={c.id} onClick={() => setActive(c.id)}
+            title={`${c.label} (${n})`}
+            style={{
+              padding: '4px 9px', borderRadius: 999, fontSize: 10.5, fontWeight: 600,
+              cursor: 'pointer', whiteSpace: 'nowrap',
+              transition: 'all 0.15s ease-out',
+              letterSpacing: '0.01em',
+              background: isActive
+                ? 'linear-gradient(135deg, rgba(168,85,247,0.25), rgba(236,72,153,0.18))'
+                : 'rgba(255,255,255,0.035)',
+              color: isActive ? '#f3e8ff' : '#8a8aa0',
+              border: isActive ? '1px solid rgba(168,85,247,0.45)' : '1px solid rgba(255,255,255,0.06)',
+              boxShadow: isActive ? '0 0 10px rgba(168,85,247,0.25)' : 'none',
+            }}>
+            {c.label}
+            <span style={{
+              marginLeft: 5, fontSize: 9, opacity: 0.7,
+              fontFamily: 'Geist Mono, monospace',
+            }}>{n}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// Filtered preset list. Pulled out so the category subscription causes
+// a re-render of just the list, not the whole sidebar.
+function PresetList({ presetSearch, showFavoritesOnly, favoritedPresets, currentPreset, loadPreset, toggleFavorite }) {
+  const cat = useStore(s => s.presetCategory || 'all')
+  const filtered = presets.filter(p => {
+    const matchSearch = !presetSearch || p.name.toLowerCase().includes(presetSearch.toLowerCase())
+    const matchFav = !showFavoritesOnly || favoritedPresets.includes(p.id)
+    const matchCat = cat === 'all' || categoryOf(p.id) === cat
+    return matchSearch && matchFav && matchCat
+  })
+  if (filtered.length === 0) {
+    return (
+      <div style={{
+        padding: '14px 12px', textAlign: 'center', fontSize: 12,
+        color: '#6a6a80', background: 'rgba(255,255,255,0.02)',
+        border: '1px dashed rgba(255,255,255,0.05)', borderRadius: 8,
+      }}>
+        No presets match this filter.
+      </div>
+    )
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {filtered.map(p => (
+        <button key={p.id} onClick={() => loadPreset(p.id)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '10px 12px',
+            borderRadius: 8,
+            textAlign: 'left',
+            fontSize: 13,
+            cursor: 'pointer',
+            transition: 'all 0.15s ease-out',
+            background: currentPreset === p.id ? 'rgba(99,102,241,0.08)' : 'transparent',
+            color: currentPreset === p.id ? '#818cf8' : '#7a7a90',
+            border: currentPreset === p.id ? '1px solid rgba(99,102,241,0.2)' : '1px solid transparent',
+          }}
+          onMouseEnter={e => {
+            if (currentPreset !== p.id) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
+          }}
+          onMouseLeave={e => {
+            if (currentPreset !== p.id) e.currentTarget.style.background = 'transparent'
+          }}
+        >
+          <span style={{ fontSize: 16 }}>{p.emoji}</span>
+          <span style={{ flex: 1 }}>{p.name}</span>
+          <span onClick={e => { e.stopPropagation(); toggleFavorite(p.id); }}
+            style={{ fontSize: 14, cursor: 'pointer', color: favoritedPresets.includes(p.id) ? '#f59e0b' : '#4a4a60',
+              transition: 'color 0.15s ease-out' }}>
+            {favoritedPresets.includes(p.id) ? '★' : '☆'}
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// Hue Cycle: continuous global hue drift layered on top of any theme.
+// Includes a live color-bar preview so users can see the wheel
+// position the cycle is currently at without staring at the canvas.
+function HueCycleRow() {
+  const enabled = useStore(s => s.hueCycleEnabled)
+  const speed   = useStore(s => s.hueCycleSpeed)
+  const setEn   = useStore(s => s.setHueCycleEnabled)
+  const setSp   = useStore(s => s.setHueCycleSpeed)
+  return (
+    <>
+      <ToggleRow label="Hue Cycle" value={enabled} onChange={setEn} />
+      {enabled && (
+        <>
+          <Slider label="Speed" value={speed} min={0.5} max={30} step={0.5}
+            onChange={setSp} display={v => `${v.toFixed(1)} cpm`} />
+          <div style={{
+            marginTop: 6, height: 14, borderRadius: 7,
+            background: 'linear-gradient(90deg, #ef4444, #f59e0b, #facc15, #22c55e, #06b6d4, #6366f1, #a855f7, #ec4899, #ef4444)',
+            border: '1px solid rgba(255,255,255,0.06)',
+            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.1), 0 0 12px rgba(168,85,247,0.18)',
+            animation: `hue-cycle-bar ${(60 / Math.max(0.5, speed)).toFixed(2)}s linear infinite`,
+            backgroundSize: '200% 100%',
+          }} />
+          <style>{`@keyframes hue-cycle-bar { from { background-position: 0% 0%; } to { background-position: 100% 0%; } }`}</style>
+          <div style={{ marginTop: 4, fontSize: 11, color: '#7a7a90', textAlign: 'center' }}>
+            One full rotation every {(60 / Math.max(0.5, speed)).toFixed(1)}s.
+          </div>
+        </>
+      )}
+    </>
+  )
+}
+
+// Crossfade — pick a blend target preset, set a duration, and the
+// renderer lerps each particle from the current preset's position +
+// color into the target's. When the ramp completes, the target
+// becomes the new current preset. Lets users build "show reel"
+// transitions without abrupt scene swaps. Cost only kicks in while
+// active; idle path is free.
+function CrossfadeRow() {
+  const blendActive   = useStore(s => s.blendActive)
+  const blendTargetId = useStore(s => s.blendTargetId)
+  const blendProgress = useStore(s => s.blendProgress)
+  const blendSeconds  = useStore(s => s.blendSeconds)
+  const setBlendSeconds = useStore(s => s.setBlendSeconds)
+  const beginBlendTo  = useStore(s => s.beginBlendTo)
+  const cancelBlend   = useStore(s => s.cancelBlend)
+  const currentPreset = useStore(s => s.currentPreset)
+  const [pickedId, setPickedId] = useState(() => {
+    // Default the dropdown to a preset that isn't the current one.
+    const first = presets.find(p => p.id !== currentPreset) || presets[0]
+    return first ? first.id : ''
+  })
+  // Keep the dropdown's default in sync as the current preset changes,
+  // but only when the user hasn't manually picked something else.
+  useEffect(() => {
+    if (pickedId === currentPreset) {
+      const next = presets.find(p => p.id !== currentPreset) || presets[0]
+      if (next) setPickedId(next.id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPreset])
+  return (
+    <>
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ fontSize: 11, color: '#7a7a90', marginBottom: 4, fontWeight: 500 }}>Target preset</div>
+        <select value={pickedId} onChange={e => setPickedId(e.target.value)}
+          disabled={blendActive}
+          style={{
+            width: '100%', padding: '7px 8px', borderRadius: 7,
+            background: 'rgba(255,255,255,0.03)', color: '#e9e9f0',
+            border: '1px solid rgba(255,255,255,0.06)',
+            fontSize: 12, fontFamily: 'inherit', cursor: 'pointer',
+            opacity: blendActive ? 0.5 : 1,
+          }}>
+          {presets.map(p => (
+            <option key={p.id} value={p.id} disabled={p.id === currentPreset}>
+              {p.emoji ? `${p.emoji} ` : ''}{p.name}{p.id === currentPreset ? ' (current)' : ''}
+            </option>
+          ))}
+        </select>
+      </div>
+      <Slider label="Duration" value={blendSeconds} min={0.5} max={10} step={0.5}
+        onChange={setBlendSeconds} display={v => `${v.toFixed(1)}s`} />
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${CROSSFADE_DURATION_CHIPS.length}, 1fr)`, gap: 6, marginTop: 4, marginBottom: 6 }}>
+        {CROSSFADE_DURATION_CHIPS.map(chip => {
+          const active = matchCrossfadeChip(blendSeconds)?.id === chip.id
+          return (
+            <button
+              key={chip.id}
+              onClick={() => setBlendSeconds(chip.seconds)}
+              disabled={blendActive}
+              title={`${chip.label} — ${chip.seconds}s blend`}
+              style={{
+                padding: '5px 0', borderRadius: 6, fontSize: 10.5, fontWeight: 600,
+                letterSpacing: '0.02em',
+                cursor: blendActive ? 'not-allowed' : 'pointer',
+                transition: 'all 0.15s ease-out',
+                background: active
+                  ? 'linear-gradient(135deg, rgba(168,85,247,0.22) 0%, rgba(236,72,153,0.18) 100%)'
+                  : 'rgba(255,255,255,0.03)',
+                color: blendActive ? '#5a5a6a' : active ? '#f3e8ff' : '#9a9ab0',
+                border: active ? '1px solid rgba(168,85,247,0.45)' : '1px solid rgba(255,255,255,0.05)',
+                opacity: blendActive ? 0.55 : 1,
+              }}
+            >{chip.label}<span style={{ display: 'block', fontSize: 9, marginTop: 1, opacity: 0.65, fontFamily: 'Geist Mono, monospace' }}>{chip.seconds}s</span></button>
+          )
+        })}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: blendActive ? '1fr 1fr' : '1fr 1fr', gap: 6, marginTop: 6 }}>
+        <button
+          onClick={() => {
+            if (blendActive) return
+            if (!pickedId || pickedId === currentPreset) return
+            beginBlendTo(pickedId)
+          }}
+          disabled={blendActive || pickedId === currentPreset}
+          style={{
+            padding: '8px 0', borderRadius: 8, fontSize: 12, fontWeight: 600,
+            cursor: (blendActive || pickedId === currentPreset) ? 'not-allowed' : 'pointer',
+            background: blendActive
+              ? 'rgba(255,255,255,0.04)'
+              : 'linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%)',
+            color: blendActive ? '#7a7a90' : '#ffffff',
+            border: blendActive ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(168,85,247,0.5)',
+            opacity: pickedId === currentPreset ? 0.5 : 1,
+            boxShadow: blendActive ? 'none' : '0 4px 14px rgba(168,85,247,0.3), inset 0 1px 0 rgba(255,255,255,0.18)',
+          }}
+        >Start Blend</button>
+        <button
+          onClick={() => {
+            // Random target that isn't the current preset.
+            const pool = presets.filter(p => p.id !== currentPreset)
+            if (pool.length === 0) return
+            const pick = pool[Math.floor(Math.random() * pool.length)].id
+            setPickedId(pick)
+            beginBlendTo(pick)
+          }}
+          disabled={blendActive || presets.length < 2}
+          style={{
+            padding: '8px 0', borderRadius: 8, fontSize: 12, fontWeight: 550,
+            cursor: blendActive ? 'not-allowed' : 'pointer',
+            background: 'rgba(255,255,255,0.04)', color: '#c8c8d0',
+            border: '1px solid rgba(255,255,255,0.06)',
+            opacity: blendActive ? 0.4 : 1,
+          }}
+        >Blend To Random</button>
+      </div>
+      {blendActive && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: '#9a9ab0', marginBottom: 4 }}>
+            <span>Blending → <span style={{ color: '#e9d5ff' }}>{presets.find(p => p.id === blendTargetId)?.name || blendTargetId}</span></span>
+            <span style={{ fontFamily: 'Geist Mono, monospace', color: '#c084fc' }}>{Math.round(blendProgress * 100)}%</span>
+          </div>
+          <div style={{
+            height: 6, borderRadius: 3, overflow: 'hidden',
+            background: 'rgba(255,255,255,0.05)',
+            border: '1px solid rgba(255,255,255,0.06)',
+          }}>
+            <div style={{
+              height: '100%', width: `${blendProgress * 100}%`,
+              background: 'linear-gradient(90deg, #6366f1, #a855f7, #ec4899)',
+              transition: 'width 0.08s linear',
+              boxShadow: '0 0 8px rgba(168,85,247,0.6)',
+            }} />
+          </div>
+          <button onClick={cancelBlend}
+            style={{
+              width: '100%', marginTop: 8, padding: '6px 0', borderRadius: 7,
+              fontSize: 11, fontWeight: 500, cursor: 'pointer',
+              background: 'rgba(239,68,68,0.06)', color: '#fca5a5',
+              border: '1px solid rgba(239,68,68,0.2)',
+            }}>
+            Cancel
+          </button>
+        </div>
+      )}
+    </>
+  )
+}
+
+// Slideshow mode — rotate through the preset library on a timer.
+// Order chips pick between sequence, shuffle, and favourites; the
+// dwell slider sets seconds per preset. The actual rotation lives
+// in <Slideshow /> (mounted in App.jsx). The "Respect category chip"
+// toggle scopes sequence + shuffle to the active LeftSidebar category
+// filter (favourites order always bypasses — explicit picks win).
+function SlideshowRow() {
+  const enabled  = useStore(s => s.slideshowEnabled)
+  const dwell    = useStore(s => s.slideshowDwellSec)
+  const order    = useStore(s => s.slideshowOrder)
+  const setEn    = useStore(s => s.setSlideshowEnabled)
+  const setDwell = useStore(s => s.setSlideshowDwellSec)
+  const setOrder = useStore(s => s.setSlideshowOrder)
+  const favCount = useStore(s => s.favoritedPresets.length)
+  const respectCat = useStore(s => s.slideshowRespectCategory)
+  const setRespectCat = useStore(s => s.setSlideshowRespectCategory)
+  const activeCat = useStore(s => s.presetCategory || 'all')
+  const activeCatLabel = (CATEGORIES.find(c => c.id === activeCat) || { label: 'All' }).label
+  const ORDERS = [
+    { id: 'sequence',   label: 'Order' },
+    { id: 'shuffle',    label: 'Shuffle' },
+    { id: 'favourites', label: `Favs${favCount ? ` (${favCount})` : ''}` },
+  ]
+  // The category-scope toggle is meaningful for sequence + shuffle.
+  // It's still shown in 'favourites' (the label explains what happens)
+  // but the driver bypasses it; documenting that inline keeps users
+  // from being surprised when the rotation looks the same.
+  const catScopeActuallyApplied = respectCat && activeCat !== 'all' && order !== 'favourites'
+  return (
+    <>
+      <ToggleRow label="Auto-cycle" value={enabled} onChange={setEn} />
+      {enabled && (
+        <>
+          <Slider label="Dwell" value={dwell} min={2} max={60} step={1}
+            onChange={setDwell} display={v => `${v}s`} />
+          <div style={{ marginTop: 4, marginBottom: 6 }}>
+            <span style={{ fontSize: 11, color: '#7a7a90', fontWeight: 500 }}>Order</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+            {ORDERS.map(o => {
+              const active = order === o.id
+              const disabled = o.id === 'favourites' && favCount === 0
+              return (
+                <button key={o.id} onClick={() => !disabled && setOrder(o.id)}
+                  disabled={disabled}
+                  title={disabled ? 'Star some presets first' : o.label}
+                  style={{
+                    padding: '7px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+                    cursor: disabled ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.15s ease-out',
+                    background: active
+                      ? 'linear-gradient(135deg, rgba(168,85,247,0.22) 0%, rgba(236,72,153,0.18) 100%)'
+                      : 'rgba(255,255,255,0.03)',
+                    color: disabled ? '#4a4a5a' : active ? '#f3e8ff' : '#8a8aa0',
+                    border: active ? '1px solid rgba(168,85,247,0.45)' : '1px solid rgba(255,255,255,0.05)',
+                    opacity: disabled ? 0.5 : 1,
+                  }}
+                >{o.label}</button>
+              )
+            })}
+          </div>
+          {/* Respect category-chip filter */}
+          <div style={{ marginTop: 10 }}>
+            <ToggleRow label="Respect category chip" value={respectCat} onChange={setRespectCat} />
+          </div>
+          <p style={{ fontSize: 11, color: '#7a7a90', marginTop: 8 }}>
+            New scene every {dwell}s.{' '}
+            {catScopeActuallyApplied
+              ? <>Scoped to <strong style={{ color: '#c4b5fd' }}>{activeCatLabel}</strong>.</>
+              : respectCat && order === 'favourites'
+                ? <>Favourites bypass category — toggle is honoured for Order &amp; Shuffle.</>
+                : <>Manually loading a preset pauses the timer until the next dwell.</>}
+          </p>
+        </>
+      )}
+    </>
+  )
+}
+
+// Background gradient picker — two-stop linear gradient painted under
+// the canvas when enabled. Quick chips swap in canned nebulas; the
+// two color inputs let users pick exact endpoints; angle slider lets
+// them rotate the gradient. Designed to play nicely with all themes:
+// when off, the canvas keeps its existing #0a0a0f clear color exactly.
+const BG_GRADIENT_PRESETS = [
+  { id: 'nebula',   a: '#1e1b4b', b: '#0a0a0f', label: 'Indigo Night' },
+  { id: 'aurora',   a: '#064e3b', b: '#0c0a1e', label: 'Aurora Mist' },
+  { id: 'ember',    a: '#7c2d12', b: '#0a0a0f', label: 'Ember Glow' },
+  { id: 'twilight', a: '#1e293b', b: '#3b0764', label: 'Twilight' },
+  { id: 'inkwash',  a: '#1a1a2e', b: '#0f0f17', label: 'Ink Wash' },
+  { id: 'sunrise',  a: '#7c2d12', b: '#1e1b4b', label: 'Sunrise' },
+]
+function BgGradientRow() {
+  const enabled = useStore(s => s.bgGradientEnabled)
+  const a       = useStore(s => s.bgGradientA)
+  const b       = useStore(s => s.bgGradientB)
+  const angle   = useStore(s => s.bgGradientAngle)
+  const audioReactiveBg = useStore(s => s.bgGradientAudioReactive)
+  const audioStrength   = useStore(s => s.bgGradientAudioStrength)
+  const audioOn         = useStore(s => s.audioReactive)
+  const setEn    = useStore(s => s.setBgGradientEnabled)
+  const setA     = useStore(s => s.setBgGradientA)
+  const setB     = useStore(s => s.setBgGradientB)
+  const setAngle = useStore(s => s.setBgGradientAngle)
+  const setAudioReactiveBg = useStore(s => s.setBgGradientAudioReactive)
+  const setAudioStrength   = useStore(s => s.setBgGradientAudioStrength)
+  return (
+    <>
+      <ToggleRow label="Custom Gradient" value={enabled} onChange={setEn} />
+      {enabled && (
+        <>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+            <label style={{ fontSize: 11, color: '#8a8aa0' }}>From</label>
+            <input type="color" value={a} onChange={e => setA(e.target.value)}
+              style={{ width: 36, height: 26, border: '1px solid rgba(255,255,255,0.06)', borderRadius: 6, background: 'transparent', cursor: 'pointer' }} />
+            <label style={{ fontSize: 11, color: '#8a8aa0', marginLeft: 8 }}>To</label>
+            <input type="color" value={b} onChange={e => setB(e.target.value)}
+              style={{ width: 36, height: 26, border: '1px solid rgba(255,255,255,0.06)', borderRadius: 6, background: 'transparent', cursor: 'pointer' }} />
+            <div style={{
+              flex: 1, height: 24, marginLeft: 6, borderRadius: 6,
+              background: `linear-gradient(${angle}deg, ${a} 0%, ${b} 100%)`,
+              border: '1px solid rgba(255,255,255,0.06)',
+            }} />
+          </div>
+          <Slider label="Angle" value={angle} min={0} max={360} step={15}
+            onChange={setAngle} display={v => `${v}°`} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 8 }}>
+            {BG_GRADIENT_PRESETS.map(p => (
+              <button key={p.id} onClick={() => { setA(p.a); setB(p.b) }} title={p.label}
+                style={{
+                  height: 28, borderRadius: 6, cursor: 'pointer',
+                  background: `linear-gradient(${angle}deg, ${p.a} 0%, ${p.b} 100%)`,
+                  border: (a === p.a && b === p.b)
+                    ? '1px solid rgba(168,85,247,0.6)'
+                    : '1px solid rgba(255,255,255,0.08)',
+                  boxShadow: (a === p.a && b === p.b) ? '0 0 12px rgba(168,85,247,0.35)' : 'none',
+                }} />
+            ))}
+          </div>
+          <p style={{ fontSize: 11, color: '#7a7a90', marginTop: 8 }}>
+            Particles render on top — pick darks so they don&apos;t get washed out.
+          </p>
+          {/* Audio-reactive hue rotation on the gradient layer. Only
+              meaningful when the global Audio Reactivity is also on. */}
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+            <ToggleRow label="React to audio" value={audioReactiveBg} onChange={setAudioReactiveBg} />
+            {audioReactiveBg && (
+              <>
+                <Slider
+                  label="Hue swing"
+                  value={audioStrength}
+                  min={0} max={1} step={0.05}
+                  onChange={setAudioStrength}
+                  display={v => `${Math.round(v * 100)}%`}
+                />
+                {!audioOn && (
+                  <p style={{ fontSize: 11, color: '#fbbf24', marginTop: 4, opacity: 0.9 }}>
+                    Turn on Audio Reactivity (Audio panel) to hear the gradient breathe.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        </>
+      )}
+    </>
+  )
+}
+
+// Click-to-drop force-field center. Toggles place-field mode (a single
+// pointer-up on the canvas sets the field's origin and turns the mode
+// back off). Also shows the current center coordinates and a one-click
+// reset to origin.
+function PlaceFieldRow() {
+  const placeFieldMode = useStore(s => s.placeFieldMode)
+  const setPlaceFieldMode = useStore(s => s.setPlaceFieldMode)
+  const center = useStore(s => s.forceFieldCenter)
+  const setCenter = useStore(s => s.setForceFieldCenter)
+  const isAtOrigin = Math.abs(center[0]) < 1e-6 && Math.abs(center[1]) < 1e-6 && Math.abs(center[2]) < 1e-6
+  return (
+    <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <button onClick={() => setPlaceFieldMode(!placeFieldMode)}
+        title={placeFieldMode ? 'Click on the canvas to drop · click again to cancel' : 'Drop the field anywhere on the canvas'}
+        style={{
+          padding: '8px 0', borderRadius: 8, fontSize: 12, fontWeight: 550,
+          cursor: 'pointer', transition: 'all 0.15s ease-out',
+          background: placeFieldMode
+            ? 'linear-gradient(135deg, rgba(34,197,94,0.22), rgba(99,102,241,0.18))'
+            : 'rgba(255,255,255,0.04)',
+          color: placeFieldMode ? '#bbf7d0' : '#c8c8d0',
+          border: placeFieldMode
+            ? '1px solid rgba(34,197,94,0.4)'
+            : '1px solid rgba(255,255,255,0.06)',
+          boxShadow: placeFieldMode ? '0 0 16px rgba(34,197,94,0.3)' : 'none',
+        }}
+      >
+        {placeFieldMode ? 'Click canvas to drop field' : 'Place Field on Canvas'}
+      </button>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '6px 10px', borderRadius: 7,
+        background: 'rgba(255,255,255,0.025)',
+        border: '1px solid rgba(255,255,255,0.05)',
+        fontSize: 10.5, color: '#9a9ab0',
+        fontFamily: 'Geist Mono, monospace',
+      }}>
+        <span>center</span>
+        <span style={{ color: isAtOrigin ? '#5a5a70' : '#c084fc' }}>
+          [{center.map(n => n.toFixed(1)).join(', ')}]
+        </span>
+      </div>
+      {!isAtOrigin && (
+        <button onClick={() => setCenter([0, 0, 0])}
+          style={{
+            padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 500,
+            cursor: 'pointer',
+            background: 'rgba(239,68,68,0.06)', color: '#fca5a5',
+            border: '1px solid rgba(239,68,68,0.2)',
+          }}>
+          Reset to origin
+        </button>
+      )}
+    </div>
+  )
+}
+
+// Trigger button for the MIDI Controller mapping panel. Lives in the
+// Audio Reactivity section because both are "external signal → live
+// param" workflows. Fires a window event the App-level state listens
+// for; keeps LeftSidebar from needing a prop-drilled setter.
+function MidiButton() {
+  const supported = typeof navigator !== 'undefined' && !!navigator.requestMIDIAccess
+  return (
+    <div>
+      <button
+        onClick={() => window.dispatchEvent(new Event('particle:open-midi'))}
+        title={supported ? 'Open MIDI Controller mapping' : 'Web MIDI is not supported in this browser'}
+        disabled={!supported}
+        style={{
+          width: '100%', padding: '8px 10px', borderRadius: 8,
+          fontSize: 12, fontWeight: 550, cursor: supported ? 'pointer' : 'not-allowed',
+          background: supported
+            ? 'linear-gradient(135deg, rgba(99,102,241,0.18), rgba(168,85,247,0.14))'
+            : 'rgba(255,255,255,0.03)',
+          color: supported ? '#c7d2fe' : '#5a5a70',
+          border: supported ? '1px solid rgba(99,102,241,0.35)' : '1px solid rgba(255,255,255,0.05)',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'space-between',
+        }}
+      >
+        <span>{'MIDI Controller\u2026'}</span>
+        <span style={{ fontSize: 10, color: supported ? '#a5b4fc' : '#5a5a70' }}>
+          {supported ? 'CC \u2192 sliders' : 'unsupported'}
+        </span>
+      </button>
+      <p style={{ fontSize: 10, color: '#6a6a80', marginTop: 6, lineHeight: 1.5 }}>
+        Map hardware knobs/faders to live sliders.
+        {!supported && ' Try Chrome or Edge.'}
+      </p>
+    </div>
+  )
+}
+
+// Named Attractors — first-class force-field objects that coexist
+// with the legacy single field. Each row exposes type chip strip,
+// strength + radius sliders, enabled toggle, place-on-canvas, and
+// a remove button. Add appends a new attractor with defaults; the
+// list caps at MAX_ATTRACTORS.
+function NamedAttractorsBlock() {
+  const list = useStore(s => s.namedAttractors)
+  const add  = useStore(s => s.addNamedAttractor)
+  const remove = useStore(s => s.removeNamedAttractor)
+  const update = useStore(s => s.updateNamedAttractor)
+  const toggle = useStore(s => s.toggleNamedAttractor)
+  const placingId = useStore(s => s.placingAttractorId)
+  const setPlacing = useStore(s => s.setPlacingAttractorId)
+  const atCap = list.length >= MAX_ATTRACTORS
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <button
+        onClick={() => { if (!atCap) add({ type: 'attractor' }) }}
+        disabled={atCap}
+        title={atCap ? `Maximum ${MAX_ATTRACTORS} reached — remove one first` : 'Add a new named force field'}
+        style={{
+          padding: '8px 12px', borderRadius: 8, fontSize: 12, fontWeight: 550,
+          cursor: atCap ? 'not-allowed' : 'pointer',
+          background: atCap ? 'rgba(255,255,255,0.03)' : 'linear-gradient(135deg, rgba(99,102,241,0.18), rgba(168,85,247,0.14))',
+          color: atCap ? '#5a5a70' : '#c7d2fe',
+          border: atCap ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(99,102,241,0.35)',
+        }}>
+        {atCap ? `Maximum ${MAX_ATTRACTORS} reached` : `+ Add attractor (${list.length}/${MAX_ATTRACTORS})`}
+      </button>
+
+      {list.length === 0 && (
+        <p style={{ fontSize: 11, color: '#7a7a90', lineHeight: 1.5, margin: 0 }}>
+          Add named force fields that layer on top of the single legacy field.
+          Multiple types coexist — try a Vortex + a Repulsor for a dramatic ring.
+        </p>
+      )}
+
+      {list.map((a, idx) => (
+        <NamedAttractorRow
+          key={a.id}
+          index={idx}
+          attractor={a}
+          isPlacing={placingId === a.id}
+          onRename={(name) => update(a.id, { name })}
+          onTypeChange={(type) => update(a.id, { type })}
+          onStrengthChange={(strength) => update(a.id, { strength })}
+          onRadiusChange={(radius) => update(a.id, { radius })}
+          onToggle={() => toggle(a.id)}
+          onRemove={() => remove(a.id)}
+          onPlace={() => setPlacing(placingId === a.id ? null : a.id)}
+        />
+      ))}
+    </div>
+  )
+}
+
+function NamedAttractorRow({
+  index, attractor, isPlacing,
+  onRename, onTypeChange, onStrengthChange, onRadiusChange,
+  onToggle, onRemove, onPlace,
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draftName, setDraftName] = useState(attractor.name)
+  // Sync draft on external rename.
+  useEffect(() => { setDraftName(attractor.name) }, [attractor.name])
+
+  const TYPE_LABELS = {
+    attractor: 'Attract',
+    repulsor:  'Repulse',
+    vortex:    'Vortex',
+    turbulence:'Turb.',
+  }
+
+  return (
+    <div style={{
+      borderRadius: 10,
+      background: attractor.enabled ? 'rgba(255,255,255,0.025)' : 'rgba(255,255,255,0.015)',
+      border: isPlacing
+        ? '1px solid rgba(34,197,94,0.45)'
+        : (attractor.enabled
+            ? '1px solid rgba(99,102,241,0.18)'
+            : '1px solid rgba(255,255,255,0.05)'),
+      boxShadow: isPlacing ? '0 0 14px rgba(34,197,94,0.25)' : 'none',
+      padding: '10px 11px',
+      opacity: attractor.enabled ? 1 : 0.55,
+      transition: 'all 0.2s ease-out',
+    }}>
+      {/* Header: name + enabled toggle + remove */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <span style={{
+          fontSize: 9, fontWeight: 700, letterSpacing: '0.12em',
+          color: '#6a6a80', textTransform: 'uppercase',
+          background: 'rgba(255,255,255,0.04)',
+          padding: '1px 5px', borderRadius: 4,
+          fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+        }}>#{index + 1}</span>
+        {editing ? (
+          <input
+            type="text"
+            value={draftName}
+            autoFocus
+            onChange={(e) => setDraftName(e.target.value)}
+            onBlur={() => { onRename(draftName); setEditing(false) }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { onRename(draftName); setEditing(false) } else if (e.key === 'Escape') { setDraftName(attractor.name); setEditing(false) } }}
+            style={{
+              flex: 1, minWidth: 0, padding: '3px 7px', borderRadius: 5,
+              background: 'rgba(255,255,255,0.04)', color: '#eeeef0',
+              border: '1px solid rgba(99,102,241,0.45)', fontSize: 12,
+              outline: 'none', fontFamily: 'inherit',
+            }}
+          />
+        ) : (
+          <span
+            onDoubleClick={() => setEditing(true)}
+            title="Double-click to rename"
+            style={{
+              flex: 1, minWidth: 0,
+              fontSize: 12, fontWeight: 600, color: '#eeeef0',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              cursor: 'text',
+            }}>
+            {attractor.name}
+          </span>
+        )}
+        <button
+          onClick={onToggle}
+          title={attractor.enabled ? 'Mute this attractor' : 'Unmute this attractor'}
+          style={{
+            padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600,
+            cursor: 'pointer',
+            background: attractor.enabled ? 'rgba(34,197,94,0.14)' : 'rgba(255,255,255,0.04)',
+            color: attractor.enabled ? '#86efac' : '#7a7a90',
+            border: attractor.enabled ? '1px solid rgba(34,197,94,0.3)' : '1px solid rgba(255,255,255,0.06)',
+            letterSpacing: '0.06em', textTransform: 'uppercase',
+          }}>
+          {attractor.enabled ? 'On' : 'Off'}
+        </button>
+        <button
+          onClick={onRemove}
+          title="Remove this attractor"
+          style={{
+            padding: '3px 7px', borderRadius: 5, fontSize: 13, lineHeight: 1,
+            background: 'rgba(239,68,68,0.08)', color: '#fca5a5',
+            border: '1px solid rgba(239,68,68,0.25)', cursor: 'pointer',
+            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+          }}>
+          {'\u00d7'}
+        </button>
+      </div>
+
+      {/* Type chips */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 4, marginBottom: 8 }}>
+        {ATTRACTOR_TYPES.map(t => {
+          const active = attractor.type === t
+          return (
+            <button key={t}
+              onClick={() => onTypeChange(t)}
+              title={TYPE_LABELS[t]}
+              style={{
+                padding: '5px 0', borderRadius: 5, fontSize: 10, fontWeight: 600,
+                cursor: 'pointer',
+                background: active
+                  ? 'linear-gradient(135deg, rgba(168,85,247,0.22), rgba(99,102,241,0.18))'
+                  : 'rgba(255,255,255,0.03)',
+                color: active ? '#f3e8ff' : '#9a9ab0',
+                border: active ? '1px solid rgba(168,85,247,0.4)' : '1px solid rgba(255,255,255,0.05)',
+              }}>
+              {TYPE_LABELS[t]}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Strength + radius sliders inline */}
+      <div style={{ marginBottom: 6 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, marginBottom: 3 }}>
+          <span style={{ color: '#9a9ab0', fontWeight: 500 }}>Strength</span>
+          <span style={{ color: '#c8c8d0', fontFamily: 'Geist Mono, monospace', fontSize: 10 }}>{attractor.strength.toFixed(2)}</span>
+        </div>
+        <input type="range" min={0} max={3} step={0.05} value={attractor.strength}
+          onChange={(e) => onStrengthChange(parseFloat(e.target.value))}
+          style={{ width: '100%' }} />
+      </div>
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, marginBottom: 3 }}>
+          <span style={{ color: '#9a9ab0', fontWeight: 500 }}>Radius</span>
+          <span style={{ color: '#c8c8d0', fontFamily: 'Geist Mono, monospace', fontSize: 10 }}>{attractor.radius.toFixed(0)}</span>
+        </div>
+        <input type="range" min={4} max={16} step={0.5} value={attractor.radius}
+          onChange={(e) => onRadiusChange(parseFloat(e.target.value))}
+          style={{ width: '100%' }} />
+      </div>
+
+      {/* Position + place button */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <button
+          onClick={onPlace}
+          title={isPlacing
+            ? 'Click on the canvas to set this attractor\u2019s center'
+            : 'Re-place this attractor by clicking the canvas'}
+          style={{
+            flex: 1, padding: '6px 0', borderRadius: 6,
+            fontSize: 11, fontWeight: 600, cursor: 'pointer',
+            background: isPlacing
+              ? 'linear-gradient(135deg, rgba(34,197,94,0.22), rgba(99,102,241,0.18))'
+              : 'rgba(255,255,255,0.04)',
+            color: isPlacing ? '#bbf7d0' : '#c8c8d0',
+            border: isPlacing ? '1px solid rgba(34,197,94,0.4)' : '1px solid rgba(255,255,255,0.06)',
+          }}>
+          {isPlacing ? 'Click canvas\u2026' : 'Place on canvas'}
+        </button>
+        <span style={{
+          fontSize: 9, color: '#7a7a90', fontFamily: 'Geist Mono, monospace',
+          padding: '4px 6px', borderRadius: 5,
+          background: 'rgba(255,255,255,0.03)',
+          border: '1px solid rgba(255,255,255,0.04)',
+        }}>
+          {attractor.position[0].toFixed(1)}, {attractor.position[1].toFixed(1)}, {attractor.position[2].toFixed(1)}
+        </span>
+      </div>
     </div>
   )
 }

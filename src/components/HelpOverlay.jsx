@@ -1,34 +1,57 @@
 import { useEffect, useState } from 'react'
 import { X, Keyboard } from 'lucide-react'
+import { loadKeymap, resolveAction, labelForBinding } from '../lib/keymap'
 
-// Single source of truth for keyboard shortcuts shown to the user.
-// Order matters: it's the on-screen reading order.
-const SHORTCUTS = [
+// Help overlay shows the current keybindings — pulled live from
+// `loadKeymap()` so remapping in Settings is reflected here without a
+// refresh. Groups + labels live next to the action ids so each row
+// renders the right kbd glyphs.
+const SHORTCUT_GROUPS = [
   { group: 'Playback', items: [
-    ['Space',       'Play / pause'],
-    ['R',           'Random preset'],
-    ['\u2190 / \u2192', 'Previous / next preset'],
-    ['1\u20139, 0',  'Jump to preset 1\u201310'],
+    { id: 'play',    label: 'Play / pause' },
+    { id: 'random',  label: 'Random preset' },
+    { id: 'prev',    label: 'Previous preset' },
+    { id: 'next',    label: 'Next preset' },
   ] },
   { group: 'View', items: [
-    ['F',           'Toggle fullscreen'],
-    ['Shift + F',   'Favorite / unfavorite current preset'],
-    ['S',           'Screenshot to PNG'],
+    { id: 'fullscreen', label: 'Toggle fullscreen' },
+    { id: 'favorite',   label: 'Favorite / unfavorite' },
+    { id: 'screenshot', label: 'Screenshot to PNG' },
+    { id: 'saveView',   label: 'Save camera view' },
   ] },
   { group: 'Tools', items: [
+    { id: 'bookmark',      label: 'Save scene bookmark' },
+    { id: 'bookmarkPanel', label: 'Restore most recent bookmark' },
+    { id: 'help',          label: 'Toggle this help' },
+  ] },
+]
+
+// Static "literals" — shortcuts we don't (yet) route through the
+// keymap: digit jumps, command palette, touch gestures.
+const STATIC_SHORTCUTS = [
+  { group: 'Tools', items: [
     ['\u2318 K / Ctrl K', 'Open command palette'],
-    ['?',           'Toggle this help'],
+    ['1\u20139, 0',        'Jump to preset 1\u201310'],
+  ] },
+  { group: 'Touch (mobile)', items: [
+    ['Pinch',                 'Decrease / increase particle count'],
+    ['Two-finger\u00a0swipe', 'Previous / next preset'],
+    ['Double-tap',            'Play / pause'],
   ] },
 ]
 
 export default function HelpOverlay() {
   const [open, setOpen] = useState(false)
+  // Tracked so the overlay re-renders if Settings changes a binding
+  // while the overlay is open.
+  const [, setRev] = useState(0)
+  const map = loadKeymap()
 
   useEffect(() => {
     const onKey = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
-      // '?' is shift+/ on most layouts; just listen for the character.
-      if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
+      const action = resolveAction(loadKeymap(), e)
+      if (action === 'help') {
         e.preventDefault()
         setOpen(o => !o)
       } else if (e.key === 'Escape' && open) {
@@ -36,7 +59,14 @@ export default function HelpOverlay() {
       }
     }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    // Refresh the rendered bindings whenever someone fires the global
+    // remap event (Settings emits this after a Save).
+    const onRemap = () => setRev(r => r + 1)
+    window.addEventListener('particle:keymap-changed', onRemap)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('particle:keymap-changed', onRemap)
+    }
   }, [open])
 
   if (!open) return null
@@ -90,7 +120,45 @@ export default function HelpOverlay() {
           ><X size={14} /></button>
         </div>
 
-        {SHORTCUTS.map(group => (
+        {SHORTCUT_GROUPS.map(group => (
+          <div key={group.group} style={{ marginBottom: 14 }}>
+            <div style={{
+              fontSize: 10, fontWeight: 700, letterSpacing: '0.12em',
+              textTransform: 'uppercase', color: '#8a8aa0', marginBottom: 8,
+            }}>
+              {group.group}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {group.items.map(item => {
+                const label = labelForBinding(item.id, map)
+                return (
+                  <div key={item.id} style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '8px 12px', borderRadius: 8,
+                    background: 'rgba(255,255,255,0.025)',
+                    border: '1px solid rgba(255,255,255,0.04)',
+                    fontSize: 12.5, color: '#d8d8e0',
+                  }}>
+                    <span>{item.label}</span>
+                    <span style={{ display: 'inline-flex', gap: 4 }}>
+                      {label.split('+').map((k, idx) => (
+                        <kbd key={idx} style={{
+                          padding: '2px 7px', borderRadius: 5,
+                          background: 'rgba(255,255,255,0.06)',
+                          border: '1px solid rgba(255,255,255,0.08)',
+                          fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                          fontSize: 11, color: '#c8c8d0',
+                        }}>{k}</kbd>
+                      ))}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+
+        {STATIC_SHORTCUTS.map(group => (
           <div key={group.group} style={{ marginBottom: 14 }}>
             <div style={{
               fontSize: 10, fontWeight: 700, letterSpacing: '0.12em',
@@ -129,13 +197,10 @@ export default function HelpOverlay() {
           fontSize: 11, color: '#6a6a80', textAlign: 'center',
           paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.05)',
         }}>
-          Press <kbd style={{
+          Rebind any shortcut in <kbd style={{
             padding: '1px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)',
             border: '1px solid rgba(255,255,255,0.08)', fontFamily: 'Geist Mono, monospace', fontSize: 10,
-          }}>?</kbd> to toggle \u00b7 <kbd style={{
-            padding: '1px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)',
-            border: '1px solid rgba(255,255,255,0.08)', fontFamily: 'Geist Mono, monospace', fontSize: 10,
-          }}>Esc</kbd> to close
+          }}>Settings \u2192 Keyboard</kbd>
         </div>
       </div>
     </div>
