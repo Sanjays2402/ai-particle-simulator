@@ -1,16 +1,36 @@
-import { useEffect, useState } from 'react'
-import { X, Download, Trash2, Images, ImageOff } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { X, Download, Trash2, Images, ImageOff, LayoutGrid, Rows3, ChevronLeft, ChevronRight, Maximize2 } from 'lucide-react'
 import {
   loadSnapshots, saveSnapshots, removeSnapshot, downloadSnapshot,
 } from '../lib/snapshotGallery'
+import { gridLayout, lightboxNav, findSnapshot, formatDimensions } from '../lib/snapshotGrid'
 import { showToast } from './Toast'
 
-// Floating gallery strip — anchored to the bottom-center of the canvas.
-// Renders thumbnails of every snapshot the user has taken, with hover
-// actions to re-download or delete. Closes on ESC or by tapping
-// outside; toggled from the TopBar Images button.
+// Floating gallery — anchored to the bottom-center of the canvas.
+// Two view modes:
+//   - 'strip' (default) : horizontal scrolling tiles (the original layout)
+//   - 'grid'            : 4-up grid that shows all snapshots at once
+// Clicking any tile opens a full-res lightbox with arrow-key navigation
+// + the original re-download / delete actions. The view-mode preference
+// persists across sessions so power-users keep their preferred layout.
+//
+// Closes on ESC or by tapping outside; toggled from the TopBar Images button.
+
+const VIEW_KEY = 'particle-snapshot-view-v1'
+function loadView() {
+  try {
+    const v = localStorage.getItem(VIEW_KEY)
+    return v === 'grid' ? 'grid' : 'strip'
+  } catch { return 'strip' }
+}
+function saveView(v) {
+  try { localStorage.setItem(VIEW_KEY, v === 'grid' ? 'grid' : 'strip') } catch { /* quota */ }
+}
+
 export default function SnapshotGallery({ open, onClose }) {
   const [items, setItems] = useState(() => loadSnapshots())
+  const [view, setView] = useState(() => loadView())
+  const [lightboxId, setLightboxId] = useState(null)
 
   // Refresh from disk whenever the gallery opens AND when a new
   // snapshot lands (TopBar fires particle:snapshot-saved). This keeps
@@ -23,12 +43,23 @@ export default function SnapshotGallery({ open, onClose }) {
     window.addEventListener('particle:snapshot-saved', onSaved)
     return () => window.removeEventListener('particle:snapshot-saved', onSaved)
   }, [])
+  // ESC: prefer closing the lightbox first so a single press doesn't
+  // accidentally dismiss the entire gallery.
   useEffect(() => {
     if (!open) return
-    const onKey = (e) => { if (e.key === 'Escape') onClose?.() }
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        if (lightboxId != null) setLightboxId(null)
+        else onClose?.()
+      } else if (lightboxId != null && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+        e.preventDefault()
+        const nextId = lightboxNav(items, lightboxId, e.key === 'ArrowRight' ? +1 : -1)
+        if (nextId != null) setLightboxId(nextId)
+      }
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  }, [open, onClose, items, lightboxId])
 
   if (!open) return null
 
@@ -36,6 +67,11 @@ export default function SnapshotGallery({ open, onClose }) {
     const next = removeSnapshot(items, id)
     setItems(next)
     saveSnapshots(next)
+    // If the deleted one was open in the lightbox, step to the next.
+    if (lightboxId === id) {
+      const nextId = lightboxNav(next, id, +1)
+      setLightboxId(nextId)
+    }
     window.dispatchEvent(new CustomEvent('particle:snapshot-removed', { detail: next.length }))
   }
   const handleRedownload = (entry) => {
@@ -46,10 +82,19 @@ export default function SnapshotGallery({ open, onClose }) {
     if (!window.confirm('Clear all snapshots? This cannot be undone.')) return
     setItems([])
     saveSnapshots([])
+    setLightboxId(null)
     window.dispatchEvent(new CustomEvent('particle:snapshot-removed', { detail: 0 }))
   }
+  const handleSetView = (next) => {
+    setView(next)
+    saveView(next)
+  }
+
+  const layout = gridLayout(items.length)
+  const lightboxEntry = lightboxId != null ? findSnapshot(items, lightboxId) : null
 
   return (
+    <>
     <div
       onClick={onClose}
       style={{
@@ -64,7 +109,7 @@ export default function SnapshotGallery({ open, onClose }) {
         onClick={e => e.stopPropagation()}
         style={{
           width: 'min(900px, 92vw)',
-          maxHeight: '40vh',
+          maxHeight: view === 'grid' ? '70vh' : '40vh',
           background: 'linear-gradient(180deg, rgba(14,14,22,0.94) 0%, rgba(10,10,18,0.92) 100%)',
           backdropFilter: 'blur(28px) saturate(140%)',
           WebkitBackdropFilter: 'blur(28px) saturate(140%)',
@@ -88,6 +133,25 @@ export default function SnapshotGallery({ open, onClose }) {
             </span>
           </div>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            {/* View toggle: strip vs grid. Only shown when there's
+                something to look at — empty state doesn't need it. */}
+            {items.length > 0 && (
+              <div style={{
+                display: 'inline-flex', alignItems: 'center',
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.06)',
+                borderRadius: 6, overflow: 'hidden',
+              }}>
+                <button onClick={() => handleSetView('strip')} title="Strip view"
+                  style={viewBtn(view === 'strip')}>
+                  <Rows3 size={11} strokeWidth={2.2} />
+                </button>
+                <button onClick={() => handleSetView('grid')} title="Grid view"
+                  style={viewBtn(view === 'grid')}>
+                  <LayoutGrid size={11} strokeWidth={2.2} />
+                </button>
+              </div>
+            )}
             {items.length > 0 && (
               <button onClick={handleClearAll} title="Clear all snapshots"
                 style={{
@@ -113,7 +177,11 @@ export default function SnapshotGallery({ open, onClose }) {
         </div>
 
         {/* Body */}
-        <div style={{ padding: 12, overflowX: 'auto', overflowY: 'hidden' }}>
+        <div style={{
+          padding: 12,
+          overflowX: view === 'grid' ? 'hidden' : 'auto',
+          overflowY: view === 'grid' ? 'auto' : 'hidden',
+        }}>
           {items.length === 0 ? (
             <div style={{
               padding: '24px 12px', textAlign: 'center',
@@ -124,10 +192,24 @@ export default function SnapshotGallery({ open, onClose }) {
               <ImageOff size={20} strokeWidth={1.8} color="#5a5a70" />
               No snapshots yet. Press <kbd style={kbdStyle}>S</kbd> or click the camera button to capture one.
             </div>
+          ) : view === 'grid' ? (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: `repeat(${layout.cols}, 1fr)`,
+              gap: 10, paddingBottom: 4,
+            }}>
+              {items.map(s => (
+                <SnapshotTile key={s.id} entry={s} compact
+                  onClick={() => setLightboxId(s.id)}
+                  onDownload={() => handleRedownload(s)}
+                  onRemove={() => handleRemove(s.id)} />
+              ))}
+            </div>
           ) : (
             <div style={{ display: 'flex', gap: 10, paddingBottom: 4 }}>
               {items.map(s => (
                 <SnapshotTile key={s.id} entry={s}
+                  onClick={() => setLightboxId(s.id)}
                   onDownload={() => handleRedownload(s)}
                   onRemove={() => handleRemove(s.id)} />
               ))}
@@ -136,26 +218,51 @@ export default function SnapshotGallery({ open, onClose }) {
         </div>
       </div>
     </div>
+    {lightboxEntry && (
+      <Lightbox
+        entry={lightboxEntry}
+        items={items}
+        onClose={() => setLightboxId(null)}
+        onPrev={() => {
+          const id = lightboxNav(items, lightboxId, -1)
+          if (id != null) setLightboxId(id)
+        }}
+        onNext={() => {
+          const id = lightboxNav(items, lightboxId, +1)
+          if (id != null) setLightboxId(id)
+        }}
+        onDownload={() => handleRedownload(lightboxEntry)}
+        onRemove={() => handleRemove(lightboxEntry.id)}
+      />
+    )}
+    </>
   )
 }
 
-function SnapshotTile({ entry, onDownload, onRemove }) {
+function SnapshotTile({ entry, compact, onClick, onDownload, onRemove }) {
   const [hover, setHover] = useState(false)
   const ts = new Date(entry.createdAt || Date.now())
   const timeLabel = ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  // Grid tiles flex to fill their column; strip tiles use a fixed
+  // 200×130 footprint so the horizontal scroll stays smooth.
+  const sizing = compact
+    ? { width: '100%', aspectRatio: '200 / 130' }
+    : { width: 200, height: 130 }
   return (
     <div
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
+      onClick={onClick}
+      title="Click to view full-size"
       style={{
         position: 'relative', flexShrink: 0,
-        width: 200, height: 130,
+        ...sizing,
         borderRadius: 10, overflow: 'hidden',
         background: '#0a0a10',
         border: hover ? '1px solid rgba(168,85,247,0.5)' : '1px solid rgba(255,255,255,0.06)',
         boxShadow: hover ? '0 8px 24px rgba(0,0,0,0.5), 0 0 18px rgba(168,85,247,0.25)' : '0 4px 12px rgba(0,0,0,0.35)',
         transition: 'all 0.18s ease-out',
-        cursor: 'default',
+        cursor: 'pointer',
       }}
     >
       <img src={entry.thumb} alt={entry.label}
@@ -187,11 +294,15 @@ function SnapshotTile({ entry, onDownload, onRemove }) {
           animation: 'tile-fade 0.15s ease-out',
         }}>
           <style>{`@keyframes tile-fade { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }`}</style>
-          <button onClick={onDownload} title="Download"
+          <button onClick={(e) => { e.stopPropagation(); onClick?.() }} title="Open full-size"
+            style={tileBtn('rgba(168,85,247,0.85)')}>
+            <Maximize2 size={11} strokeWidth={2.4} color="#fff" />
+          </button>
+          <button onClick={(e) => { e.stopPropagation(); onDownload() }} title="Download"
             style={tileBtn('rgba(99,102,241,0.85)')}>
             <Download size={11} strokeWidth={2.4} color="#fff" />
           </button>
-          <button onClick={onRemove} title="Delete"
+          <button onClick={(e) => { e.stopPropagation(); onRemove() }} title="Delete"
             style={tileBtn('rgba(239,68,68,0.85)')}>
             <Trash2 size={11} strokeWidth={2.4} color="#fff" />
           </button>
@@ -210,12 +321,148 @@ function SnapshotTile({ entry, onDownload, onRemove }) {
   )
 }
 
+// Full-screen-ish lightbox showing the original PNG (or thumb fallback)
+// at native size. Arrow keys move between snapshots; clicking the
+// backdrop or pressing ESC closes. Designed to feel like Apple Photos:
+// dark vignette, minimal chrome, image centered with letterboxing.
+function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove }) {
+  // Memoise the formatted timestamp so the per-render `new Date(...)`
+  // isn't classified as an impure-call during render by the react
+  // compiler lint pass (matches the rule rest-of-codebase obeys).
+  const tsLabel = useMemo(() => {
+    const ts = new Date(entry.createdAt || 0)
+    return ts.toLocaleString([], {
+      month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    })
+  }, [entry.createdAt])
+  const idx = items.findIndex(it => it.id === entry.id)
+  const total = items.length
+  const hasMore = total > 1
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 60,
+        background: 'rgba(2,2,8,0.88)',
+        backdropFilter: 'blur(16px)',
+        WebkitBackdropFilter: 'blur(16px)',
+        display: 'flex', flexDirection: 'column',
+        animation: 'lightbox-fade 0.18s ease-out',
+      }}
+    >
+      <style>{`@keyframes lightbox-fade { from { opacity: 0; } to { opacity: 1; } }`}</style>
+      {/* Header strip */}
+      <div onClick={e => e.stopPropagation()} style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '12px 18px',
+        background: 'linear-gradient(180deg, rgba(0,0,0,0.55), transparent)',
+      }}>
+        <div style={{ color: '#e9d5ff', fontSize: 13, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+          <span>{entry.label || 'Snapshot'}</span>
+          <span style={{ color: '#7a7a90', fontFamily: 'Geist Mono, monospace', fontSize: 11, fontWeight: 500 }}>
+            {tsLabel}
+          </span>
+          {entry.w > 0 && entry.h > 0 && (
+            <span style={{ color: '#7a7a90', fontFamily: 'Geist Mono, monospace', fontSize: 11, fontWeight: 500 }}>
+              · {formatDimensions(entry.w, entry.h)}
+            </span>
+          )}
+          {hasMore && (
+            <span style={{ color: '#9a9ab0', fontFamily: 'Geist Mono, monospace', fontSize: 11, fontWeight: 500 }}>
+              · {idx + 1} / {total}
+            </span>
+          )}
+        </div>
+        <div style={{ display: 'inline-flex', gap: 6 }}>
+          <button onClick={onDownload} title="Download"
+            style={lightboxBtn('rgba(99,102,241,0.18)', 'rgba(99,102,241,0.4)', '#c7d2fe')}>
+            <Download size={13} strokeWidth={2.2} /> Download
+          </button>
+          <button onClick={onRemove} title="Delete"
+            style={lightboxBtn('rgba(239,68,68,0.12)', 'rgba(239,68,68,0.3)', '#fca5a5')}>
+            <Trash2 size={13} strokeWidth={2.2} />
+          </button>
+          <button onClick={onClose} title="Close (ESC)"
+            style={{
+              width: 30, height: 30, borderRadius: 8,
+              background: 'rgba(255,255,255,0.05)', color: '#cfcfde',
+              border: '1px solid rgba(255,255,255,0.08)', cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+            <X size={13} strokeWidth={2.4} />
+          </button>
+        </div>
+      </div>
+      {/* Image stage + nav */}
+      <div style={{
+        flex: 1, position: 'relative',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '0 18px 18px',
+        overflow: 'hidden',
+      }}>
+        {hasMore && (
+          <button onClick={(e) => { e.stopPropagation(); onPrev() }} title="Previous (←)"
+            style={navArrow('left')}>
+            <ChevronLeft size={18} strokeWidth={2.4} />
+          </button>
+        )}
+        <img
+          onClick={e => e.stopPropagation()}
+          src={entry.png || entry.thumb}
+          alt={entry.label || 'snapshot'}
+          style={{
+            maxWidth: '100%', maxHeight: '100%',
+            objectFit: 'contain',
+            borderRadius: 12,
+            boxShadow: '0 24px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(168,85,247,0.18)',
+            background: '#0a0a10',
+          }}
+        />
+        {hasMore && (
+          <button onClick={(e) => { e.stopPropagation(); onNext() }} title="Next (→)"
+            style={navArrow('right')}>
+            <ChevronRight size={18} strokeWidth={2.4} />
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 const tileBtn = (bg) => ({
   width: 22, height: 22, borderRadius: 6,
   background: bg, border: '1px solid rgba(255,255,255,0.2)',
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
   cursor: 'pointer',
   boxShadow: '0 2px 6px rgba(0,0,0,0.5)',
+})
+
+const viewBtn = (active) => ({
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+  width: 26, height: 22,
+  background: active ? 'rgba(168,85,247,0.22)' : 'transparent',
+  color: active ? '#e9d5ff' : '#8a8aa0',
+  border: 'none', cursor: 'pointer',
+})
+
+const lightboxBtn = (bg, border, color) => ({
+  display: 'inline-flex', alignItems: 'center', gap: 6,
+  padding: '6px 12px', borderRadius: 8,
+  background: bg, color, border: `1px solid ${border}`,
+  fontSize: 12, fontWeight: 550, cursor: 'pointer',
+})
+
+const navArrow = (side) => ({
+  position: 'absolute', top: '50%', transform: 'translateY(-50%)',
+  [side]: 20,
+  width: 44, height: 44, borderRadius: '50%',
+  background: 'rgba(20,20,30,0.7)', color: '#e9d5ff',
+  border: '1px solid rgba(168,85,247,0.3)',
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+  cursor: 'pointer',
+  backdropFilter: 'blur(12px)',
+  boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
 })
 
 const kbdStyle = {
