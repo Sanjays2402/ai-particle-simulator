@@ -1,8 +1,11 @@
-// crossfade: clamp, smoothstep, tickProgress, duration chips.
+// crossfade: clamp, smoothstep, tickProgress, duration chips
+// + custom overrides (R11.05: long-press a chip to bind sliders).
 import {
   clampSeconds, smoothstep, tickProgress,
   BLEND_MIN_SEC, BLEND_MAX_SEC,
-  DURATION_CHIPS, matchDurationChip,
+  DURATION_CHIPS, DURATION_CHIPS_DEFAULT, matchDurationChip,
+  sanitizeCrossfadeOverrides, isCrossfadeChipCustom,
+  resolveCrossfadeChips, setCrossfadeOverride, clearCrossfadeOverride,
 } from './crossfade.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -91,4 +94,48 @@ for (const chip of DURATION_CHIPS) {
   if (matchDurationChip(NaN) !== null) fail('NaN returns null')
 }
 
-console.log(`PASS: crossfade — clamp/smoothstep/tick · bounds [${BLEND_MIN_SEC}, ${BLEND_MAX_SEC}] · chips ${DURATION_CHIPS.length}`)
+// --- Custom overrides (R11.05) ---
+// sanitizeCrossfadeOverrides drops unknown ids + clamps values.
+{
+  const dirty = { drift: 99, snap: -5, bogus: 1, fast: 'x', nope: NaN }
+  const clean = sanitizeCrossfadeOverrides(dirty)
+  if ('bogus' in clean) fail('sanitize: unknown id dropped')
+  if ('nope'  in clean) fail('sanitize: unknown id dropped')
+  if ('fast'  in clean) fail('sanitize: non-finite value dropped')
+  eq(clean.drift, BLEND_MAX_SEC, 'sanitize: clamp above max')
+  eq(clean.snap,  BLEND_MIN_SEC, 'sanitize: clamp below min')
+}
+// set + clear return fresh maps; never mutate input.
+{
+  const base = {}
+  const next = setCrossfadeOverride(base, 'drift', 12)
+  eq(next.drift, 12, 'set: drift stored')
+  if (base.drift) fail('set: original not mutated')
+  const cleared = clearCrossfadeOverride(next, 'drift')
+  if (cleared.drift) fail('clear: drift removed')
+  eq(Object.keys(cleared).length, 0, 'clear: empty afterwards')
+}
+// resolveCrossfadeChips mutates DURATION_CHIPS in place AND returns it.
+{
+  // Baseline.
+  resolveCrossfadeChips({})
+  const baseDrift = DURATION_CHIPS_DEFAULT.find(c => c.id === 'drift')
+  eq(DURATION_CHIPS.find(c => c.id === 'drift').seconds, baseDrift.seconds, 'resolve: drift default intact')
+  // Override.
+  const list = resolveCrossfadeChips({ drift: 7.5 })
+  if (list !== DURATION_CHIPS) fail('resolve: should return live DURATION_CHIPS')
+  eq(DURATION_CHIPS.find(c => c.id === 'drift').seconds, 7.5, 'resolve: drift overridden')
+  // Others untouched.
+  eq(DURATION_CHIPS.find(c => c.id === 'snap').seconds, 0.5, 'resolve: snap untouched')
+  // Match against overridden seconds.
+  const m = matchDurationChip(7.5)
+  if (!m || m.id !== 'drift') fail('match: overridden drift recognised')
+  // Custom-flag mirrors the override map.
+  eq(isCrossfadeChipCustom('drift', { drift: 7.5 }), true,  'custom: yes')
+  eq(isCrossfadeChipCustom('drift', {}),             false, 'custom: no')
+  // Reset for downstream.
+  resolveCrossfadeChips({})
+  eq(DURATION_CHIPS.find(c => c.id === 'drift').seconds, baseDrift.seconds, 'resolve: reset restores defaults')
+}
+
+console.log(`PASS: crossfade — clamp/smoothstep/tick + chips + custom overrides · bounds [${BLEND_MIN_SEC}, ${BLEND_MAX_SEC}] · chips ${DURATION_CHIPS.length}`)

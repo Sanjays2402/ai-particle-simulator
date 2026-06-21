@@ -10,7 +10,13 @@ import {
   setWindOverride, clearWindOverride,
   resolveWindPresets, isWindPresetCustom,
 } from '../lib/wind'
-import { DURATION_CHIPS as CROSSFADE_DURATION_CHIPS, matchDurationChip as matchCrossfadeChip } from '../lib/crossfade'
+import {
+  DURATION_CHIPS as CROSSFADE_DURATION_CHIPS,
+  matchDurationChip as matchCrossfadeChip,
+  loadCrossfadeOverrides, saveCrossfadeOverrides,
+  setCrossfadeOverride, clearCrossfadeOverride,
+  resolveCrossfadeChips, isCrossfadeChipCustom,
+} from '../lib/crossfade'
 import { downloadThemesFile, parseImport as parseThemesImport, mergeImport as mergeThemesImport, summarizeImportImpact as summarizeThemesImpact } from '../lib/customThemesIO'
 import { ATTRACTOR_TYPES, MAX_ATTRACTORS } from '../lib/namedAttractors'
 import { showToast } from './Toast'
@@ -1406,6 +1412,59 @@ function WindChip({ preset, active, isCustom, onTap, onLong, onReset }) {
   )
 }
 
+// CrossfadeChip — same long-press pattern as WindChip, but with the
+// pink-violet gradient that matches the existing Crossfade panel and
+// a compact two-line layout (label on top, seconds in monospace
+// underneath). Disabled while a blend is in-flight to match the
+// rest of the Crossfade controls.
+function CrossfadeChip({ chip, active, isCustom, disabled, onTap, onLong, onReset }) {
+  // Skip the long-press handlers entirely while disabled so a held
+  // tap during an active blend doesn't sneak an override through.
+  const handlers = useLongPress(disabled ? null : onTap, disabled ? null : onLong, 600)
+  return (
+    <div style={{ position: 'relative' }}>
+      <button {...handlers}
+        disabled={disabled}
+        title={`${chip.label} — ${chip.seconds}s blend${isCustom ? ' · custom — long-press resaves, ↺ resets' : ' · long-press to bind to current slider value'}`}
+        style={{
+          width: '100%',
+          padding: '5px 0', borderRadius: 6, fontSize: 10.5, fontWeight: 600,
+          letterSpacing: '0.02em',
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          transition: 'all 0.15s ease-out',
+          background: active
+            ? 'linear-gradient(135deg, rgba(168,85,247,0.22) 0%, rgba(236,72,153,0.18) 100%)'
+            : 'rgba(255,255,255,0.03)',
+          color: disabled ? '#5a5a6a' : active ? '#f3e8ff' : '#9a9ab0',
+          border: active
+            ? '1px solid rgba(168,85,247,0.45)'
+            : isCustom
+              ? '1px solid rgba(236,72,153,0.30)'
+              : '1px solid rgba(255,255,255,0.05)',
+          opacity: disabled ? 0.55 : 1,
+          userSelect: 'none', WebkitUserSelect: 'none',
+        }}
+      >{chip.label}<span style={{ display: 'block', fontSize: 9, marginTop: 1, opacity: 0.65, fontFamily: 'Geist Mono, monospace' }}>{chip.seconds}s</span></button>
+      {isCustom && !disabled && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onReset?.() }}
+          title={`Reset ${chip.label} to default`}
+          style={{
+            position: 'absolute', top: -3, right: -3,
+            width: 12, height: 12, padding: 0,
+            borderRadius: '50%',
+            background: 'rgba(236,72,153,0.95)',
+            border: '1px solid rgba(20,20,30,0.95)',
+            color: '#fff', fontSize: 9, lineHeight: '10px',
+            cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.5)',
+          }}>↺</button>
+      )}
+    </div>
+  )
+}
+
 // Trig-noise deformer: amplitude / frequency / speed sliders for the
 // global wiggle. Off by default; sliders only appear when enabled.
 function NoiseRow() {
@@ -1620,6 +1679,28 @@ function CrossfadeRow() {
   const beginBlendTo  = useStore(s => s.beginBlendTo)
   const cancelBlend   = useStore(s => s.cancelBlend)
   const currentPreset = useStore(s => s.currentPreset)
+
+  // Crossfade chip overrides (R11.05) — long-press a chip to bind
+  // its seconds to the current slider value. resolveCrossfadeChips
+  // mutates CROSSFADE_DURATION_CHIPS in place so matchCrossfadeChip
+  // recognises the overridden seconds when the slider lands on it.
+  const [chipOverrides, setChipOverrides] = useState(() => loadCrossfadeOverrides())
+  useEffect(() => { resolveCrossfadeChips(chipOverrides) }, [chipOverrides])
+  const saveChipOverride = (chipId) => {
+    if (blendActive) return
+    const next = setCrossfadeOverride(chipOverrides, chipId, blendSeconds)
+    setChipOverrides(next)
+    saveCrossfadeOverrides(next)
+    showToast(`Saved ${CROSSFADE_DURATION_CHIPS.find(c => c.id === chipId)?.label || chipId} → ${blendSeconds.toFixed(1)}s`)
+  }
+  const resetChip = (chipId) => {
+    const next = clearCrossfadeOverride(chipOverrides, chipId)
+    setChipOverrides(next)
+    saveCrossfadeOverrides(next)
+    const base = CROSSFADE_DURATION_CHIPS.find(c => c.id === chipId)
+    showToast(`Reset ${base?.label || chipId} to default`)
+  }
+
   const [pickedId, setPickedId] = useState(() => {
     // Default the dropdown to a preset that isn't the current one.
     const first = presets.find(p => p.id !== currentPreset) || presets[0]
@@ -1659,25 +1740,18 @@ function CrossfadeRow() {
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(${CROSSFADE_DURATION_CHIPS.length}, 1fr)`, gap: 6, marginTop: 4, marginBottom: 6 }}>
         {CROSSFADE_DURATION_CHIPS.map(chip => {
           const active = matchCrossfadeChip(blendSeconds)?.id === chip.id
+          const isCustom = isCrossfadeChipCustom(chip.id, chipOverrides)
           return (
-            <button
+            <CrossfadeChip
               key={chip.id}
-              onClick={() => setBlendSeconds(chip.seconds)}
+              chip={chip}
+              active={active}
+              isCustom={isCustom}
               disabled={blendActive}
-              title={`${chip.label} — ${chip.seconds}s blend`}
-              style={{
-                padding: '5px 0', borderRadius: 6, fontSize: 10.5, fontWeight: 600,
-                letterSpacing: '0.02em',
-                cursor: blendActive ? 'not-allowed' : 'pointer',
-                transition: 'all 0.15s ease-out',
-                background: active
-                  ? 'linear-gradient(135deg, rgba(168,85,247,0.22) 0%, rgba(236,72,153,0.18) 100%)'
-                  : 'rgba(255,255,255,0.03)',
-                color: blendActive ? '#5a5a6a' : active ? '#f3e8ff' : '#9a9ab0',
-                border: active ? '1px solid rgba(168,85,247,0.45)' : '1px solid rgba(255,255,255,0.05)',
-                opacity: blendActive ? 0.55 : 1,
-              }}
-            >{chip.label}<span style={{ display: 'block', fontSize: 9, marginTop: 1, opacity: 0.65, fontFamily: 'Geist Mono, monospace' }}>{chip.seconds}s</span></button>
+              onTap={() => setBlendSeconds(chip.seconds)}
+              onLong={() => saveChipOverride(chip.id)}
+              onReset={() => resetChip(chip.id)}
+            />
           )
         })}
       </div>
