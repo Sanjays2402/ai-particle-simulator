@@ -18,6 +18,7 @@ import {
   resolveCrossfadeChips, isCrossfadeChipCustom,
 } from '../lib/crossfade'
 import { downloadThemesFile, parseImport as parseThemesImport, mergeImport as mergeThemesImport, summarizeImportImpact as summarizeThemesImpact } from '../lib/customThemesIO'
+import { REACTIVE_CURVES } from '../lib/bgGradient'
 import { ATTRACTOR_TYPES, MAX_ATTRACTORS } from '../lib/namedAttractors'
 import { showToast } from './Toast'
 
@@ -1926,6 +1927,7 @@ function BgGradientRow() {
   const angle   = useStore(s => s.bgGradientAngle)
   const audioReactiveBg = useStore(s => s.bgGradientAudioReactive)
   const audioStrength   = useStore(s => s.bgGradientAudioStrength)
+  const audioCurve      = useStore(s => s.bgGradientAudioCurve)
   const audioOn         = useStore(s => s.audioReactive)
   const setEn    = useStore(s => s.setBgGradientEnabled)
   const setA     = useStore(s => s.setBgGradientA)
@@ -1933,6 +1935,7 @@ function BgGradientRow() {
   const setAngle = useStore(s => s.setBgGradientAngle)
   const setAudioReactiveBg = useStore(s => s.setBgGradientAudioReactive)
   const setAudioStrength   = useStore(s => s.setBgGradientAudioStrength)
+  const setAudioCurve      = useStore(s => s.setBgGradientAudioCurve)
   return (
     <>
       <ToggleRow label="Custom Gradient" value={enabled} onChange={setEn} />
@@ -1982,6 +1985,38 @@ function BgGradientRow() {
                   onChange={setAudioStrength}
                   display={v => `${Math.round(v * 100)}%`}
                 />
+                {/* Curve preset chips — reshape the signal before the
+                    linear map so users pick a FEEL ("Pulse", "Ramp",
+                    "Hold") instead of fiddling with a curve editor.
+                    Stays inline with the other audio controls so the
+                    chip rail reads like a one-tap intent selector. */}
+                <div style={{
+                  display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 4,
+                  marginTop: 8,
+                }}>
+                  {REACTIVE_CURVES.map(c => {
+                    const active = audioCurve === c.id
+                    return (
+                      <button key={c.id}
+                        onClick={() => setAudioCurve(c.id)}
+                        title={c.hint}
+                        style={{
+                          padding: '5px 0', borderRadius: 6, fontSize: 10.5, fontWeight: 550,
+                          cursor: 'pointer', transition: 'all 0.12s ease-out',
+                          background: active
+                            ? 'linear-gradient(135deg, rgba(168,85,247,0.22), rgba(99,102,241,0.18))'
+                            : 'rgba(255,255,255,0.04)',
+                          color: active ? '#e9d5ff' : '#a8a8c0',
+                          border: active
+                            ? '1px solid rgba(168,85,247,0.5)'
+                            : '1px solid rgba(255,255,255,0.06)',
+                          boxShadow: active ? '0 0 10px rgba(168,85,247,0.22)' : 'none',
+                        }}>
+                        {c.label}
+                      </button>
+                    )
+                  })}
+                </div>
                 {!audioOn && (
                   <p style={{ fontSize: 11, color: '#fbbf24', marginTop: 4, opacity: 0.9 }}>
                     Turn on Audio Reactivity (Audio panel) to hear the gradient breathe.

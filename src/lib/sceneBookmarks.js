@@ -34,7 +34,7 @@ export const SCENE_FIELDS = [
   'cameraShake', 'cameraShakeIntensity',
   'audioMode',
   'bgGradientEnabled', 'bgGradientA', 'bgGradientB', 'bgGradientAngle',
-  'bgGradientAudioReactive', 'bgGradientAudioStrength',
+  'bgGradientAudioReactive', 'bgGradientAudioStrength', 'bgGradientAudioCurve',
   'slideshowEnabled', 'slideshowDwellSec', 'slideshowOrder', 'slideshowRespectCategory',
   // Named attractors — the full list of force-field objects users
   // composed in the Named Attractors panel. Stored as a structured

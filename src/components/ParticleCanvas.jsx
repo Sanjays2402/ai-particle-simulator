@@ -804,6 +804,7 @@ export default function ParticleCanvas() {
   const bgGradientAngle   = useStore(s => s.bgGradientAngle)
   const bgGradientAudioReactive = useStore(s => s.bgGradientAudioReactive)
   const bgGradientAudioStrength = useStore(s => s.bgGradientAudioStrength)
+  const bgGradientAudioCurve    = useStore(s => s.bgGradientAudioCurve)
 
   // Audio-reactive hue rotation on the gradient layer. Cheap pure
   // math: only kicks in when both reactivity flags are on AND the
@@ -814,6 +815,7 @@ export default function ParticleCanvas() {
     ? buildHueFilterCss(computeReactiveHueDeg(
         pickAudioSignal(audioMode, { level: audioLevel, bass: audioBass, beat: audioBeat }),
         bgGradientAudioStrength,
+        bgGradientAudioCurve,
       ))
     : ''
 

@@ -17,7 +17,7 @@ import {
   toggleAttractor as toggleNamedAttractorHelper,
   moveAttractor as moveNamedAttractorHelper,
 } from './lib/namedAttractors'
-import { clampHueReactiveStrength as clampBgGradientStrength } from './lib/bgGradient'
+import { clampHueReactiveStrength as clampBgGradientStrength, normalizeReactiveCurve as normalizeBgGradientCurve } from './lib/bgGradient'
 
 // Lightweight settings persistence: a subset of user-tweakable values
 // is read once on store init and written back whenever it changes.
@@ -416,6 +416,11 @@ export const useStore = create((set, get) => {
   // the filter when the toggle is off).
   bgGradientAudioReactive: false,
   bgGradientAudioStrength: 0.5,
+  // Curve preset chips reshape the audio signal before the linear hue
+  // map (R12.03): 'linear' (default — pass-through, historic feel),
+  // 'pulse' (S-curve, amplify mid-zone), 'ramp' (ease-in cubic — loud
+  // hits harder), 'hold' (neutral until past 50%, then ramp up).
+  bgGradientAudioCurve: 'linear',
   setBgGradientEnabled: (v) => set({ bgGradientEnabled: v }),
   setBgGradientA: (v) => set({ bgGradientA: v }),
   setBgGradientB: (v) => set({ bgGradientB: v }),
@@ -423,6 +428,9 @@ export const useStore = create((set, get) => {
   setBgGradientAudioReactive: (v) => set({ bgGradientAudioReactive: !!v }),
   setBgGradientAudioStrength: (v) => set({
     bgGradientAudioStrength: clampBgGradientStrength(v),
+  }),
+  setBgGradientAudioCurve: (v) => set({
+    bgGradientAudioCurve: normalizeBgGradientCurve(v),
   }),
 
   // Crossfade — render a weighted blend between the current preset
