@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { Activity, Sparkles, Palette, Gauge, Camera, X, BarChart3, Code2, Copy, ChevronDown, ChevronUp, Bookmark, BookmarkPlus, Pencil, Play, RotateCcw, Route, Square, Repeat, Download, Upload, Shuffle } from 'lucide-react'
 import { presets } from '../presets'
@@ -14,7 +14,7 @@ import {
 import { formatDuration } from '../lib/sessionStats'
 import { tokenize } from '../lib/codeTokens'
 import { loadKeymap, resolveAction } from '../lib/keymap'
-import { validatePresetSource, sourceStats, isModified } from '../lib/presetEditor'
+import { validatePresetSource, sourceStats, isModified, lineRangeInSource } from '../lib/presetEditor'
 import {
   loadBookmarks, saveBookmarks, appendBookmark, removeBookmark,
   applyScene, captureScene, MAX_BOOKMARKS,
@@ -809,6 +809,9 @@ function CodeViewerPanel() {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [validation, setValidation] = useState({ ok: true })
+  // Ref so the "→ line N" jump button can focus + select the failing
+  // line in the textarea. Created here so it's stable across renders.
+  const textareaRef = useRef(null)
   const tokens = open && !editing && source ? tokenize(source) : []
   const stats = sourceStats(editing ? draft : source)
   const lineCount = stats.lines
@@ -968,7 +971,40 @@ function CodeViewerPanel() {
               background: 'rgba(239,68,68,0.10)', color: '#fca5a5',
               borderBottom: '1px solid rgba(239,68,68,0.25)',
               fontFamily: 'Geist Mono, JetBrains Mono, monospace',
-            }}>{validation.error}</div>
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              gap: 8,
+            }}>
+              <span style={{
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                flex: 1, minWidth: 0,
+              }}>{validation.error}</span>
+              {Number.isFinite(validation.line) && (
+                <button
+                  onClick={() => {
+                    const ta = textareaRef.current
+                    if (!ta) return
+                    const range = lineRangeInSource(draft, validation.line)
+                    if (!range) return
+                    ta.focus()
+                    ta.setSelectionRange(range.start, range.end)
+                    // Scroll the line into view. Rough heuristic: scroll
+                    // so the failing line sits in the upper third of the
+                    // visible textarea height.
+                    const lineHeight = ta.scrollHeight / Math.max(1, draft.split('\n').length)
+                    ta.scrollTop = Math.max(0, (validation.line - 1) * lineHeight - ta.clientHeight / 3)
+                  }}
+                  title={`Jump to line ${validation.line}${validation.column ? `, col ${validation.column}` : ''}`}
+                  style={{
+                    flexShrink: 0,
+                    padding: '2px 7px', borderRadius: 5, fontSize: 10,
+                    background: 'rgba(239,68,68,0.18)', color: '#fecaca',
+                    border: '1px solid rgba(239,68,68,0.40)',
+                    fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                    cursor: 'pointer', fontWeight: 600,
+                  }}
+                >→ line {validation.line}{validation.column ? `:${validation.column}` : ''}</button>
+              )}
+            </div>
           )}
           {editing && validation.ok && validation.warnings && validation.warnings.length > 0 && (
             <div style={{
@@ -983,6 +1019,7 @@ function CodeViewerPanel() {
           {/* Body — pre (read-only) or textarea (editing) */}
           {editing ? (
             <textarea
+              ref={textareaRef}
               value={draft}
               onChange={handleDraftChange}
               spellCheck={false}
