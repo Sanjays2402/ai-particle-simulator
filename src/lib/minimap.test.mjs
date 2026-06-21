@@ -1,8 +1,10 @@
 // minimap: scene-half picker, XZ projection, sample helper,
-// look-direction vector, unproject for click-to-target, scale label.
+// look-direction vector, unproject for click-to-target, scale label,
+// saved-view marker projection + hit-testing.
 import {
   DEFAULT_SCENE_HALF, MIN_SCENE_HALF, MAX_SCENE_HALF,
   pickSceneHalf, projectXZ, sampleScene, lookDirXZ, unprojectXZ, scaleLabelFor,
+  projectSavedViews, pickNearestMarker,
 } from './minimap.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -124,4 +126,82 @@ eq(scaleLabelFor(120), '120u', 'label 120')
 eq(scaleLabelFor(0), `${DEFAULT_SCENE_HALF}u`, 'zero → default')
 eq(scaleLabelFor(NaN), `${DEFAULT_SCENE_HALF}u`, 'NaN → default')
 
-console.log(`PASS: minimap — pickSceneHalf, projectXZ (clamped), sampleScene, lookDirXZ, unprojectXZ (round-trip), scaleLabelFor`)
+// --- projectSavedViews ---
+{
+  // Empty / missing → empty.
+  eq(projectSavedViews(null, 30, 100).length, 0, 'null views → []')
+  eq(projectSavedViews([], 30, 100).length, 0, 'empty → []')
+  eq(projectSavedViews(undefined, 30, 100).length, 0, 'undefined → []')
+
+  // Single view at origin → centered marker.
+  const v1 = { id: 1, name: 'Front', pos: [0, 0, 0], target: [0, 0, 0] }
+  const out1 = projectSavedViews([v1], 30, 100)
+  eq(out1.length, 1, 'one view → one marker')
+  eq(out1[0].id, 1, 'id preserved')
+  eq(out1[0].name, 'Front', 'name preserved')
+  eq(out1[0].px, 50, 'origin → center px')
+  eq(out1[0].py, 50, 'origin → center py')
+  ok(out1[0].inBounds, 'origin within bounds')
+
+  // Multiple views with different positions.
+  const views = [
+    { id: 1, name: 'Front', pos: [0, 0, 0], target: [0, 0, 0] },
+    { id: 2, name: 'Right', pos: [15, 5, 0], target: [0, 0, 0] },
+    { id: 3, name: 'Behind', pos: [0, 0, -15], target: [0, 0, 0] },
+  ]
+  const out = projectSavedViews(views, 30, 100)
+  eq(out.length, 3, 'three markers')
+  eq(out[1].px, 75, '(15,*,0) → px 75 with sh=30')
+  eq(out[2].py, 25, '(0,*,-15) → py 25 with sh=30')
+
+  // Out-of-bounds: clamps to canvas edge AND flags inBounds=false.
+  const farView = { id: 'far', name: 'Far', pos: [999, 0, 999], target: [0, 0, 0] }
+  const outFar = projectSavedViews([farView], 30, 100)
+  eq(outFar[0].px, 100, 'far view px clamped to edge')
+  eq(outFar[0].py, 100, 'far view py clamped to edge')
+  ok(!outFar[0].inBounds, 'far view marked out-of-bounds')
+
+  // Malformed pos arrays are skipped, not crashed on.
+  const dirty = [
+    { id: 1, pos: null, target: [0, 0, 0] },
+    { id: 2, pos: [1, 2], target: [0, 0, 0] },   // short array
+    { id: 3, name: 'Good', pos: [5, 0, -5], target: [0, 0, 0] },
+    null,
+  ]
+  const outDirty = projectSavedViews(dirty, 30, 100)
+  eq(outDirty.length, 1, 'only the valid view projects')
+  eq(outDirty[0].id, 3, 'survivor is the valid entry')
+
+  // Missing id falls back to a synthesized string id (not undefined).
+  const noId = [{ pos: [1, 0, 2], target: [0, 0, 0] }]
+  const outNoId = projectSavedViews(noId, 30, 100)
+  ok(outNoId[0].id, 'fallback id is truthy when missing')
+  eq(typeof outNoId[0].id, 'string', 'fallback id is a string')
+}
+
+// --- pickNearestMarker ---
+{
+  const markers = [
+    { id: 1, px: 10, py: 10, inBounds: true },
+    { id: 2, px: 50, py: 50, inBounds: true },
+    { id: 3, px: 90, py: 90, inBounds: true },
+  ]
+  // Exact hit.
+  eq(pickNearestMarker(markers, 50, 50, 8), 2, 'exact hit on marker 2')
+  // Within radius — marker 1's neighborhood.
+  eq(pickNearestMarker(markers, 13, 13, 8), 1, 'within 8px → marker 1')
+  // Outside radius → null.
+  eq(pickNearestMarker(markers, 50, 70, 8), null, '20px away → no hit')
+  // Picks the NEAREST when multiple are in range.
+  const tight = [
+    { id: 'a', px: 50, py: 50, inBounds: true },
+    { id: 'b', px: 55, py: 50, inBounds: true },
+  ]
+  eq(pickNearestMarker(tight, 51, 50, 8), 'a', 'picks nearest within radius')
+  eq(pickNearestMarker(tight, 54, 50, 8), 'b', 'picks nearest within radius (other side)')
+  // Bad inputs.
+  eq(pickNearestMarker(null, 0, 0, 8), null, 'null markers → null')
+  eq(pickNearestMarker([], 0, 0, 8), null, 'empty → null')
+}
+
+console.log(`PASS: minimap — pickSceneHalf, projectXZ (clamped), sampleScene, lookDirXZ, unprojectXZ (round-trip), scaleLabelFor, projectSavedViews (empty/origin/multi/bounds/dirty), pickNearestMarker (hit/miss/nearest)`)

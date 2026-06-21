@@ -96,3 +96,63 @@ export function scaleLabelFor(sceneHalf) {
   const sh = (sceneHalf > 0 && Number.isFinite(sceneHalf)) ? sceneHalf : DEFAULT_SCENE_HALF
   return `${Math.round(sh)}u`
 }
+
+// --- Saved camera view markers (R9.05) -----------------------------
+//
+// Project a list of saved camera views into pixel-space points so the
+// minimap renderer can paint each as a small dot. Each view has the
+// shape { id, name, pos: [x,y,z], target: [x,y,z], createdAt } —
+// matching the cameraViews lib.
+//
+// Returns an array of { id, name, px, py, inBounds } where inBounds
+// is true when the view's XZ position lands inside [0, size]^2
+// without clamping. The renderer uses inBounds to dim out-of-view
+// markers (they still draw at the canvas edge so the user knows the
+// view exists, just visually distinguished).
+export function projectSavedViews(views, sceneHalf, size) {
+  if (!Array.isArray(views) || views.length === 0) return []
+  const sh = (sceneHalf > 0 && Number.isFinite(sceneHalf)) ? sceneHalf : DEFAULT_SCENE_HALF
+  const sz = (size > 0 && Number.isFinite(size)) ? size : 100
+  const out = []
+  for (const v of views) {
+    if (!v || !Array.isArray(v.pos) || v.pos.length < 3) continue
+    const x = Number(v.pos[0]) || 0
+    const z = Number(v.pos[2]) || 0
+    // We need to know if the world-space coord was outside [-sh,+sh]
+    // BEFORE projectXZ clamps it. That's the "inBounds" hint.
+    const inBounds = Math.abs(x) <= sh && Math.abs(z) <= sh
+    const [px, py] = projectXZ(x, z, sh, sz)
+    out.push({
+      id: (v.id !== undefined && v.id !== null) ? v.id : `${px},${py}`,
+      name: typeof v.name === 'string' ? v.name : '',
+      px,
+      py,
+      inBounds,
+    })
+  }
+  return out
+}
+
+// Pick the saved-view marker nearest a click point, within a small
+// hit-test radius (pixels). Returns the picked view's id (or its
+// fallback string) or null if no marker lies within `radiusPx`.
+// Used by the consumer to switch the minimap click action between
+// "recenter orbit" (default) and "load this saved view" when a click
+// lands close enough to a marker dot.
+export function pickNearestMarker(markers, clickPx, clickPy, radiusPx = 8) {
+  if (!Array.isArray(markers) || markers.length === 0) return null
+  const r2 = radiusPx * radiusPx
+  let bestId = null
+  let bestDistSq = Infinity
+  for (const m of markers) {
+    if (!m) continue
+    const dx = m.px - clickPx
+    const dy = m.py - clickPy
+    const d2 = dx * dx + dy * dy
+    if (d2 <= r2 && d2 < bestDistSq) {
+      bestDistSq = d2
+      bestId = m.id
+    }
+  }
+  return bestId
+}

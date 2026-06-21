@@ -1,6 +1,10 @@
 import { useEffect, useRef } from 'react'
 import { useStore } from '../store'
-import { sampleScene, projectXZ, lookDirXZ, unprojectXZ, scaleLabelFor } from '../lib/minimap'
+import {
+  sampleScene, projectXZ, lookDirXZ, unprojectXZ, scaleLabelFor,
+  projectSavedViews, pickNearestMarker,
+} from '../lib/minimap'
+import { loadCameraViews } from '../lib/cameraViews'
 
 // Minimap overlay — a small top-down (XZ-plane) widget pinned to the
 // canvas's bottom-right corner. Shows where the camera sits relative
@@ -17,6 +21,12 @@ export default function Minimap() {
   const enabled = useStore(s => s.minimapEnabled)
   const canvasRef = useRef(null)
   const rafRef = useRef(0)
+  // Cache the saved-views list + a markers projection. We refresh
+  // both periodically (cheap — up to 6 views) so newly-saved views
+  // appear without needing a store subscription wired in.
+  const viewsRef = useRef([])
+  const markersRef = useRef([])
+  const viewsTickRef = useRef(0)
 
   useEffect(() => {
     if (!enabled) return
@@ -29,10 +39,21 @@ export default function Minimap() {
     cv.height = SIZE * dpr
     ctx.scale(dpr, dpr)
 
+    // Seed views immediately on enable so the first frame already
+    // paints any saved views.
+    viewsRef.current = loadCameraViews()
+
     const tick = () => {
       rafRef.current = requestAnimationFrame(tick)
       const api = typeof window !== 'undefined' ? window.__particleCamera : null
       const snap = sampleScene(api)
+      // Refresh saved views every ~30 frames (~0.5s @ 60Hz) so newly
+      // saved/deleted ones show up without a store subscription.
+      viewsTickRef.current += 1
+      if (viewsTickRef.current >= 30) {
+        viewsTickRef.current = 0
+        viewsRef.current = loadCameraViews()
+      }
       // Clear.
       ctx.clearRect(0, 0, SIZE, SIZE)
       // Frame.
@@ -54,6 +75,30 @@ export default function Minimap() {
       ctx.moveTo(SIZE / 2 - 4, SIZE / 2); ctx.lineTo(SIZE / 2 + 4, SIZE / 2)
       ctx.moveTo(SIZE / 2, SIZE / 2 - 4); ctx.lineTo(SIZE / 2, SIZE / 2 + 4)
       ctx.stroke()
+
+      // Saved camera view markers — small dots under the camera dot
+      // so the user's current position always stays the prominent
+      // feature. We project them with the SAME sceneHalf the camera
+      // is using so dots track the camera's zoom.
+      if (snap && viewsRef.current.length > 0) {
+        const markers = projectSavedViews(viewsRef.current, snap.sceneHalf, SIZE)
+        markersRef.current = markers
+        for (const m of markers) {
+          // Stroke ring — dimmer when out of bounds (camera zoomed in
+          // tight) so the user knows the view exists but is far away.
+          const ringColor = m.inBounds ? 'rgba(34,197,94,0.85)' : 'rgba(34,197,94,0.30)'
+          const fillColor = m.inBounds ? 'rgba(34,197,94,0.18)' : 'rgba(34,197,94,0.06)'
+          ctx.fillStyle = fillColor
+          ctx.strokeStyle = ringColor
+          ctx.lineWidth = 1
+          ctx.beginPath()
+          ctx.arc(m.px, m.py, 3, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.stroke()
+        }
+      } else {
+        markersRef.current = []
+      }
 
       if (snap) {
         const [cx, , cz] = snap.camera
@@ -92,8 +137,9 @@ export default function Minimap() {
     return () => cancelAnimationFrame(rafRef.current)
   }, [enabled])
 
-  // Click → recenter orbit target on that XZ point. The OrbitControls
-  // target lives behind `window.__particleCamera.set`.
+  // Click → if it lands on a saved-view dot, jump to that view.
+  // Otherwise fall back to "recenter orbit target on that XZ point"
+  // — the legacy behavior.
   const onClick = (e) => {
     const cv = canvasRef.current
     if (!cv) return
@@ -102,10 +148,21 @@ export default function Minimap() {
     const py = e.clientY - rect.top
     const api = window.__particleCamera
     if (!api) return
+    // First check the markers. We use a generous 8px hit radius so
+    // mobile / touch users don't have to be pixel-precise.
+    const hitId = pickNearestMarker(markersRef.current, px, py, 8)
+    if (hitId !== null && hitId !== undefined) {
+      // Find the original view and apply pos + target.
+      const v = viewsRef.current.find(view => view && view.id === hitId)
+      if (v && Array.isArray(v.pos) && Array.isArray(v.target)) {
+        api.set({ pos: v.pos.slice(), target: v.target.slice() })
+        return
+      }
+    }
+    // Fallback: recenter the orbit target.
     const snap = sampleScene(api)
     if (!snap) return
     const [wx, wz] = unprojectXZ(px, py, snap.sceneHalf, SIZE)
-    // Keep current Y so the camera doesn't snap vertically.
     api.set({ pos: snap.camera, target: [wx, snap.target[1], wz] })
   }
 
@@ -126,7 +183,7 @@ export default function Minimap() {
       <canvas
         ref={canvasRef}
         onClick={onClick}
-        title="Click to recenter orbit target"
+        title="Click a green dot to jump to that saved view, or anywhere else to recenter orbit"
         style={{
           width: SIZE, height: SIZE, display: 'block',
           borderRadius: 6, cursor: 'crosshair',
