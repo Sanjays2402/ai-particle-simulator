@@ -1,0 +1,206 @@
+// pinchZoom — math + state-machine tests. No DOM required.
+import {
+  MIN_SCALE, MAX_SCALE, DOUBLE_TAP_SCALE,
+  clampScale, distance, midpoint, clampTranslate,
+  idleState, beginPinch, updatePinch, beginPan, updatePan,
+  endGesture, applyDoubleTap, shouldInterceptWheel,
+  toTransform, navAllowed,
+} from './pinchZoom.js'
+
+function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
+function eq(a, b, m) {
+  const A = JSON.stringify(a), B = JSON.stringify(b)
+  if (A !== B) fail(`${m} — got ${A} expected ${B}`)
+}
+function approx(a, b, m, tol = 1e-6) {
+  if (Math.abs(a - b) > tol) fail(`${m} — got ${a} expected ${b}`)
+}
+
+// --- clampScale ---
+eq(clampScale(0.5), MIN_SCALE,   'clampScale: below MIN clamps to MIN')
+eq(clampScale(0),   MIN_SCALE,   'clampScale: 0 clamps to MIN')
+eq(clampScale(-2),  MIN_SCALE,   'clampScale: negative clamps to MIN')
+eq(clampScale(1),   1,           'clampScale: at MIN passes through')
+eq(clampScale(3.5), 3.5,         'clampScale: in-range passes through')
+eq(clampScale(MAX_SCALE + 1), MAX_SCALE, 'clampScale: above MAX clamps to MAX')
+eq(clampScale(NaN), MIN_SCALE,   'clampScale: NaN → MIN')
+
+// --- distance + midpoint ---
+approx(distance({x:0,y:0},{x:3,y:4}), 5, 'distance: 3-4-5 triangle')
+eq(distance(null, {x:1,y:1}), 0, 'distance: null point → 0')
+eq(midpoint({x:0,y:0},{x:10,y:20}), { x: 5, y: 10 }, 'midpoint: halfway')
+eq(midpoint(null, {x:1,y:1}), null, 'midpoint: null → null')
+
+// --- clampTranslate ---
+eq(clampTranslate(0, 0, 1, 200, 100), { x: 0, y: 0 }, 'clampTranslate: at scale 1 → all bounds are 0')
+eq(clampTranslate(100, 100, 1, 200, 100), { x: 0, y: 0 }, 'clampTranslate: scale 1 collapses translation')
+// At scale 2, max overhang on a 200-wide stage is (200 * (2-1)) / 2 = 100
+eq(clampTranslate(150, 60, 2, 200, 100), { x: 100, y: 50 }, 'clampTranslate: scale 2 caps at half overhang')
+eq(clampTranslate(-300, -200, 2, 200, 100), { x: -100, y: -50 }, 'clampTranslate: negative bounds symmetric')
+eq(clampTranslate(NaN, 5, 2, 200, 100), { x: 0, y: 5 }, 'clampTranslate: NaN x → 0')
+eq(clampTranslate(0, 0, 1, 0, 0), { x: 0, y: 0 }, 'clampTranslate: zero stage → zero bounds')
+
+// --- idleState ---
+const idle = idleState()
+eq(idle.scale, MIN_SCALE, 'idleState: scale at MIN')
+eq(idle.translateX, 0,    'idleState: translateX at 0')
+eq(idle.translateY, 0,    'idleState: translateY at 0')
+eq(idle.gesture, 'idle',  'idleState: gesture idle')
+
+// --- beginPinch / updatePinch ---
+{
+  const s0 = idleState()
+  // Pinch starts: two fingers 100px apart, centered at (100, 100).
+  const a = { x: 50, y: 100 }
+  const b = { x: 150, y: 100 }
+  const s1 = beginPinch(s0, a, b)
+  eq(s1.gesture, 'pinch', 'beginPinch: state moves to pinch')
+  approx(s1.startDist, 100, 'beginPinch: captures startDist')
+  eq(s1.startCenter, { x: 100, y: 100 }, 'beginPinch: captures startCenter')
+  eq(s1.startScale, MIN_SCALE, 'beginPinch: captures startScale')
+
+  // Fingers spread to 200px (2x), centroid unchanged. → scale 2, no translate.
+  const a2 = { x: 0,   y: 100 }
+  const b2 = { x: 200, y: 100 }
+  const s2 = updatePinch(s1, a2, b2, 400, 300)
+  approx(s2.scale, 2, 'updatePinch: 2x distance → 2x scale')
+  approx(s2.translateX, 0, 'updatePinch: no centroid drift → no translation')
+  approx(s2.translateY, 0, 'updatePinch: no centroid drift → no translation')
+
+  // Fingers pinch back in to 50px (0.5x of start) → clamps to MIN.
+  const a3 = { x: 75, y: 100 }
+  const b3 = { x: 125, y: 100 }
+  const s3 = updatePinch(s1, a3, b3, 400, 300)
+  eq(s3.scale, MIN_SCALE, 'updatePinch: zoom-out below MIN clamps')
+
+  // Stretch beyond MAX
+  const a4 = { x: -1000, y: 100 }
+  const b4 = { x:  1000, y: 100 }
+  const s4 = updatePinch(s1, a4, b4, 400, 300)
+  eq(s4.scale, MAX_SCALE, 'updatePinch: zoom-in above MAX clamps')
+}
+
+// --- beginPinch defensive ---
+{
+  const s0 = idleState()
+  const same = beginPinch(s0, { x: 10, y: 10 }, { x: 10, y: 10 })
+  eq(same.gesture, 'idle', 'beginPinch: zero start distance bails to original state')
+}
+
+// --- updatePinch keeps centroid roughly anchored ---
+{
+  // Start with two fingers at 100px apart, centroid (200, 200).
+  const s0 = idleState()
+  const s1 = beginPinch(s0, { x: 150, y: 200 }, { x: 250, y: 200 })
+  // Now fingers spread to 300px (3x) with centroid drifted to (220, 200).
+  const s2 = updatePinch(s1,
+    { x: 70,  y: 200 },
+    { x: 370, y: 200 },
+    1000, 1000)
+  approx(s2.scale, 3, 'updatePinch: 3x distance')
+  // centroid moved +20 in x → translateX should be +20 (clamped to bounds)
+  approx(s2.translateX, 20, 'updatePinch: centroid drift becomes translation')
+  approx(s2.translateY, 0,  'updatePinch: no y drift → no translateY')
+}
+
+// --- beginPan / updatePan ---
+{
+  // Pan only allowed when zoomed in.
+  const idle = idleState()
+  const noOp = beginPan(idle, { x: 50, y: 50 })
+  eq(noOp.gesture, 'idle', 'beginPan: bails out at scale 1 (no zoom)')
+
+  // Zoom in then pan.
+  const zoomed = { ...idle, scale: 2 }
+  const s1 = beginPan(zoomed, { x: 100, y: 100 })
+  eq(s1.gesture, 'pan', 'beginPan: enters pan state')
+  eq(s1.startCenter, { x: 100, y: 100 }, 'beginPan: captures start point')
+  const s2 = updatePan(s1, { x: 150, y: 80 }, 200, 100)
+  // dx=+50, dy=-20 → translate(50, -20) clamped to (±100, ±50)
+  approx(s2.translateX, 50,  'updatePan: x delta applied')
+  approx(s2.translateY, -20, 'updatePan: y delta applied')
+
+  // Pan way beyond bounds — should clamp.
+  const s3 = updatePan(s1, { x: 1000, y: 1000 }, 200, 100)
+  approx(s3.translateX, 100, 'updatePan: clamps to right bound')
+  approx(s3.translateY, 50,  'updatePan: clamps to bottom bound')
+}
+
+// --- endGesture ---
+{
+  const s = { ...idleState(), gesture: 'pinch', scale: 2, translateX: 80, translateY: 30 }
+  const out = endGesture(s, 200, 100)
+  eq(out.gesture, 'idle', 'endGesture: resets to idle')
+  eq(out.startCenter, null, 'endGesture: clears startCenter')
+  // Translation should remain within bounds (and update startTranslate so a
+  // subsequent gesture starts cleanly).
+  approx(out.translateX, 80, 'endGesture: translate preserved when in-bounds')
+  eq(out.startTranslate, { x: 80, y: 30 }, 'endGesture: startTranslate synced to current')
+}
+
+// --- applyDoubleTap ---
+{
+  // Idle → zoom in to DOUBLE_TAP_SCALE, centering on the tap point.
+  const idle = idleState()
+  const tap = { x: 200, y: 100 }
+  const s1 = applyDoubleTap(idle, tap, 400, 200)
+  eq(s1.scale, DOUBLE_TAP_SCALE, 'applyDoubleTap: idle → zoom in')
+  // Tap point is exactly at the stage center → translate stays at (0, 0).
+  approx(s1.translateX, 0, 'applyDoubleTap: center tap stays centered')
+  approx(s1.translateY, 0, 'applyDoubleTap: center tap stays centered')
+
+  // Tap on the right edge (x = stageW, y = stageH/2) → translate negative-x
+  // so the tap point stays under the finger.
+  const tapRight = { x: 400, y: 100 }
+  const s2 = applyDoubleTap(idle, tapRight, 400, 200)
+  eq(s2.scale, DOUBLE_TAP_SCALE, 'applyDoubleTap: corner tap still zooms in')
+  // (1 - 2) * (400 - 200) = -200, but max overhang at scale 2 on 400-wide
+  // stage is (400*(2-1))/2 = 200, so it should clamp to -200.
+  approx(s2.translateX, -200, 'applyDoubleTap: corner tap pans to edge bound')
+
+  // Zoomed → reset.
+  const zoomed = { ...idle, scale: 3, translateX: 50, translateY: 50 }
+  const s3 = applyDoubleTap(zoomed, tap, 400, 200)
+  eq(s3.scale, MIN_SCALE, 'applyDoubleTap: zoomed → resets to MIN')
+  eq(s3.translateX, 0, 'applyDoubleTap: reset zeroes translateX')
+  eq(s3.translateY, 0, 'applyDoubleTap: reset zeroes translateY')
+
+  // Null tap → defaults to centered zoom at DOUBLE_TAP_SCALE.
+  const s4 = applyDoubleTap(idle, null, 400, 200)
+  eq(s4.scale, DOUBLE_TAP_SCALE, 'applyDoubleTap: null tap → centered zoom')
+  eq(s4.translateX, 0, 'applyDoubleTap: null tap → no translate')
+}
+
+// --- shouldInterceptWheel ---
+{
+  const idle = idleState()
+  if (shouldInterceptWheel(idle, +1)) fail('wheel: idle + zoom-out direction should NOT intercept')
+  if (!shouldInterceptWheel(idle, -1)) fail('wheel: idle + zoom-in direction SHOULD intercept')
+  const zoomed = { ...idle, scale: 2 }
+  if (!shouldInterceptWheel(zoomed, +1)) fail('wheel: zoomed + zoom-out SHOULD intercept')
+  if (!shouldInterceptWheel(zoomed, -1)) fail('wheel: zoomed + zoom-in SHOULD intercept')
+  const maxed = { ...idle, scale: MAX_SCALE }
+  if (shouldInterceptWheel(maxed, -1)) fail('wheel: maxed + zoom-in should NOT intercept')
+  if (!shouldInterceptWheel(maxed, +1)) fail('wheel: maxed + zoom-out SHOULD intercept')
+  if (shouldInterceptWheel(idle, 0)) fail('wheel: zero delta → no intercept')
+  if (shouldInterceptWheel(idle, NaN)) fail('wheel: NaN delta → no intercept')
+}
+
+// --- toTransform ---
+{
+  const s = { ...idleState(), translateX: 12.5, translateY: -7.25, scale: 2 }
+  eq(toTransform(s), 'translate(12.5px, -7.25px) scale(2)', 'toTransform: produces canonical transform string')
+  const s2 = { ...idleState(), translateX: 0, translateY: 0, scale: 99 } // out-of-range
+  eq(toTransform(s2), `translate(0px, 0px) scale(${MAX_SCALE})`, 'toTransform: clamps over-large scale')
+}
+
+// --- navAllowed ---
+{
+  if (!navAllowed(idleState())) fail('navAllowed: idle state must allow nav')
+  const zoomed = { ...idleState(), scale: 2 }
+  if (navAllowed(zoomed)) fail('navAllowed: zoomed state must block nav')
+  const edge = { ...idleState(), scale: 1.0 }
+  if (!navAllowed(edge)) fail('navAllowed: exactly MIN_SCALE counts as idle')
+}
+
+console.log(`PASS: pinchZoom — clamp/distance/midpoint/clampTranslate/idleState/beginPinch/updatePinch (centroid follow)/beginPan/updatePan/endGesture/applyDoubleTap/shouldInterceptWheel/toTransform/navAllowed · MIN=${MIN_SCALE} MAX=${MAX_SCALE} DOUBLE=${DOUBLE_TAP_SCALE}`)

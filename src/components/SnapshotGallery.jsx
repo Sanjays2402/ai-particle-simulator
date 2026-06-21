@@ -1,9 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
-import { X, Download, Trash2, Images, ImageOff, LayoutGrid, Rows3, ChevronLeft, ChevronRight, Maximize2 } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { X, Download, Trash2, Images, ImageOff, LayoutGrid, Rows3, ChevronLeft, ChevronRight, Maximize2, ZoomIn } from 'lucide-react'
 import {
   loadSnapshots, saveSnapshots, removeSnapshot, downloadSnapshot,
 } from '../lib/snapshotGallery'
 import { gridLayout, lightboxNav, findSnapshot, formatDimensions } from '../lib/snapshotGrid'
+import {
+  idleState as zoomIdleState, beginPinch, updatePinch,
+  beginPan, updatePan, endGesture, applyDoubleTap,
+  toTransform as zoomToTransform, navAllowed as zoomNavAllowed,
+  MIN_SCALE as ZOOM_MIN, DOUBLE_TAP_MS,
+} from '../lib/pinchZoom'
 import { showToast } from './Toast'
 
 // Floating gallery — anchored to the bottom-center of the canvas.
@@ -44,22 +50,21 @@ export default function SnapshotGallery({ open, onClose }) {
     return () => window.removeEventListener('particle:snapshot-saved', onSaved)
   }, [])
   // ESC: prefer closing the lightbox first so a single press doesn't
-  // accidentally dismiss the entire gallery.
+  // accidentally dismiss the entire gallery. Arrow-key nav lives inside
+  // the Lightbox so it can gate itself when the user has pinch-zoomed in
+  // (we don't want a tap-zoom-and-pan to accidentally swipe to the next
+  // image).
   useEffect(() => {
     if (!open) return
     const onKey = (e) => {
       if (e.key === 'Escape') {
         if (lightboxId != null) setLightboxId(null)
         else onClose?.()
-      } else if (lightboxId != null && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
-        e.preventDefault()
-        const nextId = lightboxNav(items, lightboxId, e.key === 'ArrowRight' ? +1 : -1)
-        if (nextId != null) setLightboxId(nextId)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose, items, lightboxId])
+  }, [open, onClose, lightboxId])
 
   if (!open) return null
 
@@ -322,9 +327,12 @@ function SnapshotTile({ entry, compact, onClick, onDownload, onRemove }) {
 }
 
 // Full-screen-ish lightbox showing the original PNG (or thumb fallback)
-// at native size. Arrow keys move between snapshots; clicking the
-// backdrop or pressing ESC closes. Designed to feel like Apple Photos:
-// dark vignette, minimal chrome, image centered with letterboxing.
+// at native size. Arrow keys move between snapshots (gated by zoom);
+// clicking the backdrop or pressing ESC closes. On touch devices,
+// two-finger pinch zooms, single-finger drag pans, double-tap toggles
+// between idle and 2x zoom centered on the tap location. Designed to
+// feel like Apple Photos: dark vignette, minimal chrome, image
+// centered with letterboxing.
 function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove }) {
   // Memoise the formatted timestamp so the per-render `new Date(...)`
   // isn't classified as an impure-call during render by the react
@@ -339,9 +347,112 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
   const idx = items.findIndex(it => it.id === entry.id)
   const total = items.length
   const hasMore = total > 1
+
+  // Pinch-zoom state machine. We keep `zoom` in React state so the
+  // transform re-renders on each gesture frame, and `zoomRef` mirrors
+  // it for non-React touch handlers that fire faster than state can
+  // settle (touchmove can run at 120Hz on iOS).
+  const stageRef = useRef(null)
+  const [zoom, setZoom] = useState(zoomIdleState)
+  const zoomRef = useRef(zoom)
+  // Sync the ref inside an effect, not during render — refs may not be
+  // mutated during render (react-hooks/refs).
+  useEffect(() => { zoomRef.current = zoom }, [zoom])
+  const lastTapRef = useRef(0)
+
+  // Reset zoom when the displayed snapshot changes (next / prev / open).
+  // Routed through a microtask so the setState doesn't run synchronously
+  // in the effect body (react-hooks/set-state-in-effect rule).
+  useEffect(() => {
+    queueMicrotask(() => setZoom(zoomIdleState()))
+  }, [entry.id])
+
+  const stageSize = () => {
+    const el = stageRef.current
+    if (!el) return { w: 0, h: 0 }
+    const r = el.getBoundingClientRect()
+    return { w: r.width, h: r.height }
+  }
+
+  // Touch handlers — feed events into the pure state machine in
+  // pinchZoom.js. Single-finger taps double as our pan source when
+  // zoomed in, AND as the double-tap detector.
+  const onTouchStart = (e) => {
+    if (e.touches.length === 2) {
+      const a = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+      const b = { x: e.touches[1].clientX, y: e.touches[1].clientY }
+      setZoom(prev => beginPinch(prev, a, b))
+    } else if (e.touches.length === 1) {
+      const p = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+      // Double-tap detection — within DOUBLE_TAP_MS of the last tap
+      // means the user wants to toggle the zoom-in / zoom-out shortcut.
+      const now = Date.now()
+      if (now - lastTapRef.current < DOUBLE_TAP_MS) {
+        // Convert tap to stage-local coords (subtract stage's top/left).
+        const r = stageRef.current?.getBoundingClientRect()
+        const local = r ? { x: p.x - r.left, y: p.y - r.top } : null
+        const size = stageSize()
+        setZoom(prev => applyDoubleTap(prev, local, size.w, size.h))
+        lastTapRef.current = 0  // consume tap so triple-tap doesn't refire
+        e.preventDefault()
+        return
+      }
+      lastTapRef.current = now
+      // When zoomed in, a single-finger drag pans the image.
+      if (zoomRef.current.scale > ZOOM_MIN) {
+        setZoom(prev => beginPan(prev, p))
+      }
+    }
+  }
+  const onTouchMove = (e) => {
+    if (e.touches.length === 2) {
+      const a = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+      const b = { x: e.touches[1].clientX, y: e.touches[1].clientY }
+      const size = stageSize()
+      setZoom(prev => updatePinch(prev, a, b, size.w, size.h))
+      e.preventDefault()
+    } else if (e.touches.length === 1 && zoomRef.current.gesture === 'pan') {
+      const p = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+      const size = stageSize()
+      setZoom(prev => updatePan(prev, p, size.w, size.h))
+      e.preventDefault()
+    }
+  }
+  const onTouchEnd = (e) => {
+    if (e.touches.length === 0) {
+      const size = stageSize()
+      setZoom(prev => endGesture(prev, size.w, size.h))
+    }
+  }
+
+  // Keyboard nav lives in the lightbox itself so we can gate it by zoom.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        if (!zoomNavAllowed(zoomRef.current)) {
+          // Show user we're suppressing nav so they know what's happening.
+          // No alert/toast — just preventDefault. Pressing the Reset
+          // button (visible when zoomed) or double-tapping clears it.
+          return
+        }
+        e.preventDefault()
+        if (e.key === 'ArrowRight') onNext()
+        else onPrev()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onNext, onPrev])
+
+  const isZoomed = zoom.scale > ZOOM_MIN
+  // While zoomed, swallow backdrop-click-to-close so the user can pan
+  // freely without dismissing the lightbox. Reset button is the way out.
+  const backdropClick = isZoomed ? (e) => e.stopPropagation() : onClose
+  const resetZoom = () => setZoom(zoomIdleState())
+
   return (
     <div
-      onClick={onClose}
+      onClick={backdropClick}
       style={{
         position: 'fixed', inset: 0, zIndex: 60,
         background: 'rgba(2,2,8,0.88)',
@@ -373,8 +484,28 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
               · {idx + 1} / {total}
             </span>
           )}
+          {isZoomed && (
+            <span title="Pinch zoom is active. Double-tap or press Reset to zoom out."
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '2px 7px', borderRadius: 5,
+                background: 'rgba(168,85,247,0.16)',
+                color: '#e9d5ff', border: '1px solid rgba(168,85,247,0.4)',
+                fontFamily: 'Geist Mono, JetBrains Mono, monospace', fontSize: 10, fontWeight: 600,
+                letterSpacing: '0.04em', textTransform: 'uppercase',
+              }}>
+              <ZoomIn size={9} strokeWidth={2.4} />
+              {zoom.scale.toFixed(1)}x
+            </span>
+          )}
         </div>
         <div style={{ display: 'inline-flex', gap: 6 }}>
+          {isZoomed && (
+            <button onClick={resetZoom} title="Reset zoom"
+              style={lightboxBtn('rgba(168,85,247,0.18)', 'rgba(168,85,247,0.4)', '#e9d5ff')}>
+              Reset
+            </button>
+          )}
           <button onClick={onDownload} title="Download"
             style={lightboxBtn('rgba(99,102,241,0.18)', 'rgba(99,102,241,0.4)', '#c7d2fe')}>
             <Download size={13} strokeWidth={2.2} /> Download
@@ -395,13 +526,25 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
         </div>
       </div>
       {/* Image stage + nav */}
-      <div style={{
-        flex: 1, position: 'relative',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: '0 18px 18px',
-        overflow: 'hidden',
-      }}>
-        {hasMore && (
+      <div
+        ref={stageRef}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}
+        style={{
+          flex: 1, position: 'relative',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: '0 18px 18px',
+          overflow: 'hidden',
+          // Disable browser-native pinch-zoom + double-tap-to-zoom so
+          // our handlers can own them. `pan-y` keeps vertical scroll
+          // working in the (rare) case the lightbox doesn't fill the
+          // viewport; `pinch-zoom` is intentionally absent.
+          touchAction: 'none',
+        }}
+      >
+        {hasMore && !isZoomed && (
           <button onClick={(e) => { e.stopPropagation(); onPrev() }} title="Previous (←)"
             style={navArrow('left')}>
             <ChevronLeft size={18} strokeWidth={2.4} />
@@ -411,15 +554,27 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
           onClick={e => e.stopPropagation()}
           src={entry.png || entry.thumb}
           alt={entry.label || 'snapshot'}
+          draggable={false}
           style={{
             maxWidth: '100%', maxHeight: '100%',
             objectFit: 'contain',
             borderRadius: 12,
             boxShadow: '0 24px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(168,85,247,0.18)',
             background: '#0a0a10',
+            transform: zoomToTransform(zoom),
+            // Disable smooth transitions during an active gesture so the
+            // image tracks the user's fingers in real time; re-enable on
+            // idle so the reset / double-tap snap is animated.
+            transition: zoom.gesture === 'idle' ? 'transform 0.18s cubic-bezier(0.2,0.8,0.2,1)' : 'none',
+            transformOrigin: 'center center',
+            // Prevent the default image-drag ghost so single-finger pan
+            // doesn't trigger an awkward grey ghost on desktop browsers.
+            userSelect: 'none',
+            WebkitUserSelect: 'none',
+            WebkitUserDrag: 'none',
           }}
         />
-        {hasMore && (
+        {hasMore && !isZoomed && (
           <button onClick={(e) => { e.stopPropagation(); onNext() }} title="Next (→)"
             style={navArrow('right')}>
             <ChevronRight size={18} strokeWidth={2.4} />
