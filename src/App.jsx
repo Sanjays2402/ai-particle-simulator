@@ -20,6 +20,7 @@ import Minimap from './components/Minimap'
 import MidiPanel from './components/MidiPanel'
 import WaveformOverlay from './components/WaveformOverlay'
 import CameraPathPlayer from './components/CameraPathPlayer'
+import PresetThumbnailPrerenderer from './components/PresetThumbnailPrerenderer'
 import { useGlobalMidi } from './lib/useGlobalMidi'
 import { loadSnapshots } from './lib/snapshotGallery'
 import { useIsMobile } from './lib/useIsMobile'
@@ -276,6 +277,7 @@ export default function App() {
       <Minimap />
       <WaveformOverlay />
       <CameraPathPlayer />
+      <PresetThumbnailPrerenderer />
       <MidiPanel open={midiOpen} onClose={() => setMidiOpen(false)} />
 
       {showSplash && (

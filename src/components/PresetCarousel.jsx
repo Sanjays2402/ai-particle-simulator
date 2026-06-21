@@ -8,14 +8,22 @@ export default function PresetCarousel() {
   // Tri-state filter: 'all' | 'favs' | 'recent'.
   const [filter, setFilter] = useState('all')
 
-  // Load thumbnails from localStorage
+  // Load thumbnails from localStorage. Also listens for the
+  // 'particle:thumbnail-ready' event the prerenderer fires so
+  // freshly-generated thumbs appear without waiting for the user
+  // to switch presets.
   useEffect(() => {
-    const t = {}
-    presets.forEach(p => {
-      const d = localStorage.getItem(`preset-thumb-${p.id}`)
-      if (d) t[p.id] = d
-    })
-    setThumbs(t)
+    const refresh = () => {
+      const t = {}
+      presets.forEach(p => {
+        const d = localStorage.getItem(`preset-thumb-${p.id}`)
+        if (d) t[p.id] = d
+      })
+      setThumbs(t)
+    }
+    refresh()
+    window.addEventListener('particle:thumbnail-ready', refresh)
+    return () => window.removeEventListener('particle:thumbnail-ready', refresh)
   }, [currentPreset])
 
   // Sort: favorites first
