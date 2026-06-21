@@ -19,6 +19,11 @@ import {
 } from '../lib/crossfade'
 import { downloadThemesFile, parseImport as parseThemesImport, mergeImport as mergeThemesImport, summarizeImportImpact as summarizeThemesImpact } from '../lib/customThemesIO'
 import { REACTIVE_CURVES } from '../lib/bgGradient'
+import {
+  downloadWindOverridesFile,
+  parseImport as parseWindOverridesImport,
+  mergeImport as mergeWindOverridesImport,
+} from '../lib/windOverridesIO'
 import { ATTRACTOR_TYPES, MAX_ATTRACTORS } from '../lib/namedAttractors'
 import { showToast } from './Toast'
 
@@ -1354,9 +1359,103 @@ function WindRow() {
             Tap a chip to apply · long-press to save current sliders into that slot.
             Custom slots show a violet dot; tap the ↺ to reset.
           </div>
+          {/* Wind override IO (R12.17) — export the custom chips as a
+              portable JSON file, or merge/replace from one. Mirrors
+              the customThemes JSON pack workflow so users have a
+              consistent "export your tweaks" pattern. */}
+          <WindOverrideIO overrides={overrides} setOverrides={setOverrides} />
         </>
       )}
     </>
+  )
+}
+
+// Tiny IO leaf below the Wind sliders. Export = always available
+// (downloads empty envelope if no overrides yet). Import = merges by
+// default, replaces with shift-click. Stays modeless — file picker
+// is the only ceremony. Keeps the wind block lightweight; uses
+// downloadWindOverridesFile + parseWindOverridesImport from the
+// dedicated IO module so the same shape works elsewhere later.
+function WindOverrideIO({ overrides, setOverrides }) {
+  const overrideCount = overrides ? Object.keys(overrides).length : 0
+  const onExport = () => {
+    const filename = downloadWindOverridesFile(overrides)
+    if (filename) {
+      showToast(`Exported ${overrideCount} wind override${overrideCount === 1 ? '' : 's'} → ${filename}`)
+    } else {
+      showToast('Wind export failed')
+    }
+  }
+  const onImport = (mode) => {
+    if (typeof document === 'undefined') return
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'application/json,.json'
+    input.onchange = () => {
+      const file = input.files && input.files[0]
+      if (!file) return
+      const reader = new FileReader()
+      reader.onload = () => {
+        const raw = typeof reader.result === 'string' ? reader.result : ''
+        const parsed = parseWindOverridesImport(raw)
+        if (!parsed.ok) {
+          showToast(`Import failed: ${parsed.error}`)
+          return
+        }
+        const merge = mergeWindOverridesImport(overrides, parsed.items, mode)
+        setOverrides(merge.items)
+        try {
+          // Persist immediately so the chips visually re-render on
+          // the same tick (resolveWindPresets reads from state).
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('particle-wind-overrides-v1', JSON.stringify({ v: 1, items: merge.items }))
+          }
+        } catch { /* quota / private mode */ }
+        const verb = mode === 'replace' ? 'Replaced' : 'Merged'
+        showToast(`${verb} ${merge.added} wind override${merge.added === 1 ? '' : 's'}${merge.skipped ? ` (${merge.skipped} skipped)` : ''}`)
+      }
+      reader.readAsText(file)
+    }
+    input.click()
+  }
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginTop: 6 }}>
+      <button onClick={onExport}
+        title={overrideCount === 0
+          ? 'No overrides yet — export will be an empty envelope'
+          : `Download ${overrideCount} wind override${overrideCount === 1 ? '' : 's'} as JSON`}
+        style={{
+          padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+          cursor: 'pointer',
+          background: overrideCount === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(99,102,241,0.10)',
+          color: overrideCount === 0 ? '#7a7a90' : '#c7d2fe',
+          border: overrideCount === 0
+            ? '1px solid rgba(255,255,255,0.05)'
+            : '1px solid rgba(99,102,241,0.25)',
+        }}>
+        Export
+      </button>
+      <button onClick={() => onImport('merge')}
+        title="Merge: keep existing overrides, add only new slots from the file"
+        style={{
+          padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+          cursor: 'pointer',
+          background: 'rgba(168,85,247,0.10)', color: '#e9d5ff',
+          border: '1px solid rgba(168,85,247,0.25)',
+        }}>
+        Import (merge)
+      </button>
+      <button onClick={() => onImport('replace')}
+        title="Replace: drop all existing overrides, use only the imported ones"
+        style={{
+          padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+          cursor: 'pointer',
+          background: 'rgba(236,72,153,0.10)', color: '#fbcfe8',
+          border: '1px solid rgba(236,72,153,0.25)',
+        }}>
+        Import (replace)
+      </button>
+    </div>
   )
 }
 
