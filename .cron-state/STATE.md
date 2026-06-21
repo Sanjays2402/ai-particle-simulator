@@ -41,6 +41,11 @@ Existing capabilities (do not re-ship):
 - Web MIDI controller mapping (CC → 14 live store actions, Learn workflow, always-on hook)
 - Editable preset source viewer (textarea + live validate + Compile/Revert/Cancel)
 - Live audio waveform / oscilloscope overlay (pinned top-right, peak-aware glow)
+- Snapshot grid view + full-res lightbox (4-up grid, arrow-key navigation, persisted view pref)
+- Camera path animator (smooth-tween between saved views, loop toggle, 0.5-30s/segment)
+- Slideshow respects category filter chips (sequence + shuffle scoped, favourites bypass)
+- Bookmark export/import as JSON (tagged envelope, merge/replace, 256KB cap)
+- Wind preset chips (Calm / Breeze / Gale / Storm — one-tap weather configs)
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -86,29 +91,36 @@ single slice. Will revisit as its own dedicated batch.
 - [x] **R5.04** Editable preset code viewer (graduated from R2.05 read-only)  — df1aa6c
 - [x] **R5.05** Audio waveform overlay (oscilloscope strip on the real signal)  — d27a408
 
-### Batch 6 — next 5 (refilled)
-- [ ] R6.01 Snapshot grid view (modal showing all 8 snapshots in a grid w/ full-res preview) [was R5.06]
-- [ ] R6.02 Camera path animator (interpolate between saved views over N seconds) [was R5.07]
-- [ ] R6.03 Slideshow that respects category filter chips (currently walks the whole library) [was R5.10]
-- [ ] R6.04 Bookmark export/import as JSON (share entire collections) [was R5.11]
-- [ ] R6.05 Wind preset chips ("Calm", "Breeze", "Gale", "Storm") for one-tap configs [was R5.18]
+### Batch 6 — gallery polish + camera cinema + scoped slideshow + IO + wind chips  (SHIPPED)
+- [x] **R6.01** Snapshot grid view + full-res lightbox  — 4150c37
+- [x] **R6.02** Camera path animator — smooth tween between saved views  — 7c33991
+- [x] **R6.03** Slideshow respects category filter chips  — 33cfcae
+- [x] **R6.04** Bookmark export/import as JSON  — fc47f64
+- [x] **R6.05** Wind preset chips (Calm/Breeze/Gale/Storm)  — ae16d39
+
+### Batch 7 — next 5 (refilled)
+- [ ] R7.01 OpenGraph snapshot endpoint (server-rendered card for share URLs) [was R6.06]
+- [ ] R7.02 Preset thumbnail rendering during carousel idle (offscreen cache) [was R6.07]
+- [ ] R7.03 Random scene generator that fully randomises bookmark fields (smash → save) [was R6.08]
+- [ ] R7.04 Cross-fade timing chips (0.5s / 2s / 5s / 10s presets in the Crossfade panel) [was R6.09]
+- [ ] R7.05 Audio-reactive background gradient (cycle hue of the bg with beat) [was R6.10]
 
 ### Future queue (refill when batch closes)
-- [ ] R6.06 OpenGraph snapshot endpoint (server-rendered card for share URLs) [was R5.08]
-- [ ] R6.07 Preset thumbnail rendering during carousel idle (offscreen cache) [was R5.09]
-- [ ] R6.08 Random scene generator that fully randomises bookmark fields (smash → save) [was R5.12]
-- [ ] R6.09 Cross-fade timing chips (0.5s / 2s / 5s / 10s presets in the Crossfade panel) [was R5.13]
-- [ ] R6.10 Audio-reactive background gradient (cycle hue of the bg with beat) [was R5.14]
-- [ ] R6.11 Echo / trail FBO that survives EffectComposer (R2.02 deferred — render pipeline refactor) [was R5.15]
-- [ ] R6.12 Particle attractors as named objects (drag to reposition, multiple types coexist) [was R5.16]
-- [ ] R6.13 Custom theme export / import as JSON (share a theme pack) [was R5.17]
-- [ ] R6.14 Custom theme set as default-on-load (auto-applied if active when reloading) [was R5.19]
-- [ ] R6.15 Mobile-only gesture hint overlay shown on first run [was R5.20]
-- [ ] R6.16 Keyboard remap quick-export (round-trip keymap as JSON via Settings)
-- [ ] R6.17 MIDI mapping presets (controller-specific bundles — nanoKONTROL, Launch Control)
-- [ ] R6.18 Waveform mode switch (time-domain vs frequency-spectrum bars)
-- [ ] R6.19 Preset code viewer: inline error markers on the failing line during Edit
-- [ ] R6.20 Minimap: also render saved camera views as small dots so users can see where they are
+- [ ] R7.06 Echo / trail FBO that survives EffectComposer (R2.02 deferred — render pipeline refactor) [was R6.11]
+- [ ] R7.07 Particle attractors as named objects (drag to reposition, multiple types coexist) [was R6.12]
+- [ ] R7.08 Custom theme export / import as JSON (share a theme pack) [was R6.13]
+- [ ] R7.09 Custom theme set as default-on-load (auto-applied if active when reloading) [was R6.14]
+- [ ] R7.10 Mobile-only gesture hint overlay shown on first run [was R6.15]
+- [ ] R7.11 Keyboard remap quick-export (round-trip keymap as JSON via Settings) [was R6.16]
+- [ ] R7.12 MIDI mapping presets (controller-specific bundles — nanoKONTROL, Launch Control) [was R6.17]
+- [ ] R7.13 Waveform mode switch (time-domain vs frequency-spectrum bars) [was R6.18]
+- [ ] R7.14 Preset code viewer: inline error markers on the failing line during Edit [was R6.19]
+- [ ] R7.15 Minimap: also render saved camera views as small dots so users can see where they are [was R6.20]
+- [ ] R7.16 Camera path waypoint reorder (drag to rearrange order, drop to commit)
+- [ ] R7.17 Snapshot lightbox: pinch-zoom on mobile (CSS transform handles)
+- [ ] R7.18 Slideshow respect-category in command palette (quick-toggle without opening LeftSidebar)
+- [ ] R7.19 Bookmark export includes the live camera-view list (one combined "share-this-scene-set" file)
+- [ ] R7.20 Wind preset chips become custom-named: long-press a slot to save the current sliders as a chip
 
 ## TICK LOG
 - 2026-06-19 23:41 PT — Bootstrap + Batch 1 (5/5).
@@ -147,3 +159,11 @@ single slice. Will revisit as its own dedicated batch.
   Gates: lint baseline preserved (23 errors, 3 warnings — all pre-existing).
   Build: 835 ms green. Unit tests: 24/24 pass (added keymap, minimap, midiMap,
   presetEditor, waveform · 150+ fresh asserts this batch).
+- 2026-06-20 18:25 PT — Batch 6 (5/5).
+  Commits: 4150c37 (R6.01 snapshot grid + lightbox), 7c33991 (R6.02 camera path),
+  33cfcae (R6.03 slideshow category scoping), fc47f64 (R6.04 bookmark export/import),
+  ae16d39 (R6.05 wind weather chips).
+  Gates: lint baseline preserved (23 errors, 3 warnings — all pre-existing).
+  Build: 856 ms green. Unit tests: 27/27 pass (added snapshotGrid, cameraPath,
+  bookmarksIO · 115 fresh asserts this batch; slideshow gained categoryFilter
+  coverage; wind gained 19 asserts for the 4 preset chips + matchesWindPreset).
