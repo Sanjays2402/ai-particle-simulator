@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
-import { Activity, Sparkles, Palette, Gauge, Camera, X, BarChart3, Code2, Copy, ChevronDown, ChevronUp, Bookmark, BookmarkPlus, Pencil, Play, RotateCcw, Route, Square, Repeat, Download, Upload } from 'lucide-react'
+import { Activity, Sparkles, Palette, Gauge, Camera, X, BarChart3, Code2, Copy, ChevronDown, ChevronUp, Bookmark, BookmarkPlus, Pencil, Play, RotateCcw, Route, Square, Repeat, Download, Upload, Shuffle } from 'lucide-react'
+import { presets } from '../presets'
+import { generateRandomScene } from '../lib/randomScene'
 import { loadCameraViews, saveCameraViews, appendView, CAMERA_VIEWS_MAX } from '../lib/cameraViews'
 import {
   PATH_SECONDS_MIN, PATH_SECONDS_MAX, PATH_SECONDS_DEFAULT,
@@ -583,6 +585,49 @@ function SceneBookmarks() {
       >
         <BookmarkPlus size={12} strokeWidth={2.2} /> Save current scene
         {canSaveMore && <kbd style={{ marginLeft: 4 }}>B</kbd>}
+      </button>
+      {/* Smash & Save — roll a fully-randomised scene (preset + style +
+          palette + FX + physics + camera shake + bg gradient) AND
+          immediately save it as a bookmark, so users can A/B compare
+          surprise configurations without losing the previous winner. */}
+      <button
+        onClick={() => {
+          if (!canSaveMore) {
+            showToast(`Max ${MAX_BOOKMARKS} bookmarks — delete one first`)
+            return
+          }
+          try {
+            const presetIds = presets.map(p => p.id)
+            const { name, scene } = generateRandomScene(presetIds)
+            // Apply first so the user sees the result instantly...
+            applyScene(scene, useStore.getState())
+            // ...then save it (use the freshly-applied store state so
+            // any settings the user had on but the random scene didn't
+            // touch are preserved in the bookmark).
+            const next = appendBookmark(items, { name, scene })
+            setItems(next)
+            saveBookmarks(next)
+            showToast(`Smashed → "${name.replace(/^Smash /, '')}"`, <Shuffle size={10} color="#fff" strokeWidth={2.4} />)
+          } catch (e) {
+            showToast(`Smash failed: ${e.message || 'unknown'}`)
+          }
+        }}
+        title={canSaveMore ? 'Roll a completely random scene and save it as a bookmark' : `Max ${MAX_BOOKMARKS} bookmarks — delete one first`}
+        disabled={!canSaveMore}
+        style={{
+          width: '100%', padding: '8px 0', marginBottom: 8,
+          borderRadius: 8, fontSize: 12, fontWeight: 550,
+          cursor: canSaveMore ? 'pointer' : 'not-allowed',
+          background: canSaveMore
+            ? 'linear-gradient(135deg, rgba(236,72,153,0.18), rgba(245,158,11,0.14))'
+            : 'rgba(255,255,255,0.03)',
+          color: canSaveMore ? '#fde68a' : '#5a5a70',
+          border: canSaveMore ? '1px solid rgba(236,72,153,0.32)' : '1px solid rgba(255,255,255,0.05)',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          opacity: canSaveMore ? 1 : 0.6,
+        }}
+      >
+        <Shuffle size={12} strokeWidth={2.2} /> Smash &amp; Save
       </button>
       {/* Export / Import buttons — share whole bookmark collections
           as portable JSON files. Import shows a confirm asking
