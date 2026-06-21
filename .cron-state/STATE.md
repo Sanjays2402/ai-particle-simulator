@@ -29,12 +29,12 @@ Existing capabilities (do not re-ship):
 - Snapshot gallery (last 8 PNGs in localStorage, re-download + delete)
 - Live preset source viewer (read-only, copy button, syntax-coloured)
 - Scene bookmarks (B quick-save, up to 12, preset + palette + FX + force + camera shake)
-- Custom background gradient (alpha canvas + CSS layer, 6 nebula chips, 0-360 angle)
+- Custom background gradient (alpha canvas + CSS layer, 6 nebula chips, 0-360 angle, optional audio-reactive hue)
 - Slideshow / auto-cycle presets (sequence / shuffle / favourites, 2-60s dwell)
-- Crossfade between presets (smoothstep ramp, 0.5-10s, progress bar + cancel)
+- Crossfade between presets (smoothstep ramp, 0.5-10s, progress bar + cancel, duration chips)
 - Reduced-motion mode (auto/reduce/full, gates hue cycle, auto-rotate, shake, orbs, splash)
 - Trig-noise particle deformer (global wiggle layered on top of any preset)
-- Custom theme editor (name + accent + hue, 12-theme cap, localStorage)
+- Custom theme editor (name + accent + hue, 12-theme cap, localStorage, JSON pack export/import)
 - Touch gestures (two-finger pinch = particle count, swipe = preset nav)
 - Rebindable keyboard shortcuts (Settings → Keyboard panel, conflict detection, layout-independent codes)
 - Mini-map overlay (top-down XZ widget, click to recenter orbit target)
@@ -46,6 +46,11 @@ Existing capabilities (do not re-ship):
 - Slideshow respects category filter chips (sequence + shuffle scoped, favourites bypass)
 - Bookmark export/import as JSON (tagged envelope, merge/replace, 256KB cap)
 - Wind preset chips (Calm / Breeze / Gale / Storm — one-tap weather configs)
+- Crossfade duration chips (Snap / Fast / Cinematic / Drift — one-tap blend timings)
+- Audio-reactive background gradient (CSS hue-rotate per active audio band)
+- Smash & Save — one-tap fully random bookmark scene (47 fields rolled + saved)
+- Custom theme JSON pack export/import (parallels bookmarks IO)
+- Carousel thumbnail pre-rendering during idle frames (offscreen Canvas2D sampler, ~64/session cap)
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -98,29 +103,40 @@ single slice. Will revisit as its own dedicated batch.
 - [x] **R6.04** Bookmark export/import as JSON  — fc47f64
 - [x] **R6.05** Wind preset chips (Calm/Breeze/Gale/Storm)  — ae16d39
 
-### Batch 7 — next 5 (refilled)
-- [ ] R7.01 OpenGraph snapshot endpoint (server-rendered card for share URLs) [was R6.06]
-- [ ] R7.02 Preset thumbnail rendering during carousel idle (offscreen cache) [was R6.07]
-- [ ] R7.03 Random scene generator that fully randomises bookmark fields (smash → save) [was R6.08]
-- [ ] R7.04 Cross-fade timing chips (0.5s / 2s / 5s / 10s presets in the Crossfade panel) [was R6.09]
-- [ ] R7.05 Audio-reactive background gradient (cycle hue of the bg with beat) [was R6.10]
+### Batch 7 — crossfade chips + reactive bg + smash-save + theme IO + thumb prerender  (SHIPPED)
+- [x] **R7.04** Cross-fade timing chips (Snap/Fast/Cinematic/Drift) — d723782
+- [x] **R7.05** Audio-reactive background gradient (CSS hue-rotate per band) — 570da2c
+- [x] **R7.03** Smash & Save — fully randomised bookmark scene — b9386cc
+- [x] **R7.08** Custom theme JSON pack export/import — 12b635d
+- [x] **R7.02** Preset thumbnail pre-renderer (idle Canvas2D sampler) — 84c910e
+
+Note: R7.01 (server-rendered OG snapshot endpoint) deferred — this is a
+static Vite app, no server runtime available. Will revisit if/when a
+backend lands (Cloudflare Worker, Vercel function, etc.).
+
+### Batch 8 — next 5 (refilled)
+- [ ] R8.01 Echo / trail FBO that survives EffectComposer (R7.06 — render pipeline refactor)
+- [ ] R8.02 Particle attractors as named objects (drag to reposition, multiple types coexist) [was R7.07]
+- [ ] R8.03 Custom theme set as default-on-load (auto-applied if active when reloading) [was R7.09]
+- [ ] R8.04 Mobile-only gesture hint overlay shown on first run [was R7.10]
+- [ ] R8.05 Keyboard remap quick-export (round-trip keymap as JSON via Settings) [was R7.11]
 
 ### Future queue (refill when batch closes)
-- [ ] R7.06 Echo / trail FBO that survives EffectComposer (R2.02 deferred — render pipeline refactor) [was R6.11]
-- [ ] R7.07 Particle attractors as named objects (drag to reposition, multiple types coexist) [was R6.12]
-- [ ] R7.08 Custom theme export / import as JSON (share a theme pack) [was R6.13]
-- [ ] R7.09 Custom theme set as default-on-load (auto-applied if active when reloading) [was R6.14]
-- [ ] R7.10 Mobile-only gesture hint overlay shown on first run [was R6.15]
-- [ ] R7.11 Keyboard remap quick-export (round-trip keymap as JSON via Settings) [was R6.16]
-- [ ] R7.12 MIDI mapping presets (controller-specific bundles — nanoKONTROL, Launch Control) [was R6.17]
-- [ ] R7.13 Waveform mode switch (time-domain vs frequency-spectrum bars) [was R6.18]
-- [ ] R7.14 Preset code viewer: inline error markers on the failing line during Edit [was R6.19]
-- [ ] R7.15 Minimap: also render saved camera views as small dots so users can see where they are [was R6.20]
-- [ ] R7.16 Camera path waypoint reorder (drag to rearrange order, drop to commit)
-- [ ] R7.17 Snapshot lightbox: pinch-zoom on mobile (CSS transform handles)
-- [ ] R7.18 Slideshow respect-category in command palette (quick-toggle without opening LeftSidebar)
-- [ ] R7.19 Bookmark export includes the live camera-view list (one combined "share-this-scene-set" file)
-- [ ] R7.20 Wind preset chips become custom-named: long-press a slot to save the current sliders as a chip
+- [ ] R8.06 MIDI mapping presets (controller-specific bundles — nanoKONTROL, Launch Control) [was R7.12]
+- [ ] R8.07 Waveform mode switch (time-domain vs frequency-spectrum bars) [was R7.13]
+- [ ] R8.08 Preset code viewer: inline error markers on the failing line during Edit [was R7.14]
+- [ ] R8.09 Minimap: render saved camera views as small dots [was R7.15]
+- [ ] R8.10 Camera path waypoint reorder (drag to rearrange, drop to commit) [was R7.16]
+- [ ] R8.11 Snapshot lightbox: pinch-zoom on mobile (CSS transform handles) [was R7.17]
+- [ ] R8.12 Slideshow respect-category in command palette (quick-toggle without LeftSidebar) [was R7.18]
+- [ ] R8.13 Bookmark export includes the live camera-view list (one combined file) [was R7.19]
+- [ ] R8.14 Wind preset chips become custom-named (long-press a slot to save sliders) [was R7.20]
+- [ ] R8.15 OpenGraph snapshot endpoint (server-rendered card for share URLs) — needs backend
+- [ ] R8.16 Crossfade chips: long-press a slot to bind its seconds to the current slider value
+- [ ] R8.17 Theme pack browser — preview a JSON pack's themes before importing
+- [ ] R8.18 Per-preset thumbnail re-render button in the carousel (rebuild a single stale thumb)
+- [ ] R8.19 Audio reactive bg: animation curve preset chips (Pulse / Ramp / Hold)
+- [ ] R8.20 Smash & Save: bias chips ("Mostly Calm", "Mostly Wild") to constrain the random ranges
 
 ## TICK LOG
 - 2026-06-19 23:41 PT — Bootstrap + Batch 1 (5/5).
@@ -167,3 +183,14 @@ single slice. Will revisit as its own dedicated batch.
   Build: 856 ms green. Unit tests: 27/27 pass (added snapshotGrid, cameraPath,
   bookmarksIO · 115 fresh asserts this batch; slideshow gained categoryFilter
   coverage; wind gained 19 asserts for the 4 preset chips + matchesWindPreset).
+- 2026-06-20 21:33 PT — Batch 7 (5/5).
+  Commits: d723782 (R7.04 crossfade duration chips), 570da2c (R7.05 audio-reactive
+  bg gradient), b9386cc (R7.03 Smash & Save), 12b635d (R7.08 custom theme pack
+  export/import), 84c910e (R7.02 carousel thumbnail prerenderer).
+  R7.01 deferred — needs server runtime this static app doesn't have.
+  Gates: lint 22 errors / 3 warnings — one BETTER than baseline (zero new errors
+  in any of the 11 modified files). Build: 844 ms green. Unit tests: 30/30 files
+  pass (added bgGradient audio asserts, crossfade chips, randomScene,
+  customThemesIO, presetThumbnails · ~150 fresh asserts this batch).
+  SCENE_FIELDS up to 47 (bgGradientAudioReactive + bgGradientAudioStrength
+  round-trip through bookmarks too).
