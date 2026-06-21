@@ -1,8 +1,8 @@
 # ai-particle-simulator — autoship STATE
 
 Owner-of-record (cron): Cake (cron) `51058514+Sanjays2402@users.noreply.github.com`
-Branch: **feature/autoship** (off local main HEAD at 169b31b)
-Never merge to main, never tag, never open PRs. Quality gate ONCE per batch.
+Branch: **main** — autoship works directly on `main`, gates ONCE per batch, never PR/tag/release.
+Never reset or force-push; preserve any unpushed local commits that may sit ahead of origin.
 
 ## App snapshot (so future ticks don't re-read the world)
 
@@ -28,7 +28,7 @@ Existing capabilities (do not re-ship):
 - Session stats (lifetime presets / gifs / screenshots / time)
 - Snapshot gallery (last 8 PNGs in localStorage, re-download + delete)
 - Live preset source viewer (read-only, copy button, syntax-coloured)
-- Scene bookmarks (B quick-save, up to 12, preset + palette + FX + force + camera shake)
+- Scene bookmarks (B quick-save, up to 12, preset + palette + FX + force + camera shake + NAMED ATTRACTORS)
 - Custom background gradient (alpha canvas + CSS layer, 6 nebula chips, 0-360 angle, optional audio-reactive hue)
 - Slideshow / auto-cycle presets (sequence / shuffle / favourites, 2-60s dwell)
 - Crossfade between presets (smoothstep ramp, 0.5-10s, progress bar + cancel, duration chips)
@@ -37,10 +37,10 @@ Existing capabilities (do not re-ship):
 - Custom theme editor (name + accent + hue, 12-theme cap, localStorage, JSON pack export/import)
 - Touch gestures (two-finger pinch = particle count, swipe = preset nav)
 - Rebindable keyboard shortcuts (Settings → Keyboard panel, conflict detection, layout-independent codes)
-- Mini-map overlay (top-down XZ widget, click to recenter orbit target)
-- Web MIDI controller mapping (CC → 14 live store actions, Learn workflow, always-on hook)
-- Editable preset source viewer (textarea + live validate + Compile/Revert/Cancel)
-- Live audio waveform / oscilloscope overlay (pinned top-right, peak-aware glow)
+- Mini-map overlay (top-down XZ widget, click to recenter orbit target, SAVED CAMERA VIEWS as clickable green dots)
+- Web MIDI controller mapping (CC → 14 live store actions, Learn workflow, always-on hook, CONTROLLER PRESETS: nanoKONTROL2 / Launch Control XL / MPK Mini / Generic 8-knob with auto-detect by device name)
+- Editable preset source viewer (textarea + live validate + Compile/Revert/Cancel, INLINE ERROR LINE MARKER with jump-to-line button)
+- Live audio waveform / oscilloscope overlay (pinned top-right, peak-aware glow, time/freq mode switch, FREQ MODE LINEAR/LOG SCALE chip)
 - Snapshot grid view + full-res lightbox (4-up grid, arrow-key navigation, persisted view pref)
 - Camera path animator (smooth-tween between saved views, loop toggle, 0.5-30s/segment)
 - Slideshow respects category filter chips (sequence + shuffle scoped, favourites bypass)
@@ -55,7 +55,7 @@ Existing capabilities (do not re-ship):
 - Waveform overlay mode switch (oscilloscope vs 32-bar frequency spectrum, persisted)
 - Mobile gesture hint overlay (first-run, auto-dismiss after both gestures shown)
 - Custom theme survives reload (boot-time resolver — handles deleted themes too)
-- Named attractors — multiple coexisting force-field objects (per-attractor type/strength/radius/place-on-canvas, up to 12, persisted)
+- Named attractors — multiple coexisting force-field objects (per-attractor type/strength/radius/place-on-canvas, up to 12, persisted, round-trip through scene bookmarks)
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -127,36 +127,45 @@ backend lands (Cloudflare Worker, Vercel function, etc.).
 - [x] **R8.02** Particle attractors as named objects (multiple types coexist, drag-to-replace via click-canvas)  — 1a7139b
 
 Note: R8.01 (Echo / trail FBO that survives EffectComposer) deferred
-again — it's a render-pipeline refactor that needs its own dedicated
-batch (a single-slice swap of EffectComposer for a custom RTT pass).
-Substituted R8.07 from the future queue to keep the batch at 5.
-R8.02's "drag to reposition" was implemented as click-canvas-to-
-re-place (per attractor, with a Place button that arms the next click)
-instead of a 3D-handle drag — drag handles are a separate batch.
+again — render pipeline refactor still needs its own dedicated batch.
 
-### Batch 9 — next 5 (refilled)
-- [ ] R9.01 Echo / trail FBO that survives EffectComposer (R8.01 — render pipeline refactor, dedicated batch)
-- [ ] R9.02 Named attractor 3D drag handle (real 3-axis drag handle on the canvas, not click-place)  [new]
-- [ ] R9.03 MIDI mapping presets (controller-specific bundles — nanoKONTROL, Launch Control) [was R8.06]
-- [ ] R9.04 Preset code viewer: inline error markers on the failing line during Edit [was R8.08]
-- [ ] R9.05 Minimap: render saved camera views as small dots [was R8.09]
+### Batch 9 — MIDI presets + editor error line + minimap dots + bookmark attractors + log spectrum  (SHIPPED)
+- [x] **R9.03** MIDI controller preset bundles (nanoKONTROL2 / LCXL / MPK Mini / Generic-8) — 06ef6ea
+- [x] **R9.04** Preset editor inline error line marker + jump-to-line button — 39ef5e4
+- [x] **R9.05** Minimap renders saved camera views as clickable dots — 67a0611
+- [x] **R9.17** Named attractors round-trip through scene bookmarks (substituted from future queue) — 7677f1e
+- [x] **R9.19** Spectrum waveform log-frequency scale mode (substituted from future queue) — c4e23b0
+
+Note: R9.01 (Echo / trail FBO that survives EffectComposer) deferred
+yet again — render pipeline refactor needs its own dedicated batch.
+R9.02 (Named attractor 3D drag handle) also deferred — proper 3-axis
+drag-handle is its own batch (needs r3f gizmo integration). Substituted
+R9.17 and R9.19 from the future queue to keep the batch at 5 great
+slices instead of padding.
+
+### Batch 10 — next 5 (refilled)
+- [ ] R10.01 Echo / trail FBO that survives EffectComposer (R9.01 — render pipeline refactor, dedicated batch)
+- [ ] R10.02 Named attractor 3D drag handle (R9.02 — needs r3f gizmo handles, dedicated batch)
+- [ ] R10.03 Camera path waypoint reorder (drag to rearrange, drop to commit) [was R9.06]
+- [ ] R10.04 Snapshot lightbox: pinch-zoom on mobile (CSS transform handles) [was R9.07]
+- [ ] R10.05 Slideshow respect-category in command palette (quick-toggle without LeftSidebar) [was R9.08]
 
 ### Future queue (refill when batch closes)
-- [ ] R9.06 Camera path waypoint reorder (drag to rearrange, drop to commit) [was R8.10]
-- [ ] R9.07 Snapshot lightbox: pinch-zoom on mobile (CSS transform handles) [was R8.11]
-- [ ] R9.08 Slideshow respect-category in command palette (quick-toggle without LeftSidebar) [was R8.12]
-- [ ] R9.09 Bookmark export includes the live camera-view list (one combined file) [was R8.13]
-- [ ] R9.10 Wind preset chips become custom-named (long-press a slot to save sliders) [was R8.14]
-- [ ] R9.11 OpenGraph snapshot endpoint (server-rendered card for share URLs) — needs backend [was R8.15]
-- [ ] R9.12 Crossfade chips: long-press a slot to bind its seconds to the current slider value [was R8.16]
-- [ ] R9.13 Theme pack browser — preview a JSON pack's themes before importing [was R8.17]
-- [ ] R9.14 Per-preset thumbnail re-render button in the carousel (rebuild a single stale thumb) [was R8.18]
-- [ ] R9.15 Audio reactive bg: animation curve preset chips (Pulse / Ramp / Hold) [was R8.19]
-- [ ] R9.16 Smash & Save: bias chips ("Mostly Calm", "Mostly Wild") to constrain the random ranges [was R8.20]
-- [ ] R9.17 Named attractor bookmark — round-trip the attractor list through scene bookmarks
-- [ ] R9.18 Named attractor → MIDI: route a CC to a specific attractor's strength
-- [ ] R9.19 Spectrum waveform: log-frequency mode option for a more musical bar distribution
-- [ ] R9.20 Keymap import: live diff preview before committing
+- [ ] R10.06 Bookmark export includes the live camera-view list (one combined file) [was R9.09]
+- [ ] R10.07 Wind preset chips become custom-named (long-press a slot to save sliders) [was R9.10]
+- [ ] R10.08 OpenGraph snapshot endpoint (server-rendered card for share URLs) — needs backend [was R9.11]
+- [ ] R10.09 Crossfade chips: long-press a slot to bind its seconds to the current slider value [was R9.12]
+- [ ] R10.10 Theme pack browser — preview a JSON pack's themes before importing [was R9.13]
+- [ ] R10.11 Per-preset thumbnail re-render button in the carousel (rebuild a single stale thumb) [was R9.14]
+- [ ] R10.12 Audio reactive bg: animation curve preset chips (Pulse / Ramp / Hold) [was R9.15]
+- [ ] R10.13 Smash & Save: bias chips ("Mostly Calm", "Mostly Wild") to constrain the random ranges [was R9.16]
+- [ ] R10.14 Named attractor → MIDI: route a CC to a specific attractor's strength [was R9.18]
+- [ ] R10.15 Keymap import: live diff preview before committing [was R9.20]
+- [ ] R10.16 MIDI controller preset bundle EDITOR (let users save a custom map as their own bundle)
+- [ ] R10.17 Preset editor: gutter overlay highlighting all error lines (multi-error mode)
+- [ ] R10.18 Minimap: per-view labels on hover (small floating tooltip with view name)
+- [ ] R10.19 Spectrum waveform: peak hold lines that decay slowly (classic EQ look)
+- [ ] R10.20 Named attractor type-specific color cues in the UI (vortex purple, repulsor red, etc.)
 
 ## TICK LOG
 - 2026-06-19 23:41 PT — Bootstrap + Batch 1 (5/5).
@@ -226,3 +235,19 @@ instead of a 3D-handle drag — drag handles are a separate batch.
   Unit tests: 34/34 files pass (added keymapIO, mobileGestureHint, activeThemeBoot,
   namedAttractors; waveform extended with spectrum mode · 100+ fresh asserts
   this batch).
+- 2026-06-21 03:37 PT — Batch 9 (5/5).
+  Commits: 06ef6ea (R9.03 MIDI controller preset bundles),
+  39ef5e4 (R9.04 preset editor inline error line + jump-to-line),
+  67a0611 (R9.05 minimap saved-view dots), 7677f1e (R9.17 namedAttractors
+  round-trip through scene bookmarks — substituted from future queue),
+  c4e23b0 (R9.19 spectrum log-frequency scale — substituted from future queue).
+  R9.01 and R9.02 deferred again — render pipeline refactor and 3D drag-handle
+  each need their own dedicated batch. Working directly on main from this batch
+  onward (no more feature/autoship branch).
+  Gates: lint 23 errors / 3 warnings — exactly matches baseline (zero new
+  errors in any of the 7 modified .js/.jsx files). Build: 1.21 s green (1.63 MB
+  bundle, gzip 491 KB). Unit tests: 35/35 files pass (added midiPresets; extended
+  presetEditor with parseSyntaxErrorLocation/lineRangeInSource, minimap with
+  projectSavedViews/pickNearestMarker, sceneBookmarks with namedAttractors
+  round-trip, waveform with projectSpectrumToLogBars · ~90 fresh asserts this
+  batch). SCENE_FIELDS up to 48 (namedAttractors round-trips through bookmarks).
