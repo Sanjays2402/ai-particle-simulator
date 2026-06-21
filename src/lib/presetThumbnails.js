@@ -206,3 +206,33 @@ export function captureThumbnailToStorage(preset, opts = {}) {
     return true
   } catch { return false }
 }
+
+// Wipe the cached thumbnail for one preset id. Returns true if the
+// entry existed and was removed; false if there was nothing to remove
+// (or storage isn't available). Used by the carousel's "rebuild this
+// thumb" action so the prerenderer / live capture path treats the
+// preset as missing on the next pass.
+export function clearThumbnail(presetId, storage) {
+  if (typeof presetId !== 'string' || !presetId) return false
+  const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null)
+  if (!store) return false
+  const key = thumbStorageKey(presetId)
+  try {
+    const had = store.getItem(key) != null
+    if (!had) return false
+    store.removeItem(key)
+    return true
+  } catch { return false }
+}
+
+// Re-render exactly one preset's thumbnail, overwriting whatever
+// dataURL is already cached. Convenience for the "refresh this thumb"
+// UI in the carousel — single call, returns true on success. Different
+// from captureThumbnailToStorage only in that it explicitly clears
+// the existing entry first, so the rebuilt URL replaces the stale one
+// even if rendering fails (we don't leave a broken thumb behind).
+export function recaptureThumbnail(preset, opts = {}) {
+  if (!preset || typeof preset.id !== 'string') return false
+  clearThumbnail(preset.id, opts.storage)
+  return captureThumbnailToStorage(preset, opts)
+}

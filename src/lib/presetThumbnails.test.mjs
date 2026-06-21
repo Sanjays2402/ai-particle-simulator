@@ -2,6 +2,7 @@
 import {
   projectXY, thumbStorageKey, hasThumbnail, listMissingThumbnails,
   compilePresetForThumbnail, renderThumbnailToCanvas, captureThumbnailToStorage,
+  clearThumbnail, recaptureThumbnail,
   THUMB_WIDTH, THUMB_HEIGHT,
 } from './presetThumbnails.js'
 
@@ -117,4 +118,38 @@ eq(captureThumbnailToStorage(null), false, 'null preset → false safe')
 eq(captureThumbnailToStorage({ id: 'x', code: 'target.set(0,0,0); color.setRGB(1,1,1);' }), false,
    'no document → false safe')
 
-console.log(`PASS: presetThumbnails projection + storage discovery + compile + render (${THUMB_WIDTH}x${THUMB_HEIGHT})`)
+// --- clearThumbnail ---
+{
+  const s = makeFakeStorage()
+  eq(clearThumbnail('missing-id', s), false, 'clearThumbnail: nothing to remove → false')
+  s.setItem(thumbStorageKey('p'), 'data:image/jpeg;base64,xxx')
+  eq(hasThumbnail('p', s), true, 'precondition: thumb present')
+  eq(clearThumbnail('p', s), true, 'clearThumbnail: present → true')
+  eq(hasThumbnail('p', s), false, 'clearThumbnail removes the entry')
+  // Re-clear is a no-op.
+  eq(clearThumbnail('p', s), false, 'clearThumbnail second call → false (already gone)')
+  // Bad inputs.
+  eq(clearThumbnail('', s), false, 'clearThumbnail: empty id → false')
+  eq(clearThumbnail(null, s), false, 'clearThumbnail: null id → false')
+  eq(clearThumbnail(123, s), false, 'clearThumbnail: non-string id → false')
+}
+
+// --- recaptureThumbnail is also a Node-side no-op (no document), but
+//     verifies the wipe step ran by leaving storage empty afterward.
+{
+  const s = makeFakeStorage()
+  s.setItem(thumbStorageKey('foo'), 'stale-thumb-data')
+  eq(hasThumbnail('foo', s), true, 'precondition: stale thumb cached')
+  // Render returns false in a no-document env; the wipe should still
+  // have happened first so the stale thumb is gone.
+  const ok = recaptureThumbnail({ id: 'foo', code: 'target.set(0,0,0);' }, { storage: s })
+  eq(ok, false, 'recaptureThumbnail: no-document → render returns false')
+  eq(hasThumbnail('foo', s), false, 'recaptureThumbnail wiped stale thumb before failing render')
+
+  // Defensive: bad inputs return false without throwing.
+  eq(recaptureThumbnail(null), false, 'recaptureThumbnail: null preset → false')
+  eq(recaptureThumbnail({}), false,   'recaptureThumbnail: empty preset → false')
+  eq(recaptureThumbnail({ id: 42 }), false, 'recaptureThumbnail: non-string id → false')
+}
+
+console.log(`PASS: presetThumbnails projection + storage discovery + compile + render (${THUMB_WIDTH}x${THUMB_HEIGHT}) + clearThumbnail/recaptureThumbnail`)
