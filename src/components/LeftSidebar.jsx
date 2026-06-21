@@ -7,6 +7,7 @@ import { CATEGORIES, categoryOf, countByCategory } from '../lib/presetCategories
 import { compassFor, WIND_PRESETS, matchesWindPreset } from '../lib/wind'
 import { DURATION_CHIPS as CROSSFADE_DURATION_CHIPS, matchDurationChip as matchCrossfadeChip } from '../lib/crossfade'
 import { downloadThemesFile, parseImport as parseThemesImport, mergeImport as mergeThemesImport } from '../lib/customThemesIO'
+import { ATTRACTOR_TYPES, MAX_ATTRACTORS } from '../lib/namedAttractors'
 import { showToast } from './Toast'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
@@ -364,6 +365,10 @@ export default function LeftSidebar() {
             <PlaceFieldRow />
           </>
         )}
+      </Section>
+
+      <Section title="Named Attractors">
+        <NamedAttractorsBlock />
       </Section>
 
       <Section title="Crossfade">
@@ -1722,6 +1727,231 @@ function MidiButton() {
         Map hardware knobs/faders to live sliders.
         {!supported && ' Try Chrome or Edge.'}
       </p>
+    </div>
+  )
+}
+
+// Named Attractors — first-class force-field objects that coexist
+// with the legacy single field. Each row exposes type chip strip,
+// strength + radius sliders, enabled toggle, place-on-canvas, and
+// a remove button. Add appends a new attractor with defaults; the
+// list caps at MAX_ATTRACTORS.
+function NamedAttractorsBlock() {
+  const list = useStore(s => s.namedAttractors)
+  const add  = useStore(s => s.addNamedAttractor)
+  const remove = useStore(s => s.removeNamedAttractor)
+  const update = useStore(s => s.updateNamedAttractor)
+  const toggle = useStore(s => s.toggleNamedAttractor)
+  const placingId = useStore(s => s.placingAttractorId)
+  const setPlacing = useStore(s => s.setPlacingAttractorId)
+  const atCap = list.length >= MAX_ATTRACTORS
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <button
+        onClick={() => { if (!atCap) add({ type: 'attractor' }) }}
+        disabled={atCap}
+        title={atCap ? `Maximum ${MAX_ATTRACTORS} reached — remove one first` : 'Add a new named force field'}
+        style={{
+          padding: '8px 12px', borderRadius: 8, fontSize: 12, fontWeight: 550,
+          cursor: atCap ? 'not-allowed' : 'pointer',
+          background: atCap ? 'rgba(255,255,255,0.03)' : 'linear-gradient(135deg, rgba(99,102,241,0.18), rgba(168,85,247,0.14))',
+          color: atCap ? '#5a5a70' : '#c7d2fe',
+          border: atCap ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(99,102,241,0.35)',
+        }}>
+        {atCap ? `Maximum ${MAX_ATTRACTORS} reached` : `+ Add attractor (${list.length}/${MAX_ATTRACTORS})`}
+      </button>
+
+      {list.length === 0 && (
+        <p style={{ fontSize: 11, color: '#7a7a90', lineHeight: 1.5, margin: 0 }}>
+          Add named force fields that layer on top of the single legacy field.
+          Multiple types coexist — try a Vortex + a Repulsor for a dramatic ring.
+        </p>
+      )}
+
+      {list.map((a, idx) => (
+        <NamedAttractorRow
+          key={a.id}
+          index={idx}
+          attractor={a}
+          isPlacing={placingId === a.id}
+          onRename={(name) => update(a.id, { name })}
+          onTypeChange={(type) => update(a.id, { type })}
+          onStrengthChange={(strength) => update(a.id, { strength })}
+          onRadiusChange={(radius) => update(a.id, { radius })}
+          onToggle={() => toggle(a.id)}
+          onRemove={() => remove(a.id)}
+          onPlace={() => setPlacing(placingId === a.id ? null : a.id)}
+        />
+      ))}
+    </div>
+  )
+}
+
+function NamedAttractorRow({
+  index, attractor, isPlacing,
+  onRename, onTypeChange, onStrengthChange, onRadiusChange,
+  onToggle, onRemove, onPlace,
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draftName, setDraftName] = useState(attractor.name)
+  // Sync draft on external rename.
+  useEffect(() => { setDraftName(attractor.name) }, [attractor.name])
+
+  const TYPE_LABELS = {
+    attractor: 'Attract',
+    repulsor:  'Repulse',
+    vortex:    'Vortex',
+    turbulence:'Turb.',
+  }
+
+  return (
+    <div style={{
+      borderRadius: 10,
+      background: attractor.enabled ? 'rgba(255,255,255,0.025)' : 'rgba(255,255,255,0.015)',
+      border: isPlacing
+        ? '1px solid rgba(34,197,94,0.45)'
+        : (attractor.enabled
+            ? '1px solid rgba(99,102,241,0.18)'
+            : '1px solid rgba(255,255,255,0.05)'),
+      boxShadow: isPlacing ? '0 0 14px rgba(34,197,94,0.25)' : 'none',
+      padding: '10px 11px',
+      opacity: attractor.enabled ? 1 : 0.55,
+      transition: 'all 0.2s ease-out',
+    }}>
+      {/* Header: name + enabled toggle + remove */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <span style={{
+          fontSize: 9, fontWeight: 700, letterSpacing: '0.12em',
+          color: '#6a6a80', textTransform: 'uppercase',
+          background: 'rgba(255,255,255,0.04)',
+          padding: '1px 5px', borderRadius: 4,
+          fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+        }}>#{index + 1}</span>
+        {editing ? (
+          <input
+            type="text"
+            value={draftName}
+            autoFocus
+            onChange={(e) => setDraftName(e.target.value)}
+            onBlur={() => { onRename(draftName); setEditing(false) }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { onRename(draftName); setEditing(false) } else if (e.key === 'Escape') { setDraftName(attractor.name); setEditing(false) } }}
+            style={{
+              flex: 1, minWidth: 0, padding: '3px 7px', borderRadius: 5,
+              background: 'rgba(255,255,255,0.04)', color: '#eeeef0',
+              border: '1px solid rgba(99,102,241,0.45)', fontSize: 12,
+              outline: 'none', fontFamily: 'inherit',
+            }}
+          />
+        ) : (
+          <span
+            onDoubleClick={() => setEditing(true)}
+            title="Double-click to rename"
+            style={{
+              flex: 1, minWidth: 0,
+              fontSize: 12, fontWeight: 600, color: '#eeeef0',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              cursor: 'text',
+            }}>
+            {attractor.name}
+          </span>
+        )}
+        <button
+          onClick={onToggle}
+          title={attractor.enabled ? 'Mute this attractor' : 'Unmute this attractor'}
+          style={{
+            padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600,
+            cursor: 'pointer',
+            background: attractor.enabled ? 'rgba(34,197,94,0.14)' : 'rgba(255,255,255,0.04)',
+            color: attractor.enabled ? '#86efac' : '#7a7a90',
+            border: attractor.enabled ? '1px solid rgba(34,197,94,0.3)' : '1px solid rgba(255,255,255,0.06)',
+            letterSpacing: '0.06em', textTransform: 'uppercase',
+          }}>
+          {attractor.enabled ? 'On' : 'Off'}
+        </button>
+        <button
+          onClick={onRemove}
+          title="Remove this attractor"
+          style={{
+            padding: '3px 7px', borderRadius: 5, fontSize: 13, lineHeight: 1,
+            background: 'rgba(239,68,68,0.08)', color: '#fca5a5',
+            border: '1px solid rgba(239,68,68,0.25)', cursor: 'pointer',
+            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+          }}>
+          {'\u00d7'}
+        </button>
+      </div>
+
+      {/* Type chips */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 4, marginBottom: 8 }}>
+        {ATTRACTOR_TYPES.map(t => {
+          const active = attractor.type === t
+          return (
+            <button key={t}
+              onClick={() => onTypeChange(t)}
+              title={TYPE_LABELS[t]}
+              style={{
+                padding: '5px 0', borderRadius: 5, fontSize: 10, fontWeight: 600,
+                cursor: 'pointer',
+                background: active
+                  ? 'linear-gradient(135deg, rgba(168,85,247,0.22), rgba(99,102,241,0.18))'
+                  : 'rgba(255,255,255,0.03)',
+                color: active ? '#f3e8ff' : '#9a9ab0',
+                border: active ? '1px solid rgba(168,85,247,0.4)' : '1px solid rgba(255,255,255,0.05)',
+              }}>
+              {TYPE_LABELS[t]}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Strength + radius sliders inline */}
+      <div style={{ marginBottom: 6 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, marginBottom: 3 }}>
+          <span style={{ color: '#9a9ab0', fontWeight: 500 }}>Strength</span>
+          <span style={{ color: '#c8c8d0', fontFamily: 'Geist Mono, monospace', fontSize: 10 }}>{attractor.strength.toFixed(2)}</span>
+        </div>
+        <input type="range" min={0} max={3} step={0.05} value={attractor.strength}
+          onChange={(e) => onStrengthChange(parseFloat(e.target.value))}
+          style={{ width: '100%' }} />
+      </div>
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, marginBottom: 3 }}>
+          <span style={{ color: '#9a9ab0', fontWeight: 500 }}>Radius</span>
+          <span style={{ color: '#c8c8d0', fontFamily: 'Geist Mono, monospace', fontSize: 10 }}>{attractor.radius.toFixed(0)}</span>
+        </div>
+        <input type="range" min={4} max={16} step={0.5} value={attractor.radius}
+          onChange={(e) => onRadiusChange(parseFloat(e.target.value))}
+          style={{ width: '100%' }} />
+      </div>
+
+      {/* Position + place button */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <button
+          onClick={onPlace}
+          title={isPlacing
+            ? 'Click on the canvas to set this attractor\u2019s center'
+            : 'Re-place this attractor by clicking the canvas'}
+          style={{
+            flex: 1, padding: '6px 0', borderRadius: 6,
+            fontSize: 11, fontWeight: 600, cursor: 'pointer',
+            background: isPlacing
+              ? 'linear-gradient(135deg, rgba(34,197,94,0.22), rgba(99,102,241,0.18))'
+              : 'rgba(255,255,255,0.04)',
+            color: isPlacing ? '#bbf7d0' : '#c8c8d0',
+            border: isPlacing ? '1px solid rgba(34,197,94,0.4)' : '1px solid rgba(255,255,255,0.06)',
+          }}>
+          {isPlacing ? 'Click canvas\u2026' : 'Place on canvas'}
+        </button>
+        <span style={{
+          fontSize: 9, color: '#7a7a90', fontFamily: 'Geist Mono, monospace',
+          padding: '4px 6px', borderRadius: 5,
+          background: 'rgba(255,255,255,0.03)',
+          border: '1px solid rgba(255,255,255,0.04)',
+        }}>
+          {attractor.position[0].toFixed(1)}, {attractor.position[1].toFixed(1)}, {attractor.position[2].toFixed(1)}
+        </span>
+      </div>
     </div>
   )
 }

@@ -75,8 +75,14 @@ function MouseAttractor() {
     const onDown = () => { draggingRef.current = true }
     const onUp = () => { draggingRef.current = false }
     const onClick = (e) => {
-      const { placeFieldMode, setForceFieldCenter, setPlaceFieldMode } = useStore.getState()
-      if (!placeFieldMode) return
+      const {
+        placeFieldMode, setForceFieldCenter, setPlaceFieldMode,
+        placingAttractorId, moveNamedAttractor, setPlacingAttractorId,
+      } = useStore.getState()
+      // Either legacy place-field mode OR named-attractor place mode
+      // claims the next click; legacy wins if both are accidentally
+      // armed at once.
+      if (!placeFieldMode && !placingAttractorId) return
       // Raycast to the same z=0 plane the rest of the canvas uses.
       const rect = dom.getBoundingClientRect()
       const x = ((e.clientX - rect.left) / rect.width) * 2 - 1
@@ -84,8 +90,13 @@ function MouseAttractor() {
       raycaster.setFromCamera({ x, y }, camera)
       const hit = new THREE.Vector3()
       raycaster.ray.intersectPlane(planeRef.current, hit)
-      setForceFieldCenter([hit.x, hit.y, hit.z])
-      setPlaceFieldMode(false)
+      if (placeFieldMode) {
+        setForceFieldCenter([hit.x, hit.y, hit.z])
+        setPlaceFieldMode(false)
+      } else if (placingAttractorId) {
+        moveNamedAttractor(placingAttractorId, [hit.x, hit.y, hit.z])
+        setPlacingAttractorId(null)
+      }
       e.stopPropagation()
     }
     dom.addEventListener('pointerdown', onDown)
@@ -202,6 +213,7 @@ function Particles() {
             paletteEnabled, paletteA, paletteB, paletteMix,
             gravityEnabled, gravityStrength, collisionsEnabled,
             forceFieldType, forceFieldStrength, forceFieldCenter,
+            namedAttractors,
             kaleidoscopeEnabled, kaleidoscopeSegments,
             hueCycleEnabled, hueCycleSpeed,
             windEnabled, windIntensity, windAzimuth, windPitch,
@@ -237,7 +249,25 @@ function Particles() {
       prevCountRef.current = particleCount
     }
     const vel = velocitiesRef.current
-    const physicsActive = gravityEnabled || collisionsEnabled || forceFieldType
+    // Pre-filter active named attractors once per frame — avoids
+    // walking the disabled / zero-strength ones N times per particle.
+    // Each entry becomes [type, strengthScaled, cx, cy, cz, radiusSq].
+    const namedActive = []
+    if (Array.isArray(namedAttractors)) {
+      for (let i = 0; i < namedAttractors.length; i++) {
+        const a = namedAttractors[i]
+        if (!a || !a.enabled) continue
+        if (!a.strength || a.strength <= 0) continue
+        const r = typeof a.radius === 'number' ? a.radius : 10
+        namedActive.push([
+          a.type,
+          a.strength,
+          a.position[0], a.position[1], a.position[2],
+          r * r,
+        ])
+      }
+    }
+    const physicsActive = gravityEnabled || collisionsEnabled || forceFieldType || namedActive.length > 0
     const dt = Math.min(delta, 0.05) // cap delta
 
     // Spatial hash for collisions
@@ -373,6 +403,39 @@ function Particles() {
               vel[i3 + 1] += Math.cos(pz * 3 + t * 1.7) * strength * 5
               vel[i3 + 2] += Math.sin(px * 3 + t * 2.3) * strength * 5
             }
+          }
+        }
+
+        // Named attractors — additive force-field objects that layer
+        // on top of the single legacy field. Squared-distance gate
+        // keeps the per-attractor cost negligible far from each one;
+        // the active set is pre-filtered once per frame.
+        for (let ai = 0; ai < namedActive.length; ai++) {
+          const a = namedActive[ai]
+          const aType = a[0]
+          const aStr  = a[1]
+          const apx = _target.x - a[2]
+          const apy = _target.y - a[3]
+          const apz = _target.z - a[4]
+          const ad2 = apx * apx + apy * apy + apz * apz
+          if (ad2 >= a[5]) continue
+          const ad = Math.sqrt(ad2) + 0.01
+          const aS = aStr * dt
+          if (aType === 'attractor') {
+            vel[i3]     -= (apx / ad) * aS * 3
+            vel[i3 + 1] -= (apy / ad) * aS * 3
+            vel[i3 + 2] -= (apz / ad) * aS * 3
+          } else if (aType === 'repulsor') {
+            vel[i3]     += (apx / ad) * aS * 3
+            vel[i3 + 1] += (apy / ad) * aS * 3
+            vel[i3 + 2] += (apz / ad) * aS * 3
+          } else if (aType === 'vortex') {
+            vel[i3]     += (-apz / ad) * aS * 4
+            vel[i3 + 2] += ( apx / ad) * aS * 4
+          } else if (aType === 'turbulence') {
+            vel[i3]     += Math.sin(apy * 3 + t * 2)   * aS * 5
+            vel[i3 + 1] += Math.cos(apz * 3 + t * 1.7) * aS * 5
+            vel[i3 + 2] += Math.sin(apx * 3 + t * 2.3) * aS * 5
           }
         }
 

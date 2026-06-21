@@ -8,6 +8,15 @@ import { clampFocusDistance, clampFocalLength, clampBokehScale } from './lib/dep
 import { clampIntensity as clampWindIntensity, clampAzimuth as clampWindAzimuth, clampPitch as clampWindPitch } from './lib/wind'
 import { loadThemes as loadCustomThemes, saveThemes as saveCustomThemes, addTheme as addCustomThemeHelper, removeTheme as removeCustomThemeHelper, resolveTheme as resolveThemeHelper } from './lib/customThemes'
 import { clampAmplitude as clampNoiseAmp, clampFrequency as clampNoiseFreq, clampSpeed as clampNoiseSpeed } from './lib/noiseDeformer'
+import {
+  loadAttractors as loadNamedAttractors,
+  saveAttractors as saveNamedAttractors,
+  addAttractor as addNamedAttractorHelper,
+  removeAttractor as removeNamedAttractorHelper,
+  updateAttractor as updateNamedAttractorHelper,
+  toggleAttractor as toggleNamedAttractorHelper,
+  moveAttractor as moveNamedAttractorHelper,
+} from './lib/namedAttractors'
 import { clampHueReactiveStrength as clampBgGradientStrength } from './lib/bgGradient'
 
 // Lightweight settings persistence: a subset of user-tweakable values
@@ -130,6 +139,49 @@ export const useStore = create((set, get) => {
   placeFieldMode: false,
   setForceFieldCenter: (xyz) => set({ forceFieldCenter: xyz }),
   setPlaceFieldMode: (v) => set({ placeFieldMode: v }),
+
+  // Named attractors — first-class force-field OBJECTS that coexist
+  // alongside the legacy single forceFieldType. Each entry has its
+  // own type / strength / position / radius / enabled flag so users
+  // can compose multiple effects (e.g. a vortex + a repulsor) in one
+  // scene. Persisted to localStorage via lib/namedAttractors.
+  namedAttractors: loadNamedAttractors(),
+  // When non-null, the next canvas pointer-up will move this
+  // attractor's center to the intersected world point, then clear
+  // this flag. null = not placing anything. The string is the
+  // attractor id so multiple slots can each enter "place" mode
+  // independently without sharing a single placeFieldMode flag.
+  placingAttractorId: null,
+  setPlacingAttractorId: (id) => set({ placingAttractorId: id || null }),
+  addNamedAttractor: (partial) => {
+    const next = addNamedAttractorHelper(get().namedAttractors, partial)
+    saveNamedAttractors(next)
+    set({ namedAttractors: next })
+    return next[next.length - 1] ? next[next.length - 1].id : null
+  },
+  removeNamedAttractor: (id) => {
+    const next = removeNamedAttractorHelper(get().namedAttractors, id)
+    saveNamedAttractors(next)
+    set({ namedAttractors: next })
+  },
+  updateNamedAttractor: (id, patch) => {
+    const next = updateNamedAttractorHelper(get().namedAttractors, id, patch)
+    if (next === get().namedAttractors) return
+    saveNamedAttractors(next)
+    set({ namedAttractors: next })
+  },
+  toggleNamedAttractor: (id) => {
+    const next = toggleNamedAttractorHelper(get().namedAttractors, id)
+    if (next === get().namedAttractors) return
+    saveNamedAttractors(next)
+    set({ namedAttractors: next })
+  },
+  moveNamedAttractor: (id, position) => {
+    const next = moveNamedAttractorHelper(get().namedAttractors, id, position)
+    if (next === get().namedAttractors) return
+    saveNamedAttractors(next)
+    set({ namedAttractors: next })
+  },
 
   // Recording & Replay
   isRecording: false,
