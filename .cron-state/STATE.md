@@ -69,6 +69,11 @@ Existing capabilities (do not re-ship):
 - Crossfade duration chips support long-press to bind seconds to the slider value (pink ↺ reset badge, parallel override storage, disabled-while-blend-active gating)
 - Snapshot lightbox keyboard zoom (+/=/-/_/0) + cursor-anchored mouse-wheel zoom on desktop (mirrors the pinch state machine — same anchor math, MIN/MAX bounds, snap-to-idle on cross-back)
 - Minimap saved-view dots now show a small floating tooltip on hover with the view name (tooltipPlacement helper handles edge-flipping + horizontal slide-into-bounds + tiny-canvas fallback; hovered dot also paints brighter + larger)
+- Audio-reactive bg gradient curve preset chips — Linear / Pulse / Ramp / Hold reshape the audio signal before the linear hue map (shapeReactiveSignal + REACTIVE_CURVES); pulse uses sqrt-boost from neutral, ramp is ease-in cubic, hold pins at neutral until past 0.5. Round-trips through scene bookmarks.
+- Smash & Save bias chips — Mostly Calm / Surprise / Mostly Wild profiles parameterise every random range (counts/speed/glow/attract/chances/force-type weighting). Persisted across sessions, toast labels the bias chosen, calm bias produces avg ~9K particles vs wild ~33K.
+- MIDI controller can route a CC to a specific named attractor's STRENGTH (e.g. `attr:attr-3:strength`); per-attractor rows appear in the MIDI panel below the built-in bindings; deleted attractor → silent no-op + "missing" label; saves through localStorage round-trip.
+- Wind chip overrides export/import as portable JSON envelope (kind=`ai-particle-simulator/wind-overrides`, v1); 3-button row (Export / Import-merge / Import-replace) below the Wind sliders; parses bare-items shorthand too; size cap 32 KB.
+- Snapshot lightbox: WASD pan when zoomed (+ hjkl for vim users); each press moves ~15% of stage scaled by current zoom; preventDefault only when zoomed so WASD stays free at idle; bound to existing clampTranslate so image can't float off stage.
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -182,29 +187,42 @@ dedicated render-pipeline / r3f-gizmo batches. Substituted R11.15 and
 R11.13 from the future queue to keep the batch at 5 great slices
 instead of padding.
 
-### Batch 12 — next 5 (refilled)
-- [ ] R12.01 Echo / trail FBO that survives EffectComposer (carried over — render pipeline refactor, dedicated batch)
-- [ ] R12.02 Named attractor 3D drag handle (carried over — needs r3f gizmo handles, dedicated batch)
-- [ ] R12.03 Audio reactive bg: animation curve preset chips (Pulse / Ramp / Hold) [was R11.07]
-- [ ] R12.04 Smash & Save: bias chips ("Mostly Calm", "Mostly Wild") to constrain the random ranges [was R11.08]
-- [ ] R12.05 Named attractor → MIDI: route a CC to a specific attractor's strength [was R11.09]
+### Batch 12 — bg curve chips + smash bias + attractor MIDI + wind IO + lightbox WASD  (SHIPPED)
+- [x] **R12.03** Audio reactive bg: animation curve preset chips (Pulse / Ramp / Hold) — af12643
+- [x] **R12.04** Smash & Save: bias chips ("Mostly Calm", "Mostly Wild", "Surprise") — e2a382b
+- [x] **R12.05** Named attractor → MIDI: route a CC to a specific attractor's strength — 9c41d20
+- [x] **R12.17** Wind chip overrides: export/import the override map as JSON — e32c54e
+- [x] **R12.19** Lightbox: pan with WASD when zoomed (desktop alternative to drag) — fc830d0
+
+Note: R12.01 (Echo / trail FBO that survives EffectComposer) and R12.02
+(Named attractor 3D drag handle) deferred again — both need their own
+dedicated render-pipeline / r3f-gizmo batches. Substituted R12.17 and
+R12.19 from the future queue to keep the batch at 5 great slices
+instead of padding.
+
+### Batch 13 — next 5 (refilled)
+- [ ] R13.01 Echo / trail FBO that survives EffectComposer (carried over — render pipeline refactor, dedicated batch)
+- [ ] R13.02 Named attractor 3D drag handle (carried over — needs r3f gizmo handles, dedicated batch)
+- [ ] R13.03 OpenGraph snapshot endpoint (server-rendered card for share URLs) — needs backend [was R12.06]
+- [ ] R13.04 Keymap import: live diff preview before committing [was R12.07]
+- [ ] R13.05 MIDI controller preset bundle EDITOR (let users save a custom map as their own bundle) [was R12.08]
 
 ### Future queue (refill when batch closes)
-- [ ] R12.06 OpenGraph snapshot endpoint (server-rendered card for share URLs) — needs backend [was R11.06]
-- [ ] R12.07 Keymap import: live diff preview before committing [was R11.10]
-- [ ] R12.08 MIDI controller preset bundle EDITOR (let users save a custom map as their own bundle) [was R11.11]
-- [ ] R12.09 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [was R11.12]
-- [ ] R12.10 Named attractor type-specific color cues in the UI (vortex purple, repulsor red, etc.) [was R11.14]
-- [ ] R12.11 Carousel: bulk "rebuild all stale thumbs" action in the filter button menu [was R11.16]
-- [ ] R12.12 Spectrum peak-holds: per-bar fade-out tail (last 200ms still painted at low alpha) for an even more cinematic look [was R11.17]
-- [ ] R12.13 Theme pack preview: drag a JSON onto the sidebar to preview without the file picker [was R11.18]
-- [ ] R12.14 Camera path: drag-and-drop reorder (graduates from arrow-button slice R10.03) [was R11.19]
-- [ ] R12.15 Snapshot grid: long-press a tile to multi-select for bulk delete [was R11.20]
-- [ ] R12.16 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view
-- [ ] R12.17 Wind chip overrides: export/import the override map as JSON (parallels customThemes pack IO)
-- [ ] R12.18 Crossfade chip overrides: export/import the override map as JSON (matches wind)
-- [ ] R12.19 Lightbox: pan with WASD when zoomed (desktop alternative to drag)
-- [ ] R12.20 Minimap: shift+click a green dot to delete the saved view inline (skip the panel trip)
+- [ ] R13.06 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [was R12.09]
+- [ ] R13.07 Named attractor type-specific color cues in the UI (vortex purple, repulsor red, etc.) [was R12.10]
+- [ ] R13.08 Carousel: bulk "rebuild all stale thumbs" action in the filter button menu [was R12.11]
+- [ ] R13.09 Spectrum peak-holds: per-bar fade-out tail (last 200ms still painted at low alpha) for an even more cinematic look [was R12.12]
+- [ ] R13.10 Theme pack preview: drag a JSON onto the sidebar to preview without the file picker [was R12.13]
+- [ ] R13.11 Camera path: drag-and-drop reorder (graduates from arrow-button slice R10.03) [was R12.14]
+- [ ] R13.12 Snapshot grid: long-press a tile to multi-select for bulk delete [was R12.15]
+- [ ] R13.13 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view [was R12.16]
+- [ ] R13.14 Crossfade chip overrides: export/import the override map as JSON (matches wind) [was R12.18]
+- [ ] R13.15 Minimap: shift+click a green dot to delete the saved view inline (skip the panel trip) [was R12.20]
+- [ ] R13.16 Audio-reactive bg curve chips → add a custom curve editor for power users (visual spline / 3-knot bezier)
+- [ ] R13.17 Smash bias: user-editable per-chip ranges (open the bias as JSON, tweak, re-save)
+- [ ] R13.18 Per-attractor MIDI: route a CC to RADIUS or X/Y/Z (currently strength-only)
+- [ ] R13.19 Lightbox WASD pan: hold to repeat (auto-repeat on key-held for smoother sweeps)
+- [ ] R13.20 Wind override import: preview panel (diff against current overrides) before committing
 
 ## TICK LOG
 - 2026-06-19 23:41 PT — Bootstrap + Batch 1 (5/5).
@@ -330,3 +348,32 @@ instead of padding.
   applyWheelZoom/classifyZoomKey, minimap tooltipPlacement edge
   cases · ~120 fresh asserts this batch). Combined bookmark file
   is now v2 with optional `views` array; v1 imports still accepted.
+- 2026-06-21 12:48 PT — Batch 12 (5/5).
+  Commits: af12643 (R12.03 bg gradient curve chips Linear/Pulse/Ramp/Hold
+  + shapeReactiveSignal + REACTIVE_CURVES roster), e2a382b (R12.04 Smash
+  & Save bias chips Mostly Calm/Surprise/Mostly Wild + SCENE_BIASES +
+  localStorage-persisted selection), 9c41d20 (R12.05 named attractor →
+  MIDI routing — `attr:<id>:strength` action namespace + resolveAction
+  ForId + attractorActions + UI section in MidiPanel), e32c54e (R12.17
+  wind chip overrides export/import — new windOverridesIO.js module
+  + UI buttons under Wind sliders), fc830d0 (R12.19 lightbox WASD pan
+  when zoomed + hjkl vim aliases — classifyPanKey + applyKeyboardPan
+  helpers wired into SnapshotGallery onKey).
+  R12.01 (Echo / trail FBO) and R12.02 (3D drag handle) deferred again
+  — both need their own dedicated render-pipeline / r3f-gizmo batches.
+  Substituted R12.17 and R12.19 from the future queue to keep the batch
+  at 5 great slices instead of padding.
+  Gates: lint 23 errors / 3 warnings — exactly matches baseline (zero
+  new errors in any of the 9 modified .js/.jsx files + 1 new .js file +
+  1 new .test.mjs file; the new windOverridesIO.js + curve-chip JSX
+  + WindOverrideIO leaf + attractor MIDI rows all linted clean).
+  Build: 2.35 s green (1.67 MB bundle, gzip 500 KB — +3 KB for the
+  three new ranges + curve constants + IO module). Unit tests: 37/37
+  files pass (added windOverridesIO; extended bgGradient with REACTIVE
+  _CURVES + shapeReactiveSignal + 3-curve assertion coverage, random
+  Scene with SCENE_BIASES + per-bias range correctness + chance gating
+  + backwards-compat, midiMap with attractorActionId/parse/resolve/
+  actionLabel/attractorActions, pinchZoom with classifyPanKey/apply
+  KeyboardPan/PAN_STEP_FRACTION · ~260 fresh asserts this batch).
+  SCENE_FIELDS up to 49 (bgGradientAudioCurve round-trips through
+  bookmarks).
