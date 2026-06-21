@@ -24,6 +24,11 @@ import {
   parseImport as parseWindOverridesImport,
   mergeImport as mergeWindOverridesImport,
 } from '../lib/windOverridesIO'
+import {
+  downloadCrossfadeOverridesFile,
+  parseImport as parseCrossfadeOverridesImport,
+  mergeImport as mergeCrossfadeOverridesImport,
+} from '../lib/crossfadeOverridesIO'
 import { ATTRACTOR_TYPES, MAX_ATTRACTORS } from '../lib/namedAttractors'
 import { showToast } from './Toast'
 
@@ -1512,6 +1517,94 @@ function WindChip({ preset, active, isCustom, onTap, onLong, onReset }) {
   )
 }
 
+// CrossfadeOverrideIO — Export / Import the chip overrides map as
+// a portable JSON envelope (R13.14). Directly parallels the
+// WindOverrideIO leaf above: same 3-button row, same toast wording,
+// same merge/replace modes. Caller passes the live overrides map
+// + setter so we can both display a count and update on import.
+function CrossfadeOverrideIO({ overrides, setOverrides }) {
+  const overrideCount = overrides ? Object.keys(overrides).length : 0
+  const onExport = () => {
+    const filename = downloadCrossfadeOverridesFile(overrides)
+    if (filename) {
+      showToast(`Exported ${overrideCount} crossfade override${overrideCount === 1 ? '' : 's'} → ${filename}`)
+    } else {
+      showToast('Crossfade export failed')
+    }
+  }
+  const onImport = (mode) => {
+    if (typeof document === 'undefined') return
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'application/json,.json'
+    input.onchange = () => {
+      const file = input.files && input.files[0]
+      if (!file) return
+      const reader = new FileReader()
+      reader.onload = () => {
+        const raw = typeof reader.result === 'string' ? reader.result : ''
+        const parsed = parseCrossfadeOverridesImport(raw)
+        if (!parsed.ok) {
+          showToast(`Import failed: ${parsed.error}`)
+          return
+        }
+        const merge = mergeCrossfadeOverridesImport(overrides, parsed.items, mode)
+        setOverrides(merge.items)
+        try {
+          // Persist immediately so the chips re-render on the same tick
+          // (resolveCrossfadeChips reads from this state via useEffect).
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('particle-crossfade-overrides-v1', JSON.stringify({ v: 1, items: merge.items }))
+          }
+        } catch { /* quota / private mode */ }
+        const verb = mode === 'replace' ? 'Replaced' : 'Merged'
+        showToast(`${verb} ${merge.added} crossfade override${merge.added === 1 ? '' : 's'}${merge.skipped ? ` (${merge.skipped} skipped)` : ''}`)
+      }
+      reader.readAsText(file)
+    }
+    input.click()
+  }
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginTop: 4 }}>
+      <button onClick={onExport}
+        title={overrideCount === 0
+          ? 'No overrides yet — export will be an empty envelope'
+          : `Download ${overrideCount} crossfade override${overrideCount === 1 ? '' : 's'} as JSON`}
+        style={{
+          padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+          cursor: 'pointer',
+          background: overrideCount === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(236,72,153,0.10)',
+          color: overrideCount === 0 ? '#7a7a90' : '#fbcfe8',
+          border: overrideCount === 0
+            ? '1px solid rgba(255,255,255,0.05)'
+            : '1px solid rgba(236,72,153,0.25)',
+        }}>
+        Export
+      </button>
+      <button onClick={() => onImport('merge')}
+        title="Merge: keep existing overrides, add only new slots from the file"
+        style={{
+          padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+          cursor: 'pointer',
+          background: 'rgba(168,85,247,0.10)', color: '#e9d5ff',
+          border: '1px solid rgba(168,85,247,0.25)',
+        }}>
+        Import (merge)
+      </button>
+      <button onClick={() => onImport('replace')}
+        title="Replace: drop all existing overrides, use only the imported ones"
+        style={{
+          padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+          cursor: 'pointer',
+          background: 'rgba(99,102,241,0.10)', color: '#c7d2fe',
+          border: '1px solid rgba(99,102,241,0.25)',
+        }}>
+        Import (replace)
+      </button>
+    </div>
+  )
+}
+
 // CrossfadeChip — same long-press pattern as WindChip, but with the
 // pink-violet gradient that matches the existing Crossfade panel and
 // a compact two-line layout (label on top, seconds in monospace
@@ -1855,6 +1948,12 @@ function CrossfadeRow() {
           )
         })}
       </div>
+      {/* R13.14 — Export / Import the chip override map as JSON.
+          Directly mirrors the Wind IO row above it so the UX pattern
+          stays predictable: same 3-button layout, same merge/replace
+          modes, same toast feedback. Stays modeless — file picker
+          is the only ceremony. */}
+      <CrossfadeOverrideIO overrides={chipOverrides} setOverrides={setChipOverrides} />
       <div style={{ display: 'grid', gridTemplateColumns: blendActive ? '1fr 1fr' : '1fr 1fr', gap: 6, marginTop: 6 }}>
         <button
           onClick={() => {
