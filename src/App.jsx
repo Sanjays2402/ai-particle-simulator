@@ -26,6 +26,8 @@ import { useGlobalMidi } from './lib/useGlobalMidi'
 import { loadSnapshots } from './lib/snapshotGallery'
 import { useIsMobile } from './lib/useIsMobile'
 import { getOSPrefersReduced, subscribeOSReducedMotion } from './lib/reducedMotion'
+import { pickBootTheme, applyThemeToElement } from './lib/activeThemeBoot'
+import { THEMES } from './store'
 import { Sparkles, ChevronLeft, ChevronRight } from 'lucide-react'
 
 export default function App() {
@@ -98,6 +100,27 @@ export default function App() {
       useStore.getState().setOSPrefersReducedMotion(v)
     })
     return unsub
+  }, [])
+
+  // Active theme bootstrap: the store hydrates `theme` from
+  // particle-settings-v1 BEFORE customThemes are available to its
+  // setTheme side-effect, so the persisted theme ID (which may be
+  // a 'custom-*' id) never gets to write the --neon CSS variable on
+  // boot. This effect runs once after mount with both sides loaded
+  // and re-routes the persisted id through pickBootTheme — falling
+  // back to the default if the theme was deleted between sessions.
+  useEffect(() => {
+    const { theme, customThemes, setTheme } = useStore.getState()
+    const picked = pickBootTheme(theme, THEMES, customThemes)
+    // If the persisted id resolved cleanly we still need to apply
+    // the CSS variable; if it fell back, also flip the store to the
+    // resolved id so the UI doesn't show a phantom selection on a
+    // theme that no longer exists.
+    if (picked.fellBack && picked.id !== theme) {
+      setTheme(picked.id)
+    } else {
+      applyThemeToElement(picked, document.documentElement)
+    }
   }, [])
 
   useEffect(() => {
