@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
-import { Activity, Sparkles, Palette, Gauge, Camera, X, BarChart3, Code2, Copy, ChevronDown, ChevronUp, Bookmark, BookmarkPlus, Pencil, Play, RotateCcw, Route, Square, Repeat } from 'lucide-react'
+import { Activity, Sparkles, Palette, Gauge, Camera, X, BarChart3, Code2, Copy, ChevronDown, ChevronUp, Bookmark, BookmarkPlus, Pencil, Play, RotateCcw, Route, Square, Repeat, Download, Upload } from 'lucide-react'
 import { loadCameraViews, saveCameraViews, appendView, CAMERA_VIEWS_MAX } from '../lib/cameraViews'
 import {
   PATH_SECONDS_MIN, PATH_SECONDS_MAX, PATH_SECONDS_DEFAULT,
   PATH_MIN_WAYPOINTS, pathDuration, clampSeconds,
 } from '../lib/cameraPath'
+import {
+  downloadBookmarksFile, parseImport, mergeImport,
+} from '../lib/bookmarksIO'
 import { formatDuration } from '../lib/sessionStats'
 import { tokenize } from '../lib/codeTokens'
 import { loadKeymap, resolveAction } from '../lib/keymap'
@@ -506,6 +509,54 @@ function SceneBookmarks() {
 
   const canSaveMore = items.length < MAX_BOOKMARKS
 
+  // --- Export / Import (R6.04) ---
+  const exportNow = () => {
+    if (items.length === 0) {
+      showToast('No bookmarks to export')
+      return
+    }
+    const filename = downloadBookmarksFile(items)
+    if (filename) {
+      showToast(`Exported ${items.length} → ${filename}`, <Download size={10} color="#fff" strokeWidth={2.4} />)
+    } else {
+      showToast('Export failed — check console')
+    }
+  }
+  const importFromFile = () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'application/json,.json'
+    input.onchange = async () => {
+      const file = input.files?.[0]
+      if (!file) return
+      try {
+        const text = await file.text()
+        const res = parseImport(text)
+        if (!res.ok) {
+          showToast(`Import failed: ${res.error}`)
+          return
+        }
+        // Ask once: merge vs replace. Plain confirm keeps the UI calm
+        // and matches the existing "Clear All" pattern elsewhere.
+        const mode = window.confirm(
+          `Import ${res.items.length} bookmark${res.items.length === 1 ? '' : 's'}?\n\n` +
+          `OK = Merge into existing list (dupes by name are skipped).\n` +
+          `Cancel = Replace the entire list.`
+        ) ? 'merge' : 'replace'
+        const merge = mergeImport(items, res.items, mode)
+        setItems(merge.items)
+        saveBookmarks(merge.items)
+        const summary = mode === 'merge'
+          ? `Imported ${merge.added}, skipped ${merge.skipped}`
+          : `Replaced with ${merge.added}`
+        showToast(summary, <Upload size={10} color="#fff" strokeWidth={2.4} />)
+      } catch (e) {
+        showToast(`Import error: ${e.message || 'unknown'}`)
+      }
+    }
+    input.click()
+  }
+
   return (
     <div>
       <button
@@ -533,6 +584,41 @@ function SceneBookmarks() {
         <BookmarkPlus size={12} strokeWidth={2.2} /> Save current scene
         {canSaveMore && <kbd style={{ marginLeft: 4 }}>B</kbd>}
       </button>
+      {/* Export / Import buttons — share whole bookmark collections
+          as portable JSON files. Import shows a confirm asking
+          merge-vs-replace; merge skips dupes by name. */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 8 }}>
+        <button onClick={exportNow}
+          disabled={items.length === 0}
+          title={items.length === 0 ? 'No bookmarks to export' : `Download ${items.length} bookmarks as JSON`}
+          style={{
+            padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+            cursor: items.length === 0 ? 'not-allowed' : 'pointer',
+            background: items.length === 0
+              ? 'rgba(255,255,255,0.03)'
+              : 'rgba(99,102,241,0.10)',
+            color: items.length === 0 ? '#5a5a70' : '#c7d2fe',
+            border: items.length === 0
+              ? '1px solid rgba(255,255,255,0.05)'
+              : '1px solid rgba(99,102,241,0.25)',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+            opacity: items.length === 0 ? 0.55 : 1,
+          }}>
+          <Download size={11} strokeWidth={2.2} /> Export
+        </button>
+        <button onClick={importFromFile}
+          title="Load bookmarks from a JSON file"
+          style={{
+            padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+            cursor: 'pointer',
+            background: 'rgba(168,85,247,0.10)',
+            color: '#e9d5ff',
+            border: '1px solid rgba(168,85,247,0.25)',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+          }}>
+          <Upload size={11} strokeWidth={2.2} /> Import
+        </button>
+      </div>
       {items.length === 0 ? (
         <div style={{
           padding: '12px 8px', borderRadius: 8, textAlign: 'center',
