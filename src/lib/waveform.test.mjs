@@ -4,7 +4,7 @@ import {
   SILENCE_BYTE, FULL_AMPLITUDE,
   bytesToCentered, peakAmplitude, projectToCanvas, sampleAnalyser,
   WAVEFORM_MODES, bytesToSpectrum, sampleAnalyserSpectrum,
-  projectSpectrumToBars, normalizeWaveformMode,
+  projectSpectrumToBars, projectSpectrumToLogBars, normalizeWaveformMode,
 } from './waveform.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -229,4 +229,73 @@ eq(normalizeWaveformMode('garbage'), 'time', 'unknown → time fallback')
 eq(normalizeWaveformMode(null), 'time', 'null → time fallback')
 eq(normalizeWaveformMode(undefined), 'time', 'undefined → time fallback')
 
-console.log('PASS: waveform spectrum extensions')
+// --- projectSpectrumToLogBars (R9.19) ---
+{
+  // Empty input → empty output.
+  eq(projectSpectrumToLogBars(null, 100, 40, 8).length, 0, 'null → empty')
+  eq(projectSpectrumToLogBars(new Float32Array(0), 100, 40, 8).length, 0, 'empty → empty')
+}
+{
+  // Bar count == 32 (default), 64 bins → produces 32 bars whose
+  // start/end indices grow exponentially.
+  const s = new Float32Array(64).fill(0)
+  const bars = projectSpectrumToLogBars(s, 320, 40, 32, 4)
+  eq(bars.length, 32, 'log bars: 32 bars produced')
+  // X positions evenly spaced (visual layout stays even — the LOG
+  // distribution is about which bins map to which bar, not pixel x).
+  near(bars[0][0],  0,  'bar 0 starts at x=0')
+  near(bars[1][0], 10, 'bar 1 starts at x=10 (320/32)')
+  near(bars[31][0], 310, 'last bar starts at x=310')
+}
+{
+  // Concentrated bass: bins 0..3 hot, rest silent. In LOG layout the
+  // first few bars cover bins 0..N (small step), so the bass should
+  // visibly survive in the leftmost bar — even though linear mode
+  // would split it across many bars too. The point of this test is
+  // that the curve doesn't crash and the leftmost bar reflects the
+  // bass content.
+  const s = new Float32Array(64).fill(0)
+  s[0] = 1; s[1] = 1; s[2] = 1; s[3] = 1
+  const bars = projectSpectrumToLogBars(s, 320, 40, 32, 4)
+  ok(bars[0][1] > 0, 'leftmost log bar shows bass energy')
+}
+{
+  // Treble-heavy: only the last bin is hot. In linear mode the last
+  // bar would average bins 60..63 (binsPerBar = 2). In log mode the
+  // last bar covers a wider chunk of high bins, but it must still be
+  // non-zero because at least one of those bins is hot.
+  const s = new Float32Array(64).fill(0)
+  s[63] = 1
+  const bars = projectSpectrumToLogBars(s, 320, 40, 32, 4)
+  ok(bars[31][1] > 0, 'rightmost log bar reflects treble energy')
+}
+{
+  // Crucial guard: when N < B (more bars than bins), the curve degenerates;
+  // we still need to emit one bar per bar slot without crashing.
+  const s = new Float32Array(4).fill(0.5)
+  const bars = projectSpectrumToLogBars(s, 320, 40, 32, 4)
+  eq(bars.length, 32, 'still 32 bars even when N << B')
+  // Every bar height is clamped non-negative.
+  for (const [_, h] of bars) ok(h >= 0, 'log bar height non-negative')
+}
+{
+  // Heights clamp to maxBarPx like the linear variant.
+  const s = new Float32Array(64).fill(5)  // huge values
+  const bars = projectSpectrumToLogBars(s, 320, 40, 32, 4)
+  for (const [_, h] of bars) ok(h <= 32, 'log bar height ≤ maxBarPx (h - 2*pad)')
+}
+{
+  // barCount=0 clamps to 1 (same contract as linear).
+  const s = new Float32Array(64).fill(0.5)
+  const bars = projectSpectrumToLogBars(s, 320, 40, 0)
+  eq(bars.length, 1, 'log barCount=0 clamped to 1')
+}
+{
+  // Bad dimensions → defaults; the projector still emits the right
+  // number of bars.
+  const s = new Float32Array(32).fill(0.5)
+  const bars = projectSpectrumToLogBars(s, 0, 0, 8)
+  eq(bars.length, 8, 'log bad dims still emits bars')
+}
+
+console.log('PASS: waveform spectrum extensions + log-frequency bars (R9.19, ~10 fresh asserts)')

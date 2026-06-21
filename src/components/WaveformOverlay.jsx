@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useStore } from '../store'
 import {
   sampleAnalyser, projectToCanvas, peakAmplitude,
-  sampleAnalyserSpectrum, projectSpectrumToBars,
+  sampleAnalyserSpectrum, projectSpectrumToBars, projectSpectrumToLogBars,
 } from '../lib/waveform'
 
 // Audio waveform / oscilloscope overlay. Pinned to the canvas's
@@ -26,6 +26,8 @@ export default function WaveformOverlay() {
   const audioReactive = useStore(s => s.audioReactive)
   const mode = useStore(s => s.waveformMode)
   const setMode = useStore(s => s.setWaveformMode)
+  const spectrumScale = useStore(s => s.spectrumScale)
+  const setSpectrumScale = useStore(s => s.setSpectrumScale)
   const canvasRef = useRef(null)
   const rafRef = useRef(0)
   const scratchRef = useRef(null)
@@ -112,7 +114,9 @@ export default function WaveformOverlay() {
         ctx.fillText('waiting for audio...', 10, HEIGHT / 2 + 4)
         return
       }
-      const bars = projectSpectrumToBars(spectrum, WIDTH, HEIGHT, BAR_COUNT, 4)
+      const bars = (spectrumScale === 'log')
+        ? projectSpectrumToLogBars(spectrum, WIDTH, HEIGHT, BAR_COUNT, 4)
+        : projectSpectrumToBars(spectrum, WIDTH, HEIGHT, BAR_COUNT, 4)
       const colW = WIDTH / BAR_COUNT
       const barW = Math.max(1, colW - 1)
       let sumIntensity = 0
@@ -140,15 +144,20 @@ export default function WaveformOverlay() {
     }
     rafRef.current = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(rafRef.current)
-  }, [active, mode])
+  }, [active, mode, spectrumScale])
 
   if (!active) return null
 
   // Tiny mode toggle pill — single chip that swaps label on tap.
   // Lives inside the overlay so users discover it without an extra
   // panel and the overlay stays a single self-contained widget.
+  // In frequency mode we also surface a linear/log chip so users
+  // can swap between the EQ-style linear distribution and a more
+  // musical log-frequency bar layout.
   const next = mode === 'time' ? 'frequency' : 'time'
   const label = mode === 'time' ? 'time' : 'freq'
+  const nextScale  = spectrumScale === 'log' ? 'linear' : 'log'
+  const scaleLabel = spectrumScale === 'log' ? 'log' : 'lin'
 
   return (
     <div style={{
@@ -187,6 +196,29 @@ export default function WaveformOverlay() {
           cursor: 'pointer',
           backdropFilter: 'blur(4px)',
         }}>{label}</button>
+      {mode === 'frequency' && (
+        <button
+          type="button"
+          onClick={() => setSpectrumScale(nextScale)}
+          title={`Switch spectrum to ${nextScale === 'log' ? 'log frequency (musical)' : 'linear frequency (EQ-style)'} scale`}
+          style={{
+            position: 'absolute', top: 8, left: 56,
+            pointerEvents: 'auto',
+            padding: '2px 8px', borderRadius: 5,
+            fontSize: 9, fontWeight: 600, letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            color: spectrumScale === 'log' ? '#fde68a' : '#d8d8e0',
+            background: spectrumScale === 'log'
+              ? 'rgba(245,158,11,0.16)'
+              : 'rgba(255,255,255,0.06)',
+            border: spectrumScale === 'log'
+              ? '1px solid rgba(245,158,11,0.40)'
+              : '1px solid rgba(255,255,255,0.14)',
+            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+            cursor: 'pointer',
+            backdropFilter: 'blur(4px)',
+          }}>{scaleLabel}</button>
+      )}
     </div>
   )
 }

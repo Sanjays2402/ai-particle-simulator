@@ -543,6 +543,23 @@ export const useStore = create((set, get) => {
     try { if (typeof localStorage !== 'undefined') localStorage.setItem('waveform-mode-v1', next) } catch { /* */ }
     set({ waveformMode: next })
   },
+  // Spectrum-scale = 'linear' (default) or 'log'. Only meaningful when
+  // waveformMode === 'frequency'. Log mode groups FFT bins
+  // exponentially so the bar distribution matches human pitch
+  // perception — bass occupies the left half, treble the right half
+  // at roughly even visual density. Persisted in localStorage so
+  // the choice survives a reload.
+  spectrumScale: (() => {
+    try {
+      const v = typeof localStorage !== 'undefined' ? localStorage.getItem('spectrum-scale-v1') : null
+      return (v === 'log' || v === 'linear') ? v : 'linear'
+    } catch { return 'linear' }
+  })(),
+  setSpectrumScale: (v) => {
+    const next = (v === 'log') ? 'log' : 'linear'
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem('spectrum-scale-v1', next) } catch { /* */ }
+    set({ spectrumScale: next })
+  },
 
   setMouseAttract: (v) => set({ mouseAttract: v }),
   paintMode: false,

@@ -148,6 +148,55 @@ export function projectSpectrumToBars(spectrum, width, height, barCount = 32, pa
   return out
 }
 
+// Log-frequency variant — instead of linear binsPerBar, the i-th bar
+// covers an exponentially widening range of bins. This matches how
+// humans perceive pitch (octaves are equal-spaced in log frequency,
+// not linear) and brings out the musical structure: bass occupies a
+// large chunk of the screen, treble doesn't get squeezed into 2 bars
+// at the far right.
+//
+// Math: the spectrum has N bins indexed [0..N-1]. We map each bar's
+// start/end to bins via:
+//   start_i = round((N) * (10^(i/B) - 1) / (10 - 1))    (zero-based)
+// where B = barCount. This is a "log10 over [0..1]" curve renormalised
+// so bar 0 starts at bin 0 and bar B-1 ends near bin N-1.
+//
+// We guard against degenerate cases: when start_i === end_i (which
+// happens for the first few bars when N << B), we still average the
+// single bin so the bar height isn't zero.
+export function projectSpectrumToLogBars(spectrum, width, height, barCount = 32, padPx = 4) {
+  const w = (width > 0 && Number.isFinite(width)) ? width : 100
+  const h = (height > 0 && Number.isFinite(height)) ? height : 40
+  const bc = Math.max(1, barCount | 0)
+  const out = []
+  if (!spectrum || spectrum.length === 0) return out
+  const N = spectrum.length
+  const maxBarPx = Math.max(0, h - padPx * 2)
+  const colWidth = w / bc
+  // Pre-compute the cumulative-log denominator so we can map bar i
+  // to a bin offset in [0..N).
+  const denom = Math.pow(10, 1) - 1  // = 9, the curve's tail at i=B
+  for (let i = 0; i < bc; i++) {
+    const t0 = i / bc
+    const t1 = (i + 1) / bc
+    // Two-anchor log curve — start at 0, end at N when t=1.
+    const start = Math.floor(N * (Math.pow(10, t0) - 1) / denom)
+    let end     = Math.floor(N * (Math.pow(10, t1) - 1) / denom)
+    if (end <= start) end = start + 1  // ensure at least one bin / bar
+    if (end > N) end = N
+    let sum = 0
+    let count = 0
+    for (let j = start; j < end; j++) {
+      sum += spectrum[j]
+      count++
+    }
+    const avg = count > 0 ? sum / count : 0
+    const barH = Math.max(0, Math.min(maxBarPx, avg * maxBarPx))
+    out.push([i * colWidth, barH])
+  }
+  return out
+}
+
 // Validator — accept only the documented modes, fall through to 'time'.
 export function normalizeWaveformMode(mode) {
   return WAVEFORM_MODES.includes(mode) ? mode : 'time'
