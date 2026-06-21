@@ -6,8 +6,12 @@ import {
 } from '../lib/midiMap'
 import {
   MIDI_PRESETS, applyPresetToMap, detectPresetForInput, presetBindingCount,
+  // R13.05 — user preset bundle editor
+  loadUserPresets, saveUserPresets,
+  buildUserPresetFromMap, addUserPreset, removeUserPreset,
+  MAX_USER_PRESETS,
 } from '../lib/midiPresets'
-import { Music4, X, CheckCircle2, AlertCircle, Zap } from 'lucide-react'
+import { Music4, X, CheckCircle2, AlertCircle, Zap, Save, Trash2 } from 'lucide-react'
 
 // Floating Web MIDI control panel. Opens from the LeftSidebar's
 // "MIDI Controller" button. Connects to navigator.requestMIDIAccess,
@@ -26,6 +30,12 @@ export default function MidiPanel({ open, onClose }) {
   const [bindings, setBindings] = useState(() => loadMidiMap())
   const [lastCC, setLastCC] = useState(null)   // {cc, value, deviceName}
   const [learnFor, setLearnFor] = useState(null) // actionId waiting for next CC
+  // R13.05 — user-authored bundle list. Persisted separately from the
+  // live binding map so saving a bundle never touches the live state.
+  const [userPresets, setUserPresets] = useState(() => loadUserPresets())
+  // Save-bundle form open/closed + draft name.
+  const [savingBundle, setSavingBundle] = useState(false)
+  const [bundleName, setBundleName] = useState('')
   // Subscribe to the live attractor list so per-attractor MIDI rows
   // appear/disappear and re-label in real time as the user adds,
   // renames, or deletes attractors. attractorActions() is pure data
@@ -127,11 +137,40 @@ export default function MidiPanel({ open, onClose }) {
 
   // Apply a controller preset. mode = 'replace' wipes existing
   // bindings; 'merge' keeps untouched CCs intact. We persist
-  // immediately so a refresh keeps the preset live.
+  // immediately so a refresh keeps the preset live. R13.05 — passes
+  // userPresets so a user-saved bundle resolves alongside shipped
+  // ones; same code path either way.
   const applyPreset = (presetId, mode) => {
-    const next = applyPresetToMap(bindings, presetId, mode)
+    const next = applyPresetToMap(bindings, presetId, mode, userPresets)
     setBindings(next)
     saveMidiMap(next)
+  }
+
+  // R13.05 — commit the current bindings as a new user bundle.
+  // Refuses empty names and empty maps (the lib guards both but we
+  // surface the failure with a clearer message). Caps at
+  // MAX_USER_PRESETS by dropping the oldest entry.
+  const commitBundle = () => {
+    const built = buildUserPresetFromMap(bundleName, bindings, userPresets)
+    if (!built) {
+      // Either the name was empty/whitespace or the live map had no
+      // built-in CC actions to save. Both cases are handled by the
+      // form gating below, but the lib's null-return is the source
+      // of truth so we double-check here.
+      return
+    }
+    const next = addUserPreset(userPresets, built)
+    setUserPresets(next)
+    saveUserPresets(next)
+    setSavingBundle(false)
+    setBundleName('')
+  }
+
+  const deleteUserBundle = (id) => {
+    if (!window.confirm('Delete this saved bundle?')) return
+    const next = removeUserPreset(userPresets, id)
+    setUserPresets(next)
+    saveUserPresets(next)
   }
 
   // Try to auto-detect a likely preset from the connected inputs.
@@ -201,11 +240,21 @@ export default function MidiPanel({ open, onClose }) {
         {/* Status banner */}
         <StatusBanner status={status} message={errorMsg} inputs={inputs} lastCC={lastCC} />
 
-        {/* Controller presets — pre-baked CC→action maps for common hardware */}
+        {/* Controller presets — pre-baked CC→action maps for common hardware
+            + R13.05 user-authored bundles */}
         <PresetBar
           presets={MIDI_PRESETS}
+          userPresets={userPresets}
           detectedId={detectedPresetId}
           onApply={applyPreset}
+          onDeleteUser={deleteUserBundle}
+          savingBundle={savingBundle}
+          onStartSave={() => { setSavingBundle(true); setBundleName('') }}
+          onCancelSave={() => { setSavingBundle(false); setBundleName('') }}
+          onCommitBundle={commitBundle}
+          bundleName={bundleName}
+          onBundleNameChange={setBundleName}
+          liveBindingCount={Object.keys(bindings).length}
         />
 
         {/* Action list */}
@@ -442,7 +491,18 @@ function Banner({ color, icon, children }) {
 // "auto-detected" badge when one of the connected inputs matches by
 // name. Click the chip to apply the bundle (Replace mode); Shift-click
 // to merge into the existing map without wiping pre-existing bindings.
-function PresetBar({ presets, detectedId, onApply }) {
+//
+// R13.05 — also renders any USER-authored bundles (vendor === 'Custom')
+// in a second row below the shipped chips, with a small X on each so
+// the user can delete a bundle. A "+ Save current" button opens an
+// inline form to capture the current binding map as a new bundle.
+function PresetBar({
+  presets, userPresets = [], detectedId, onApply, onDeleteUser,
+  savingBundle, onStartSave, onCancelSave, onCommitBundle,
+  bundleName, onBundleNameChange, liveBindingCount,
+}) {
+  const canSave = (bundleName || '').trim().length > 0 && liveBindingCount > 0
+  const atCap = userPresets.length >= MAX_USER_PRESETS
   return (
     <div style={{
       padding: '10px 12px', marginBottom: 10, borderRadius: 8,
@@ -474,7 +534,7 @@ function PresetBar({ presets, detectedId, onApply }) {
             <button
               key={p.id}
               onClick={(e) => onApply(p.id, e.shiftKey ? 'merge' : 'replace')}
-              title={`${p.description} — ${presetBindingCount(p.id)} bindings. Shift-click to merge.`}
+              title={`${p.description} — ${presetBindingCount(p.id, userPresets)} bindings. Shift-click to merge.`}
               style={{
                 padding: '5px 9px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
                 background: isDetected
@@ -494,7 +554,7 @@ function PresetBar({ presets, detectedId, onApply }) {
                 fontSize: 9, fontFamily: 'Geist Mono, monospace',
                 color: isDetected ? '#86efac' : '#8a8aa0',
               }}>
-                {presetBindingCount(p.id)}
+                {presetBindingCount(p.id, userPresets)}
               </span>
               {isDetected && (
                 <span style={{
@@ -507,6 +567,142 @@ function PresetBar({ presets, detectedId, onApply }) {
           )
         })}
       </div>
+      {/* R13.05 — user-authored bundles. Hidden until at least one
+          exists or the user clicks "Save current" so the panel stays
+          tidy out of the box. */}
+      {(userPresets.length > 0 || savingBundle) && (
+        <>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            marginTop: 10, marginBottom: 6,
+          }}>
+            <span style={{
+              fontSize: 10, fontWeight: 700, letterSpacing: '0.12em',
+              textTransform: 'uppercase', color: '#fbcfe8',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+            }}>
+              <Save size={11} strokeWidth={2.4} />
+              Your Bundles
+              <span style={{
+                fontSize: 9, fontWeight: 500, color: '#7a7a90', letterSpacing: 0,
+                textTransform: 'none', fontFamily: 'Geist Mono, monospace',
+              }}>
+                {userPresets.length}/{MAX_USER_PRESETS}
+              </span>
+            </span>
+          </div>
+          {userPresets.length > 0 && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: savingBundle ? 8 : 0 }}>
+              {userPresets.map(p => (
+                <div key={p.id} style={{
+                  display: 'inline-flex', alignItems: 'stretch',
+                  borderRadius: 6, overflow: 'hidden',
+                  border: '1px solid rgba(236,72,153,0.30)',
+                }}>
+                  <button
+                    onClick={(e) => onApply(p.id, e.shiftKey ? 'merge' : 'replace')}
+                    title={`${p.description} · ${Object.keys(p.map).length} bindings. Shift-click to merge.`}
+                    style={{
+                      padding: '5px 9px', fontSize: 11, cursor: 'pointer',
+                      background: 'rgba(236,72,153,0.08)',
+                      color: '#fbcfe8',
+                      border: 'none',
+                      borderRight: '1px solid rgba(236,72,153,0.20)',
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      fontFamily: 'Geist, system-ui, sans-serif',
+                    }}
+                  >
+                    {p.name}
+                    <span style={{
+                      fontSize: 9, fontFamily: 'Geist Mono, monospace',
+                      color: 'rgba(251,207,232,0.7)',
+                    }}>
+                      {Object.keys(p.map).length}
+                    </span>
+                  </button>
+                  <button onClick={() => onDeleteUser(p.id)} title="Delete this bundle"
+                    style={{
+                      padding: '0 6px', fontSize: 11, cursor: 'pointer',
+                      background: 'rgba(239,68,68,0.06)', color: '#fca5a5',
+                      border: 'none',
+                      display: 'inline-flex', alignItems: 'center',
+                    }}>
+                    <Trash2 size={10} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {/* Save form — inline so it stays in context */}
+          {savingBundle && (
+            <div style={{
+              display: 'flex', gap: 6, alignItems: 'center',
+              padding: 6, borderRadius: 6,
+              background: 'rgba(236,72,153,0.05)',
+              border: '1px solid rgba(236,72,153,0.20)',
+            }}>
+              <input
+                value={bundleName}
+                onChange={(e) => onBundleNameChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && canSave) onCommitBundle()
+                  if (e.key === 'Escape') onCancelSave()
+                }}
+                placeholder={liveBindingCount === 0 ? 'No bindings to save yet' : 'Bundle name'}
+                maxLength={32}
+                autoFocus
+                disabled={liveBindingCount === 0}
+                style={{
+                  flex: 1, padding: '4px 8px', borderRadius: 5, fontSize: 11,
+                  background: 'rgba(0,0,0,0.25)', color: '#f3e8ff',
+                  border: '1px solid rgba(236,72,153,0.25)',
+                  outline: 'none', fontFamily: 'inherit',
+                }}
+              />
+              <button onClick={onCommitBundle} disabled={!canSave}
+                title={!canSave ? (liveBindingCount === 0 ? 'No bindings to save' : 'Type a name') : `Save ${liveBindingCount} bindings`}
+                style={{
+                  padding: '4px 9px', borderRadius: 5, fontSize: 11, fontWeight: 600,
+                  cursor: canSave ? 'pointer' : 'not-allowed',
+                  background: canSave
+                    ? 'linear-gradient(135deg, rgba(236,72,153,0.25), rgba(168,85,247,0.18))'
+                    : 'rgba(255,255,255,0.04)',
+                  color: canSave ? '#fff' : '#5a5a70',
+                  border: canSave ? '1px solid rgba(236,72,153,0.45)' : '1px solid rgba(255,255,255,0.07)',
+                  fontFamily: 'inherit',
+                }}>Save</button>
+              <button onClick={onCancelSave}
+                style={{
+                  padding: '4px 8px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
+                  background: 'rgba(255,255,255,0.03)', color: '#9a9ab0',
+                  border: '1px solid rgba(255,255,255,0.06)', fontFamily: 'inherit',
+                }}>Cancel</button>
+            </div>
+          )}
+        </>
+      )}
+      {/* "+ Save current" button — always visible (when not editing)
+          so users discover the feature without having to know it
+          exists. Disabled at cap so we don't quietly lose entries. */}
+      {!savingBundle && (
+        <button onClick={onStartSave}
+          disabled={atCap}
+          title={atCap
+            ? `At cap (${MAX_USER_PRESETS}) — delete one first`
+            : 'Save the current bindings as a reusable bundle'}
+          style={{
+            marginTop: userPresets.length > 0 ? 8 : 6,
+            padding: '5px 9px', borderRadius: 6, fontSize: 11, fontWeight: 550,
+            cursor: atCap ? 'not-allowed' : 'pointer',
+            background: atCap ? 'rgba(255,255,255,0.03)' : 'rgba(236,72,153,0.08)',
+            color: atCap ? '#5a5a70' : '#fbcfe8',
+            border: atCap ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(236,72,153,0.25)',
+            display: 'inline-flex', alignItems: 'center', gap: 5, fontFamily: 'inherit',
+          }}>
+          <Save size={10} strokeWidth={2.4} />
+          {atCap ? `Bundle cap reached (${MAX_USER_PRESETS})` : 'Save current as bundle'}
+        </button>
+      )}
     </div>
   )
 }

@@ -138,6 +138,151 @@ const GENERIC_8_KNOBS = {
   },
 }
 
+// User-authored controller preset bundles (R13.05) — power users
+// can save the CURRENT CC→action map as their own named bundle and
+// re-apply it later (or even share the JSON). Persisted to
+// localStorage under STORAGE_KEY_USER_PRESETS. Stored shape:
+//   { v: 1, items: [{ id, name, description, vendor, map, createdAt }, ...] }
+// User presets are CLEARLY distinguished from shipped ones (vendor
+// === 'Custom') and capped at MAX_USER_PRESETS to keep the chip bar
+// readable.
+
+export const STORAGE_KEY_USER_PRESETS = 'particle-midi-user-presets-v1'
+export const MAX_USER_PRESETS = 8
+const USER_PRESET_PREFIX = 'user-'
+
+// Load + sanitize the persisted user-preset list. Drops any entry
+// that fails the same validateMap gate as shipped bundles.
+export function loadUserPresets() {
+  if (typeof localStorage === 'undefined') return []
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_USER_PRESETS)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!parsed || parsed.v !== 1 || !Array.isArray(parsed.items)) return []
+    const out = []
+    for (const item of parsed.items) {
+      if (!item || typeof item !== 'object') continue
+      const id = typeof item.id === 'string' && item.id.startsWith(USER_PRESET_PREFIX) ? item.id : null
+      if (!id) continue
+      const name = sanitizePresetName(item.name)
+      if (!name) continue
+      const map = sanitizePresetMap(item.map)
+      if (!map) continue
+      out.push({
+        id,
+        name,
+        description: typeof item.description === 'string' ? item.description.slice(0, 80) : 'Custom bundle',
+        vendor: 'Custom',
+        map,
+        createdAt: typeof item.createdAt === 'number' ? item.createdAt : Date.now(),
+      })
+      if (out.length >= MAX_USER_PRESETS) break
+    }
+    return out
+  } catch { return [] }
+}
+
+export function saveUserPresets(list) {
+  if (typeof localStorage === 'undefined') return false
+  try {
+    const cleaned = (Array.isArray(list) ? list : [])
+      .map(p => {
+        const map = sanitizePresetMap(p && p.map)
+        if (!map) return null
+        const name = sanitizePresetName(p && p.name)
+        if (!name) return null
+        const id = typeof p.id === 'string' && p.id.startsWith(USER_PRESET_PREFIX) ? p.id : `${USER_PRESET_PREFIX}${Date.now()}`
+        return {
+          id, name,
+          description: typeof p.description === 'string' ? p.description.slice(0, 80) : 'Custom bundle',
+          vendor: 'Custom',
+          map,
+          createdAt: typeof p.createdAt === 'number' ? p.createdAt : Date.now(),
+        }
+      })
+      .filter(Boolean)
+      .slice(0, MAX_USER_PRESETS)
+    localStorage.setItem(STORAGE_KEY_USER_PRESETS, JSON.stringify({ v: 1, items: cleaned }))
+    return true
+  } catch { return false }
+}
+
+function sanitizePresetName(s) {
+  if (typeof s !== 'string') return ''
+  const t = s.trim().slice(0, 32)
+  return t.length > 0 ? t : ''
+}
+
+// Same shape as validateMap above but defensive — returns the sanitized
+// map (or null on bad data) instead of throwing, so load/save can drop
+// corrupt rows silently rather than blowing up the whole bundle list.
+function sanitizePresetMap(map) {
+  if (!map || typeof map !== 'object') return null
+  const out = {}
+  let kept = 0
+  for (const [cc, actionId] of Object.entries(map)) {
+    const n = parseInt(cc, 10)
+    if (!Number.isFinite(n) || n < 0 || n > 127) continue
+    if (typeof actionId !== 'string' || !ACTION_IDS.has(actionId)) continue
+    out[String(n)] = actionId
+    kept++
+  }
+  return kept > 0 ? out : null
+}
+
+// Mint a stable id for a new user bundle. Numbered for clean URLs
+// + log output; falls back to a timestamp suffix when all numbered
+// slots are taken (extremely unlikely with MAX_USER_PRESETS = 8).
+export function nextUserPresetId(existing) {
+  const ids = new Set((existing || []).map(p => p && p.id))
+  for (let i = 1; i <= MAX_USER_PRESETS + 32; i++) {
+    const id = `${USER_PRESET_PREFIX}${i}`
+    if (!ids.has(id)) return id
+  }
+  return `${USER_PRESET_PREFIX}${Date.now()}`
+}
+
+// Build a new user bundle from the live binding map. Filters to
+// known action ids only so corrupt entries can't leak into the
+// stored bundle. Returns null if there's nothing to save.
+export function buildUserPresetFromMap(name, currentMap, existing = [], nowMs = Date.now()) {
+  const cleanName = sanitizePresetName(name)
+  if (!cleanName) return null
+  const cleanMap = sanitizePresetMap(currentMap || {})
+  if (!cleanMap) return null
+  return {
+    id: nextUserPresetId(existing),
+    name: cleanName,
+    description: `${Object.keys(cleanMap).length} binding${Object.keys(cleanMap).length === 1 ? '' : 's'} saved ${new Date(nowMs).toISOString().slice(0, 10)}`,
+    vendor: 'Custom',
+    map: cleanMap,
+    createdAt: nowMs,
+  }
+}
+
+// Append a user bundle to the list. Caps at MAX_USER_PRESETS by
+// dropping the oldest entry (FIFO). Returns the new list; never
+// mutates the input.
+export function addUserPreset(list, preset) {
+  if (!preset || !preset.id) return list || []
+  const base = Array.isArray(list) ? list.filter(p => p && p.id !== preset.id) : []
+  const next = [...base, preset]
+  return next.slice(-MAX_USER_PRESETS)
+}
+
+export function removeUserPreset(list, id) {
+  if (!Array.isArray(list)) return []
+  return list.filter(p => p && p.id !== id)
+}
+
+// True when this id is a USER-authored bundle (vs a shipped one).
+// Stable check via the id prefix; vendor-name fallback for older
+// entries that might lack the prefix.
+export function isUserPresetId(id) {
+  return typeof id === 'string' && id.startsWith(USER_PRESET_PREFIX)
+}
+
 export const MIDI_PRESETS = [
   KORG_NANOKONTROL2,
   NOVATION_LCXL,
@@ -152,17 +297,25 @@ for (const p of MIDI_PRESETS) validateMap(p.id, p.map)
 
 const PRESETS_BY_ID = new Map(MIDI_PRESETS.map(p => [p.id, p]))
 
-export function getMidiPreset(id) {
-  return PRESETS_BY_ID.get(id) || null
+// Look up by id — searches BOTH shipped presets AND any user-saved
+// bundle (R13.05). Pass `userPresets` from the live state so the
+// lookup stays in sync with whatever's currently persisted.
+export function getMidiPreset(id, userPresets = []) {
+  const shipped = PRESETS_BY_ID.get(id)
+  if (shipped) return shipped
+  if (Array.isArray(userPresets)) {
+    return userPresets.find(p => p && p.id === id) || null
+  }
+  return null
 }
 
 // Build a fresh CC→action map from a preset by id. Returns {} on a
 // bad id so callers can apply without a try/catch.
-export function buildMidiMapFromPreset(id) {
-  const p = PRESETS_BY_ID.get(id)
+export function buildMidiMapFromPreset(id, userPresets = []) {
+  const p = getMidiPreset(id, userPresets)
   if (!p) return {}
   // Defensive copy — we never want a downstream mutation to alter
-  // the shipped preset's source-of-truth.
+  // the shipped (or user-saved) preset's source-of-truth.
   return { ...p.map }
 }
 
@@ -188,9 +341,10 @@ export function detectPresetForInput(inputName) {
 // existing map first; "merge" keeps existing bindings that the
 // preset doesn't touch. The latter is useful when the user has
 // already Learn-bound a couple of their favourite knobs and just
-// wants the rest auto-filled.
-export function applyPresetToMap(currentMap, presetId, mode = 'replace') {
-  const incoming = buildMidiMapFromPreset(presetId)
+// wants the rest auto-filled. Searches both shipped and user
+// bundles via getMidiPreset.
+export function applyPresetToMap(currentMap, presetId, mode = 'replace', userPresets = []) {
+  const incoming = buildMidiMapFromPreset(presetId, userPresets)
   if (mode === 'merge') {
     return { ...(currentMap || {}), ...incoming }
   }
@@ -199,8 +353,8 @@ export function applyPresetToMap(currentMap, presetId, mode = 'replace') {
 }
 
 // Friendly counts for the UI — e.g. "14 actions" / "8 knobs".
-export function presetBindingCount(id) {
-  const p = PRESETS_BY_ID.get(id)
+export function presetBindingCount(id, userPresets = []) {
+  const p = getMidiPreset(id, userPresets)
   if (!p) return 0
   return Object.keys(p.map).length
 }
