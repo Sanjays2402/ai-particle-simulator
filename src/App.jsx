@@ -21,6 +21,7 @@ import MidiPanel from './components/MidiPanel'
 import WaveformOverlay from './components/WaveformOverlay'
 import CameraPathPlayer from './components/CameraPathPlayer'
 import PresetThumbnailPrerenderer from './components/PresetThumbnailPrerenderer'
+import MobileGestureHint from './components/MobileGestureHint'
 import { useGlobalMidi } from './lib/useGlobalMidi'
 import { loadSnapshots } from './lib/snapshotGallery'
 import { useIsMobile } from './lib/useIsMobile'
@@ -278,6 +279,7 @@ export default function App() {
       <WaveformOverlay />
       <CameraPathPlayer />
       <PresetThumbnailPrerenderer />
+      <MobileGestureHint />
       <MidiPanel open={midiOpen} onClose={() => setMidiOpen(false)} />
 
       {showSplash && (

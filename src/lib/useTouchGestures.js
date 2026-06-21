@@ -47,6 +47,18 @@ export function useTouchGestures(domRef) {
         const next = pinchToCountDelta(pinchDelta, start.startCount)
         const cur = useStore.getState().particleCount
         if (next !== cur) useStore.getState().setParticleCount(next)
+        // Announce so the mobile-gesture-hint overlay can track that
+        // the user has demonstrated this gesture. Cheap to dispatch
+        // even when nothing listens.
+        if (!start.pinchDispatched) {
+          start.pinchDispatched = true
+          try {
+            const ev = new CustomEvent('particle:touch-gesture', {
+              detail: { type: pinchDelta > 0 ? 'pinch-out' : 'pinch-in' },
+            })
+            window.dispatchEvent(ev)
+          } catch { /* */ }
+        }
       }
     }
 
@@ -71,6 +83,12 @@ export function useTouchGestures(domRef) {
             const { nextPreset, prevPreset } = useStore.getState()
             if (gesture === 'swipe-left') nextPreset()
             else prevPreset()
+            try {
+              const ev = new CustomEvent('particle:touch-gesture', {
+                detail: { type: gesture },
+              })
+              window.dispatchEvent(ev)
+            } catch { /* */ }
           }
         }
       }
