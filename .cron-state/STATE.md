@@ -51,6 +51,11 @@ Existing capabilities (do not re-ship):
 - Smash & Save — one-tap fully random bookmark scene (47 fields rolled + saved)
 - Custom theme JSON pack export/import (parallels bookmarks IO)
 - Carousel thumbnail pre-rendering during idle frames (offscreen Canvas2D sampler, ~64/session cap)
+- Keyboard remap JSON export/import (Settings → Keyboard, merge vs replace modes)
+- Waveform overlay mode switch (oscilloscope vs 32-bar frequency spectrum, persisted)
+- Mobile gesture hint overlay (first-run, auto-dismiss after both gestures shown)
+- Custom theme survives reload (boot-time resolver — handles deleted themes too)
+- Named attractors — multiple coexisting force-field objects (per-attractor type/strength/radius/place-on-canvas, up to 12, persisted)
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -114,29 +119,44 @@ Note: R7.01 (server-rendered OG snapshot endpoint) deferred — this is a
 static Vite app, no server runtime available. Will revisit if/when a
 backend lands (Cloudflare Worker, Vercel function, etc.).
 
-### Batch 8 — next 5 (refilled)
-- [ ] R8.01 Echo / trail FBO that survives EffectComposer (R7.06 — render pipeline refactor)
-- [ ] R8.02 Particle attractors as named objects (drag to reposition, multiple types coexist) [was R7.07]
-- [ ] R8.03 Custom theme set as default-on-load (auto-applied if active when reloading) [was R7.09]
-- [ ] R8.04 Mobile-only gesture hint overlay shown on first run [was R7.10]
-- [ ] R8.05 Keyboard remap quick-export (round-trip keymap as JSON via Settings) [was R7.11]
+### Batch 8 — keymap IO + waveform spectrum + mobile hint + custom theme boot + named attractors  (SHIPPED)
+- [x] **R8.05** Keymap quick-export (round-trip keymap as JSON via Settings)  — 2da8c81
+- [x] **R8.07** Waveform mode switch (time-domain vs frequency-spectrum bars)  — 1ade1b4
+- [x] **R8.04** Mobile-only gesture hint overlay shown on first run  — 30e5839
+- [x] **R8.03** Custom theme set as default-on-load (auto-applied if active when reloading)  — 086bf76
+- [x] **R8.02** Particle attractors as named objects (multiple types coexist, drag-to-replace via click-canvas)  — 1a7139b
+
+Note: R8.01 (Echo / trail FBO that survives EffectComposer) deferred
+again — it's a render-pipeline refactor that needs its own dedicated
+batch (a single-slice swap of EffectComposer for a custom RTT pass).
+Substituted R8.07 from the future queue to keep the batch at 5.
+R8.02's "drag to reposition" was implemented as click-canvas-to-
+re-place (per attractor, with a Place button that arms the next click)
+instead of a 3D-handle drag — drag handles are a separate batch.
+
+### Batch 9 — next 5 (refilled)
+- [ ] R9.01 Echo / trail FBO that survives EffectComposer (R8.01 — render pipeline refactor, dedicated batch)
+- [ ] R9.02 Named attractor 3D drag handle (real 3-axis drag handle on the canvas, not click-place)  [new]
+- [ ] R9.03 MIDI mapping presets (controller-specific bundles — nanoKONTROL, Launch Control) [was R8.06]
+- [ ] R9.04 Preset code viewer: inline error markers on the failing line during Edit [was R8.08]
+- [ ] R9.05 Minimap: render saved camera views as small dots [was R8.09]
 
 ### Future queue (refill when batch closes)
-- [ ] R8.06 MIDI mapping presets (controller-specific bundles — nanoKONTROL, Launch Control) [was R7.12]
-- [ ] R8.07 Waveform mode switch (time-domain vs frequency-spectrum bars) [was R7.13]
-- [ ] R8.08 Preset code viewer: inline error markers on the failing line during Edit [was R7.14]
-- [ ] R8.09 Minimap: render saved camera views as small dots [was R7.15]
-- [ ] R8.10 Camera path waypoint reorder (drag to rearrange, drop to commit) [was R7.16]
-- [ ] R8.11 Snapshot lightbox: pinch-zoom on mobile (CSS transform handles) [was R7.17]
-- [ ] R8.12 Slideshow respect-category in command palette (quick-toggle without LeftSidebar) [was R7.18]
-- [ ] R8.13 Bookmark export includes the live camera-view list (one combined file) [was R7.19]
-- [ ] R8.14 Wind preset chips become custom-named (long-press a slot to save sliders) [was R7.20]
-- [ ] R8.15 OpenGraph snapshot endpoint (server-rendered card for share URLs) — needs backend
-- [ ] R8.16 Crossfade chips: long-press a slot to bind its seconds to the current slider value
-- [ ] R8.17 Theme pack browser — preview a JSON pack's themes before importing
-- [ ] R8.18 Per-preset thumbnail re-render button in the carousel (rebuild a single stale thumb)
-- [ ] R8.19 Audio reactive bg: animation curve preset chips (Pulse / Ramp / Hold)
-- [ ] R8.20 Smash & Save: bias chips ("Mostly Calm", "Mostly Wild") to constrain the random ranges
+- [ ] R9.06 Camera path waypoint reorder (drag to rearrange, drop to commit) [was R8.10]
+- [ ] R9.07 Snapshot lightbox: pinch-zoom on mobile (CSS transform handles) [was R8.11]
+- [ ] R9.08 Slideshow respect-category in command palette (quick-toggle without LeftSidebar) [was R8.12]
+- [ ] R9.09 Bookmark export includes the live camera-view list (one combined file) [was R8.13]
+- [ ] R9.10 Wind preset chips become custom-named (long-press a slot to save sliders) [was R8.14]
+- [ ] R9.11 OpenGraph snapshot endpoint (server-rendered card for share URLs) — needs backend [was R8.15]
+- [ ] R9.12 Crossfade chips: long-press a slot to bind its seconds to the current slider value [was R8.16]
+- [ ] R9.13 Theme pack browser — preview a JSON pack's themes before importing [was R8.17]
+- [ ] R9.14 Per-preset thumbnail re-render button in the carousel (rebuild a single stale thumb) [was R8.18]
+- [ ] R9.15 Audio reactive bg: animation curve preset chips (Pulse / Ramp / Hold) [was R8.19]
+- [ ] R9.16 Smash & Save: bias chips ("Mostly Calm", "Mostly Wild") to constrain the random ranges [was R8.20]
+- [ ] R9.17 Named attractor bookmark — round-trip the attractor list through scene bookmarks
+- [ ] R9.18 Named attractor → MIDI: route a CC to a specific attractor's strength
+- [ ] R9.19 Spectrum waveform: log-frequency mode option for a more musical bar distribution
+- [ ] R9.20 Keymap import: live diff preview before committing
 
 ## TICK LOG
 - 2026-06-19 23:41 PT — Bootstrap + Batch 1 (5/5).
@@ -194,3 +214,15 @@ backend lands (Cloudflare Worker, Vercel function, etc.).
   customThemesIO, presetThumbnails · ~150 fresh asserts this batch).
   SCENE_FIELDS up to 47 (bgGradientAudioReactive + bgGradientAudioStrength
   round-trip through bookmarks too).
+- 2026-06-21 00:10 PT — Batch 8 (5/5).
+  Commits: 2da8c81 (R8.05 keymap export/import), 1ade1b4 (R8.07 waveform spectrum
+  mode), 30e5839 (R8.04 mobile gesture hint), 086bf76 (R8.03 custom theme boot
+  resolver), 1a7139b (R8.02 named attractors).
+  R8.01 deferred again — render pipeline refactor still needs its own dedicated
+  batch. Substituted R8.07 from the future queue. R8.02 ships click-canvas-to-
+  place; 3D drag-handle reposition moved to new R9.02.
+  Gates: lint 23 errors / 3 warnings — exactly matches baseline (zero new
+  errors in any modified file). Build: 1.01 s green (1.6 MB bundle, gzip 488 KB).
+  Unit tests: 34/34 files pass (added keymapIO, mobileGestureHint, activeThemeBoot,
+  namedAttractors; waveform extended with spectrum mode · 100+ fresh asserts
+  this batch).
