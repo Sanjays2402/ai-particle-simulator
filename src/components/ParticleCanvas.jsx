@@ -11,6 +11,7 @@ import { windVector, applyWind } from '../lib/wind'
 import { resolveTheme as resolveActiveTheme } from '../lib/customThemes'
 import { applyNoise } from '../lib/noiseDeformer'
 import { useTouchGestures } from '../lib/useTouchGestures'
+import { buildHueFilterCss, computeReactiveHueDeg, pickAudioSignal } from '../lib/bgGradient'
 
 // FPS counter component (renders as HTML overlay)
 function FPSCounter() {
@@ -732,10 +733,26 @@ export default function ParticleCanvas() {
   const audioBass = useStore(s => s.audioBass)
   const audioMid = useStore(s => s.audioMid)
   const audioTreble = useStore(s => s.audioTreble)
+  const audioBeat   = useStore(s => s.audioBeat)
+  const audioMode   = useStore(s => s.audioMode)
   const bgGradientEnabled = useStore(s => s.bgGradientEnabled)
   const bgGradientA       = useStore(s => s.bgGradientA)
   const bgGradientB       = useStore(s => s.bgGradientB)
   const bgGradientAngle   = useStore(s => s.bgGradientAngle)
+  const bgGradientAudioReactive = useStore(s => s.bgGradientAudioReactive)
+  const bgGradientAudioStrength = useStore(s => s.bgGradientAudioStrength)
+
+  // Audio-reactive hue rotation on the gradient layer. Cheap pure
+  // math: only kicks in when both reactivity flags are on AND the
+  // gradient is showing. The CSS filter is recomputed each render the
+  // audio signal changes (which the subscribed `audio*` selectors
+  // already trigger).
+  const bgFilter = (bgGradientEnabled && bgGradientAudioReactive && audioReactive)
+    ? buildHueFilterCss(computeReactiveHueDeg(
+        pickAudioSignal(audioMode, { level: audioLevel, bass: audioBass, beat: audioBeat }),
+        bgGradientAudioStrength,
+      ))
+    : ''
 
   // FPS overlay
   useEffect(() => {
@@ -797,6 +814,8 @@ export default function ParticleCanvas() {
           position: 'absolute', inset: 0, zIndex: 0,
           background: `linear-gradient(${bgGradientAngle}deg, ${bgGradientA} 0%, ${bgGradientB} 100%)`,
           pointerEvents: 'none',
+          filter: bgFilter || undefined,
+          transition: bgGradientAudioReactive ? 'filter 80ms linear' : 'none',
         }} />
       )}
       <Canvas

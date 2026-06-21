@@ -8,6 +8,7 @@ import { clampFocusDistance, clampFocalLength, clampBokehScale } from './lib/dep
 import { clampIntensity as clampWindIntensity, clampAzimuth as clampWindAzimuth, clampPitch as clampWindPitch } from './lib/wind'
 import { loadThemes as loadCustomThemes, saveThemes as saveCustomThemes, addTheme as addCustomThemeHelper, removeTheme as removeCustomThemeHelper, resolveTheme as resolveThemeHelper } from './lib/customThemes'
 import { clampAmplitude as clampNoiseAmp, clampFrequency as clampNoiseFreq, clampSpeed as clampNoiseSpeed } from './lib/noiseDeformer'
+import { clampHueReactiveStrength as clampBgGradientStrength } from './lib/bgGradient'
 
 // Lightweight settings persistence: a subset of user-tweakable values
 // is read once on store init and written back whenever it changes.
@@ -328,10 +329,22 @@ export const useStore = create((set, get) => {
   bgGradientA: '#1e1b4b',   // top
   bgGradientB: '#0a0a0f',   // bottom (current default)
   bgGradientAngle: 180,     // degrees, 180 = top→bottom
+  // Audio-reactive hue rotation on the gradient layer — when both
+  // this and `audioReactive` are on, the gradient div gets a
+  // `filter: hue-rotate(<deg>)` driven by the active audio signal
+  // (level / bass / beat per audioMode). Strength is 0..1; 0 mutes
+  // the reactivity entirely. Idle path is unchanged (renderer skips
+  // the filter when the toggle is off).
+  bgGradientAudioReactive: false,
+  bgGradientAudioStrength: 0.5,
   setBgGradientEnabled: (v) => set({ bgGradientEnabled: v }),
   setBgGradientA: (v) => set({ bgGradientA: v }),
   setBgGradientB: (v) => set({ bgGradientB: v }),
   setBgGradientAngle: (v) => set({ bgGradientAngle: Math.max(0, Math.min(360, v | 0)) }),
+  setBgGradientAudioReactive: (v) => set({ bgGradientAudioReactive: !!v }),
+  setBgGradientAudioStrength: (v) => set({
+    bgGradientAudioStrength: clampBgGradientStrength(v),
+  }),
 
   // Crossfade — render a weighted blend between the current preset
   // and a chosen "blend target" preset. When `blendActive` is true,

@@ -1475,10 +1475,15 @@ function BgGradientRow() {
   const a       = useStore(s => s.bgGradientA)
   const b       = useStore(s => s.bgGradientB)
   const angle   = useStore(s => s.bgGradientAngle)
+  const audioReactiveBg = useStore(s => s.bgGradientAudioReactive)
+  const audioStrength   = useStore(s => s.bgGradientAudioStrength)
+  const audioOn         = useStore(s => s.audioReactive)
   const setEn    = useStore(s => s.setBgGradientEnabled)
   const setA     = useStore(s => s.setBgGradientA)
   const setB     = useStore(s => s.setBgGradientB)
   const setAngle = useStore(s => s.setBgGradientAngle)
+  const setAudioReactiveBg = useStore(s => s.setBgGradientAudioReactive)
+  const setAudioStrength   = useStore(s => s.setBgGradientAudioStrength)
   return (
     <>
       <ToggleRow label="Custom Gradient" value={enabled} onChange={setEn} />
@@ -1515,6 +1520,27 @@ function BgGradientRow() {
           <p style={{ fontSize: 11, color: '#7a7a90', marginTop: 8 }}>
             Particles render on top — pick darks so they don&apos;t get washed out.
           </p>
+          {/* Audio-reactive hue rotation on the gradient layer. Only
+              meaningful when the global Audio Reactivity is also on. */}
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+            <ToggleRow label="React to audio" value={audioReactiveBg} onChange={setAudioReactiveBg} />
+            {audioReactiveBg && (
+              <>
+                <Slider
+                  label="Hue swing"
+                  value={audioStrength}
+                  min={0} max={1} step={0.05}
+                  onChange={setAudioStrength}
+                  display={v => `${Math.round(v * 100)}%`}
+                />
+                {!audioOn && (
+                  <p style={{ fontSize: 11, color: '#fbbf24', marginTop: 4, opacity: 0.9 }}>
+                    Turn on Audio Reactivity (Audio panel) to hear the gradient breathe.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
         </>
       )}
     </>

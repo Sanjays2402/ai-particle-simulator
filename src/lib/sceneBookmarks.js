@@ -34,6 +34,7 @@ export const SCENE_FIELDS = [
   'cameraShake', 'cameraShakeIntensity',
   'audioMode',
   'bgGradientEnabled', 'bgGradientA', 'bgGradientB', 'bgGradientAngle',
+  'bgGradientAudioReactive', 'bgGradientAudioStrength',
   'slideshowEnabled', 'slideshowDwellSec', 'slideshowOrder', 'slideshowRespectCategory',
 ]
 
