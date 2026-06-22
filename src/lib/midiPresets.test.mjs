@@ -10,6 +10,8 @@ import {
   loadUserPresets, saveUserPresets,
   nextUserPresetId, buildUserPresetFromMap,
   addUserPreset, removeUserPreset, isUserPresetId,
+  // R14.18 — rename in place
+  renameUserPreset,
 } from './midiPresets.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -261,4 +263,93 @@ for (const p of MIDI_PRESETS) {
   eq(presetBindingCount(userId, []), 0, 'no userList → 0 for user id')
 }
 
-console.log(`PASS: midiPresets — ${MIDI_PRESETS.length} shipped + user bundle editor (build/add/remove/load/save, cap ${MAX_USER_PRESETS})`)
+// R14.18 — renameUserPreset
+{
+  const p1 = buildUserPresetFromMap('OLD', { '7': 'glow' }, [])
+  const list = addUserPreset([], p1)
+  // Happy path: rename succeeds, returns new array, name updated.
+  const next = renameUserPreset(list, p1.id, 'NEW')
+  ok(next !== list, 'rename returns NEW array on success')
+  eq(next.length, 1, 'list size unchanged')
+  eq(next[0].id, p1.id, 'id preserved')
+  eq(next[0].name, 'NEW', 'name updated')
+  // Description was the auto-template — it should be rewritten to
+  // carry the same form (still "1 binding saved YYYY-MM-DD").
+  ok(/^1 binding saved \d{4}-\d{2}-\d{2}$/.test(next[0].description), 'auto description rewritten')
+  // Map should be untouched, createdAt should be preserved.
+  eq(next[0].map['7'], 'glow', 'map preserved')
+  eq(next[0].createdAt, p1.createdAt, 'createdAt preserved')
+}
+{
+  // Blank-after-trim → list returned unchanged (ref-equal).
+  const p1 = buildUserPresetFromMap('OK', { '7': 'glow' }, [])
+  const list = addUserPreset([], p1)
+  eq(renameUserPreset(list, p1.id, ''),    list, 'empty name → list unchanged')
+  eq(renameUserPreset(list, p1.id, '   '), list, 'whitespace name → list unchanged')
+  eq(renameUserPreset(list, p1.id, null),  list, 'null name → list unchanged')
+  // Identical-name rename is a no-op (ref-equal too).
+  eq(renameUserPreset(list, p1.id, 'OK'),  list, 'identical name → list unchanged')
+}
+{
+  // Missing id → list returned unchanged.
+  const p1 = buildUserPresetFromMap('OK', { '7': 'glow' }, [])
+  const list = addUserPreset([], p1)
+  eq(renameUserPreset(list, 'user-999', 'X'), list, 'missing id → list unchanged')
+  eq(renameUserPreset(list, '', 'X'),         list, 'empty id → list unchanged')
+  eq(renameUserPreset(list, null, 'X'),       list, 'null id → list unchanged')
+}
+{
+  // Defensive: non-array → list returned unchanged.
+  eq(renameUserPreset(null,      'user-1', 'X'), null,      'null list → null')
+  eq(renameUserPreset(undefined, 'user-1', 'X'), undefined, 'undefined list → undefined')
+}
+{
+  // Name longer than 32 chars is truncated by the sanitizer.
+  const p1 = buildUserPresetFromMap('OK', { '7': 'glow' }, [])
+  const list = addUserPreset([], p1)
+  const next = renameUserPreset(list, p1.id, 'x'.repeat(100))
+  eq(next[0].name.length, 32, 'long name truncated to 32')
+}
+{
+  // Custom (hand-edited) description survives a rename — only the
+  // auto template gets rewritten.
+  const p1 = buildUserPresetFromMap('OK', { '7': 'glow' }, [])
+  // Hand-set a custom description.
+  const listWithCustomDesc = [{ ...p1, description: 'Important notes about this rig' }]
+  const next = renameUserPreset(listWithCustomDesc, p1.id, 'NEW')
+  eq(next[0].name, 'NEW', 'name updated')
+  eq(next[0].description, 'Important notes about this rig', 'custom description preserved')
+}
+{
+  // Rename works on only the matching id when multiple bundles exist.
+  const p1 = buildUserPresetFromMap('first',  { '7': 'glow'  }, [])
+  const p2 = buildUserPresetFromMap('second', { '8': 'speed' }, [p1])
+  const list = addUserPreset(addUserPreset([], p1), p2)
+  const next = renameUserPreset(list, p2.id, 'renamed-second')
+  eq(next[0].name, 'first', 'first untouched')
+  eq(next[1].name, 'renamed-second', 'second renamed')
+}
+{
+  // Rename round-trips through save/load.
+  const fakeStore = (() => {
+    const map = new Map()
+    return {
+      getItem(k) { return map.has(k) ? map.get(k) : null },
+      setItem(k, v) { map.set(k, String(v)) },
+      removeItem(k) { map.delete(k) },
+    }
+  })()
+  // Inject fakeStore for this scope.
+  globalThis.localStorage = fakeStore
+  const p1 = buildUserPresetFromMap('OLD', { '7': 'glow' }, [])
+  let list = addUserPreset([], p1)
+  list = renameUserPreset(list, p1.id, 'NEW')
+  saveUserPresets(list)
+  const loaded = loadUserPresets()
+  eq(loaded.length, 1, 'reload yields 1')
+  eq(loaded[0].name, 'NEW', 'renamed name persisted')
+  // Tidy up.
+  delete globalThis.localStorage
+}
+
+console.log(`PASS: midiPresets — ${MIDI_PRESETS.length} shipped + user bundle editor (build/add/remove/load/save, cap ${MAX_USER_PRESETS}) + R14.18 rename (success/blank-rejects/missing-id/non-array-defensive/truncation/custom-desc-preserved/multi-entry-targeted/save-load-roundtrip)`)

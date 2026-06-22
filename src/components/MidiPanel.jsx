@@ -9,6 +9,8 @@ import {
   // R13.05 — user preset bundle editor
   loadUserPresets, saveUserPresets,
   buildUserPresetFromMap, addUserPreset, removeUserPreset,
+  // R14.18 — rename in place
+  renameUserPreset,
   MAX_USER_PRESETS,
 } from '../lib/midiPresets'
 import {
@@ -181,6 +183,18 @@ export default function MidiPanel({ open, onClose }) {
     saveUserPresets(next)
   }
 
+  // R14.18 — rename a user bundle in place. The lib's
+  // renameUserPreset returns the SAME array ref on no-op (blank
+  // name, missing id, identical name), so we only save when the
+  // ref actually changed.
+  const renameUserBundle = (id, newName) => {
+    const next = renameUserPreset(userPresets, id, newName)
+    if (next === userPresets) return false
+    setUserPresets(next)
+    saveUserPresets(next)
+    return true
+  }
+
   // R14.17 — download one user bundle as a portable JSON file. The
   // filename is auto-slugified from the bundle name + dated. We use
   // the showToast pattern the rest of the app uses for non-blocking
@@ -319,6 +333,7 @@ export default function MidiPanel({ open, onClose }) {
           detectedId={detectedPresetId}
           onApply={applyPreset}
           onDeleteUser={deleteUserBundle}
+          onRenameUser={renameUserBundle}
           onExportUser={exportUserBundle}
           onImportUser={importUserBundle}
           savingBundle={savingBundle}
@@ -603,7 +618,7 @@ function Banner({ color, icon, children }) {
 // the user can delete a bundle. A "+ Save current" button opens an
 // inline form to capture the current binding map as a new bundle.
 function PresetBar({
-  presets, userPresets = [], detectedId, onApply, onDeleteUser,
+  presets, userPresets = [], detectedId, onApply, onDeleteUser, onRenameUser,
   onExportUser, onImportUser,
   savingBundle, onStartSave, onCancelSave, onCommitBundle,
   bundleName, onBundleNameChange, liveBindingCount,
@@ -701,57 +716,14 @@ function PresetBar({
           {userPresets.length > 0 && (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: savingBundle ? 8 : 0 }}>
               {userPresets.map(p => (
-                <div key={p.id} style={{
-                  display: 'inline-flex', alignItems: 'stretch',
-                  borderRadius: 6, overflow: 'hidden',
-                  border: '1px solid rgba(236,72,153,0.30)',
-                }}>
-                  <button
-                    onClick={(e) => onApply(p.id, e.shiftKey ? 'merge' : 'replace')}
-                    title={`${p.description} · ${Object.keys(p.map).length} bindings. Shift-click to merge.`}
-                    style={{
-                      padding: '5px 9px', fontSize: 11, cursor: 'pointer',
-                      background: 'rgba(236,72,153,0.08)',
-                      color: '#fbcfe8',
-                      border: 'none',
-                      borderRight: '1px solid rgba(236,72,153,0.20)',
-                      display: 'inline-flex', alignItems: 'center', gap: 6,
-                      fontFamily: 'Geist, system-ui, sans-serif',
-                    }}
-                  >
-                    {p.name}
-                    <span style={{
-                      fontSize: 9, fontFamily: 'Geist Mono, monospace',
-                      color: 'rgba(251,207,232,0.7)',
-                    }}>
-                      {Object.keys(p.map).length}
-                    </span>
-                  </button>
-                  {/* R14.17 — per-bundle Export. Tucked between the
-                      apply chip + the trash so the destructive button
-                      stays the rightmost (least-fat-fingerable) action. */}
-                  {onExportUser && (
-                    <button onClick={() => onExportUser(p)} title={`Download "${p.name}" as JSON`}
-                      style={{
-                        padding: '0 6px', fontSize: 11, cursor: 'pointer',
-                        background: 'rgba(99,102,241,0.08)', color: '#a5b4fc',
-                        border: 'none',
-                        borderRight: '1px solid rgba(99,102,241,0.18)',
-                        display: 'inline-flex', alignItems: 'center',
-                      }}>
-                      <Download size={10} />
-                    </button>
-                  )}
-                  <button onClick={() => onDeleteUser(p.id)} title="Delete this bundle"
-                    style={{
-                      padding: '0 6px', fontSize: 11, cursor: 'pointer',
-                      background: 'rgba(239,68,68,0.06)', color: '#fca5a5',
-                      border: 'none',
-                      display: 'inline-flex', alignItems: 'center',
-                    }}>
-                    <Trash2 size={10} />
-                  </button>
-                </div>
+                <UserBundleChip
+                  key={p.id}
+                  preset={p}
+                  onApply={(mode) => onApply(p.id, mode)}
+                  onDelete={() => onDeleteUser(p.id)}
+                  onRename={onRenameUser ? (newName) => onRenameUser(p.id, newName) : null}
+                  onExport={onExportUser ? () => onExportUser(p) : null}
+                />
               ))}
             </div>
           )}
@@ -854,6 +826,163 @@ function PresetBar({
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// R14.18 — UserBundleChip: a single user-authored bundle chip with
+// double-click-to-rename inline editing. Replaces the static apply +
+// trash row PresetBar used to render inline so the rename state
+// machine + autoFocus input ref can live in one place.
+//
+// Layout matches the previous inline row exactly: [apply | export |
+// trash] when at rest; switches to [name-input | save | cancel]
+// while editing. Edit gesture is double-click on the name (matches
+// NamedAttractorRow in LeftSidebar so the pattern is consistent
+// across the app). Enter saves; Escape cancels; blur saves with
+// fallback-to-cancel when the trimmed name is empty.
+function UserBundleChip({ preset, onApply, onDelete, onRename, onExport }) {
+  const [editing, setEditing] = useState(false)
+  const [draftName, setDraftName] = useState(preset.name)
+  // (No useEffect needed to sync `draftName` ↔ `preset.name`: the
+  // onDoubleClick handler re-initializes the draft from preset.name
+  // every time editing starts, and the at-rest branch displays
+  // preset.name directly. The only scenario a sync would cover is
+  // "preset name changes externally while the input is open" which
+  // is vanishingly rare — and dropping the effect keeps us under
+  // React Compiler's `react-hooks/set-state-in-effect` purity rule.)
+
+  const commitRename = () => {
+    if (!onRename) { setEditing(false); return }
+    const trimmed = (draftName || '').trim()
+    if (!trimmed) {
+      // Blank → revert + dismiss without calling rename (lib would
+      // reject anyway, this just keeps the input from ping-ponging).
+      setDraftName(preset.name)
+      setEditing(false)
+      return
+    }
+    onRename(trimmed)
+    setEditing(false)
+  }
+  const cancelRename = () => {
+    setDraftName(preset.name)
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <div style={{
+        display: 'inline-flex', alignItems: 'stretch',
+        borderRadius: 6, overflow: 'hidden',
+        border: '1px solid rgba(168,85,247,0.45)',
+        boxShadow: '0 0 10px rgba(168,85,247,0.18)',
+      }}>
+        <input
+          type="text"
+          value={draftName}
+          autoFocus
+          onChange={(e) => setDraftName(e.target.value)}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); commitRename() }
+            else if (e.key === 'Escape') { e.preventDefault(); cancelRename() }
+          }}
+          maxLength={32}
+          placeholder="Bundle name"
+          style={{
+            minWidth: 0, width: Math.max(90, (draftName?.length || 0) * 7 + 24),
+            padding: '5px 9px', fontSize: 11,
+            background: 'rgba(0,0,0,0.30)',
+            color: '#f3e8ff',
+            border: 'none', outline: 'none',
+            fontFamily: 'Geist, system-ui, sans-serif',
+            borderRight: '1px solid rgba(168,85,247,0.30)',
+          }}
+        />
+        <button onClick={commitRename} title="Save name (Enter)"
+          style={{
+            padding: '0 7px', fontSize: 10, fontWeight: 700, cursor: 'pointer',
+            background: 'rgba(34,197,94,0.10)', color: '#86efac',
+            border: 'none', borderRight: '1px solid rgba(34,197,94,0.25)',
+            display: 'inline-flex', alignItems: 'center',
+            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+            letterSpacing: '0.02em',
+          }}>OK</button>
+        <button onClick={cancelRename} title="Cancel (Escape)"
+          style={{
+            padding: '0 6px', fontSize: 11, cursor: 'pointer',
+            background: 'rgba(255,255,255,0.03)', color: '#9a9ab0',
+            border: 'none',
+            display: 'inline-flex', alignItems: 'center',
+          }}><X size={10} /></button>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{
+      display: 'inline-flex', alignItems: 'stretch',
+      borderRadius: 6, overflow: 'hidden',
+      border: '1px solid rgba(236,72,153,0.30)',
+    }}>
+      <button
+        onClick={(e) => onApply(e.shiftKey ? 'merge' : 'replace')}
+        onDoubleClick={(e) => {
+          // R14.18 — double-click to start editing. Only when a
+          // rename handler is wired; otherwise this is a plain
+          // apply button. preventDefault stops the double-tap from
+          // selecting the chip text on mobile.
+          if (!onRename) return
+          e.preventDefault()
+          e.stopPropagation()
+          setDraftName(preset.name)
+          setEditing(true)
+        }}
+        title={`${preset.description} · ${Object.keys(preset.map).length} bindings. Shift-click to merge${onRename ? '. Double-click name to rename' : ''}.`}
+        style={{
+          padding: '5px 9px', fontSize: 11, cursor: 'pointer',
+          background: 'rgba(236,72,153,0.08)',
+          color: '#fbcfe8',
+          border: 'none',
+          borderRight: '1px solid rgba(236,72,153,0.20)',
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          fontFamily: 'Geist, system-ui, sans-serif',
+          userSelect: 'none', WebkitUserSelect: 'none',
+        }}
+      >
+        {preset.name}
+        <span style={{
+          fontSize: 9, fontFamily: 'Geist Mono, monospace',
+          color: 'rgba(251,207,232,0.7)',
+        }}>
+          {Object.keys(preset.map).length}
+        </span>
+      </button>
+      {/* R14.17 — per-bundle Export. Between apply + trash so the
+          destructive trash stays the rightmost (least fat-fingerable)
+          action. */}
+      {onExport && (
+        <button onClick={onExport} title={`Download "${preset.name}" as JSON`}
+          style={{
+            padding: '0 6px', fontSize: 11, cursor: 'pointer',
+            background: 'rgba(99,102,241,0.08)', color: '#a5b4fc',
+            border: 'none',
+            borderRight: '1px solid rgba(99,102,241,0.18)',
+            display: 'inline-flex', alignItems: 'center',
+          }}>
+          <Download size={10} />
+        </button>
+      )}
+      <button onClick={onDelete} title="Delete this bundle"
+        style={{
+          padding: '0 6px', fontSize: 11, cursor: 'pointer',
+          background: 'rgba(239,68,68,0.06)', color: '#fca5a5',
+          border: 'none',
+          display: 'inline-flex', alignItems: 'center',
+        }}>
+        <Trash2 size={10} />
+      </button>
     </div>
   )
 }

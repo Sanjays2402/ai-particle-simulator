@@ -276,6 +276,40 @@ export function removeUserPreset(list, id) {
   return list.filter(p => p && p.id !== id)
 }
 
+// R14.18 — rename a user-authored bundle in place by id. Returns a
+// NEW array with the entry's `name` (and `description` if it followed
+// the auto-generated pattern, see below) updated through the same
+// sanitizer as save/load so a blank-after-trim name is rejected
+// without mutating anything. Caller is responsible for persisting
+// the returned list via saveUserPresets.
+//
+// Why bother rewriting the description? The shipped buildUserPreset
+// FromMap sets description to `N bindings saved YYYY-MM-DD` —
+// purely derived. If we leave that text alone after a rename, the
+// chip tooltip says "8 bindings saved 2026-06-21" even after the
+// user renames "OLD" → "NEW" and the rename feels less complete.
+// We ONLY rewrite when the description still matches the auto
+// template (preserves any custom description the user might have
+// hand-edited via JSON import or future per-bundle UI).
+export function renameUserPreset(list, id, newName) {
+  if (!Array.isArray(list) || !id) return list
+  const cleanName = sanitizePresetName(newName)
+  if (!cleanName) return list  // refuse blank-after-trim
+  let changed = false
+  const next = list.map(p => {
+    if (!p || p.id !== id) return p
+    if (p.name === cleanName) return p  // no-op for identical name
+    changed = true
+    // Rewrite the auto-generated description if it still matches.
+    const autoDescPattern = /^\d+ binding(s)? saved \d{4}-\d{2}-\d{2}$/
+    const nextDescription = (typeof p.description === 'string' && autoDescPattern.test(p.description))
+      ? `${Object.keys(p.map || {}).length} binding${Object.keys(p.map || {}).length === 1 ? '' : 's'} saved ${new Date(p.createdAt || Date.now()).toISOString().slice(0, 10)}`
+      : p.description
+    return { ...p, name: cleanName, description: nextDescription }
+  })
+  return changed ? next : list
+}
+
 // True when this id is a USER-authored bundle (vs a shipped one).
 // Stable check via the id prefix; vendor-name fallback for older
 // entries that might lack the prefix.
