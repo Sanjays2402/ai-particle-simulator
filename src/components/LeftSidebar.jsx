@@ -905,6 +905,54 @@ function CustomThemesRow() {
     }
   }
 
+  // R18.18 — multi-file drag-and-drop. Reads N files in parallel,
+  // parses each, COMBINES the valid items into a single preview
+  // panel. Failed parses don't block the whole batch — they surface
+  // in the resulting toast as a per-file error count. The preview
+  // shows the merged item list with a sources-line listing each
+  // contributing filename so the user can see what's about to land.
+  // Mode defaults to 'merge' (same as the single-file path); the
+  // existing commitPendingPack / cancelPendingPack handlers absorb
+  // the combined items unchanged. Duplicate names ACROSS the files
+  // are not deduped here — the existing mergeThemesImport step
+  // handles name collisions via its standard merge/replace rules
+  // when the user finally clicks Apply, so dropping the same theme
+  // pack twice in one gesture won't double-import.
+  const parseAndPreviewMulti = async (files, skipped = 0) => {
+    if (!Array.isArray(files) || files.length === 0) return
+    const results = await Promise.all(files.map(async f => {
+      try {
+        const text = await f.text()
+        const res = parseThemesImport(text)
+        if (!res.ok) return { ok: false, name: f.name, error: res.error }
+        return { ok: true, name: f.name, items: res.items }
+      } catch (err) {
+        return { ok: false, name: f.name, error: err.message || 'read error' }
+      }
+    }))
+    const okResults = results.filter(r => r.ok)
+    const failed = results.length - okResults.length
+    if (okResults.length === 0) {
+      const firstErr = results[0] && results[0].error
+      showToast(`All ${results.length} imports failed${firstErr ? `: ${firstErr}` : ''}`)
+      return
+    }
+    // Combine items in filename order (already sorted by caller).
+    const combined = okResults.flatMap(r => r.items)
+    const sources = okResults.map(r => r.name)
+    const filename = okResults.length === 1
+      ? sources[0]
+      : `${okResults.length} files (${sources[0]}…)`
+    setPendingPack({ items: combined, filename, sources, fileCount: okResults.length })
+    setPendingMode('merge')
+    const bits = []
+    if (failed > 0) bits.push(`${failed} failed`)
+    if (skipped > 0) bits.push(`${skipped} non-JSON skipped`)
+    if (bits.length > 0) {
+      showToast(`Combined ${combined.length} themes from ${okResults.length} files · ${bits.join(' · ')}`)
+    }
+  }
+
   // Open a file picker, parse the JSON, then surface a preview panel
   // (instead of a window.confirm) so the user can SEE the themes before
   // committing. The actual merge/replace happens in commitPendingPack
@@ -932,12 +980,18 @@ function CustomThemesRow() {
 
   // R17.06 — drag-and-drop handlers. dragenter increments depth so
   // the highlight stays on as the drag moves between child elements;
-  // dragleave decrements. The drop handler reads the first dropped
-  // file (we silently ignore multi-file drops — a theme pack is
-  // single-file by convention) and feeds it through parseAndPreview.
+  // dragleave decrements. The drop handler reads the dropped files
+  // and feeds them through parseAndPreview / parseAndPreviewMulti.
   // We only intercept drags that carry FILES so a stray text-drag
   // (e.g. selecting text on the page itself) doesn't flicker the
   // overlay or block the default behaviour.
+  //
+  // R18.18 — multiple .json files at once. When the user drops N
+  // files we read them all, parse each, and combine the items into
+  // a single preview panel (with a banner showing the source-file
+  // count). Failed parses surface in a toast but don't block the
+  // valid ones — partial success is better than throwing the whole
+  // drop away.
   const onDragEnter = (e) => {
     if (!e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return
     e.preventDefault()
@@ -957,16 +1011,33 @@ function CustomThemesRow() {
     if (!e.dataTransfer) return
     e.preventDefault()
     setDragDepth(0)
-    const file = e.dataTransfer.files && e.dataTransfer.files[0]
-    if (!file) {
+    const files = e.dataTransfer.files
+    if (!files || files.length === 0) {
       showToast('Drop a .json theme pack to import')
       return
     }
-    if (!file.name.toLowerCase().endsWith('.json')) {
-      showToast(`Not a JSON file: ${file.name}`)
+    // Filter to .json files only — non-JSON drops are flagged as
+    // skipped rather than rejecting the whole batch. Sorting by
+    // name keeps the preview deterministic for users who drop the
+    // same multi-file set on different machines.
+    const jsonFiles = Array.from(files)
+      .filter(f => f.name && f.name.toLowerCase().endsWith('.json'))
+      .sort((a, b) => a.name.localeCompare(b.name))
+    const skipped = files.length - jsonFiles.length
+    if (jsonFiles.length === 0) {
+      showToast(`No JSON files in drop (${skipped} skipped)`)
       return
     }
-    parseAndPreview(file)
+    if (jsonFiles.length === 1) {
+      // Single-file path — preserve the R17.06 behaviour exactly.
+      parseAndPreview(jsonFiles[0])
+      if (skipped > 0) showToast(`${skipped} non-JSON file${skipped === 1 ? '' : 's'} skipped`)
+      return
+    }
+    // R18.18 — multi-file: read all in parallel, parse each, combine
+    // valid items into a single preview. Track per-file outcomes
+    // so the toast can report partial successes accurately.
+    parseAndPreviewMulti(jsonFiles, skipped)
   }
 
   return (
@@ -1005,6 +1076,14 @@ function CustomThemesRow() {
           pointerEvents: 'none', zIndex: 2,
         }}>
           Drop .json to preview theme pack
+          <span style={{
+            display: 'inline', marginLeft: 6,
+            fontSize: 9, color: '#a5b4fc',
+            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+            letterSpacing: 0, textTransform: 'none', fontWeight: 500,
+          }}>
+            (multi-file ok)
+          </span>
         </div>
       )}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -1210,9 +1289,17 @@ function ThemePackPreview({ pack, mode, onModeChange, existing, onCommit, onCanc
       }}>
         <span style={{ fontSize: 11, color: '#c7d2fe', fontWeight: 600, letterSpacing: '0.02em' }}>
           Preview: {pack.items.length} theme{pack.items.length === 1 ? '' : 's'}
+          {/* R18.18 — when multi-file, show source-count next to the
+              theme-count so the user knows how many files contributed. */}
+          {pack.fileCount && pack.fileCount > 1 && (
+            <span style={{ marginLeft: 6, fontSize: 10, color: '#a5b4fc', fontFamily: 'Geist Mono, monospace', fontWeight: 500 }}
+              title={`Combined from: ${(pack.sources || []).join(', ')}`}>
+              · {pack.fileCount} files
+            </span>
+          )}
         </span>
-        <span style={{ fontSize: 10, color: '#7a7a90', fontFamily: 'Geist Mono, monospace', maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-          title={pack.filename}>
+        <span style={{ fontSize: 10, color: '#7a7a90', fontFamily: 'Geist Mono, monospace', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          title={pack.sources ? pack.sources.join('\n') : pack.filename}>
           {pack.filename}
         </span>
       </div>
