@@ -6,6 +6,10 @@ import {
   EXPORT_KIND, EXPORT_VERSION, MAX_IMPORT_BYTES, MAX_USER_PRESETS,
   buildExportPayload, serializeUserBundle, makeFilename,
   parseImport, isAtBundleCap,
+  // R15.14 — multi-bundle IO
+  EXPORT_KIND_MULTI, MAX_IMPORT_BYTES_MULTI,
+  buildExportPayloadMulti, serializeUserBundlesMulti, makeFilenameMulti,
+  parseImportMulti, summarizeImportImpactMulti,
 } from './midiUserBundleIO.js'
 import { ACTIONS } from './midiMap.js'
 
@@ -207,4 +211,182 @@ const SAMPLE = {
   eq(r.bundle.description, 'Custom bundle', 'default description survives')
 }
 
-console.log(`PASS: midiUserBundleIO — envelope build/parse, bare-bundle shorthand, sanitize (out-of-range CC + unknown action + blank name + long-name/desc truncation), serialize (success + null on unencodable), filename slugify (punctuation/case/blank/null/multi-space/leading-trailing), parseImport (envelope + bare + all rejection cases), id/vendor/createdAt stripped on round-trip, isAtBundleCap (empty/null/non-array/full/past-cap/below)`)
+// --- R15.14 multi-bundle export / import ---
+{
+  const A = { name: 'Stage Rig',  map: { '1': SOME_ACTION } }
+  const B = { name: 'Studio',     map: { '2': OTHER_ACTION, '64': SOME_ACTION } }
+  const C = { name: 'Performance',map: { '70': SOME_ACTION } }
+  const payload = buildExportPayloadMulti([A, B, C], '2026-06-21T12:00:00.000Z')
+  ok(payload, 'multi envelope built')
+  eq(payload.kind, EXPORT_KIND_MULTI, 'multi kind tag')
+  eq(payload.v, EXPORT_VERSION, 'version stamped (shared)')
+  eq(payload.exportedAt, '2026-06-21T12:00:00.000Z', 'timestamp preserved')
+  eq(Array.isArray(payload.bundles), true, 'bundles is an array')
+  eq(payload.bundles.length, 3, 'all 3 bundles carried')
+  eq(payload.bundles[0].name, 'Stage Rig', 'order preserved')
+  eq(payload.bundles[1].name, 'Studio',    'order preserved [1]')
+  eq(payload.bundles[2].name, 'Performance','order preserved [2]')
+}
+{
+  // buildExportPayloadMulti: defensive cases.
+  eq(buildExportPayloadMulti(null),  null, 'null input → null')
+  eq(buildExportPayloadMulti('foo'), null, 'non-array input → null')
+  eq(buildExportPayloadMulti([]),    null, 'empty array → null (nothing to export)')
+  // Mix of valid + unencodable — survivor only.
+  const mixed = [
+    { name: 'Good',  map: { '1': SOME_ACTION } },
+    { name: '',      map: { '1': SOME_ACTION } },   // blank name → dropped
+    { name: 'AlsoBad', map: { '999': 'no-such' } }, // unknown actions → dropped
+  ]
+  const payload = buildExportPayloadMulti(mixed)
+  eq(payload.bundles.length, 1, 'only valid bundles kept')
+  eq(payload.bundles[0].name, 'Good', 'survivor is the valid bundle')
+}
+
+// serialize round-trip via parseImportMulti.
+{
+  const A = { name: 'Alpha', map: { '1': SOME_ACTION } }
+  const B = { name: 'Beta',  map: { '2': OTHER_ACTION } }
+  const json = serializeUserBundlesMulti([A, B], '2026-06-21T00:00:00.000Z')
+  ok(typeof json === 'string', 'multi serialize returns string')
+  const r = parseImportMulti(json)
+  ok(r.ok, `multi parse ok (got ${r.error})`)
+  eq(r.bundles.length, 2, 'multi round-trip count')
+  eq(r.bundles[0].name, 'Alpha', 'multi round-trip name [0]')
+  eq(r.bundles[1].name, 'Beta',  'multi round-trip name [1]')
+}
+// serializeUserBundlesMulti null cases.
+eq(serializeUserBundlesMulti(null), null, 'multi serialize null → null')
+eq(serializeUserBundlesMulti([]),   null, 'multi serialize empty → null')
+
+// makeFilenameMulti — count + date.
+{
+  eq(makeFilenameMulti([{name:'A'},{name:'B'},{name:'C'}], '2026-06-21T00:00:00.000Z'),
+     'particle-midi-bundles-3-2026-06-21.json', 'multi filename includes count + date')
+  eq(makeFilenameMulti([], '2026-06-21T00:00:00.000Z'),
+     'particle-midi-bundles-0-2026-06-21.json', 'multi filename empty list → 0')
+  eq(makeFilenameMulti(null, '2026-06-21T00:00:00.000Z'),
+     'particle-midi-bundles-0-2026-06-21.json', 'multi filename null → 0')
+}
+
+// parseImportMulti: full envelope happy path.
+{
+  const envelope = {
+    kind: EXPORT_KIND_MULTI, v: 1, exportedAt: '2026-06-21',
+    bundles: [
+      { name: 'A', map: { '1': SOME_ACTION } },
+      { name: 'B', map: { '2': OTHER_ACTION } },
+    ],
+  }
+  const r = parseImportMulti(JSON.stringify(envelope))
+  ok(r.ok, `multi envelope parsed (got ${r.error})`)
+  eq(r.bundles.length, 2, 'two bundles parsed')
+}
+
+// parseImportMulti: bare-array shorthand (top-level JSON array).
+{
+  const bare = [
+    { name: 'X', map: { '1': SOME_ACTION } },
+    { name: 'Y', map: { '2': OTHER_ACTION } },
+  ]
+  const r = parseImportMulti(JSON.stringify(bare))
+  ok(r.ok, `bare array accepted (got ${r.error})`)
+  eq(r.bundles.length, 2, 'bare array two bundles')
+  eq(r.bundles[0].name, 'X', 'bare array order preserved')
+}
+
+// parseImportMulti: per-bundle sanitisation inside a multi-bundle file.
+{
+  // Bad inner bundles are dropped silently; good ones survive.
+  const mixed = {
+    kind: EXPORT_KIND_MULTI, v: 1,
+    bundles: [
+      { name: 'OK', map: { '1': SOME_ACTION } },
+      { name: '',   map: { '1': SOME_ACTION } },     // blank name → drop
+      { name: 'AlsoOK', map: { '999': 'no-such' } }, // unknown action → no valid bindings → drop
+      { name: 'Final',  map: { '3': SOME_ACTION } },
+    ],
+  }
+  const r = parseImportMulti(JSON.stringify(mixed))
+  ok(r.ok, 'partial-valid multi accepted')
+  eq(r.bundles.length, 2, 'only valid bundles survived')
+  eq(r.bundles[0].name, 'OK',    'survivor 0')
+  eq(r.bundles[1].name, 'Final', 'survivor 1')
+}
+
+// parseImportMulti: rejection cases.
+{
+  eq(parseImportMulti(null).ok,    false, 'multi: null rejected')
+  eq(parseImportMulti(123).ok,     false, 'multi: number rejected')
+  eq(parseImportMulti('garbage').ok, false, 'multi: non-JSON rejected')
+  eq(parseImportMulti('null').ok,  false, 'multi: null literal rejected')
+  eq(parseImportMulti('"a"').ok,   false, 'multi: top-level string rejected')
+  eq(parseImportMulti(JSON.stringify({ kind: 'other', bundles: [] })).ok, false, 'multi: wrong kind rejected')
+  eq(parseImportMulti(JSON.stringify({ kind: EXPORT_KIND_MULTI, v: 99, bundles: [] })).ok, false, 'multi: future version rejected')
+  eq(parseImportMulti(JSON.stringify({ kind: EXPORT_KIND_MULTI })).ok, false, 'multi: missing bundles array rejected')
+  eq(parseImportMulti(JSON.stringify({ kind: EXPORT_KIND_MULTI, bundles: 'not-array' })).ok, false, 'multi: bundles wrong type rejected')
+  // All inner bundles bad → whole file rejected.
+  eq(parseImportMulti(JSON.stringify({
+    kind: EXPORT_KIND_MULTI, v: 1,
+    bundles: [{ name: '', map: {} }, { name: 'X', map: { '999': 'bad' } }],
+  })).ok, false, 'multi: all-invalid rejected')
+  // File too large (multi has a higher cap).
+  const huge = 'x'.repeat(MAX_IMPORT_BYTES_MULTI + 1)
+  eq(parseImportMulti(huge).ok, false, 'multi: oversize rejected')
+  // BUT a file >MAX_IMPORT_BYTES (single) is still fine for multi.
+  ok(MAX_IMPORT_BYTES_MULTI > MAX_IMPORT_BYTES, 'multi cap > single cap')
+}
+
+// summarizeImportImpactMulti: project add / replace / drop counts.
+{
+  // Empty existing + 3 incoming = 3 new, 0 replace, 0 drop.
+  const inc = [
+    { name: 'A', map: { '1': SOME_ACTION } },
+    { name: 'B', map: { '2': SOME_ACTION } },
+    { name: 'C', map: { '3': SOME_ACTION } },
+  ]
+  const im = summarizeImportImpactMulti([], inc)
+  eq(im.willAdd,     3, 'empty existing: 3 new')
+  eq(im.willReplace, 0, 'empty existing: 0 replace')
+  eq(im.willDrop,    0, 'empty existing: 0 drop')
+  eq(im.incoming,    3, 'incoming count')
+  eq(im.live,        0, 'live count')
+}
+{
+  // Replace by name: case-insensitive + trimmed.
+  const live = [
+    { name: 'Stage Rig', map: { '1': SOME_ACTION } },
+    { name: 'studio',     map: { '2': SOME_ACTION } },
+  ]
+  const inc = [
+    { name: 'STAGE RIG', map: { '4': SOME_ACTION } },   // matches by case-insens
+    { name: '  Studio  ', map: { '5': SOME_ACTION } },   // matches by trim
+    { name: 'NewOne',    map: { '6': SOME_ACTION } },
+  ]
+  const im = summarizeImportImpactMulti(live, inc)
+  eq(im.willReplace, 2, 'two replaces by case-insens+trim name')
+  eq(im.willAdd,     1, 'one new name')
+  eq(im.willDrop,    0, 'no drop projected')
+}
+{
+  // FIFO drop projection: existing full + new entries would push past cap.
+  const live = []
+  for (let i = 0; i < MAX_USER_PRESETS; i++) live.push({ name: `live-${i}`, map: { '1': SOME_ACTION } })
+  const inc = [
+    { name: 'new-a', map: { '2': SOME_ACTION } },
+    { name: 'new-b', map: { '3': SOME_ACTION } },
+  ]
+  const im = summarizeImportImpactMulti(live, inc)
+  eq(im.willAdd,  2, 'two adds')
+  eq(im.willDrop, 2, 'projected drop = added past cap')
+}
+{
+  // Defensive: null inputs.
+  const im = summarizeImportImpactMulti(null, null)
+  eq(im.willAdd, 0, 'null/null no adds')
+  eq(im.willReplace, 0, 'null/null no replaces')
+  eq(im.incoming, 0, 'null incoming = 0')
+  eq(im.live, 0, 'null live = 0')
+}
+
+console.log(`PASS: midiUserBundleIO — envelope build/parse, bare-bundle shorthand, sanitize (out-of-range CC + unknown action + blank name + long-name/desc truncation), serialize (success + null on unencodable), filename slugify (punctuation/case/blank/null/multi-space/leading-trailing), parseImport (envelope + bare + all rejection cases), id/vendor/createdAt stripped on round-trip, isAtBundleCap (empty/null/non-array/full/past-cap/below) + R15.14 multi-bundle (envelope/serialize/filename/parse/bare-array/per-bundle-sanitize/rejection/summarize-impact)`)

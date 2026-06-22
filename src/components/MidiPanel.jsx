@@ -18,6 +18,10 @@ import {
   downloadUserBundleFile,
   parseImport as parseUserBundleImport,
   isAtBundleCap,
+  // R15.14 — multi-bundle (all bundles in one file) export/import
+  downloadUserBundlesFileMulti,
+  parseImportMulti as parseUserBundlesImportMulti,
+  summarizeImportImpactMulti,
 } from '../lib/midiUserBundleIO'
 import { attractorTypeStyle } from '../lib/namedAttractors'
 import { Music4, X, CheckCircle2, AlertCircle, Zap, Save, Trash2, Download, Upload } from 'lucide-react'
@@ -258,6 +262,83 @@ export default function MidiPanel({ open, onClose }) {
     input.click()
   }
 
+  // R15.14 — export EVERY user bundle in a single multi-bundle JSON
+  // file. Useful for backup / cross-machine sync of the entire
+  // "Your Bundles" section without N separate file dialogs. Disabled
+  // when the list is empty; toasts the bundle count + filename.
+  const exportAllUserBundles = () => {
+    if (!Array.isArray(userPresets) || userPresets.length === 0) {
+      showToast('No bundles to export — save one first')
+      return
+    }
+    const filename = downloadUserBundlesFileMulti(userPresets)
+    if (filename) {
+      showToast(`Exported ${userPresets.length} bundle${userPresets.length === 1 ? '' : 's'} → ${filename}`)
+    } else {
+      showToast('Multi-bundle export failed')
+    }
+  }
+
+  // R15.14 — import a multi-bundle JSON file. Each incoming bundle is
+  // added through the existing addUserPreset path so id-mint + FIFO
+  // semantics stay identical to the single-bundle import. Replace-
+  // by-name strategy: when an incoming bundle's name (case-insensitive
+  // + trimmed) matches an existing one, the existing entry is removed
+  // FIRST so the incoming takes its slot without doubling the count.
+  // Caps at MAX_USER_PRESETS via the slice in addUserPreset, but we
+  // pre-compute the FIFO-drop count via summarizeImportImpactMulti so
+  // the user knows BEFORE they confirm.
+  const importAllUserBundles = () => {
+    if (typeof document === 'undefined') return
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'application/json,.json'
+    input.onchange = () => {
+      const file = input.files && input.files[0]
+      if (!file) return
+      const reader = new FileReader()
+      reader.onload = () => {
+        const raw = typeof reader.result === 'string' ? reader.result : ''
+        const parsed = parseUserBundlesImportMulti(raw)
+        if (!parsed.ok) {
+          showToast(`Multi-import failed: ${parsed.error}`)
+          return
+        }
+        const impact = summarizeImportImpactMulti(userPresets, parsed.bundles)
+        // Single confirm — keeps the workflow boring + reversible
+        // (the user can delete individual bundles after import).
+        let prompt = `Import ${impact.incoming} bundle${impact.incoming === 1 ? '' : 's'}?`
+        const bits = []
+        if (impact.willAdd)     bits.push(`${impact.willAdd} new`)
+        if (impact.willReplace) bits.push(`${impact.willReplace} replace existing`)
+        if (impact.willDrop)    bits.push(`${impact.willDrop} will FIFO-drop oldest`)
+        if (bits.length) prompt += `\n${bits.join(' · ')}`
+        if (!window.confirm(prompt)) return
+        // Walk the incoming bundles, removing any same-name existing
+        // entry first (so replace semantics are honoured), then append.
+        let next = userPresets
+        let added = 0
+        for (const inc of parsed.bundles) {
+          const target = inc.name.trim().toLowerCase()
+          // Find + remove the existing entry with the same name (case-
+          // insensitive). addUserPreset already dedupes by ID; we dedupe
+          // by NAME here so a re-imported bundle replaces the old one
+          // instead of stacking a numbered duplicate.
+          next = next.filter(p => !p || typeof p.name !== 'string' || p.name.trim().toLowerCase() !== target)
+          const built = buildUserPresetFromMap(inc.name, inc.map, next)
+          if (!built) continue
+          next = addUserPreset(next, built)
+          added++
+        }
+        setUserPresets(next)
+        saveUserPresets(next)
+        showToast(`Imported ${added} bundle${added === 1 ? '' : 's'}${impact.willDrop ? ` · ${impact.willDrop} dropped` : ''}`)
+      }
+      reader.readAsText(file)
+    }
+    input.click()
+  }
+
   // Try to auto-detect a likely preset from the connected inputs.
   // Returns the preset id of the FIRST match, or null. Surface only —
   // we don't auto-apply, the user has to opt in.
@@ -336,6 +417,8 @@ export default function MidiPanel({ open, onClose }) {
           onRenameUser={renameUserBundle}
           onExportUser={exportUserBundle}
           onImportUser={importUserBundle}
+          onExportAllUsers={exportAllUserBundles}
+          onImportAllUsers={importAllUserBundles}
           savingBundle={savingBundle}
           onStartSave={() => { setSavingBundle(true); setBundleName('') }}
           onCancelSave={() => { setSavingBundle(false); setBundleName('') }}
@@ -620,6 +703,8 @@ function Banner({ color, icon, children }) {
 function PresetBar({
   presets, userPresets = [], detectedId, onApply, onDeleteUser, onRenameUser,
   onExportUser, onImportUser,
+  // R15.14 — multi-bundle (all-in-one) IO
+  onExportAllUsers, onImportAllUsers,
   savingBundle, onStartSave, onCancelSave, onCommitBundle,
   bundleName, onBundleNameChange, liveBindingCount,
 }) {
@@ -811,7 +896,7 @@ function PresetBar({
               disabled={atCap}
               title={atCap
                 ? `At cap (${MAX_USER_PRESETS}) — delete one first`
-                : 'Import a bundle JSON file (from another machine or a collaborator)'}
+                : 'Import a single-bundle JSON file (from another machine or a collaborator)'}
               style={{
                 padding: '5px 9px', borderRadius: 6, fontSize: 11, fontWeight: 550,
                 cursor: atCap ? 'not-allowed' : 'pointer',
@@ -822,6 +907,46 @@ function PresetBar({
               }}>
               <Upload size={10} strokeWidth={2.4} />
               Import bundle
+            </button>
+          )}
+          {/* R15.14 — Export ALL bundles in one JSON file. Different colour
+              (cyan) from the single-bundle Download (indigo) so users can
+              tell at a glance which IO surface they're invoking. Disabled
+              when nothing to export — the toast in the handler still
+              fires if they click anyway (button is disabled, but
+              defensive). */}
+          {onExportAllUsers && userPresets.length > 0 && (
+            <button onClick={onExportAllUsers}
+              title={`Download ALL ${userPresets.length} bundle${userPresets.length === 1 ? '' : 's'} in one JSON file`}
+              style={{
+                padding: '5px 9px', borderRadius: 6, fontSize: 11, fontWeight: 550,
+                cursor: 'pointer',
+                background: 'rgba(14,165,233,0.10)',
+                color: '#7dd3fc',
+                border: '1px solid rgba(14,165,233,0.25)',
+                display: 'inline-flex', alignItems: 'center', gap: 5, fontFamily: 'inherit',
+              }}>
+              <Download size={10} strokeWidth={2.4} />
+              Export all ({userPresets.length})
+            </button>
+          )}
+          {/* R15.14 — Import a multi-bundle JSON file. Not cap-gated
+              because the importer handles replace-by-name + FIFO at
+              commit-time (and surfaces the projected impact in the
+              confirmation prompt). */}
+          {onImportAllUsers && (
+            <button onClick={onImportAllUsers}
+              title="Import a multi-bundle JSON file (replaces existing bundles by name)"
+              style={{
+                padding: '5px 9px', borderRadius: 6, fontSize: 11, fontWeight: 550,
+                cursor: 'pointer',
+                background: 'rgba(14,165,233,0.10)',
+                color: '#7dd3fc',
+                border: '1px solid rgba(14,165,233,0.25)',
+                display: 'inline-flex', alignItems: 'center', gap: 5, fontFamily: 'inherit',
+              }}>
+              <Upload size={10} strokeWidth={2.4} />
+              Import all
             </button>
           )}
         </div>
