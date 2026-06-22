@@ -244,6 +244,58 @@ export const PEAK_TRAIL_LENGTH = 12      // ~200ms @ 60Hz
 export const PEAK_TRAIL_ALPHA_MAX = 0.55 // freshest trail step alpha
 export const PEAK_TRAIL_ALPHA_MIN = 0.04 // oldest trail step still drawn
 
+// R16.17 — per-bar fade-out curve presets that shape how the trail
+// alpha ramps from MIN (oldest) to MAX (newest). The default 'linear'
+// matches R15.07's original visual. 'exp' biases the trail toward the
+// head — the tail fades fast and the freshest sample bloom hangs
+// longer. 'log' is the opposite — the tail lingers visibly and the
+// recent samples ramp up gently. All curves keep the same MIN and MAX
+// anchors so swapping curves doesn't disturb the trail's overall
+// brightness range — only the distribution of intensity inside it.
+//
+// applyTrailCurve takes a normalised t ∈ [0, 1] (oldest=0 → newest=1)
+// and returns a shaped s ∈ [0, 1] that the caller then lerps between
+// MIN and MAX. Pure: zero allocations, branch-on-string-once per call.
+//
+// Defensive contract: any non-finite / out-of-range t is clamped before
+// shaping, unknown curve falls back to 'linear', so a corrupt persisted
+// value can never NaN out the renderer.
+export const PEAK_TRAIL_CURVES = ['linear', 'exp', 'log']
+
+export function applyTrailCurve(t, curve = 'linear') {
+  // Clamp t into [0, 1]. NaN → 0 (no curve can extrapolate from NaN);
+  // ±Infinity gets mapped to the corresponding boundary so a callsite
+  // that accidentally divides by zero doesn't NaN out the renderer.
+  let clamped
+  if (Number.isNaN(t) || t == null) clamped = 0
+  else if (t === Infinity || t >= 1) clamped = 1
+  else if (t === -Infinity || t <= 0) clamped = 0
+  else clamped = t
+  switch (curve) {
+    case 'exp':
+      // Head-leading: square the input so tail (small t) gets shaped
+      // toward MIN much faster. New samples dominate visually.
+      return clamped * clamped
+    case 'log':
+      // Tail-leading: sqrt curve lifts small t values aggressively, so
+      // the oldest part of the trail stays brighter for longer.
+      return Math.sqrt(clamped)
+    case 'linear':
+    default:
+      return clamped
+  }
+}
+
+// Cycle the curve forward through PEAK_TRAIL_CURVES with wraparound.
+// Used by the UI chip — one helper so the wraparound math doesn't
+// live in two places (the toggle + any future "reset to linear" menu).
+// Unknown current curves snap to the first entry, not the next-after.
+export function nextTrailCurve(current) {
+  const idx = PEAK_TRAIL_CURVES.indexOf(current)
+  if (idx < 0) return PEAK_TRAIL_CURVES[0]
+  return PEAK_TRAIL_CURVES[(idx + 1) % PEAK_TRAIL_CURVES.length]
+}
+
 export function makePeakHoldState(barCount) {
   const n = Math.max(0, barCount | 0)
   return {
@@ -332,18 +384,20 @@ export function resetPeakHolds(state) {
 // trail is meant to live ABOVE the bar (a sample lower than the bar
 // would visually live INSIDE the bar, which looks like a glitch).
 //
-// Alpha walks linearly from PEAK_TRAIL_ALPHA_MIN (oldest) to
-// PEAK_TRAIL_ALPHA_MAX (newest) — gives the trail a clean head-leading
-// gradient. We skip the head-most (newest) slot because that's the
-// SAME height as the live peak-hold line; rendering both at full alpha
-// would just paint over it.
-export function readPeakTrail(state, barIndex, current = 0) {
+// Alpha walks from PEAK_TRAIL_ALPHA_MIN (oldest) to PEAK_TRAIL_ALPHA_MAX
+// (newest) through `applyTrailCurve(t, opts.curve)` — linear by default
+// (matches R15.07's original look), 'exp' biases freshness, 'log'
+// lingers on the tail. We skip the head-most (newest) slot because
+// that's the SAME height as the live peak-hold line; rendering both at
+// full alpha would just paint over it.
+export function readPeakTrail(state, barIndex, current = 0, opts = {}) {
   if (!state || !state.trail || !state.peaks) return []
   const trailLen = state.trailLen || 0
   if (trailLen <= 1) return []
   const n = state.peaks.length
   if (barIndex < 0 || barIndex >= n) return []
   const base = barIndex * trailLen
+  const curve = opts && typeof opts.curve === 'string' ? opts.curve : 'linear'
   const out = []
   // Walk oldest → newest, but skip slot 0 (head); see comment above.
   for (let s = trailLen - 1; s >= 1; s--) {
@@ -352,9 +406,12 @@ export function readPeakTrail(state, barIndex, current = 0) {
     if (h <= current + 1) continue
     // Alpha grows as we approach the head. s=trailLen-1 → MIN,
     // s=1 → MAX (almost). Lerp linearly between MIN and MAX as a
-    // function of how close `s` is to the head.
+    // function of how close `s` is to the head, after shaping
+    // by the per-bar fade-out curve (R16.17 — 'linear' is the default
+    // R15.07 behaviour, 'exp' / 'log' redistribute intensity).
     const t = (trailLen - 1 - s) / (trailLen - 2)  // 0 (oldest) → 1 (newest non-head)
-    const alpha = PEAK_TRAIL_ALPHA_MIN + t * (PEAK_TRAIL_ALPHA_MAX - PEAK_TRAIL_ALPHA_MIN)
+    const shaped = applyTrailCurve(t, curve)
+    const alpha = PEAK_TRAIL_ALPHA_MIN + shaped * (PEAK_TRAIL_ALPHA_MAX - PEAK_TRAIL_ALPHA_MIN)
     out.push({ height: h, alpha })
   }
   return out

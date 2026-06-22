@@ -601,6 +601,23 @@ export const useStore = create((set, get) => {
     try { if (typeof localStorage !== 'undefined') localStorage.setItem('spectrum-peak-holds-v1', next ? '1' : '0') } catch { /* */ }
     set({ spectrumPeakHolds: next })
   },
+  // R16.17 — per-bar fade-out curve preset for the peak-hold trail.
+  // 'linear' (default, matches the R15.07 original), 'exp' (head-
+  // leading: tail fades fast, fresh samples bloom), 'log' (tail-
+  // leading: oldest samples linger). Persisted across reloads so the
+  // visual preference sticks. Corrupt persisted values resolve to
+  // 'linear' on boot via the validate-on-read.
+  spectrumPeakCurve: (() => {
+    try {
+      const v = typeof localStorage !== 'undefined' ? localStorage.getItem('spectrum-peak-curve-v1') : null
+      return (v === 'exp' || v === 'log') ? v : 'linear'
+    } catch { return 'linear' }
+  })(),
+  setSpectrumPeakCurve: (v) => {
+    const next = (v === 'exp' || v === 'log') ? v : 'linear'
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem('spectrum-peak-curve-v1', next) } catch { /* */ }
+    set({ spectrumPeakCurve: next })
+  },
 
   setMouseAttract: (v) => set({ mouseAttract: v }),
   paintMode: false,

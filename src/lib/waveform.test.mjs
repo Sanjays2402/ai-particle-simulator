@@ -10,6 +10,8 @@ import {
   // R15.07 — peak-hold fade-out tail
   PEAK_TRAIL_LENGTH, PEAK_TRAIL_ALPHA_MAX, PEAK_TRAIL_ALPHA_MIN,
   readPeakTrail,
+  // R16.17 — per-bar fade-out curve preset
+  PEAK_TRAIL_CURVES, applyTrailCurve, nextTrailCurve,
 } from './waveform.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -495,4 +497,107 @@ eq(readPeakTrail(makePeakHoldState(2),  5, 0).length, 0, 'out-of-range index →
 // Alpha bounds for a trivial 2-sample trail (degenerate divisor guard).
 ok(PEAK_TRAIL_LENGTH >= 3, 'trail length ≥ 3 so the lerp denominator is non-zero')
 
-console.log(`PASS: waveform peak-hold lines · HOLD=${PEAK_HOLD_FRAMES} frames · DECAY=${PEAK_DECAY_PX}px/frame (R10.19) + fade trail · TRAIL=${PEAK_TRAIL_LENGTH} frames · α ${PEAK_TRAIL_ALPHA_MIN}→${PEAK_TRAIL_ALPHA_MAX} (R15.07)`)
+// --- R16.17: applyTrailCurve / nextTrailCurve / curve-aware readPeakTrail ---
+
+// PEAK_TRAIL_CURVES roster
+eq(PEAK_TRAIL_CURVES.length, 3, 'three curves shipped: linear/exp/log')
+eq(PEAK_TRAIL_CURVES[0], 'linear', 'linear is the canonical default at index 0')
+ok(PEAK_TRAIL_CURVES.includes('exp'), 'exp curve in roster')
+ok(PEAK_TRAIL_CURVES.includes('log'), 'log curve in roster')
+
+// applyTrailCurve — endpoints + midpoint shape
+near(applyTrailCurve(0, 'linear'), 0, 'linear: 0 → 0')
+near(applyTrailCurve(1, 'linear'), 1, 'linear: 1 → 1')
+near(applyTrailCurve(0.5, 'linear'), 0.5, 'linear: 0.5 → 0.5 (identity)')
+near(applyTrailCurve(0, 'exp'), 0, 'exp: 0 → 0')
+near(applyTrailCurve(1, 'exp'), 1, 'exp: 1 → 1')
+near(applyTrailCurve(0.5, 'exp'), 0.25, 'exp at midpoint = 0.25 (squared)')
+near(applyTrailCurve(0, 'log'), 0, 'log: 0 → 0')
+near(applyTrailCurve(1, 'log'), 1, 'log: 1 → 1')
+near(applyTrailCurve(0.25, 'log'), 0.5, 'log at 0.25 = 0.5 (sqrt)')
+
+// Shape invariant: at any inner point, exp < linear < log.
+// (This is the whole point — `exp` biases toward the head end, `log`
+// toward the tail end. If this stops holding, the chip visual lies.)
+for (const t of [0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9]) {
+  const l = applyTrailCurve(t, 'linear')
+  const e = applyTrailCurve(t, 'exp')
+  const g = applyTrailCurve(t, 'log')
+  ok(e < l, `exp(${t}) < linear(${t}) — head-leading`)
+  ok(g > l, `log(${t}) > linear(${t}) — tail-leading`)
+}
+
+// applyTrailCurve — defensive: out-of-range / non-finite / unknown
+near(applyTrailCurve(-0.5, 'linear'), 0, 'negative t clamps to 0')
+near(applyTrailCurve(2, 'linear'), 1, 't > 1 clamps to 1')
+near(applyTrailCurve(NaN, 'linear'), 0, 'NaN t treated as 0 (no NaN propagation)')
+near(applyTrailCurve(Infinity, 'linear'), 1, 'Infinity t clamps to 1')
+near(applyTrailCurve(-Infinity, 'exp'), 0, '-Infinity t clamps to 0 (also for exp)')
+near(applyTrailCurve(0.5, 'unknown'), 0.5, 'unknown curve falls back to linear')
+near(applyTrailCurve(0.5),            0.5, 'omitted curve defaults to linear')
+near(applyTrailCurve(0.5, null),      0.5, 'null curve falls back to linear')
+
+// nextTrailCurve — wraparound + unknown
+eq(nextTrailCurve('linear'), 'exp', 'linear → exp')
+eq(nextTrailCurve('exp'),    'log', 'exp → log')
+eq(nextTrailCurve('log'),    'linear', 'log → linear (wrap)')
+eq(nextTrailCurve('unknown'), 'linear', 'unknown current → first entry')
+eq(nextTrailCurve(),          'linear', 'undefined current → first entry')
+
+// Curve-aware readPeakTrail: alpha distribution differs between curves
+// for the SAME trail. The freshest-non-head sample's alpha is highest
+// with `exp` (head bias) and lowest with `log` (tail bias).
+{
+  const s = makePeakHoldState(1)
+  // Fill the trail with strictly increasing heights so every step
+  // passes the filter and we get all PEAK_TRAIL_LENGTH-1 samples back.
+  // The actual heights matter only insofar as they exceed the live bar.
+  for (let k = 0; k < PEAK_TRAIL_LENGTH; k++) {
+    tickPeakHolds(s, [[0, 50 + k * 5]])
+  }
+  const linear = readPeakTrail(s, 0, 0, { curve: 'linear' })
+  const exp    = readPeakTrail(s, 0, 0, { curve: 'exp' })
+  const log    = readPeakTrail(s, 0, 0, { curve: 'log' })
+  // All three return the SAME number of samples (only alpha differs).
+  eq(exp.length,  linear.length, 'exp returns same sample count as linear')
+  eq(log.length,  linear.length, 'log returns same sample count as linear')
+  ok(linear.length >= 3, 'long enough trail to actually compare curves')
+
+  // Pick an inner sample (NOT the endpoints — at t=0/t=1 all three
+  // curves converge by definition). Mid-trail comparison: exp shapes
+  // alpha mass toward the head, log toward the tail, so an inner
+  // sample's alpha walks: exp < linear < log when read at the
+  // SAME index across all three trails.
+  const innerIdx = Math.floor(linear.length / 2)
+  ok(innerIdx > 0 && innerIdx < linear.length - 1, 'inner index is strictly inside the range')
+  ok(exp[innerIdx].alpha < linear[innerIdx].alpha, 'inner sample dimmer with exp (head bias)')
+  ok(log[innerIdx].alpha > linear[innerIdx].alpha, 'inner sample brighter with log (tail bias)')
+
+  // Alpha bounds preserved for all three curves (anchors are MIN/MAX).
+  for (const arr of [linear, exp, log]) {
+    for (const sample of arr) {
+      ok(sample.alpha >= PEAK_TRAIL_ALPHA_MIN - 1e-9, 'curve never floors below MIN')
+      ok(sample.alpha <= PEAK_TRAIL_ALPHA_MAX + 1e-9, 'curve never ceilings above MAX')
+    }
+  }
+
+  // Heights are identical across curves — only alpha is shaped.
+  for (let i = 0; i < linear.length; i++) {
+    eq(exp[i].height, linear[i].height, `height stable across curves at idx ${i}`)
+    eq(log[i].height, linear[i].height, `height stable across curves at idx ${i}`)
+  }
+}
+
+// Unknown curve passed through opts falls back to linear (no crash).
+{
+  const s = makePeakHoldState(1)
+  for (let k = 0; k < PEAK_TRAIL_LENGTH; k++) tickPeakHolds(s, [[0, 80]])
+  const baseline = readPeakTrail(s, 0, 0)  // default linear
+  const fallback = readPeakTrail(s, 0, 0, { curve: 'bogus' })
+  eq(fallback.length, baseline.length, 'unknown curve still returns trail')
+  for (let i = 0; i < baseline.length; i++) {
+    near(fallback[i].alpha, baseline[i].alpha, `unknown curve alpha matches linear at idx ${i}`)
+  }
+}
+
+console.log(`PASS: waveform peak-hold lines · HOLD=${PEAK_HOLD_FRAMES} frames · DECAY=${PEAK_DECAY_PX}px/frame (R10.19) + fade trail · TRAIL=${PEAK_TRAIL_LENGTH} frames · α ${PEAK_TRAIL_ALPHA_MIN}→${PEAK_TRAIL_ALPHA_MAX} (R15.07) + curve presets ${PEAK_TRAIL_CURVES.join('/')} (R16.17)`)

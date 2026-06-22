@@ -4,7 +4,7 @@ import {
   sampleAnalyser, projectToCanvas, peakAmplitude,
   sampleAnalyserSpectrum, projectSpectrumToBars, projectSpectrumToLogBars,
   makePeakHoldState, tickPeakHolds, resetPeakHolds, PEAK_LINE_THICKNESS,
-  readPeakTrail,
+  readPeakTrail, nextTrailCurve,
 } from '../lib/waveform'
 
 // Audio waveform / oscilloscope overlay. Pinned to the canvas's
@@ -32,6 +32,8 @@ export default function WaveformOverlay() {
   const setSpectrumScale = useStore(s => s.setSpectrumScale)
   const peakHolds = useStore(s => s.spectrumPeakHolds)
   const setPeakHolds = useStore(s => s.setSpectrumPeakHolds)
+  const peakCurve = useStore(s => s.spectrumPeakCurve)
+  const setPeakCurve = useStore(s => s.setSpectrumPeakCurve)
   const canvasRef = useRef(null)
   const rafRef = useRef(0)
   const scratchRef = useRef(null)
@@ -172,7 +174,9 @@ export default function WaveformOverlay() {
           // cinematic afterimage instead of vanishing in one frame.
           // Walks oldest → newest so the youngest sample paints LAST
           // (on top) — the gradient reads as a head-leading flame.
-          const tail = readPeakTrail(peakStateRef.current, i, h)
+          // R16.17 — `peakCurve` reshapes the alpha distribution:
+          // 'exp' bias toward fresh, 'log' bias toward the tail.
+          const tail = readPeakTrail(peakStateRef.current, i, h, { curve: peakCurve })
           for (let k = 0; k < tail.length; k++) {
             const sample = tail[k]
             const trailY = baseY - sample.height
@@ -189,7 +193,7 @@ export default function WaveformOverlay() {
     }
     rafRef.current = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(rafRef.current)
-  }, [active, mode, spectrumScale, peakHolds])
+  }, [active, mode, spectrumScale, peakHolds, peakCurve])
 
   if (!active) return null
 
@@ -288,6 +292,42 @@ export default function WaveformOverlay() {
             cursor: 'pointer',
             backdropFilter: 'blur(4px)',
           }}>pk</button>
+      )}
+      {/* R16.17 — per-bar fade-out curve preset chip. Cycles linear →
+          exp → log → linear on click. Only renders when peak-holds
+          are ON (the trail rides on the held peaks, so the chip would
+          have no audible effect with peaks off). Sky-blue accent so it
+          reads as adjacent-but-distinct from the `pk` toggle. */}
+      {mode === 'frequency' && peakHolds && (
+        <button
+          type="button"
+          onClick={() => setPeakCurve(nextTrailCurve(peakCurve))}
+          title={peakCurve === 'linear'
+            ? 'Trail fade curve: LINEAR — even falloff. Click to bias toward fresh samples (EXP).'
+            : peakCurve === 'exp'
+              ? 'Trail fade curve: EXP — fresh samples dominate, tail fades fast. Click for LOG (lingering tail).'
+              : 'Trail fade curve: LOG — tail lingers, recent samples ramp gently. Click for LINEAR.'}
+          style={{
+            position: 'absolute', top: 8, left: 122,
+            pointerEvents: 'auto',
+            padding: '2px 8px', borderRadius: 5,
+            fontSize: 9, fontWeight: 600, letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            color: peakCurve === 'linear' ? '#d8d8e0' : peakCurve === 'exp' ? '#7dd3fc' : '#a5f3fc',
+            background: peakCurve === 'linear'
+              ? 'rgba(255,255,255,0.06)'
+              : peakCurve === 'exp'
+                ? 'rgba(56,189,248,0.16)'
+                : 'rgba(34,211,238,0.16)',
+            border: peakCurve === 'linear'
+              ? '1px solid rgba(255,255,255,0.14)'
+              : peakCurve === 'exp'
+                ? '1px solid rgba(56,189,248,0.40)'
+                : '1px solid rgba(34,211,238,0.40)',
+            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+            cursor: 'pointer',
+            backdropFilter: 'blur(4px)',
+          }}>{peakCurve === 'linear' ? 'lin' : peakCurve}</button>
       )}
     </div>
   )
