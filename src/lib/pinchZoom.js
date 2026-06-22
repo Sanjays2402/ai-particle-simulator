@@ -456,11 +456,52 @@ export function panAccelMultiplier(elapsedMs, opts = {}) {
   const max       = Number.isFinite(opts.max)         ? opts.max         : PAN_ACCEL_MAX
   if (Number.isNaN(elapsedMs) || elapsedMs == null) return 1
   if (elapsedMs === -Infinity || elapsedMs <= 0)     return 1
+  // R17.20 — 'off' shortcuts the whole acceleration system: the
+  // multiplier stays at 1× forever so a single sustained sweep moves
+  // at the same speed as a tap-tap-tap. Useful when a user wants
+  // tighter control (e.g. inspecting fine detail of a snapshot) and
+  // finds the ramp-up jarring.
+  if (opts.curve === 'off')                          return 1
   if (elapsedMs <= threshold)                        return 1
   if (elapsedMs === Infinity || ramp <= 0)           return max
-  const t = (elapsedMs - threshold) / ramp  // 0..1
-  if (t >= 1)                                        return max
-  return 1 + t * (max - 1)
+  const t = (elapsedMs - threshold) / ramp  // 0..1, normalized along the ramp
+  // R17.20 — reshape the ramp via a curve preset. 'linear' (default)
+  // is the R16.20 behaviour; 'exp' starts slow then sprints (most of
+  // the speed-up sits past the half-ramp mark — gentle wake-up before
+  // the explosive sweep); 'log' starts fast then settles (lots of
+  // help in the first chunk after the threshold — better for users
+  // who feel the wait at 1× before things speed up).
+  let shaped
+  if (t >= 1) {
+    shaped = 1
+  } else if (opts.curve === 'exp') {
+    // t^2 keeps the start near 1× and pushes the gain late.
+    shaped = t * t
+  } else if (opts.curve === 'log') {
+    // sqrt(t) gains fast early then flattens.
+    shaped = Math.sqrt(t)
+  } else {
+    shaped = t
+  }
+  return 1 + shaped * (max - 1)
+}
+
+// R17.20 — roster of acceleration curve presets. Order is meaningful:
+// the cycle chip walks linear → exp → log → off → linear so a single
+// click moves the user predictably through the available choices.
+//   - linear : R16.20 baseline. Even ramp from 1× to MAX over the ramp window.
+//   - exp    : slow start, sprint finish. Bias toward delicate fine-motion.
+//   - log    : fast start, settle. Bias toward quick coverage.
+//   - off    : disable acceleration entirely. Holds stay at 1× forever.
+export const PAN_ACCEL_CURVES = ['linear', 'exp', 'log', 'off']
+
+// Cycle the curve forward through PAN_ACCEL_CURVES with wraparound.
+// Mirrors the R16.17 nextTrailCurve shape so the chip UX is identical.
+// Unknown current curves snap to the first entry, not the next-after.
+export function nextPanAccelCurve(current) {
+  const idx = PAN_ACCEL_CURVES.indexOf(current)
+  if (idx < 0) return PAN_ACCEL_CURVES[0]
+  return PAN_ACCEL_CURVES[(idx + 1) % PAN_ACCEL_CURVES.length]
 }
 
 // R16.20 — scale a pan direction vector by the acceleration multiplier.
@@ -469,6 +510,8 @@ export function panAccelMultiplier(elapsedMs, opts = {}) {
 // feed the scaled vector into applyKeyboardPan without re-deriving the
 // curve math at the callsite. Returns a NEW direction object; the
 // input is never mutated.
+// R17.20 — opts.curve passes through to panAccelMultiplier so the
+// callsite stays a single function call regardless of the active curve.
 export function scaleDirByHold(dir, elapsedMs, opts = {}) {
   if (!dir) return dir
   const mult = panAccelMultiplier(elapsedMs, opts)

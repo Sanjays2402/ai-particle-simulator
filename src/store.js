@@ -629,6 +629,24 @@ export const useStore = create((set, get) => {
     set({ spectrumPeakCurve: next })
   },
 
+  // R17.20 — lightbox WASD pan acceleration curve preset. Parallels
+  // spectrumPeakCurve (R16.17): a single string token persisted across
+  // sessions, validated on read. 'linear' (default) keeps the R16.20
+  // baseline straight ramp; 'exp' starts slow then sprints; 'log'
+  // starts fast then settles; 'off' disables acceleration entirely.
+  // Corrupt persisted values resolve to 'linear'.
+  lightboxPanCurve: (() => {
+    try {
+      const v = typeof localStorage !== 'undefined' ? localStorage.getItem('lightbox-pan-curve-v1') : null
+      return (v === 'exp' || v === 'log' || v === 'off') ? v : 'linear'
+    } catch { return 'linear' }
+  })(),
+  setLightboxPanCurve: (v) => {
+    const next = (v === 'exp' || v === 'log' || v === 'off') ? v : 'linear'
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem('lightbox-pan-curve-v1', next) } catch { /* */ }
+    set({ lightboxPanCurve: next })
+  },
+
   setMouseAttract: (v) => set({ mouseAttract: v }),
   paintMode: false,
   paintPoints: [], // array of [x, y, z]

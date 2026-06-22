@@ -14,6 +14,8 @@ import {
   // R16.20 — pan acceleration curve for held WASD
   PAN_ACCEL_THRESHOLD_MS, PAN_ACCEL_RAMP_MS, PAN_ACCEL_MAX,
   panAccelMultiplier, scaleDirByHold,
+  // R17.20 — acceleration curve preset chip (linear/exp/log/off)
+  PAN_ACCEL_CURVES, nextPanAccelCurve,
 } from './pinchZoom.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -553,4 +555,137 @@ eq(panAccelMultiplier(-Infinity), 1,             '-Infinity elapsed → 1× (neg
   const dir = { dx: 1, dy: 0 }
   const s = scaleDirByHold(dir, 250, { thresholdMs: 200, rampMs: 0, max: 4 })
   approx(s.dx, 4, 'custom opts threaded: ramp=0 past threshold → MAX×dx')
+}
+
+// --- R17.20: PAN_ACCEL_CURVES roster + nextPanAccelCurve + curve-shaped multiplier ---
+
+// Roster contract — order is part of the UX (linear → exp → log → off → linear).
+eq(PAN_ACCEL_CURVES.length, 4, 'PAN_ACCEL_CURVES has 4 entries')
+eq(PAN_ACCEL_CURVES[0], 'linear', 'first curve = linear (default)')
+eq(PAN_ACCEL_CURVES[1], 'exp',    'second curve = exp')
+eq(PAN_ACCEL_CURVES[2], 'log',    'third curve = log')
+eq(PAN_ACCEL_CURVES[3], 'off',    'fourth curve = off')
+
+// nextPanAccelCurve wraps around predictably.
+eq(nextPanAccelCurve('linear'), 'exp',    'cycle: linear → exp')
+eq(nextPanAccelCurve('exp'),    'log',    'cycle: exp → log')
+eq(nextPanAccelCurve('log'),    'off',    'cycle: log → off')
+eq(nextPanAccelCurve('off'),    'linear', 'cycle: off → linear (wraparound)')
+// Unknown / corrupt persisted values snap to the first entry (NOT the
+// next-after) so a load can recover to a known good state.
+eq(nextPanAccelCurve('cubic'),  'linear', 'unknown curve → linear (first)')
+eq(nextPanAccelCurve(''),       'linear', 'empty string → linear')
+eq(nextPanAccelCurve(null),     'linear', 'null → linear')
+eq(nextPanAccelCurve(undefined),'linear', 'undefined → linear')
+
+// 'off' curve: multiplier stays at 1× regardless of elapsed time. Useful
+// for a calmer mode that disables acceleration entirely.
+{
+  eq(panAccelMultiplier(0,      { curve: 'off' }), 1, 'off + just-pressed → 1×')
+  eq(panAccelMultiplier(500,    { curve: 'off' }), 1, 'off + mid-tap → 1×')
+  eq(panAccelMultiplier(1001,   { curve: 'off' }), 1, 'off + past threshold → still 1×')
+  eq(panAccelMultiplier(60_000, { curve: 'off' }), 1, 'off + held 60s → still 1×')
+  eq(panAccelMultiplier(Infinity, { curve: 'off' }), 1, 'off + ∞ → still 1×')
+}
+
+// 'linear' curve (default): equivalent to passing no curve at all so
+// existing R16.20 callsites stay untouched.
+{
+  approx(panAccelMultiplier(1000 + 1500 / 2, { curve: 'linear' }),
+         panAccelMultiplier(1000 + 1500 / 2),
+         'linear curve === default behaviour at mid-ramp')
+  eq(panAccelMultiplier(60_000, { curve: 'linear' }), PAN_ACCEL_MAX, 'linear: max past ramp')
+  eq(panAccelMultiplier(500,    { curve: 'linear' }), 1,             'linear: 1× pre-threshold')
+}
+
+// 'exp' curve: t^2 keeps multiplier near 1× for most of the ramp, then
+// sprints to MAX. At the midpoint of the ramp (t=0.5) the shaped value
+// is 0.25, so the multiplier is 1 + 0.25*(MAX-1).
+{
+  const midT = 0.5
+  const expMid = panAccelMultiplier(1000 + 1500 * midT, { curve: 'exp' })
+  approx(expMid, 1 + (midT * midT) * (PAN_ACCEL_MAX - 1),
+         'exp: midway through ramp → 1 + 0.25*(MAX-1) (slow start)')
+  // Compared to linear at the same t: exp must NOT overshoot linear in
+  // the first half (slow-start property is what makes it useful).
+  const linMid = panAccelMultiplier(1000 + 1500 * midT, { curve: 'linear' })
+  if (!(expMid < linMid)) fail(`exp should be SLOWER than linear at midpoint; got exp=${expMid} lin=${linMid}`)
+  // At full ramp both curves reach MAX exactly.
+  approx(panAccelMultiplier(1000 + 1500, { curve: 'exp' }), PAN_ACCEL_MAX,
+         'exp: end of ramp = MAX')
+  // Past the ramp: still capped at MAX (no runaway from the t^2).
+  eq(panAccelMultiplier(60_000, { curve: 'exp' }), PAN_ACCEL_MAX, 'exp: past ramp capped at MAX')
+  // Pre-threshold: still 1× — the curve doesn't kick in before the wait.
+  eq(panAccelMultiplier(500, { curve: 'exp' }), 1, 'exp: pre-threshold 1×')
+}
+
+// 'log' curve: sqrt(t) gains fast early then flattens. Mirror of exp.
+{
+  const midT = 0.5
+  const logMid = panAccelMultiplier(1000 + 1500 * midT, { curve: 'log' })
+  approx(logMid, 1 + Math.sqrt(midT) * (PAN_ACCEL_MAX - 1),
+         'log: midway through ramp → 1 + sqrt(0.5)*(MAX-1) (fast start)')
+  // log must be FASTER than linear at the same midpoint.
+  const linMid = panAccelMultiplier(1000 + 1500 * midT, { curve: 'linear' })
+  if (!(logMid > linMid)) fail(`log should be FASTER than linear at midpoint; got log=${logMid} lin=${linMid}`)
+  // log + exp don't perfectly mirror linear (sqrt + square aren't a
+  // mirror pair around y=x), but they DO straddle linear: exp sits
+  // below, log sits above, both anchor at the same endpoints.
+  const expMid = panAccelMultiplier(1000 + 1500 * midT, { curve: 'exp' })
+  if (!(expMid < linMid && linMid < logMid)) {
+    fail(`expected exp < linear < log at midpoint; got exp=${expMid} lin=${linMid} log=${logMid}`)
+  }
+  approx(panAccelMultiplier(1000 + 1500, { curve: 'log' }), PAN_ACCEL_MAX,
+         'log: end of ramp = MAX')
+  eq(panAccelMultiplier(500, { curve: 'log' }), 1, 'log: pre-threshold 1×')
+}
+
+// Curve-shaped monotonicity: every curve never decreases on the input.
+// This is what makes the chip safe — flipping curves mid-sweep can never
+// make the sweep retreat.
+{
+  for (const curve of PAN_ACCEL_CURVES) {
+    let prev = 0
+    for (const t of [0, 100, 999, 1000, 1100, 1500, 2000, 2500, 3000, 10_000]) {
+      const m = panAccelMultiplier(t, { curve })
+      if (m + 1e-9 < prev) fail(`monotonicity broken for ${curve} at t=${t}: ${m} < ${prev}`)
+      prev = m
+    }
+  }
+}
+
+// Defensive: unknown curve string falls back to linear (so a corrupt
+// persisted value can never NaN out the renderer).
+{
+  approx(panAccelMultiplier(1000 + 1500 / 2, { curve: 'wat' }),
+         panAccelMultiplier(1000 + 1500 / 2, { curve: 'linear' }),
+         'unknown curve → linear behaviour')
+  approx(panAccelMultiplier(1000 + 1500 / 2, { curve: undefined }),
+         panAccelMultiplier(1000 + 1500 / 2, { curve: 'linear' }),
+         'undefined curve → linear behaviour')
+}
+
+// scaleDirByHold threads the curve preset all the way down — the chip
+// click reshapes the per-tick scale on the next animation tick.
+{
+  const dir = { dx: 0, dy: -1 }
+  const mid = 1000 + 1500 / 2
+  // 'off' must short-circuit to the input ref (no allocation on hot path)
+  // since the multiplier is 1.
+  eq(scaleDirByHold(dir, mid, { curve: 'off' }), dir,
+     'scaleDirByHold + off: input ref returned (no churn)')
+  eq(scaleDirByHold(dir, 60_000, { curve: 'off' }), dir,
+     'scaleDirByHold + off + 60s held: still input ref')
+
+  // exp at mid is slower than linear → smaller magnitude scale.
+  const sExp = scaleDirByHold(dir, mid, { curve: 'exp' })
+  const sLin = scaleDirByHold(dir, mid, { curve: 'linear' })
+  if (!(Math.abs(sExp.dy) < Math.abs(sLin.dy))) {
+    fail(`scaleDirByHold: exp dy magnitude should be < linear at mid (got exp=${sExp.dy} lin=${sLin.dy})`)
+  }
+  // log at mid is faster than linear → larger magnitude scale.
+  const sLog = scaleDirByHold(dir, mid, { curve: 'log' })
+  if (!(Math.abs(sLog.dy) > Math.abs(sLin.dy))) {
+    fail(`scaleDirByHold: log dy magnitude should be > linear at mid (got log=${sLog.dy} lin=${sLin.dy})`)
+  }
 }

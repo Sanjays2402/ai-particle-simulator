@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { X, Download, Trash2, Images, ImageOff, LayoutGrid, Rows3, ChevronLeft, ChevronRight, Maximize2, ZoomIn } from 'lucide-react'
+import { useStore } from '../store'
 import {
   loadSnapshots, saveSnapshots, removeSnapshot, downloadSnapshot,
 } from '../lib/snapshotGallery'
@@ -12,6 +13,7 @@ import {
   applyKeyboardZoomIn, applyKeyboardZoomOut, applyResetZoom,
   applyWheelZoom, classifyZoomKey,
   classifyPanKey, applyKeyboardPan, aggregateHeldPan, scaleDirByHold,
+  nextPanAccelCurve,
 } from '../lib/pinchZoom'
 import { showToast } from './Toast'
 
@@ -350,6 +352,11 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
   const idx = items.findIndex(it => it.id === entry.id)
   const total = items.length
   const hasMore = total > 1
+  // R17.20 — persisted pan acceleration curve preset. Lightbox subscribes
+  // to the store directly so the chip click immediately re-shapes the
+  // active sweep (the hold-keys effect re-reads panCurveRef each tick).
+  const panCurve = useStore(s => s.lightboxPanCurve)
+  const setPanCurve = useStore(s => s.setLightboxPanCurve)
 
   // Pinch-zoom state machine. We keep `zoom` in React state so the
   // transform re-renders on each gesture frame, and `zoomRef` mirrors
@@ -445,6 +452,13 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
   // (panAccelMultiplier(now - holdStartTs)). Reset whenever the
   // held set drops to empty so a fresh press starts at 1×.
   const holdStartTsRef = useRef(0)
+  // R17.20 — mirror the panCurve into a ref so the hold-keys effect
+  // (which only re-runs when onNext/onPrev change) reads the LIVE
+  // curve every tick. Updating the ref from inside the effect tick is
+  // fine — refs are mutable, and the effect's setInterval closure
+  // re-reads .current each call.
+  const panCurveRef = useRef(panCurve)
+  useEffect(() => { panCurveRef.current = panCurve }, [panCurve])
 
   useEffect(() => {
     const PAN_REPEAT_MS = 60   // ~16 ticks/second — smooth without overshoot
@@ -472,7 +486,10 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
       const elapsedMs = holdStartTsRef.current
         ? Date.now() - holdStartTsRef.current
         : 0
-      const scaledDir = scaleDirByHold(dir, elapsedMs)
+      // R17.20 — pass the live curve preset into the acceleration
+      // math so flipping the chip mid-sweep reshapes the rest of the
+      // hold in real time.
+      const scaledDir = scaleDirByHold(dir, elapsedMs, { curve: panCurveRef.current })
       const el = stageRef.current
       const r = el ? el.getBoundingClientRect() : { width: 0, height: 0 }
       setZoom(prev => applyKeyboardPan(prev, scaledDir, r.width, r.height))
@@ -674,6 +691,41 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
           )}
         </div>
         <div style={{ display: 'inline-flex', gap: 6 }}>
+          {isZoomed && (
+            <button
+              type="button"
+              onClick={() => setPanCurve(nextPanAccelCurve(panCurve))}
+              title={panCurve === 'linear'
+                ? 'Pan accel curve: LINEAR — even ramp from 1× to 3× over the hold window. Click for EXP (slow start, sprint finish).'
+                : panCurve === 'exp'
+                  ? 'Pan accel curve: EXP — gentle wake-up, sprint late. Click for LOG (fast start, settle).'
+                  : panCurve === 'log'
+                    ? 'Pan accel curve: LOG — fast help early, then settle. Click for OFF (no acceleration, holds stay 1×).'
+                    : 'Pan accel: OFF — holds stay at 1× forever. Click for LINEAR.'}
+              style={{
+                padding: '6px 10px', borderRadius: 8,
+                fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                fontSize: 10, fontWeight: 600, letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                color: panCurve === 'linear' ? '#d8d8e0'
+                  : panCurve === 'exp' ? '#7dd3fc'
+                  : panCurve === 'log' ? '#a5f3fc'
+                  : '#fcd34d',
+                background: panCurve === 'linear' ? 'rgba(255,255,255,0.06)'
+                  : panCurve === 'exp' ? 'rgba(56,189,248,0.16)'
+                  : panCurve === 'log' ? 'rgba(34,211,238,0.16)'
+                  : 'rgba(245,158,11,0.16)',
+                border: panCurve === 'linear' ? '1px solid rgba(255,255,255,0.14)'
+                  : panCurve === 'exp' ? '1px solid rgba(56,189,248,0.40)'
+                  : panCurve === 'log' ? '1px solid rgba(34,211,238,0.40)'
+                  : '1px solid rgba(245,158,11,0.40)',
+                cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+              }}>
+              <span style={{ opacity: 0.65, fontWeight: 500 }}>accel</span>
+              {panCurve === 'linear' ? 'lin' : panCurve}
+            </button>
+          )}
           {isZoomed && (
             <button onClick={resetZoom} title="Reset zoom (0)"
               style={lightboxBtn('rgba(168,85,247,0.18)', 'rgba(168,85,247,0.4)', '#e9d5ff')}>
