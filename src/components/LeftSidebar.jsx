@@ -5,7 +5,7 @@ import { GifEncoder } from '../lib/gifEncoder'
 import { startCanvasRecording, downloadVideoBlob, isVideoExportSupported } from '../lib/videoRecorder'
 import { CATEGORIES, categoryOf, countByCategory } from '../lib/presetCategories'
 import {
-  compassFor, WIND_PRESETS, matchesWindPreset,
+  compassFor, WIND_PRESETS, WIND_PRESETS_DEFAULT, matchesWindPreset,
   loadWindOverrides, saveWindOverrides,
   setWindOverride, clearWindOverride,
   resolveWindPresets, isWindPresetCustom,
@@ -23,6 +23,7 @@ import {
   downloadWindOverridesFile,
   parseImport as parseWindOverridesImport,
   mergeImport as mergeWindOverridesImport,
+  summarizeImportImpact as summarizeWindOverridesImpact,
 } from '../lib/windOverridesIO'
 import {
   downloadCrossfadeOverridesFile,
@@ -1376,13 +1377,20 @@ function WindRow() {
 }
 
 // Tiny IO leaf below the Wind sliders. Export = always available
-// (downloads empty envelope if no overrides yet). Import = merges by
-// default, replaces with shift-click. Stays modeless — file picker
-// is the only ceremony. Keeps the wind block lightweight; uses
-// downloadWindOverridesFile + parseWindOverridesImport from the
-// dedicated IO module so the same shape works elsewhere later.
+// (downloads empty envelope if no overrides yet). Import = stages
+// a preview panel below the buttons (R14.15) so the user sees the
+// diff BEFORE committing — matches the keymap import preview in
+// SettingsModal (R13.04). Stays modeless — file picker is the only
+// ceremony. Uses downloadWindOverridesFile + parseWindOverridesImport
+// + summarizeWindOverridesImpact from the dedicated IO module so the
+// same shape works elsewhere later.
 function WindOverrideIO({ overrides, setOverrides }) {
   const overrideCount = overrides ? Object.keys(overrides).length : 0
+  // R14.15 — staged import. Holds the parsed items + filename + the
+  // currently-selected mode so the preview re-renders live when the
+  // user flips between merge / replace. Cleared on commit or cancel.
+  const [pending, setPending] = useState(null)
+  const [pendingMode, setPendingMode] = useState('merge')
   const onExport = () => {
     const filename = downloadWindOverridesFile(overrides)
     if (filename) {
@@ -1407,59 +1415,278 @@ function WindOverrideIO({ overrides, setOverrides }) {
           showToast(`Import failed: ${parsed.error}`)
           return
         }
-        const merge = mergeWindOverridesImport(overrides, parsed.items, mode)
-        setOverrides(merge.items)
-        try {
-          // Persist immediately so the chips visually re-render on
-          // the same tick (resolveWindPresets reads from state).
-          if (typeof localStorage !== 'undefined') {
-            localStorage.setItem('particle-wind-overrides-v1', JSON.stringify({ v: 1, items: merge.items }))
-          }
-        } catch { /* quota / private mode */ }
-        const verb = mode === 'replace' ? 'Replaced' : 'Merged'
-        showToast(`${verb} ${merge.added} wind override${merge.added === 1 ? '' : 's'}${merge.skipped ? ` (${merge.skipped} skipped)` : ''}`)
+        // R14.15 — stage instead of commit. The user sees the diff
+        // in the preview panel and confirms (or cancels).
+        setPending({ items: parsed.items, filename: file.name })
+        setPendingMode(mode)
       }
       reader.readAsText(file)
     }
     input.click()
   }
+  // Commit the staged import — same merge math as before, just
+  // gated behind the preview's Apply button.
+  const commit = () => {
+    if (!pending) return
+    const merge = mergeWindOverridesImport(overrides, pending.items, pendingMode)
+    setOverrides(merge.items)
+    try {
+      // Persist immediately so the chips visually re-render on
+      // the same tick (resolveWindPresets reads from state).
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('particle-wind-overrides-v1', JSON.stringify({ v: 1, items: merge.items }))
+      }
+    } catch { /* quota / private mode */ }
+    const verb = pendingMode === 'replace' ? 'Replaced' : 'Merged'
+    showToast(`${verb} ${merge.added} wind override${merge.added === 1 ? '' : 's'}${merge.skipped ? ` (${merge.skipped} skipped)` : ''}`)
+    setPending(null)
+  }
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginTop: 6 }}>
-      <button onClick={onExport}
-        title={overrideCount === 0
-          ? 'No overrides yet — export will be an empty envelope'
-          : `Download ${overrideCount} wind override${overrideCount === 1 ? '' : 's'} as JSON`}
-        style={{
-          padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
-          cursor: 'pointer',
-          background: overrideCount === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(99,102,241,0.10)',
-          color: overrideCount === 0 ? '#7a7a90' : '#c7d2fe',
-          border: overrideCount === 0
-            ? '1px solid rgba(255,255,255,0.05)'
-            : '1px solid rgba(99,102,241,0.25)',
+    <>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginTop: 6 }}>
+        <button onClick={onExport}
+          title={overrideCount === 0
+            ? 'No overrides yet — export will be an empty envelope'
+            : `Download ${overrideCount} wind override${overrideCount === 1 ? '' : 's'} as JSON`}
+          style={{
+            padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+            cursor: 'pointer',
+            background: overrideCount === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(99,102,241,0.10)',
+            color: overrideCount === 0 ? '#7a7a90' : '#c7d2fe',
+            border: overrideCount === 0
+              ? '1px solid rgba(255,255,255,0.05)'
+              : '1px solid rgba(99,102,241,0.25)',
+          }}>
+          Export
+        </button>
+        <button onClick={() => onImport('merge')}
+          title="Merge: keep existing overrides, add only new slots from the file"
+          style={{
+            padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+            cursor: 'pointer',
+            background: 'rgba(168,85,247,0.10)', color: '#e9d5ff',
+            border: '1px solid rgba(168,85,247,0.25)',
+          }}>
+          Import (merge)
+        </button>
+        <button onClick={() => onImport('replace')}
+          title="Replace: drop all existing overrides, use only the imported ones"
+          style={{
+            padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+            cursor: 'pointer',
+            background: 'rgba(236,72,153,0.10)', color: '#fbcfe8',
+            border: '1px solid rgba(236,72,153,0.25)',
+          }}>
+          Import (replace)
+        </button>
+      </div>
+      {/* R14.15 — live diff preview. Appears the moment a valid wind
+          override file lands; toggling merge/replace recomputes the
+          diff in-place. Apply commits + dismisses; Cancel dismisses
+          without touching the live overrides. */}
+      {pending && (
+        <WindOverridesImportPreview
+          pending={pending}
+          mode={pendingMode}
+          onModeChange={setPendingMode}
+          existing={overrides}
+          onCancel={() => setPending(null)}
+          onCommit={commit}
+        />
+      )}
+    </>
+  )
+}
+
+// R14.15 — WindOverridesImportPreview: surfaces what an imported wind
+// overrides file will actually CHANGE before the user commits. Lists
+// every slot in the import with its three knob values vs. the live
+// values, flags ids that will overwrite an existing override (only
+// matters in replace mode for the wind IO because merge MODE SKIPS
+// existing slots — we mirror that in the impact line). Parallels
+// the keymap import preview in SettingsModal.
+function WindOverridesImportPreview({ pending, mode, onModeChange, existing, onCancel, onCommit }) {
+  const impact = summarizeWindOverridesImpact(existing, pending.items, mode)
+  const labelById = Object.fromEntries(WIND_PRESETS_DEFAULT.map(p => [p.id, p.label]))
+  // Diff rows — one per slot the import touches. For each, decide
+  // whether the import will WRITE (new slot) / SKIP (merge + existing)
+  // / OVERWRITE (replace + existing).
+  const rows = Object.keys(pending.items).map(id => {
+    const incoming = pending.items[id]
+    const live = existing && existing[id]
+    const isExisting = !!live
+    const wouldWrite = mode === 'replace' ? true : !isExisting
+    const action = mode === 'replace'
+      ? (isExisting ? 'overwrite' : 'add')
+      : (isExisting ? 'skip' : 'add')
+    return {
+      id,
+      label: labelById[id] || id,
+      incoming, live,
+      isExisting, wouldWrite, action,
+    }
+  }).sort((a, b) => {
+    // Stable order: by WIND_PRESETS_DEFAULT order so the diff list
+    // reads the same as the chip grid above (calm → breeze → gale → storm).
+    const ai = WIND_PRESETS_DEFAULT.findIndex(p => p.id === a.id)
+    const bi = WIND_PRESETS_DEFAULT.findIndex(p => p.id === b.id)
+    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi)
+  })
+  const willWrite = rows.filter(r => r.wouldWrite).length
+  const willSkip = mode === 'merge' ? rows.filter(r => !r.wouldWrite).length : 0
+  return (
+    <div style={{
+      marginTop: 8, padding: 10, borderRadius: 8,
+      background: 'rgba(99,102,241,0.06)',
+      border: '1px solid rgba(99,102,241,0.25)',
+      animation: 'wind-import-rise 0.18s cubic-bezier(0.2,0.8,0.2,1)',
+    }}>
+      <style>{`@keyframes wind-import-rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }`}</style>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        marginBottom: 8,
+      }}>
+        <span style={{ fontSize: 11, color: '#c7d2fe', fontWeight: 600, letterSpacing: '0.02em' }}>
+          Preview: {impact.totalImport} wind override{impact.totalImport === 1 ? '' : 's'} in file
+        </span>
+        <span style={{
+          fontSize: 10, color: '#7a7a90', fontFamily: 'Geist Mono, monospace',
+          maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }} title={pending.filename}>
+          {pending.filename}
+        </span>
+      </div>
+      {/* Mode selector */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 8 }}>
+        <button onClick={() => onModeChange('merge')}
+          title="Keep existing overrides, only apply slots the file mentions that aren't already overridden."
+          style={{
+            padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+            cursor: 'pointer',
+            background: mode === 'merge' ? 'rgba(168,85,247,0.22)' : 'rgba(255,255,255,0.04)',
+            color: mode === 'merge' ? '#e9d5ff' : '#8a8aa0',
+            border: mode === 'merge' ? '1px solid rgba(168,85,247,0.45)' : '1px solid rgba(255,255,255,0.07)',
+          }}>Merge</button>
+        <button onClick={() => onModeChange('replace')}
+          title="Drop all existing overrides, then write the slots from the file."
+          style={{
+            padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+            cursor: 'pointer',
+            background: mode === 'replace' ? 'rgba(236,72,153,0.20)' : 'rgba(255,255,255,0.04)',
+            color: mode === 'replace' ? '#fbcfe8' : '#8a8aa0',
+            border: mode === 'replace' ? '1px solid rgba(236,72,153,0.42)' : '1px solid rgba(255,255,255,0.07)',
+          }}>Replace</button>
+      </div>
+      {/* Diff list — one row per slot the import touches. */}
+      {rows.length === 0 ? (
+        <p style={{
+          fontSize: 10.5, color: '#7a7a90', fontStyle: 'italic',
+          margin: 0, marginBottom: 8, lineHeight: 1.5,
+          padding: '6px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.02)',
+          border: '1px dashed rgba(255,255,255,0.08)',
         }}>
-        Export
-      </button>
-      <button onClick={() => onImport('merge')}
-        title="Merge: keep existing overrides, add only new slots from the file"
-        style={{
-          padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
-          cursor: 'pointer',
-          background: 'rgba(168,85,247,0.10)', color: '#e9d5ff',
-          border: '1px solid rgba(168,85,247,0.25)',
+          No valid wind slots in this file.
+        </p>
+      ) : (
+        <div style={{
+          maxHeight: 144, overflowY: 'auto',
+          marginBottom: 8, padding: 4, borderRadius: 6,
+          background: 'rgba(0,0,0,0.18)',
+          border: '1px solid rgba(255,255,255,0.04)',
         }}>
-        Import (merge)
-      </button>
-      <button onClick={() => onImport('replace')}
-        title="Replace: drop all existing overrides, use only the imported ones"
-        style={{
-          padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
-          cursor: 'pointer',
-          background: 'rgba(236,72,153,0.10)', color: '#fbcfe8',
-          border: '1px solid rgba(236,72,153,0.25)',
-        }}>
-        Import (replace)
-      </button>
+          {rows.map(r => {
+            const isSkip = r.action === 'skip'
+            const isOverwrite = r.action === 'overwrite'
+            return (
+              <div key={r.id} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                fontSize: 10.5, padding: '3px 6px',
+                fontFamily: 'inherit', color: isSkip ? '#7a7a90' : '#d8d8e0',
+                opacity: isSkip ? 0.7 : 1,
+              }}>
+                <span style={{
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  maxWidth: '38%', fontWeight: 600,
+                }} title={r.label}>{r.label}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{
+                    fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                    fontSize: 9.5, padding: '1px 5px', borderRadius: 4,
+                    background: 'rgba(255,255,255,0.04)', color: '#9a9ab0',
+                    border: '1px solid rgba(255,255,255,0.06)',
+                  }} title={r.live ? `Live override: ${r.live.intensity.toFixed(1)} / ${r.live.azimuth | 0}° / ${r.live.pitch | 0}°` : 'No live override — chip uses shipped default'}>
+                    {r.live ? `${r.live.intensity.toFixed(1)}/${r.live.azimuth | 0}°` : '—'}
+                  </span>
+                  <span style={{ color: '#7a7a90', fontSize: 10 }}>{'\u2192'}</span>
+                  <span style={{
+                    fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                    fontSize: 9.5, padding: '1px 5px', borderRadius: 4,
+                    background: isSkip
+                      ? 'rgba(255,255,255,0.03)'
+                      : isOverwrite
+                        ? 'rgba(245,158,11,0.10)'
+                        : 'rgba(34,197,94,0.10)',
+                    color: isSkip ? '#7a7a90' : isOverwrite ? '#fde68a' : '#86efac',
+                    border: isSkip
+                      ? '1px solid rgba(255,255,255,0.05)'
+                      : isOverwrite
+                        ? '1px solid rgba(245,158,11,0.30)'
+                        : '1px solid rgba(34,197,94,0.30)',
+                  }} title={`Incoming: ${r.incoming.intensity.toFixed(1)} / ${r.incoming.azimuth | 0}° / ${r.incoming.pitch | 0}°`}>
+                    {`${r.incoming.intensity.toFixed(1)}/${r.incoming.azimuth | 0}°`}
+                    {isSkip && (
+                      <span style={{ marginLeft: 4, fontSize: 8, fontWeight: 700 }}>SKIP</span>
+                    )}
+                    {isOverwrite && (
+                      <span style={{ marginLeft: 4, fontSize: 8, fontWeight: 700 }}>OVR</span>
+                    )}
+                  </span>
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      {/* Impact line */}
+      <p style={{
+        fontSize: 10.5, color: mode === 'replace' ? '#fbcfe8' : '#a5b4fc',
+        margin: 0, marginBottom: 8, lineHeight: 1.5,
+        fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+      }}>
+        {mode === 'replace'
+          ? `Replace: write ${willWrite} slot${willWrite === 1 ? '' : 's'}${impact.willOverwrite ? ` (incl. ${impact.willOverwrite} overwrite)` : ''}, drop other live overrides.`
+          : `Merge: add ${willWrite} new${willSkip ? ` · skip ${willSkip} existing` : ''}.`}
+      </p>
+      {/* Apply / Cancel */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+        <button onClick={onCancel}
+          style={{
+            padding: '7px 0', borderRadius: 7, fontSize: 11.5, fontWeight: 550,
+            cursor: 'pointer',
+            background: 'rgba(255,255,255,0.04)',
+            color: '#c8c8d4',
+            border: '1px solid rgba(255,255,255,0.07)',
+          }}>Cancel</button>
+        <button onClick={onCommit}
+          disabled={willWrite === 0 && mode === 'merge'}
+          title={(willWrite === 0 && mode === 'merge') ? 'Nothing new to merge' : `Apply ${mode}`}
+          style={{
+            padding: '7px 0', borderRadius: 7, fontSize: 11.5, fontWeight: 600,
+            cursor: (willWrite === 0 && mode === 'merge') ? 'not-allowed' : 'pointer',
+            background: (willWrite === 0 && mode === 'merge')
+              ? 'rgba(255,255,255,0.04)'
+              : mode === 'replace'
+                ? 'linear-gradient(135deg, rgba(236,72,153,0.28), rgba(168,85,247,0.18))'
+                : 'linear-gradient(135deg, rgba(99,102,241,0.28), rgba(168,85,247,0.18))',
+            color: (willWrite === 0 && mode === 'merge') ? '#5a5a70' : '#ffffff',
+            border: (willWrite === 0 && mode === 'merge')
+              ? '1px solid rgba(255,255,255,0.07)'
+              : mode === 'replace'
+                ? '1px solid rgba(236,72,153,0.45)'
+                : '1px solid rgba(99,102,241,0.45)',
+            opacity: (willWrite === 0 && mode === 'merge') ? 0.6 : 1,
+          }}>Apply {mode === 'replace' ? 'Replace' : 'Merge'}</button>
+      </div>
     </div>
   )
 }
