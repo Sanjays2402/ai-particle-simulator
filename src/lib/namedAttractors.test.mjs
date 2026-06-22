@@ -16,6 +16,8 @@ import {
   moveAttractorByIndex, moveAttractorUp, moveAttractorDown,
   // R16.18 — bulk jump-to-position helper + input parser
   moveAttractorTo1BasedPosition, parsePositionInput,
+  // R17.17 — bulk-delete by id collection
+  removeAttractors,
 } from './namedAttractors.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -501,4 +503,98 @@ console.log(`PASS: namedAttractors — types/clamps, normalize (full/defaults/en
   eq(parsePositionInput(NaN),        null, 'parse NaN → null')
   eq(parsePositionInput(Infinity),   null, 'parse Infinity → null')
   eq(parsePositionInput(-Infinity),  null, 'parse -Infinity → null')
+}
+
+// --- R17.17 — removeAttractors (bulk delete by id collection) ---
+{
+  const a = defaultAttractor([], { id: 'attr-1', name: 'A', type: 'attractor' })
+  const b = defaultAttractor([a], { id: 'attr-2', name: 'B', type: 'vortex' })
+  const c = defaultAttractor([a, b], { id: 'attr-3', name: 'C', type: 'repulsor' })
+  const d = defaultAttractor([a, b, c], { id: 'attr-4', name: 'D', type: 'turbulence' })
+  const list = [a, b, c, d]
+
+  // Happy path: Set with 2 ids → those rows drop, others preserved + ordered.
+  {
+    const next = removeAttractors(list, new Set(['attr-2', 'attr-4']))
+    eq(next.length, 2, 'removeAttractors(Set) drops 2 of 4')
+    eq(next[0].id, 'attr-1', 'kept rows preserve order (a first)')
+    eq(next[1].id, 'attr-3', 'kept rows preserve order (c second)')
+    if (next === list) fail('removeAttractors should return a NEW array when any row was removed')
+  }
+
+  // Array input also works (no need for caller to pre-wrap).
+  {
+    const next = removeAttractors(list, ['attr-1', 'attr-3'])
+    eq(next.length, 2, 'removeAttractors(array) drops 2 of 4')
+    eq(next.map(r => r.id).join(','), 'attr-2,attr-4', 'array input preserves remaining order')
+  }
+
+  // Generator / iterable: a synthetic iterable should also work — proves
+  // the helper isn't accidentally requiring Set semantics only.
+  {
+    function* ids() { yield 'attr-1'; yield 'attr-4' }
+    const next = removeAttractors(list, ids())
+    eq(next.length, 2, 'removeAttractors(iterable) drops 2 of 4')
+    eq(next.map(r => r.id).join(','), 'attr-2,attr-3', 'iterable input preserves remaining order')
+  }
+
+  // Single-id set still works (consistent with removeAttractor for one).
+  {
+    const next = removeAttractors(list, new Set(['attr-3']))
+    eq(next.length, 3, 'single-id set drops one row')
+    eq(next.map(r => r.id).join(','), 'attr-1,attr-2,attr-4', 'order preserved after single drop')
+  }
+
+  // Ref-equal-on-no-op contract: empty set, ids that don't exist, null,
+  // undefined, and non-iterable inputs all return the input list ref so
+  // zustand can skip the save.
+  {
+    const empty = removeAttractors(list, new Set())
+    eq(empty, list, 'empty Set → input ref (no churn)')
+    const noMatch = removeAttractors(list, new Set(['attr-99']))
+    eq(noMatch, list, 'no-id-matches → input ref (no churn)')
+    const arrEmpty = removeAttractors(list, [])
+    eq(arrEmpty, list, 'empty array → input ref')
+    const noMatchArr = removeAttractors(list, ['attr-99', 'attr-100'])
+    eq(noMatchArr, list, 'array with no matches → input ref')
+    eq(removeAttractors(list, null), list,      'null collection → input ref')
+    eq(removeAttractors(list, undefined), list, 'undefined collection → input ref')
+    eq(removeAttractors(list, 42), list,        'non-iterable number → input ref')
+    eq(removeAttractors(list, 'attr-1'), list,  'string (iterable but not the right kind) treated as iterable of chars → no match → input ref')
+  }
+
+  // Non-array input returns empty array (parallels removeAttractor's
+  // null-list contract).
+  {
+    eq(removeAttractors(null, new Set(['attr-1'])).length, 0, 'null list → empty')
+    eq(removeAttractors(undefined, new Set(['attr-1'])).length, 0, 'undefined list → empty')
+    eq(removeAttractors('not-a-list', new Set(['attr-1'])).length, 0, 'non-array → empty')
+  }
+
+  // Corrupt rows (null entries) are dropped EVEN when the id set is
+  // empty-on-the-ids-that-matter, because the helper's contract says
+  // "ref-equal only when nothing changes AT ALL". A list with a null
+  // row mixed in produces a cleaned list even if no id matches.
+  {
+    const dirty = [a, null, b]
+    const next = removeAttractors(dirty, new Set(['attr-99']))
+    eq(next.length, 2, 'corrupt row dropped (null entry)')
+    eq(next[0].id, 'attr-1', 'live rows preserved')
+    eq(next[1].id, 'attr-2', 'live rows preserved')
+    if (next === dirty) fail('removeAttractors should clean corrupt rows even without id matches')
+  }
+
+  // Full wipe: removing every id leaves an empty list (no off-by-one).
+  {
+    const next = removeAttractors(list, new Set(['attr-1', 'attr-2', 'attr-3', 'attr-4']))
+    eq(next.length, 0, 'removing every id leaves empty list')
+  }
+
+  // Input list is never mutated — every successful removal returns a
+  // fresh array.
+  {
+    const before = list.slice()
+    removeAttractors(list, new Set(['attr-1', 'attr-3']))
+    deepEq(list, before, 'input list not mutated')
+  }
 }

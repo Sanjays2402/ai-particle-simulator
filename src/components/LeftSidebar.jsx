@@ -2797,6 +2797,7 @@ function NamedAttractorsBlock() {
   const list = useStore(s => s.namedAttractors)
   const add  = useStore(s => s.addNamedAttractor)
   const remove = useStore(s => s.removeNamedAttractor)
+  const removeMany = useStore(s => s.removeNamedAttractors)
   const update = useStore(s => s.updateNamedAttractor)
   const toggle = useStore(s => s.toggleNamedAttractor)
   const moveUp = useStore(s => s.moveNamedAttractorUp)
@@ -2805,6 +2806,48 @@ function NamedAttractorsBlock() {
   const placingId = useStore(s => s.placingAttractorId)
   const setPlacing = useStore(s => s.setPlacingAttractorId)
   const atCap = list.length >= MAX_ATTRACTORS
+  // R17.17 — multi-select state for bulk-delete. Shift-click on a row
+  // toggles its membership in the selection. When non-empty, a delete
+  // bar surfaces above the list; clearing the last selected row hides
+  // it again. We keep the Set in component state (not zustand) since
+  // selection is purely a transient UI concept — a hard refresh
+  // should always start with nothing selected.
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
+  // Reconcile selection against the live list — if an attractor was
+  // removed (single-delete or external) drop its id from the selection.
+  useEffect(() => {
+    setSelectedIds(prev => {
+      if (prev.size === 0) return prev
+      const liveIds = new Set(list.map(a => a && a.id))
+      let changed = false
+      const next = new Set()
+      for (const id of prev) {
+        if (liveIds.has(id)) next.add(id)
+        else changed = true
+      }
+      if (!changed) return prev  // no-op: skip the React re-render
+      return next
+    })
+  }, [list])
+
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  const clearSelection = () => setSelectedIds(new Set())
+  const deleteSelected = () => {
+    if (selectedIds.size === 0) return
+    const count = selectedIds.size
+    if (!window.confirm(`Delete ${count} selected attractor${count === 1 ? '' : 's'}? This cannot be undone.`)) return
+    removeMany(selectedIds)
+    setSelectedIds(new Set())
+    showToast(`Removed ${count} attractor${count === 1 ? '' : 's'}`)
+  }
+  const selectAll = () => setSelectedIds(new Set(list.map(a => a.id)))
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -2829,6 +2872,60 @@ function NamedAttractorsBlock() {
         </p>
       )}
 
+      {/* R17.17 — multi-select bulk-delete bar. Only surfaces while at
+          least one attractor is selected; offers Delete (gradient red),
+          Select all (when not everything is selected), and Clear. The
+          live "N of M selected" counter sits inline so the user always
+          sees the scope before confirming. */}
+      {selectedIds.size > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '8px 10px', borderRadius: 8,
+          background: 'rgba(239,68,68,0.08)',
+          border: '1px solid rgba(239,68,68,0.30)',
+        }}>
+          <span style={{
+            fontSize: 11.5, fontWeight: 600, color: '#fca5a5',
+            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+            letterSpacing: '0.02em', flex: 1,
+          }}>
+            {selectedIds.size} of {list.length} selected
+          </span>
+          {selectedIds.size < list.length && (
+            <button onClick={selectAll}
+              title="Add every remaining attractor to the selection"
+              style={{
+                padding: '4px 9px', borderRadius: 5,
+                fontSize: 10.5, fontWeight: 550,
+                background: 'rgba(255,255,255,0.04)',
+                color: '#c8c8d0',
+                border: '1px solid rgba(255,255,255,0.08)',
+                cursor: 'pointer',
+              }}>Select all</button>
+          )}
+          <button onClick={clearSelection}
+            title="Clear the selection (exit multi-select mode)"
+            style={{
+              padding: '4px 9px', borderRadius: 5,
+              fontSize: 10.5, fontWeight: 550,
+              background: 'rgba(255,255,255,0.04)',
+              color: '#c8c8d0',
+              border: '1px solid rgba(255,255,255,0.08)',
+              cursor: 'pointer',
+            }}>Clear</button>
+          <button onClick={deleteSelected}
+            title={`Delete the ${selectedIds.size} selected attractor${selectedIds.size === 1 ? '' : 's'}`}
+            style={{
+              padding: '4px 10px', borderRadius: 5,
+              fontSize: 10.5, fontWeight: 700, letterSpacing: '0.04em',
+              background: 'linear-gradient(135deg, rgba(239,68,68,0.30), rgba(168,85,247,0.22))',
+              color: '#fee2e2',
+              border: '1px solid rgba(239,68,68,0.55)',
+              cursor: 'pointer',
+            }}>Delete {selectedIds.size}</button>
+        </div>
+      )}
+
       {list.map((a, idx) => (
         <NamedAttractorRow
           key={a.id}
@@ -2836,6 +2933,9 @@ function NamedAttractorsBlock() {
           total={list.length}
           attractor={a}
           isPlacing={placingId === a.id}
+          isSelected={selectedIds.has(a.id)}
+          hasSelection={selectedIds.size > 0}
+          onShiftClickSelect={() => toggleSelect(a.id)}
           onRename={(name) => update(a.id, { name })}
           onTypeChange={(type) => update(a.id, { type })}
           onStrengthChange={(strength) => update(a.id, { strength })}
@@ -2854,6 +2954,7 @@ function NamedAttractorsBlock() {
 
 function NamedAttractorRow({
   index, total, attractor, isPlacing,
+  isSelected, hasSelection, onShiftClickSelect,
   onRename, onTypeChange, onStrengthChange, onRadiusChange,
   onToggle, onRemove, onPlace, onMoveUp, onMoveDown, onJumpToPosition,
 }) {
@@ -2895,22 +2996,74 @@ function NamedAttractorRow({
   // tapping a chip flips the row's border + index badge instantly.
   const typeStyle = attractorTypeStyle(attractor.type)
 
+  // R17.17 — shift-click on the row toggles its membership in the
+  // multi-select set. We intercept at the row container's onMouseDown
+  // so the click reaches us before any inner click handler swallows
+  // the bubble. preventDefault keeps the default text-selection
+  // shift-extend gesture from yanking nearby UI text into a selection
+  // when the user is mass-clicking rows.
+  const onRowMouseDown = (e) => {
+    if (!e.shiftKey || !onShiftClickSelect) return
+    e.preventDefault()
+    e.stopPropagation()
+    onShiftClickSelect()
+  }
+
   return (
-    <div style={{
+    <div
+      onMouseDown={onRowMouseDown}
+      style={{
       borderRadius: 10,
-      background: attractor.enabled ? 'rgba(255,255,255,0.025)' : 'rgba(255,255,255,0.015)',
-      border: isPlacing
-        ? '1px solid rgba(34,197,94,0.45)'
-        : (attractor.enabled
-            ? `1px solid ${typeStyle.borderFaint}`
-            : '1px solid rgba(255,255,255,0.05)'),
-      boxShadow: isPlacing ? '0 0 14px rgba(34,197,94,0.25)' : 'none',
+      background: isSelected
+        ? 'rgba(239,68,68,0.10)'
+        : (attractor.enabled ? 'rgba(255,255,255,0.025)' : 'rgba(255,255,255,0.015)'),
+      border: isSelected
+        ? '1px solid rgba(239,68,68,0.55)'
+        : (isPlacing
+            ? '1px solid rgba(34,197,94,0.45)'
+            : (attractor.enabled
+                ? `1px solid ${typeStyle.borderFaint}`
+                : '1px solid rgba(255,255,255,0.05)')),
+      boxShadow: isSelected
+        ? '0 0 14px rgba(239,68,68,0.22)'
+        : (isPlacing ? '0 0 14px rgba(34,197,94,0.25)' : 'none'),
       padding: '10px 11px',
       opacity: attractor.enabled ? 1 : 0.55,
       transition: 'all 0.2s ease-out',
-    }}>
+      // R17.17 — explicit cursor cue when shift is the only thing the
+      // user can do to a row in selection mode; we don't try to style
+      // hover-during-shift in pure CSS (would need :has() and complex
+      // conditionals), so the title attr on the row name handles
+      // discoverability.
+    }}
+    title={hasSelection ? 'Shift+click to toggle selection · normal click still edits' : 'Shift+click to start multi-select'}
+    >
       {/* Header: name + enabled toggle + remove */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        {/* R17.17 — when selection is active, show a small checkbox-style
+            indicator on the LEFT so the row's selected state is scannable
+            even when many rows wear the red border. Shift-click toggle
+            still drives it; clicking the indicator itself ALSO toggles
+            (without needing shift). */}
+        {hasSelection && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); if (onShiftClickSelect) onShiftClickSelect() }}
+            title={isSelected ? 'Remove from selection' : 'Add to selection'}
+            style={{
+              width: 14, height: 14, padding: 0,
+              borderRadius: 3,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              background: isSelected ? 'rgba(239,68,68,0.40)' : 'rgba(255,255,255,0.04)',
+              border: isSelected ? '1px solid rgba(239,68,68,0.7)' : '1px solid rgba(255,255,255,0.18)',
+              color: '#fee2e2',
+              fontSize: 10, lineHeight: 1, fontWeight: 700,
+              cursor: 'pointer',
+              fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+            }}>
+            {isSelected ? '\u2713' : ''}
+          </button>
+        )}
         {editingPos && total > 1 && onJumpToPosition ? (
           // R16.18 — inline jump-to-position input. Replaces the #N
           // badge while editing; sized to match the badge so the row

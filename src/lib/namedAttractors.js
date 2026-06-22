@@ -237,6 +237,38 @@ export function removeAttractor(list, id) {
   return list.filter(a => a && a.id !== id)
 }
 
+// R17.17 — bulk-delete by id set. Used by the LeftSidebar's shift-click
+// multi-select bulk delete UX so users can wipe several attractors in
+// one operation instead of clicking × N times. Pure: returns the input
+// ref unchanged when nothing in `idSet` actually existed in the list
+// (zustand can skip the redundant save). `idSet` may be a Set, an
+// array, or any iterable; non-iterables and null/undefined return the
+// input ref. Drops corrupt rows as a side-effect (same contract as
+// removeView / removeAttractor — keeping known-bad rows around just to
+// honour the ref-equal contract would be the wrong trade-off).
+export function removeAttractors(list, idSet) {
+  if (!Array.isArray(list)) return []
+  if (!idSet) return list
+  // Normalise iterable input to a Set for O(1) hits.
+  let ids
+  if (idSet instanceof Set) {
+    ids = idSet
+  } else if (typeof idSet[Symbol.iterator] === 'function') {
+    ids = new Set(idSet)
+  } else {
+    return list
+  }
+  if (ids.size === 0) return list
+  let changed = false
+  const next = []
+  for (const a of list) {
+    if (!a) { changed = true; continue }  // drop corrupt rows
+    if (ids.has(a.id)) { changed = true; continue }
+    next.push(a)
+  }
+  return changed ? next : list
+}
+
 // Patch a single field on an attractor by id — returns a new array
 // with the entry updated AND re-normalized so the patch is safe.
 export function updateAttractor(list, id, patch) {

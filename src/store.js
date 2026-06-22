@@ -21,6 +21,8 @@ import {
   moveAttractorDown as moveNamedAttractorDownHelper,
   // R16.18 — bulk jump-to-position helper
   moveAttractorTo1BasedPosition as moveNamedAttractorTo1BasedPositionHelper,
+  // R17.17 — bulk-delete helper (shift-click multi-select)
+  removeAttractors as removeNamedAttractorsHelper,
 } from './lib/namedAttractors'
 import { clampHueReactiveStrength as clampBgGradientStrength, normalizeReactiveCurve as normalizeBgGradientCurve } from './lib/bgGradient'
 
@@ -166,6 +168,16 @@ export const useStore = create((set, get) => {
   },
   removeNamedAttractor: (id) => {
     const next = removeNamedAttractorHelper(get().namedAttractors, id)
+    saveNamedAttractors(next)
+    set({ namedAttractors: next })
+  },
+  // R17.17 — bulk-delete by id collection (Set | Array | iterable).
+  // Used by the LeftSidebar's shift-click multi-select bulk-delete UX.
+  // Skips the save when nothing was actually removed (ref-equality
+  // contract from the lib helper).
+  removeNamedAttractors: (ids) => {
+    const next = removeNamedAttractorsHelper(get().namedAttractors, ids)
+    if (next === get().namedAttractors) return
     saveNamedAttractors(next)
     set({ namedAttractors: next })
   },
