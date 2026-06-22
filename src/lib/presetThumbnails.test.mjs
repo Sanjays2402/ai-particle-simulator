@@ -4,12 +4,19 @@ import {
   compilePresetForThumbnail, renderThumbnailToCanvas, captureThumbnailToStorage,
   clearThumbnail, recaptureThumbnail,
   clearAllThumbnails, summarizeBulkRebuild,
+  // R19.13 — per-thumb metadata side-store + relative-time formatter
+  thumbMetadataKey, recordThumbMetadata, readThumbMetadata, clearThumbMetadata,
+  summarizeThumbAge,
   THUMB_WIDTH, THUMB_HEIGHT,
 } from './presetThumbnails.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
 function eq(a, b, m) { if (a !== b) fail(`${m} — got ${a} expected ${b}`) }
 function near(a, b, m, tol = 1e-6) { if (Math.abs(a - b) > tol) fail(`${m} — got ${a} expected ~${b}`) }
+// R19.13 — truthy assertion. Named distinctly from `ok` because the
+// existing test cases above shadow `ok` with local return values
+// from renderThumbnailToCanvas / recaptureThumbnail / recordThumbMetadata.
+function truthy(c, m) { if (!c) fail(m) }
 
 // --- projectXY ---
 {
@@ -218,3 +225,145 @@ console.log(`PASS: presetThumbnails projection + storage discovery + compile + r
   eq(noStore.withThumb, 0, 'summarizeBulkRebuild: no storage → 0 cached')
   eq(noStore.withoutThumb, 4, 'summarizeBulkRebuild: no storage → all uncached')
 }
+
+// --- R19.13: per-thumb metadata side-store + summarizeThumbAge ---
+
+// Storage key shape parallels thumbStorageKey so a sweep can find both halves.
+eq(thumbMetadataKey('spiral-galaxy'), 'preset-thumb-meta-spiral-galaxy', 'metadata key format')
+
+// recordThumbMetadata: writes JSON-encoded metadata to the parallel key.
+{
+  const s = makeFakeStorage()
+  const ok = recordThumbMetadata('p', { width: 200, height: 120, source: 'live' }, s)
+  eq(ok, true, 'recordThumbMetadata: success returns true')
+  const raw = s.getItem(thumbMetadataKey('p'))
+  truthy(raw != null, 'metadata entry exists')
+  const parsed = JSON.parse(raw)
+  eq(parsed.width, 200, 'width recorded')
+  eq(parsed.height, 120, 'height recorded')
+  eq(parsed.source, 'live', 'source recorded')
+  truthy(typeof parsed.capturedAt === 'string' && parsed.capturedAt.includes('T'),
+    'capturedAt is ISO-8601')
+}
+
+// recordThumbMetadata: defensive — non-string/empty id, bad/missing dimensions,
+// unknown source all sanitised or rejected.
+{
+  const s = makeFakeStorage()
+  eq(recordThumbMetadata('', { width: 100, height: 100 }, s), false, 'empty id → false')
+  eq(recordThumbMetadata(null, { width: 100, height: 100 }, s), false, 'null id → false')
+  eq(recordThumbMetadata(123, { width: 100, height: 100 }, s), false, 'non-string id → false')
+  eq(recordThumbMetadata('p', {}, null), false, 'no storage → false')
+
+  // Missing dimensions fall back to THUMB_WIDTH/HEIGHT defaults.
+  recordThumbMetadata('q', {}, s)
+  const parsedQ = JSON.parse(s.getItem(thumbMetadataKey('q')))
+  eq(parsedQ.width, THUMB_WIDTH, 'missing width → default')
+  eq(parsedQ.height, THUMB_HEIGHT, 'missing height → default')
+  eq(parsedQ.source, 'render', 'missing source → render')
+
+  // Unknown source coerces to 'render'.
+  recordThumbMetadata('r', { source: 'mystery' }, s)
+  const parsedR = JSON.parse(s.getItem(thumbMetadataKey('r')))
+  eq(parsedR.source, 'render', 'unknown source → render')
+
+  // Negative / NaN dimensions fall back too.
+  recordThumbMetadata('s', { width: -5, height: NaN }, s)
+  const parsedS = JSON.parse(s.getItem(thumbMetadataKey('s')))
+  eq(parsedS.width, THUMB_WIDTH, 'negative width → default')
+  eq(parsedS.height, THUMB_HEIGHT, 'NaN height → default')
+}
+
+// readThumbMetadata: roundtrip + corrupt-data handling.
+{
+  const s = makeFakeStorage()
+  eq(readThumbMetadata('absent', s), null, 'missing entry → null')
+  recordThumbMetadata('p', { width: 240, height: 160, source: 'live' }, s)
+  const md = readThumbMetadata('p', s)
+  eq(md.width, 240, 'roundtrip: width')
+  eq(md.height, 160, 'roundtrip: height')
+  eq(md.source, 'live', 'roundtrip: source')
+  truthy(typeof md.capturedAt === 'string' && md.capturedAt.length > 0, 'roundtrip: capturedAt')
+
+  // Corrupt JSON → null (no crash).
+  s.setItem(thumbMetadataKey('bad'), '{not-json')
+  eq(readThumbMetadata('bad', s), null, 'corrupt JSON → null')
+
+  // Wrong shape → null.
+  s.setItem(thumbMetadataKey('arr'), '[1,2,3]')
+  eq(readThumbMetadata('arr', s), null, 'array top-level → null')
+  s.setItem(thumbMetadataKey('num'), '42')
+  eq(readThumbMetadata('num', s), null, 'number top-level → null')
+
+  // Missing capturedAt → null (the timestamp is what makes the badge meaningful).
+  s.setItem(thumbMetadataKey('nocap'), JSON.stringify({ width: 100, height: 100, source: 'live' }))
+  eq(readThumbMetadata('nocap', s), null, 'missing capturedAt → null')
+
+  // Defensive: bad id/storage.
+  eq(readThumbMetadata('', s), null, 'empty id → null')
+  eq(readThumbMetadata(123, s), null, 'non-string id → null')
+  eq(readThumbMetadata('p', null), null, 'no storage → null')
+
+  // Partial-corruption: missing dimensions but valid capturedAt → defaults applied.
+  s.setItem(thumbMetadataKey('partial'), JSON.stringify({ capturedAt: '2026-06-22T00:00:00Z' }))
+  const partial = readThumbMetadata('partial', s)
+  truthy(partial != null, 'partial-but-valid → object')
+  eq(partial.width, THUMB_WIDTH, 'partial: width defaulted')
+  eq(partial.height, THUMB_HEIGHT, 'partial: height defaulted')
+  eq(partial.source, 'render', 'partial: source defaulted')
+}
+
+// clearThumbMetadata + cascade from clearThumbnail / clearAllThumbnails.
+{
+  const s = makeFakeStorage()
+  recordThumbMetadata('p', { width: 100, height: 100 }, s)
+  eq(clearThumbMetadata('p', s), true, 'clearThumbMetadata: present → true')
+  eq(readThumbMetadata('p', s), null, 'metadata gone after clear')
+  eq(clearThumbMetadata('p', s), false, 'second clear: nothing → false')
+  eq(clearThumbMetadata('', s), false, 'empty id → false')
+  eq(clearThumbMetadata('p', null), false, 'no storage → false')
+
+  // Cascade through clearThumbnail — wiping the thumb also wipes metadata.
+  s.setItem(thumbStorageKey('cascade'), 'data:image/jpeg;base64,xxx')
+  recordThumbMetadata('cascade', { width: 100, height: 100 }, s)
+  truthy(readThumbMetadata('cascade', s) != null, 'precondition: metadata present')
+  clearThumbnail('cascade', s)
+  eq(readThumbMetadata('cascade', s), null, 'clearThumbnail cascade wipes metadata too')
+
+  // Cascade through clearAllThumbnails — same behaviour, bulk.
+  s.setItem(thumbStorageKey('a'), 'd')
+  s.setItem(thumbStorageKey('b'), 'd')
+  recordThumbMetadata('a', { width: 100, height: 100 }, s)
+  recordThumbMetadata('b', { width: 100, height: 100 }, s)
+  truthy(readThumbMetadata('a', s) != null && readThumbMetadata('b', s) != null,
+    'precondition: bulk metadata present')
+  clearAllThumbnails([{ id: 'a' }, { id: 'b' }], s)
+  eq(readThumbMetadata('a', s), null, 'clearAllThumbnails cascade wipes a metadata')
+  eq(readThumbMetadata('b', s), null, 'clearAllThumbnails cascade wipes b metadata')
+}
+
+// summarizeThumbAge: returns a compact relative-time string.
+{
+  const baseIso = '2026-06-22T12:00:00Z'
+  const base = Date.parse(baseIso)
+  eq(summarizeThumbAge({ capturedAt: baseIso }, base + 1000),     'now',  '1s → now')
+  eq(summarizeThumbAge({ capturedAt: baseIso }, base + 4_999),    'now',  '4.999s → now')
+  eq(summarizeThumbAge({ capturedAt: baseIso }, base + 5_000),    '5s',   '5s threshold')
+  eq(summarizeThumbAge({ capturedAt: baseIso }, base + 59_999),   '59s',  'sub-minute → seconds')
+  eq(summarizeThumbAge({ capturedAt: baseIso }, base + 60_000),   '1m',   '60s → 1m')
+  eq(summarizeThumbAge({ capturedAt: baseIso }, base + 60 * 60_000), '1h', '60m → 1h')
+  eq(summarizeThumbAge({ capturedAt: baseIso }, base + 24 * 60 * 60_000), '1d', '24h → 1d')
+  eq(summarizeThumbAge({ capturedAt: baseIso }, base + 7 * 24 * 60 * 60_000), '1w', '7d → 1w')
+  eq(summarizeThumbAge({ capturedAt: baseIso }, base + 52 * 7 * 24 * 60 * 60_000), '1y', '52w → 1y')
+
+  // Future timestamps (capturedAt > now) clamp to "now" — never report negative ages.
+  eq(summarizeThumbAge({ capturedAt: baseIso }, base - 10_000), 'now', 'future → now (no negative ages)')
+
+  // Defensive: bad inputs → null.
+  eq(summarizeThumbAge(null), null, 'null metadata → null')
+  eq(summarizeThumbAge({}), null, 'no capturedAt → null')
+  eq(summarizeThumbAge({ capturedAt: 'not-a-date' }), null, 'unparseable capturedAt → null')
+  eq(summarizeThumbAge({ capturedAt: 42 }), null, 'non-string capturedAt → null')
+}
+
+console.log('PASS: presetThumbnails R19.13 metadata side-store + relative-time formatter')

@@ -48,6 +48,115 @@ export function thumbStorageKey(presetId) {
   return `preset-thumb-${presetId}`
 }
 
+// R19.13 — per-thumb metadata side-store. The thumb data URL alone
+// doesn't tell the user when it was captured or at what resolution;
+// metadata fixes that for the hover badge in PresetCarousel:
+//   - capturedAt: ISO-8601 timestamp the thumb was generated
+//   - width / height: dimensions in CSS pixels
+//   - source: 'live' (captured during preset playback) or 'render'
+//             (offline sampler — pre-rendered thumb)
+//
+// Stored under a parallel `preset-thumb-meta-<id>` key so the legacy
+// data-URL path is untouched. JSON-encoded so adding fields later
+// (compile-time, performance score, etc) doesn't break old metadata.
+//
+// Defensive contract on the read side: missing key → null. Parse
+// failures (corrupt JSON, wrong shape) → null. Schema validation:
+// drop unknown fields, sanitise types, coerce missing dimensions to
+// the THUMB_WIDTH/HEIGHT defaults. The UI guards against null.
+export function thumbMetadataKey(presetId) {
+  return `preset-thumb-meta-${presetId}`
+}
+
+const VALID_SOURCES = new Set(['live', 'render'])
+
+export function recordThumbMetadata(presetId, opts = {}, storage) {
+  if (typeof presetId !== 'string' || !presetId) return false
+  const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null)
+  if (!store) return false
+  const width  = Number.isFinite(opts.width)  && opts.width  > 0 ? Math.round(opts.width)  : THUMB_WIDTH
+  const height = Number.isFinite(opts.height) && opts.height > 0 ? Math.round(opts.height) : THUMB_HEIGHT
+  const source = VALID_SOURCES.has(opts.source) ? opts.source : 'render'
+  const capturedAt = typeof opts.capturedAt === 'string' && opts.capturedAt
+    ? opts.capturedAt
+    : new Date().toISOString()
+  const meta = { capturedAt, width, height, source }
+  try {
+    store.setItem(thumbMetadataKey(presetId), JSON.stringify(meta))
+    return true
+  } catch { return false }
+}
+
+export function readThumbMetadata(presetId, storage) {
+  if (typeof presetId !== 'string' || !presetId) return null
+  const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null)
+  if (!store) return null
+  let raw
+  try { raw = store.getItem(thumbMetadataKey(presetId)) }
+  catch { return null }
+  if (!raw) return null
+  let parsed
+  try { parsed = JSON.parse(raw) }
+  catch { return null }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  // Sanitise + drop unknown fields. Missing required fields with no
+  // sensible default → return null so the UI hides the badge instead
+  // of showing junk.
+  const capturedAt = typeof parsed.capturedAt === 'string' && parsed.capturedAt
+    ? parsed.capturedAt
+    : null
+  if (!capturedAt) return null
+  const width  = Number.isFinite(parsed.width)  && parsed.width  > 0 ? Math.round(parsed.width)  : THUMB_WIDTH
+  const height = Number.isFinite(parsed.height) && parsed.height > 0 ? Math.round(parsed.height) : THUMB_HEIGHT
+  const source = VALID_SOURCES.has(parsed.source) ? parsed.source : 'render'
+  return { capturedAt, width, height, source }
+}
+
+// Clear metadata for one preset id. Returns true when an entry was
+// removed, false otherwise. Mirrors clearThumbnail's contract so the
+// rebuild path can drop both halves with the same call shape.
+export function clearThumbMetadata(presetId, storage) {
+  if (typeof presetId !== 'string' || !presetId) return false
+  const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null)
+  if (!store) return false
+  const key = thumbMetadataKey(presetId)
+  try {
+    const had = store.getItem(key) != null
+    if (!had) return false
+    store.removeItem(key)
+    return true
+  } catch { return false }
+}
+
+// R19.13 — relative-time formatter for the hover badge. Returns a
+// short string like "12s", "4m", "3h", "2d", "3w", or "now". Built
+// here (not via Intl.RelativeTimeFormat) so the lib stays test-pure
+// without polyfilling Intl — and so the output is compact for a
+// hover badge regardless of locale (the user sees "3h" not "3 hours
+// ago" which would wrap on the small tile).
+//
+// `now` is injectable for unit tests; defaults to Date.now().
+export function summarizeThumbAge(metadata, now = Date.now()) {
+  if (!metadata || typeof metadata !== 'object') return null
+  if (typeof metadata.capturedAt !== 'string') return null
+  const then = Date.parse(metadata.capturedAt)
+  if (!Number.isFinite(then)) return null
+  const deltaMs = Math.max(0, now - then)  // never report "in the future"
+  const sec = Math.floor(deltaMs / 1000)
+  if (sec < 5) return 'now'
+  if (sec < 60) return `${sec}s`
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min}m`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr}h`
+  const day = Math.floor(hr / 24)
+  if (day < 7) return `${day}d`
+  const wk = Math.floor(day / 7)
+  if (wk < 52) return `${wk}w`
+  const yr = Math.floor(wk / 52)
+  return `${yr}y`
+}
+
 // Has a thumbnail already been recorded for this preset id?
 export function hasThumbnail(presetId, storage) {
   const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null)
@@ -191,6 +300,11 @@ export function renderThumbnailToCanvas(code, canvas, opts = {}) {
 // One-shot: render a preset and stash the dataURL in localStorage
 // under the carousel's expected key. Returns true on success.
 // Pure no-op (returns false) in a non-DOM context.
+//
+// R19.13 — also records side-store metadata (capturedAt + width +
+// height + source) under the parallel `preset-thumb-meta-<id>` key
+// so the carousel hover badge can show when + how big + by what
+// path each thumb was minted.
 export function captureThumbnailToStorage(preset, opts = {}) {
   if (typeof document === 'undefined') return false
   const storage = opts.storage || (typeof localStorage !== 'undefined' ? localStorage : null)
@@ -198,11 +312,17 @@ export function captureThumbnailToStorage(preset, opts = {}) {
   if (!preset || typeof preset.id !== 'string' || typeof preset.code !== 'string') return false
   try {
     const canvas = document.createElement('canvas')
-    canvas.width  = opts.width  || THUMB_WIDTH
-    canvas.height = opts.height || THUMB_HEIGHT
+    const w = opts.width  || THUMB_WIDTH
+    const h = opts.height || THUMB_HEIGHT
+    canvas.width  = w
+    canvas.height = h
     if (!renderThumbnailToCanvas(preset.code, canvas, opts)) return false
     const url = canvas.toDataURL('image/jpeg', opts.quality || THUMB_JPEG_QUALITY)
     storage.setItem(thumbStorageKey(preset.id), url)
+    // R19.13 — record metadata alongside the data URL. Failures are
+    // swallowed (the thumb itself succeeded; missing metadata just
+    // means the hover badge skips this entry, not a broken thumb).
+    recordThumbMetadata(preset.id, { width: w, height: h, source: opts.source || 'render' }, storage)
     return true
   } catch { return false }
 }
@@ -212,6 +332,9 @@ export function captureThumbnailToStorage(preset, opts = {}) {
 // (or storage isn't available). Used by the carousel's "rebuild this
 // thumb" action so the prerenderer / live capture path treats the
 // preset as missing on the next pass.
+//
+// R19.13 — also clears the side-store metadata so a stale "captured
+// 3 days ago" badge doesn't outlive its thumb.
 export function clearThumbnail(presetId, storage) {
   if (typeof presetId !== 'string' || !presetId) return false
   const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null)
@@ -221,6 +344,10 @@ export function clearThumbnail(presetId, storage) {
     const had = store.getItem(key) != null
     if (!had) return false
     store.removeItem(key)
+    // Best-effort metadata cleanup. The thumb removal is the source
+    // of truth for "cleared" — a missing or stuck metadata entry
+    // doesn't change that, so we ignore its return value.
+    clearThumbMetadata(presetId, store)
     return true
   } catch { return false }
 }
@@ -243,6 +370,9 @@ export function recaptureThumbnail(preset, opts = {}) {
 // button — clear here, then let the prerenderer + live-capture paths
 // repopulate during the next idle window.
 //
+// R19.13 — also wipes the parallel metadata entries so stale "captured
+// 3d ago" badges don't outlive their thumbs after a bulk clear.
+//
 // Defensive contract:
 //   - non-array presets: returns 0 (no storage touched).
 //   - missing/unavailable storage: returns 0.
@@ -262,6 +392,8 @@ export function clearAllThumbnails(presets, storage) {
         store.removeItem(thumbStorageKey(p.id))
         cleared++
       }
+      // R19.13 — best-effort metadata sweep alongside the thumb removal.
+      clearThumbMetadata(p.id, store)
     } catch { /* per-entry safety */ }
   }
   return cleared

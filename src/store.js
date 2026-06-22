@@ -13,6 +13,7 @@ import {
   sanitizeCurveParams as sanitizeCurveParamsHelper,
   setCurveParam as setCurveParamHelper,
 } from './lib/waveform'
+import { recordThumbMetadata as recordPresetThumbMeta } from './lib/presetThumbnails'
 import {
   loadAttractors as loadNamedAttractors,
   saveAttractors as saveNamedAttractors,
@@ -313,6 +314,12 @@ export const useStore = create((set, get) => {
       ctx.drawImage(canvas, 0, 0, 120, 80)
       const dataUrl = tmpCanvas.toDataURL('image/jpeg', 0.5)
       localStorage.setItem(`preset-thumb-${presetId}`, dataUrl)
+      // R19.13 — pair the live-capture path with metadata so the
+      // hover badge in PresetCarousel can tag this thumb as 'live'
+      // and time-stamp it. Best-effort: a metadata write failure
+      // doesn't cancel the thumb itself.
+      try { recordPresetThumbMeta(presetId, { width: 120, height: 80, source: 'live' }) }
+      catch { /* metadata is the badge, the thumb is the thing */ }
     } catch (e) { console.warn('Thumbnail capture failed:', e) }
   },
 

@@ -1,11 +1,19 @@
 import { useState, useEffect } from 'react'
 import { useStore } from '../store'
 import { presets } from '../presets'
-import { recaptureThumbnail, clearAllThumbnails, summarizeBulkRebuild } from '../lib/presetThumbnails'
+import {
+  recaptureThumbnail, clearAllThumbnails, summarizeBulkRebuild,
+  // R19.13 — per-thumb metadata side-store powers the hover badge
+  readThumbMetadata, summarizeThumbAge,
+} from '../lib/presetThumbnails'
 
 export default function PresetCarousel() {
   const { loadPreset, currentPreset, favoritedPresets, recentPresets, toggleFavorite } = useStore()
   const [thumbs, setThumbs] = useState({})
+  // R19.13 — per-preset metadata cache (capturedAt + width/height +
+  // source). Refreshed alongside thumbs whenever a particle:thumbnail-
+  // ready event fires so the badge reflects the freshest cache state.
+  const [meta, setMeta] = useState({})
   // Tri-state filter: 'all' | 'favs' | 'recent'.
   const [filter, setFilter] = useState('all')
   // Track which preset just had its thumb rebuilt — used to animate the
@@ -22,11 +30,22 @@ export default function PresetCarousel() {
   useEffect(() => {
     const refresh = () => {
       const t = {}
+      const m = {}
       presets.forEach(p => {
         const d = localStorage.getItem(`preset-thumb-${p.id}`)
-        if (d) t[p.id] = d
+        if (d) {
+          t[p.id] = d
+          // R19.13 — keep the metadata cache in lockstep with the thumb
+          // cache so the hover badge never points at a thumb that's
+          // been wiped (or vice versa). readThumbMetadata returns
+          // null on missing/corrupt entries, which the badge UI
+          // handles gracefully.
+          const md = readThumbMetadata(p.id)
+          if (md) m[p.id] = md
+        }
       })
       setThumbs(t)
+      setMeta(m)
     }
     refresh()
     window.addEventListener('particle:thumbnail-ready', refresh)
@@ -182,6 +201,14 @@ export default function PresetCarousel() {
         const isFav = favoritedPresets.includes(p.id)
         const thumb = thumbs[p.id]
         const isBusy = busyId === p.id
+        // R19.13 — per-preset metadata for the hover badge. Only
+        // surfaces when we ACTUALLY have metadata for this preset
+        // (recent rebuilds, fresh installs, or live captures).
+        // summarizeThumbAge returns a compact relative-time string
+        // ("3h", "now", "2d") — null when capturedAt is missing or
+        // unparseable.
+        const md = thumb ? meta[p.id] : null
+        const age = md ? summarizeThumbAge(md) : null
         return (
           <div key={p.id} style={{ position: 'relative', flexShrink: 0 }} className="preset-tile">
             <button
@@ -291,6 +318,40 @@ export default function PresetCarousel() {
                 }}>↻</span>
               </button>
             )}
+            {/* R19.13 — hover-only metadata badge. Sits at the bottom-
+                left of the tile, hidden by default + faded in via the
+                .thumb-meta-badge rule below the carousel markup. Only
+                renders when both the thumb AND its metadata are present
+                so a half-stale state (thumb without meta) skips the
+                badge entirely rather than showing junk. Format:
+                "120×80 · render · 3h" — dimensions, source, age. */}
+            {thumb && md && age && (
+              <span
+                className="thumb-meta-badge"
+                title={`Captured ${new Date(md.capturedAt).toLocaleString()} at ${md.width}\u00d7${md.height} via ${md.source === 'live' ? 'live canvas capture (during preset playback)' : 'offline sampler (background prerender)'}`}
+                style={{
+                  position: 'absolute', bottom: 26, left: 5,
+                  padding: '1px 5px',
+                  borderRadius: 3,
+                  fontSize: 8.5, fontWeight: 600,
+                  letterSpacing: '0.04em',
+                  fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                  background: 'rgba(0,0,0,0.75)',
+                  color: md.source === 'live' ? '#a7f3d0' : '#c7d2fe',
+                  border: `1px solid ${md.source === 'live' ? 'rgba(34,197,94,0.40)' : 'rgba(99,102,241,0.40)'}`,
+                  backdropFilter: 'blur(4px)',
+                  pointerEvents: 'none',
+                  whiteSpace: 'nowrap',
+                  zIndex: 2,
+                  textTransform: 'lowercase',
+                }}>
+                {md.width}{'\u00d7'}{md.height}
+                <span style={{ color: '#7a7a90', margin: '0 3px' }}>{'\u00b7'}</span>
+                {md.source}
+                <span style={{ color: '#7a7a90', margin: '0 3px' }}>{'\u00b7'}</span>
+                {age}
+              </span>
+            )}
             {/* Favorite star */}
             <button
               onClick={e => { e.stopPropagation(); toggleFavorite(p.id) }}
@@ -321,6 +382,11 @@ export default function PresetCarousel() {
         .preset-tile:hover .thumb-rebuild-btn,
         .preset-tile .thumb-rebuild-btn[disabled] { opacity: 1; transform: scale(1); pointer-events: auto; }
         @keyframes thumb-rebuild-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        /* R19.13 — hover-only metadata badge. Tracks the rebuild button's
+           pattern (hidden at rest, fades in on hover) so the tile stays
+           visually tidy until the user is actively scanning it. */
+        .preset-tile .thumb-meta-badge { opacity: 0; transition: opacity 0.18s ease-out; }
+        .preset-tile:hover .thumb-meta-badge { opacity: 1; }
       `}</style>
     </div>
   )
