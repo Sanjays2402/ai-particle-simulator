@@ -3028,6 +3028,56 @@ function NamedAttractorsBlock() {
   }
   const selectAll = () => setSelectedIds(new Set(list.map(a => a.id)))
 
+  // R18.19 — drag-and-drop reorder. Parallels R17.07's camera-path
+  // drag-and-drop (which graduated the chevron R10.03 controls).
+  // Grab any row by its #N badge (the badge wears `cursor: grab` so
+  // discoverability matches camera-path) and drop on another row;
+  // moveAttractorByIndex's existing ref-equal-on-no-op skip makes
+  // a self-drop a free no-op.
+  //
+  // STATE not ref for draggingIdx — each row reads it during render
+  // to compute its `isBeingDragged` styling, and react-hooks/refs
+  // disallows reading refs during render (camera-path lesson from
+  // RightSidebar.jsx R17.07).
+  const [draggingIdx, setDraggingIdx] = useState(null)
+  const [dragOverIdx, setDragOverIdx] = useState(null)
+  const onDragStart = (idx) => (e) => {
+    setDraggingIdx(idx)
+    try { e.dataTransfer.setData('text/plain', String(idx)) } catch { /* */ }
+    e.dataTransfer.effectAllowed = 'move'
+  }
+  const onDragOver = (idx) => (e) => {
+    // preventDefault is what tells the browser a drop is allowed
+    // here; without it, no `drop` event fires.
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (dragOverIdx !== idx) setDragOverIdx(idx)
+  }
+  const onDragLeave = (idx) => () => {
+    // Clear the highlight only if we're leaving the SAME row that's
+    // currently highlighted — sibling enter events fire before this
+    // leave, so a naive clear flickers indicator off+on across each
+    // row boundary.
+    setDragOverIdx(prev => (prev === idx ? null : prev))
+  }
+  const onDrop = (idx) => (e) => {
+    e.preventDefault()
+    const from = draggingIdx
+    setDraggingIdx(null)
+    setDragOverIdx(null)
+    if (from === null || from === undefined) return
+    if (from === idx) return  // self-drop is a no-op
+    // moveAttractorByIndex is the same primitive R15.20's
+    // moveAttractorUp/Down already wraps; calling moveToPosition
+    // (1-based) routes through the same lib helper with the same
+    // ref-equal-on-no-op contract.
+    moveToPosition(list[from].id, idx + 1)
+  }
+  const onDragEnd = () => {
+    setDraggingIdx(null)
+    setDragOverIdx(null)
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <button
@@ -3114,6 +3164,8 @@ function NamedAttractorsBlock() {
           isPlacing={placingId === a.id}
           isSelected={validSelectedIds.has(a.id)}
           hasSelection={validSelectedIds.size > 0}
+          isBeingDragged={draggingIdx === idx}
+          isDropTarget={dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx}
           onShiftClickSelect={() => toggleSelect(a.id)}
           onRename={(name) => update(a.id, { name })}
           onTypeChange={(type) => update(a.id, { type })}
@@ -3125,6 +3177,11 @@ function NamedAttractorsBlock() {
           onMoveUp={idx > 0 ? () => moveUp(a.id) : null}
           onMoveDown={idx < list.length - 1 ? () => moveDown(a.id) : null}
           onJumpToPosition={(pos1Based) => moveToPosition(a.id, pos1Based)}
+          onDragStart={list.length > 1 ? onDragStart(idx) : null}
+          onDragOver={list.length > 1 ? onDragOver(idx) : null}
+          onDragLeave={list.length > 1 ? onDragLeave(idx) : null}
+          onDrop={list.length > 1 ? onDrop(idx) : null}
+          onDragEnd={list.length > 1 ? onDragEnd : null}
         />
       ))}
     </div>
@@ -3134,8 +3191,10 @@ function NamedAttractorsBlock() {
 function NamedAttractorRow({
   index, total, attractor, isPlacing,
   isSelected, hasSelection, onShiftClickSelect,
+  isBeingDragged, isDropTarget,
   onRename, onTypeChange, onStrengthChange, onRadiusChange,
   onToggle, onRemove, onPlace, onMoveUp, onMoveDown, onJumpToPosition,
+  onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd,
 }) {
   const [editing, setEditing] = useState(false)
   const [draftName, setDraftName] = useState(attractor.name)
@@ -3191,24 +3250,44 @@ function NamedAttractorRow({
   return (
     <div
       onMouseDown={onRowMouseDown}
+      draggable={!!onDragStart && !editing && !editingPos}
+      onDragStart={onDragStart || undefined}
+      onDragOver={onDragOver || undefined}
+      onDragLeave={onDragLeave || undefined}
+      onDrop={onDrop || undefined}
+      onDragEnd={onDragEnd || undefined}
       style={{
       borderRadius: 10,
-      background: isSelected
-        ? 'rgba(239,68,68,0.10)'
-        : (attractor.enabled ? 'rgba(255,255,255,0.025)' : 'rgba(255,255,255,0.015)'),
-      border: isSelected
-        ? '1px solid rgba(239,68,68,0.55)'
-        : (isPlacing
-            ? '1px solid rgba(34,197,94,0.45)'
-            : (attractor.enabled
-                ? `1px solid ${typeStyle.borderFaint}`
-                : '1px solid rgba(255,255,255,0.05)')),
-      boxShadow: isSelected
-        ? '0 0 14px rgba(239,68,68,0.22)'
-        : (isPlacing ? '0 0 14px rgba(34,197,94,0.25)' : 'none'),
+      // R18.19 — drop-target tint + accent stripe.
+      background: isDropTarget
+        ? 'rgba(99,102,241,0.10)'
+        : (isSelected
+          ? 'rgba(239,68,68,0.10)'
+          : (attractor.enabled ? 'rgba(255,255,255,0.025)' : 'rgba(255,255,255,0.015)')),
+      border: isDropTarget
+        ? '1px solid rgba(99,102,241,0.55)'
+        : (isSelected
+          ? '1px solid rgba(239,68,68,0.55)'
+          : (isPlacing
+              ? '1px solid rgba(34,197,94,0.45)'
+              : (attractor.enabled
+                  ? `1px solid ${typeStyle.borderFaint}`
+                  : '1px solid rgba(255,255,255,0.05)'))),
+      // R18.19 — left-edge accent stripe so the drop indicator is
+      // scannable even when the row's full border is muted.
+      borderLeft: isDropTarget
+        ? '3px solid rgba(168,85,247,0.85)'
+        : (isBeingDragged
+          ? '3px solid rgba(168,85,247,0.4)'
+          : undefined),
+      boxShadow: isDropTarget
+        ? '0 0 14px rgba(99,102,241,0.25)'
+        : (isSelected
+          ? '0 0 14px rgba(239,68,68,0.22)'
+          : (isPlacing ? '0 0 14px rgba(34,197,94,0.25)' : 'none')),
       padding: '10px 11px',
-      opacity: attractor.enabled ? 1 : 0.55,
-      transition: 'all 0.2s ease-out',
+      opacity: isBeingDragged ? 0.55 : (attractor.enabled ? 1 : 0.55),
+      transition: 'all 0.15s ease-out',
       // R17.17 — explicit cursor cue when shift is the only thing the
       // user can do to a row in selection mode; we don't try to style
       // hover-during-shift in pure CSS (would need :has() and complex
@@ -3285,12 +3364,20 @@ function NamedAttractorRow({
               padding: '1px 5px', borderRadius: 4,
               fontFamily: 'Geist Mono, JetBrains Mono, monospace',
               border: attractor.enabled ? `1px solid ${typeStyle.borderFaint}` : '1px solid transparent',
-              cursor: (total > 1 && onJumpToPosition) ? 'pointer' : 'default',
+              // R18.19 — badge wears the grab cursor when the row is
+              // draggable (parallels camera-path R17.07 visual cue).
+              // Falls back to pointer when the row isn't draggable but
+              // jump-to-position is wired; default cursor otherwise.
+              cursor: onDragStart
+                ? 'grab'
+                : (total > 1 && onJumpToPosition ? 'pointer' : 'default'),
               userSelect: 'none',
             }}
-            title={(total > 1 && onJumpToPosition)
-              ? `Type: ${TYPE_LABELS[attractor.type] || attractor.type} (${typeStyle.label}) — click to jump this row to a numbered position`
-              : `Type: ${TYPE_LABELS[attractor.type] || attractor.type} (${typeStyle.label})`}>
+            title={onDragStart
+              ? `Type: ${TYPE_LABELS[attractor.type] || attractor.type} (${typeStyle.label}) — drag the row to reorder, or click this badge to jump to a numbered position`
+              : ((total > 1 && onJumpToPosition)
+                ? `Type: ${TYPE_LABELS[attractor.type] || attractor.type} (${typeStyle.label}) — click to jump this row to a numbered position`
+                : `Type: ${TYPE_LABELS[attractor.type] || attractor.type} (${typeStyle.label})`)}>
             #{index + 1}
           </span>
         )}
