@@ -94,6 +94,11 @@ Existing capabilities (do not re-ship):
 - Named attractor jump-to-position (R16.18). Graduates the R15.20 single-step chevron reorder. Click the monospace #N badge on any attractor row to open an inline numeric input; type a 1-based position and press Enter (or blur) to jump in one operation instead of clicking ▲/▼ N times. New pure helpers in namedAttractors.js: `moveAttractorTo1BasedPosition(list, id, pos1Based)` (wraps moveAttractorByIndex with generous clamp [1, length] so 99-in-a-5-list jumps to end, same ref-equal-on-no-op contract), `parsePositionInput(raw)` (sanitises string→positive int or null; handles trim/round/empty/non-numeric/≤0). New store action `moveNamedAttractorToPosition`. Min/max attrs hint the input's valid range to browser spinners.
 - MIDI user bundle per-bundle COLOR tag (R16.19). Pick from 8-swatch palette (pink default, violet/indigo/cyan/emerald/amber/rose/slate) to visually sort chips beyond just name. New `USER_PRESET_COLORS` + `USER_PRESET_COLOR_STYLES` + `userPresetColorStyle(c)` (CSS-ready bundle mirroring attractorTypeStyle's shape) + `isValidUserPresetColor` / `sanitizeUserPresetColor` defensive helpers in midiPresets.js. `setUserPresetColor(list, id, color)` mirrors rename's ref-equal-on-no-op contract. load/save/buildUserPresetFromMap all thread `color` through the v1 envelope; legacy bundles missing the field upgrade silently to default on load. UI: tiny round swatch button in the chip header opens an 8-circle palette popover below the chip; active colour gets thicker white border + glow + 1.08× scale. Chip's background/text/border now follow the bundle's accent (replaces the hard-coded pink).
 - Lightbox WASD pan acceleration curve (R16.20). Graduates the R15.13 hold-to-repeat with a hold-time multiplier: stays at 1× for the first 1s (precision near centre), then linearly ramps to 3× over the next 1.5s (a 2.5s sustained sweep covers ~6× the ground of a single tap). New pure helpers in pinchZoom.js: `panAccelMultiplier(elapsedMs, opts)` (returns 1× below threshold, lerps to PAN_ACCEL_MAX=3 over PAN_ACCEL_RAMP_MS=1500, caps at MAX past it; NaN/null/±Infinity defensive), `scaleDirByHold(dir, elapsedMs, opts)` (returns input ref unchanged when multiplier===1 — zero allocation on hot 60ms tick). SnapshotGallery seeds `holdStartTsRef` when chord begins, reads elapsed each tick, scales aggregated direction before applyKeyboardPan. Resets on keyup-to-empty / blur so next press starts fresh.
+- Lightbox pan acceleration curve preset chip (R17.20). Graduates the R16.20 single-shape ramp with four chip-cycled curves: linear (default, R16.20 baseline), exp (t² — slow start, sprint finish), log (sqrt(t) — fast help early, then settle), off (acceleration disabled entirely). New pure helpers in pinchZoom.js: `PAN_ACCEL_CURVES` roster + `nextPanAccelCurve(current)` with unknown-string fallback to first entry; `panAccelMultiplier` extended with `opts.curve` passthrough; `scaleDirByHold` threads `opts.curve` so existing callsites only change at the threading layer. Endpoint convergence preserved across every curve so swapping curves never overshoots MAX or dips below 1×; monotonicity preserved on input so a sweep can never retreat mid-hold. Persisted via `setLightboxPanCurve` (key `lightbox-pan-curve-v1`); parallels `spectrumPeakCurve` (R16.17) for UX consistency. SnapshotGallery `panCurveRef` mirrors the store value so the hold-keys interval re-reads the live curve every 60ms tick — flipping mid-sweep reshapes in real time.
+- Per-attractor MIDI: route CC to RADIUS via inverse log curve (R17.15). Adds a sibling `attr:<id>:radiusLog` slot next to the linear `attr:<id>:radius` so users can pick the knob feel that matches their hardware. Curve `2^v - 1` (2^0=1, 2^1=2, divisor implicit) maps v01 ∈ [0,1] to [0,1] with midpoint ≈0.414: a knob's bottom half covers radii 4..8 (fine control at the low end where small radius changes have the biggest visible effect on a scene) and the top half flows up through 8..16. Both rows live side-by-side in the MidiPanel per-attractor section so binding-by-feel is one click. New pure helpers `logCurveShape(v01)` + `logCurveRadius(v01)` in midiMap.js with full defensive contract (NaN/±Infinity/negative/>1 all clamp safely; non-finite falls to MIN = the calm default). `ATTRACTOR_FIELD_RADIUS_LOG` + `ATTRACTOR_FIELDS` grows from 6 to 7 entries, slotted directly after RADIUS so the panel groups the pair adjacent. `labelForAttractorField` returns 'Radius·log'; `resolveActionForId` handles the new field with `set(v01, s) => s.updateNamedAttractor(id, { radius: logCurveRadius(v01) })`. MidiPanel row tooltip explains the curve semantic; range label shows "4..16 log" (vs "4..16" linear) so users can tell which routing they're looking at.
+- Named attractor bulk-delete via shift-click multi-select (R17.17). Graduates the single-× delete with a multi-select bar that surfaces above the list as soon as one row is selected; offers Select all / Clear / Delete N (gradient red, window.confirm gate). Shift-click on any row toggles its membership in the selection set; selected rows wear a red border + glow + on-row checkbox indicator. Selection auto-reconciles via a `useMemo(validSelectedIds)` derived value (no setState-in-effect) so ids that vanish externally drop from the bar's counts silently. New pure helper `removeAttractors(list, idSet)` in namedAttractors.js accepts Set | Array | iterable (incl. generators), normalises to Set internally for O(1) hits, returns input REF unchanged when nothing in idSet existed (ref-equal-on-no-op skips redundant save), drops corrupt null rows as a side-effect (parallels removeView contract). Store action `removeNamedAttractors(ids)` wraps with the same skip contract.
+- Camera path drag-and-drop reorder (R17.07). Graduates the chevron up/down buttons (R10.03) with a direct drag gesture for users who'd rather GRAB the row and DROP it where they want. The chevrons stay (precision moves + keyboard-only users). Pure wire layer on top of `moveView(views, fromIdx, toIdx)` from R10.03 so no new lib helpers / no new unit tests — the ref-equal-on-no-op skip + happy paths + defensive cases were already pinned in cameraViews.test.mjs. `useState(null)` for `draggingIdx` (NOT a ref — each row reads it during render to compute its `isBeingDragged` styling, and react-hooks/refs disallows reading refs during render). `dragOverIdx` state drives the indigo drop-target highlight; the dragLeave handler clears only when leaving the SAME row currently highlighted so sibling enter events don't flicker the indicator across row boundaries.
+- Custom theme pack drag-and-drop import (R17.06). Graduates the click-to-import button with a file-drop zone covering the entire CustomThemesRow block. Drop a .json theme pack anywhere on the row and the same R10.10 preview panel surfaces — no auto-apply, every import still flows through the Merge/Replace dry-run summary. Implementation: `dragDepth` counter tracks nested dragenter/leave so the highlight only clears when the ACTUAL drag leaves the container (browsers fire enter+leave on every child element a drag crosses; naive boolean would flicker at every chip). Filters by `dataTransfer.types.includes('Files')` so stray text-drags don't trigger the overlay. Only the FIRST file in a multi-file drop is read; non-.json files toast an error. Drop handler shares `parseAndPreview(file)` with the file-picker path so a future format change only touches one place. Visual feedback: dashed indigo outline (outlineOffset:4 keeps layout stable), 5% bg tint, "Drop .json to preview theme pack" banner pinned to top with pointerEvents:none so drag events keep hitting the parent.
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -276,29 +281,44 @@ focused batch. Substituted R16.06, R16.17, R16.18, R16.19, R16.20
 from the future queue to keep the batch at 5 great slices instead
 of padding.
 
-### Batch 17 — next 5 (refilled)
-- [ ] R17.01 Echo / trail FBO that survives EffectComposer (carried over — render pipeline refactor, dedicated batch)
-- [ ] R17.02 Named attractor 3D drag handle (carried over — needs r3f gizmo handles, dedicated batch)
-- [ ] R17.03 OpenGraph snapshot endpoint (server-rendered card for share URLs) — needs backend [carried over]
-- [ ] R17.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [carried from R16.04]
-- [ ] R17.05 Audio-reactive bg curve chips → custom curve editor for power users (visual spline / 3-knot bezier) [carried from R16.05]
+### Batch 17 — pan accel chip + log-curve radius + bulk-delete + drag reorder + theme drag-import  (SHIPPED)
+- [x] **R17.20** Lightbox pan acceleration curve preset chip (linear/exp/log/off) — 21f15f1
+- [x] **R17.15** Per-attractor MIDI: route CC to RADIUS via inverse curve — fb8d794
+- [x] **R17.17** Named attractor bulk-delete via shift-click selection — a927c8d
+- [x] **R17.07** Camera path drag-and-drop reorder (graduates R10.03) — 62bacfa
+- [x] **R17.06** Theme pack drag-and-drop import to sidebar — afc5a6f
+
+Note: R17.01 (Echo / trail FBO) and R17.02 (Named attractor 3D drag
+handle) deferred yet again — both need their own dedicated render-
+pipeline / r3f-gizmo batches. R17.03 (server-rendered OG endpoint)
+still deferred — no backend runtime. R17.04 (multi-error gutter
+overlay) and R17.05 (custom audio-reactive curve editor) each need
+their own focused batch. Substituted R17.06, R17.07, R17.15, R17.17,
+R17.20 from the future queue.
+
+### Batch 18 — next 5 (refilled)
+- [ ] R18.01 Echo / trail FBO that survives EffectComposer [carried from R17.01 — render pipeline refactor, dedicated batch]
+- [ ] R18.02 Named attractor 3D drag handle (r3f gizmo) [carried from R17.02 — dedicated batch]
+- [ ] R18.03 OpenGraph snapshot endpoint (server-rendered share card) [carried from R17.03 — needs backend]
+- [ ] R18.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [carried from R17.04]
+- [ ] R18.05 Audio-reactive bg curve chips → custom curve editor for power users (visual spline / 3-knot bezier) [carried from R17.05]
 
 ### Future queue (refill when batch closes)
-- [ ] R17.06 Theme pack preview: drag a JSON onto the sidebar to preview without the file picker [was R16.07]
-- [ ] R17.07 Camera path: drag-and-drop reorder (graduates from arrow-button slice R10.03) [was R16.08]
-- [ ] R17.08 Snapshot grid: long-press a tile to multi-select for bulk delete [was R16.09]
-- [ ] R17.09 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view [was R16.10]
-- [ ] R17.10 Smash bias: user-editable per-chip ranges (open the bias as JSON, tweak, re-save) [was R16.11]
-- [ ] R17.11 MIDI user bundle: drag-and-drop a bundle JSON onto the MidiPanel to import (skip the file picker) [was R16.12]
-- [ ] R17.12 Minimap: hover a saved-view dot for ~1s shows a thumbnail preview (canvas2D sample of the scene from that camera) [was R16.13]
-- [ ] R17.13 Wind chip overrides: per-chip live "what slot is this CC bound to" badge if the chip's seconds is bound to a CC (cross-reference between MIDI map + wind chips) [was R16.14]
-- [ ] R17.14 Crossfade chip overrides: same MIDI cross-reference badge as R17.13 [was R16.15]
-- [ ] R17.15 Per-attractor MIDI: route CC to RADIUS via inverse curve (e.g. log-spaced) so small knob movements at low radii are still useful [was R16.16]
-- [ ] R17.16 MIDI user bundle: per-bundle keyboard shortcut binding (assign a hotkey to apply each bundle without opening the panel)
-- [ ] R17.17 Named attractor: bulk-delete via shift-click selection (multi-select rows then one Delete button)
-- [ ] R17.18 Spectrum peak trail: per-curve tunable parameters (exp's exponent, log's base) — power users can taste-shape beyond the 3 shipped presets [graduates from R16.17]
-- [ ] R17.19 Carousel: per-preset thumb metadata badge (cached date, dimensions, time since last view) on hover
-- [ ] R17.20 Lightbox: pan acceleration curve preset chip (linear/exp/log/off) parallels the spectrum trail chip [graduates from R16.20]
+- [ ] R18.06 Snapshot grid: long-press a tile to multi-select for bulk delete [was R17.08]
+- [ ] R18.07 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view [was R17.09]
+- [ ] R18.08 Smash bias: user-editable per-chip ranges (open the bias as JSON, tweak, re-save) [was R17.10]
+- [ ] R18.09 MIDI user bundle: drag-and-drop a bundle JSON onto the MidiPanel to import (skip the file picker) [was R17.11]
+- [ ] R18.10 Minimap: hover a saved-view dot for ~1s shows a thumbnail preview (canvas2D sample of the scene from that camera) [was R17.12]
+- [ ] R18.11 Wind chip overrides: per-chip live "what slot is this CC bound to" badge if the chip's seconds is bound to a CC (cross-reference between MIDI map + wind chips) [was R17.13]
+- [ ] R18.12 Crossfade chip overrides: same MIDI cross-reference badge as R18.11 [was R17.14]
+- [ ] R18.13 MIDI user bundle: per-bundle keyboard shortcut binding (assign a hotkey to apply each bundle without opening the panel) [was R17.16]
+- [ ] R18.14 Spectrum peak trail: per-curve tunable parameters (exp's exponent, log's base) — power users can taste-shape beyond the 3 shipped presets [was R17.18, graduates from R16.17]
+- [ ] R18.15 Carousel: per-preset thumb metadata badge (cached date, dimensions, time since last view) on hover [was R17.19]
+- [ ] R18.16 Per-attractor MIDI: route CC to TYPE (cycle through attractor/repulsor/vortex/turbulence as the knob sweeps) [new — graduates from R15.16 enabled-routing concept]
+- [ ] R18.17 Camera path: drag-and-drop reorder ALSO works on touch (current R17.07 is desktop-only — touch users need a long-press-to-drag gesture)
+- [ ] R18.18 Theme pack: drag-and-drop multiple .json files at once (current R17.06 reads only the FIRST file)
+- [ ] R18.19 Named attractor row: drag-and-drop reorder via the #N badge handle (parallel to R17.07 camera-path drag — would replace the chevron R15.20 buttons with a single grab handle)
+- [ ] R18.20 Spectrum peak trail: per-bar colour tint based on frequency (low bars warm, high bars cool — graduates from R15.07 trail)
 
 ## TICK LOG
 - 2026-06-19 23:41 PT — Bootstrap + Batch 1 (5/5).
@@ -669,3 +689,59 @@ of padding.
   1e9) + monotonicity invariant + full defensive contract
   including ±Infinity handling + scaleDirByHold ref-equality on
   hot path · ~245 fresh asserts this batch).
+- 2026-06-22 05:42 PT — Batch 17 (5/5).
+  Commits: 21f15f1 (R17.20 lightbox pan accel curve chip
+  linear/exp/log/off — PAN_ACCEL_CURVES + nextPanAccelCurve +
+  panAccelMultiplier extended with opts.curve passthrough +
+  scaleDirByHold threads curve, persisted via setLightboxPanCurve
+  with key `lightbox-pan-curve-v1` parallels R16.17 spectrumPeakCurve),
+  fb8d794 (R17.15 per-attractor MIDI radius·log routing — sibling
+  `attr:<id>:radiusLog` slot next to linear radius, 2^v-1 curve
+  with midpoint ≈0.414, ATTRACTOR_FIELDS grew from 6 to 7 entries
+  slotted directly after RADIUS, logCurveShape + logCurveRadius
+  pure helpers with full defensive contract), a927c8d (R17.17
+  named attractor bulk-delete via shift-click multi-select —
+  validSelectedIds derived via useMemo to dodge react-hooks/
+  set-state-in-effect, removeAttractors helper accepts Set|Array|
+  iterable with ref-equal-on-no-op contract + corrupt-row cleanup
+  side-effect, removeNamedAttractors store action), 62bacfa
+  (R17.07 camera path drag-and-drop reorder — pure wire layer on
+  R10.03 moveView primitive, draggingIdx kept in STATE not REF so
+  render-time reads pass react-hooks/refs, drag-target highlight
+  with sibling-enter-before-leave guard), afc5a6f (R17.06 custom
+  theme pack drag-and-drop import — file-drop zone covering whole
+  CustomThemesRow, dragDepth counter handles nested enter/leave
+  flicker, shared parseAndPreview path with file picker so future
+  format change touches one place, +.json file-extension validation
+  + multi-file first-only convention, also rolled in the two
+  lint-gate cleanups: validSelectedIds rewrite + draggingIdx
+  state migration that surfaced during the end-of-batch gate).
+  R17.01 / R17.02 / R17.03 / R17.04 / R17.05 all deferred —
+  first three are dedicated infrastructure batches (render-pipeline
+  / r3f-gizmo / backend runtime), R17.04 + R17.05 each need their
+  own focused batch. Substituted R17.06, R17.07, R17.15, R17.17,
+  R17.20 from the future queue.
+  Gates: lint 23 errors / 3 warnings — exactly matches baseline
+  (zero new errors / warnings in any of the 7 modified .js/.jsx
+  files + 3 modified .test.mjs files; the lint-gate cleanups
+  rolled into afc5a6f caught + resolved 2 new errors that
+  surfaced at the gate — RightSidebar.jsx draggingIdxRef.current
+  read-during-render, LeftSidebar.jsx setSelectedIds-in-effect —
+  same pattern as 72c186f + 6cf966a from prior batches). Build:
+  1.26 s green (1.73 MB bundle, gzip 515 KB — +0 KB vs Batch 16,
+  R17.06/07/17 are pure wire layers + R17.15/20 added tiny helpers).
+  Unit tests: 39/39 files pass (extended pinchZoom with ~30 R17.20
+  asserts pinning PAN_ACCEL_CURVES roster order + nextPanAccelCurve
+  wraparound + curve-specific endpoint convergence + slow-vs-fast
+  property exp<linear<log at mid-ramp + monotonicity invariant +
+  defensive fallback + scaleDirByHold off-curve ref-equal contract;
+  extended midiMap with ~50 R17.15 asserts pinning logCurveShape
+  endpoint anchors + midpoint ≈0.414 + monotonicity + full
+  defensive contract for non-finite/out-of-range + attractorActionId
+  mint + resolveActionForId log-curve setter + 7-field invariant
+  + radiusLog adjacent to linear radius layout invariant; extended
+  namedAttractors with ~30 R17.17 asserts pinning Set/Array/iterable
+  input forms + single/multi/full-wipe behaviour + order preservation
+  + ref-equal-on-no-op 8 different no-op shapes + corrupt-row cleanup
+  + input list never mutated + empty-array return on non-array list
+  · ~110 fresh asserts this batch). ATTRACTOR_FIELDS now at 7 (was 6).
