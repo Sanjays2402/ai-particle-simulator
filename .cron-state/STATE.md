@@ -103,7 +103,16 @@ Existing capabilities (do not re-ship):
 - MIDI user bundle drag-and-drop import (R18.09). Graduates the click-Import-bundle / Import-all buttons with direct drag-and-drop on the entire Controller Presets bar (parallels R17.06 theme-pack drag-import). Auto-detects single-bundle (kind=`midi-user-bundle`) vs multi-bundle (kind=`midi-user-bundles`) by trying parseImportMulti first then falling through to parseImport (single). Bare-array top-level shorthand still works via parseImportMulti. Pure wire layer — no new IO module, no envelope changes; the panel passes a single `onDropFile` handler to a presentational PresetBar that does the dragDepth-counter highlight + filter-by-Files-mimetype + drop-zone banner. Multi-imports gate through the same window.confirm impact summary as the file-picker path; single-imports respect the bundle cap (rejects when at MAX_USER_PRESETS with a toast instead of silent FIFO drop). Non-.json files toast an error.
 - Theme pack drag-and-drop multiple .json files at once (R18.18). Graduates R17.06's first-file-only convention. Drops every .json file in a single gesture, reads them in parallel via Promise.all, combines valid items into a single preview panel. Failed parses surface as per-file error counts in a toast but don't block valid ones — partial success is preserved. Sorted by filename for stable preview/commit ordering across machines. New helper `parseAndPreviewMulti(files, skipped)` runs alongside `parseAndPreview` so the file-picker path is untouched. Cross-file duplicate names aren't deduped here — the existing mergeThemesImport step handles collisions when the user clicks Apply. Preview header shows "12 themes · 3 files" with a tooltip listing every contributing filename; filename slot widens to 160px. Drop banner gains "(multi-file ok)" hint.
 - Named attractor drag-and-drop reorder via #N badge handle (R18.19). Parallels R17.07's camera-path drag-and-drop. Grab any attractor row (the #N badge wears cursor:grab so affordance matches camera-path) and drop on another row to move it. Chevron up/down (R15.20) + jump-to-position click-to-edit (R16.18) stay alongside — three layered controls cover precise single-step, arbitrary numeric jump, and direct visual drag. Pure wire layer on top of moveAttractorByIndex (already pinned in tests). draggable attribute gated on `!editing && !editingPos` so a user double-clicking the name or typing a jump-position doesn't have their text-selection drag converted to a row drag mid-keystroke. Drop-target row gets indigo tint + indigo border + 3px violet left stripe; dragged row drops to 0.55 opacity + muted-violet stripe. dragOverIdx clears only on leaving the SAME row currently highlighted (sibling-enter-before-leave guard, same as R17.07).
+- Per-attractor MIDI: route a CC to TYPE — knob cycles 4 force-field types (R18.16). Graduates the ENABLED routing R15.16 with band-hysteresis selection: [0..1] split into N equal-width bands (4 with current ATTRACTOR_TYPES), with a symmetric TYPE_BAND_HYSTERESIS=0.015 dead-band at each boundary that holds the previous type when the boundary is between the live type and its immediate neighbour (non-adjacent jumps skip the hold). Pure helper `pickAttractorTypeForCC(prevType, v01, types?, hysteresis?)` in midiMap.js; full defensive contract pinned (NaN/±Infinity holds previous, empty/invalid types returns previous, single-type list always wins, custom hysteresis arg). ATTRACTOR_FIELDS extended to 8 entries with `attr:<id>:type` slot; resolveActionForId reads LIVE attractor type at apply-time for dead-band decisions and writes only on transition. MidiPanel TYPE row gets a "cycle 4" range hint + boundary-semantics tooltip. ~90 fresh asserts: band selection, endpoint anchors, clamp behaviour, dead-band hold (lower + upper neighbour, both sweep directions), non-adjacent skip, full-sweep round-trip invariant (≤3 transitions across 0→1, every type visited).
+- MIDI user bundle drag-and-drop import (R18.09). Graduates the click-Import-bundle / Import-all buttons with direct drag-and-drop on the entire Controller Presets bar (parallels R17.06 theme-pack drag-import). Auto-detects single-bundle (kind=`midi-user-bundle`) vs multi-bundle (kind=`midi-user-bundles`) by trying parseImportMulti first then falling through to parseImport (single). Bare-array top-level shorthand still works via parseImportMulti. Pure wire layer — no new IO module, no envelope changes; the panel passes a single `onDropFile` handler to a presentational PresetBar that does the dragDepth-counter highlight + filter-by-Files-mimetype + drop-zone banner. Multi-imports gate through the same window.confirm impact summary as the file-picker path; single-imports respect the bundle cap (rejects when at MAX_USER_PRESETS with a toast instead of silent FIFO drop). Non-.json files toast an error.
+- Theme pack drag-and-drop multiple .json files at once (R18.18). Graduates R17.06's first-file-only convention. Drops every .json file in a single gesture, reads them in parallel via Promise.all, combines valid items into a single preview panel. Failed parses surface as per-file error counts in a toast but don't block valid ones — partial success is preserved. Sorted by filename for stable preview/commit ordering across machines. New helper `parseAndPreviewMulti(files, skipped)` runs alongside `parseAndPreview` so the file-picker path is untouched. Cross-file duplicate names aren't deduped here — the existing mergeThemesImport step handles collisions when the user clicks Apply. Preview header shows "12 themes · 3 files" with a tooltip listing every contributing filename; filename slot widens to 160px. Drop banner gains "(multi-file ok)" hint.
+- Named attractor drag-and-drop reorder via #N badge handle (R18.19). Parallels R17.07's camera-path drag-and-drop. Grab any attractor row (the #N badge wears cursor:grab so affordance matches camera-path) and drop on another row to move it. Chevron up/down (R15.20) + jump-to-position click-to-edit (R16.18) stay alongside — three layered controls cover precise single-step, arbitrary numeric jump, and direct visual drag. Pure wire layer on top of moveAttractorByIndex (already pinned in tests). draggable attribute gated on `!editing && !editingPos` so a user double-clicking the name or typing a jump-position doesn't have their text-selection drag converted to a row drag mid-keystroke. Drop-target row gets indigo tint + indigo border + 3px violet left stripe; dragged row drops to 0.55 opacity + muted-violet stripe. dragOverIdx clears only on leaving the SAME row currently highlighted (sibling-enter-before-leave guard, same as R17.07).
 - Snapshot grid long-press multi-select for bulk delete (R18.06). Long-press (≥450ms) any tile in grid view to enter selection mode; a delete bar surfaces above the grid with Select all / Clear / Delete N (parallels R17.17 attractor multi-select). Tap-at-rest opens lightbox (unchanged); tap-in-select-mode toggles selection. Move guard (LONG_PRESS_SLOP_PX=8) bails out if the user starts to scroll/swipe — long-press only fires on a genuine hold. After firing, the synthetic click is swallowed. validSelectedIds reconciled at render-time via useMemo so externally-removed snapshots drop out of counts without setState-in-effect. Selection clears on gallery close / view-change (grid-only by design). New pure helper `removeSnapshots(items, idSet)` mirrors removeAttractors contract — Set | Array | iterable inputs, ref-equal-on-no-op skip, corrupt-row cleanup. Visual: selected tiles get red border + glow + filled red checkmark; unselected-in-select-mode get an empty ring; hover actions hidden in select mode so a careful tap doesn't fight the toggle. touchAction:'manipulation' + WebkitTouchCallout:'none' prevents iOS native long-press action sheet from intercepting.
+- Spectrum peak trail per-curve tunable parameters (R19.12). Graduates R16.17's fixed-shape curves (t^2 for exp, sqrt(t) for log) with one knob per shape: `exp.exponent` (1..6, default 2 — t^exponent; higher = sharper head bloom; 1.0 degenerates to linear) and `log.base` (2..8, default 4 — log(1+(base-1)*t)/log(base); higher = tail lingers more aggressively). Endpoint anchoring INVARIANT across every (curve, params) combination (0 at t=0, 1 at t=1) so swapping shapes or tweaking params never disturbs the trail's overall MIN/MAX brightness — only the distribution between. New pure helpers in waveform.js: `PEAK_TRAIL_CURVE_PARAMS` schema with min/max/step/default/label/hint per entry; `defaultPeakTrailCurveParams()` returns non-aliased fresh defaults; `sanitizeCurveParamValue(curve, key, raw)` clamps + non-finite-fallback-to-default; `sanitizeCurveParams(raw)` merges partial map with defaults; `setCurveParam(params, curve, key, raw)` ref-equal-on-no-op contract; `isCurveParamsAtDefaults(params)` projector. `applyTrailCurve(t, curve, params)` extended with params arg threaded through both branches. `readPeakTrail(state, barIndex, current, opts)` accepts opts.curveParams passthrough. UI: CurveChipWithLongPress wraps the R16.17 chip with pointer-event-based long-press (≥400ms hold opens the param editor popover); small sky-blue dot next to chip label when curve has non-default params; popover renders one slider per param with reset button (atomic reset across all curves, mirrors the chip overrides IO patterns). Store: spectrumPeakCurveParams persisted to `spectrum-peak-curve-params-v1`; sanitizeCurveParams runs on every read so corrupt persisted values resolve to defaults; setSpectrumPeakCurveParam + resetSpectrumPeakCurveParams actions.
+- Per-attractor MIDI: TYPE row shows live band on tooltip (R19.16). Graduates R18.16's invisible band-hysteresis with a scannable cue: each TYPE row with a bound CC + at least one message seen on that CC wears a tiny coloured tag showing "N/4 typename" (band index + type label) + a `·hold` amber suffix when the live value sits inside the dead-band so the user knows the type is HELD (not about to flip from jitter). New pure projector `describeTypeBand(v01, types?, hysteresis?)` in midiMap.js: returns `{ index, label, total, holdingPrev, distanceToEdge01 }` using the SAME band-width + hysteresis math as pickAttractorTypeForCC so the tag never lies about the picker's actual decision. holdingPrev is true only when v01 is inside the symmetric hysteresis window around a TRUE boundary (extremes 0/1 never hold since there's no neighbouring boundary). MidiPanel wires per-CC lastCCByNumber state cache (functional setState with same-value-skip + bound-CC-only filter so chatty controllers pumping unbound CCs don't trigger 60Hz re-renders). Badge wears the type's accent colour via attractorTypeStyle (parallels R14.05 indigo/red/violet/amber palette).
+- Per-preset thumb metadata badge on hover (R19.13). Hover any preset tile in the carousel to see a tiny metadata badge in the bottom-left corner: "120×80 · render · 3h" (dimensions, source, age). Source-tagged colour (live=green, render=indigo) shows at a glance which capture path minted the thumb. Tooltip carries full ISO-localised timestamp + source explanation. New lib helpers in presetThumbnails.js: `thumbMetadataKey(id)` parallel storage-key shape (preset-thumb-meta-<id>); `recordThumbMetadata(id, opts, storage)` writes JSON-encoded {capturedAt, width, height, source}; `readThumbMetadata(id, storage)` reads + sanitises (returns null on missing/corrupt/missing-capturedAt); `clearThumbMetadata(id, storage)` matches clearThumbnail's contract; `summarizeThumbAge(metadata, now=Date.now())` returns compact "now"/"12s"/"4m"/"3h"/"2d"/"3w"/"2y" (future timestamps clamp to "now" so we never report negative ages). captureThumbnailToStorage + capturePresetThumbnail (live path) both record metadata; clearThumbnail + clearAllThumbnails cascade-wipe metadata so stale badges don't outlive their thumbs.
+- MIDI user bundle drag-and-drop accepts multiple .json files at once (R19.20). Graduates R18.09's first-file-only convention with the multi-file gesture R18.18 brought to theme packs. Drop N .json files at once and the panel COMBINES them into one impact summary before the confirm fires. Per-file failures (corrupt JSON, wrong-kind envelope, non-.json extension) are counted + toasted but don't block valid bundles in the same drop — partial success preserved. New pure helper `combineDroppedBundles(reads)` in midiUserBundleIO.js takes per-file FileReader results { raw, error?, name? } and returns { bundles, parseFails, totalFilesRead } using the same parseImportMulti → parseImport precedence as the single-file drop; pure / no DOM so the combine logic is regression-pinned without polyfilling FileReader. PresetBar drop handler accepts onDropFiles alongside onDropFile (multi-file is preferred when present, single-file is the fallback for older callsites). Drop banner gains "(multi-file ok)" hint.
+- Named attractor drag-reorder accepts drops on row gaps for insert-here (R19.19). Graduates R18.19's drop-on-row gesture with drop-on-GAP zones so users can insert an attractor EXACTLY into a target slot (insert semantics) instead of only swapping with a specific row's position. Thin gap zones appear between every pair of rows (and above the first / below the last). At rest: 6px tall + transparent (invisible spacer doesn't disturb the resting layout); during drag: stays 6px until hovered then expands to 22px with indigo dashed strip + soft gradient. Trailing gap below the last row only renders during an active drag. New pure helper `dropIndexForGap(from, gapIdx, listLength)` in namedAttractors.js encapsulates the splice-bookkeeping math (from < gapIdx: insert at gapIdx - 1 due to remove-then-insert shift; from >= gapIdx: insert at gapIdx; no-op when gap above/below self). Defensive: non-finite/negative/out-of-range inputs return null. NamedAttractorRow wraps in a fragment with leading gap div; the trailing-gap div lives at the block level.
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -316,29 +325,45 @@ overlay) and R18.05 (custom audio-reactive curve editor) each need
 their own focused batch. Substituted R18.06, R18.09, R18.16, R18.18,
 R18.19 from the future queue to keep the batch at 5 great slices.
 
-### Batch 19 — next 5 (refilled)
-- [ ] R19.01 Echo / trail FBO that survives EffectComposer [carried from R18.01 — render pipeline refactor, dedicated batch]
-- [ ] R19.02 Named attractor 3D drag handle (r3f gizmo) [carried from R18.02 — dedicated batch]
-- [ ] R19.03 OpenGraph snapshot endpoint (server-rendered share card) [carried from R18.03 — needs backend]
-- [ ] R19.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [carried from R18.04]
-- [ ] R19.05 Audio-reactive bg curve chips → custom curve editor for power users (visual spline / 3-knot bezier) [carried from R18.05]
+### Batch 19 — peak trail params + MIDI TYPE tooltip + thumb metadata + multi-file drop + gap-drop  (SHIPPED)
+- [x] **R19.12** Spectrum peak trail per-curve tunable parameters (exp exponent, log base)  — f66dff3
+- [x] **R19.16** Per-attractor MIDI: TYPE row shows live band on tooltip  — c55527e
+  (+ f4717f5 lint-gate cleanup: lastCCByNumber useRef → useState)
+- [x] **R19.13** Carousel: per-preset thumb metadata badge on hover  — 6d4bd68
+- [x] **R19.20** MIDI user bundle drag-and-drop accepts multiple .json files at once  — 22f05d6
+- [x] **R19.19** Named attractor drag-reorder accepts drops on row gaps for insert-here  — 9ecc15f
+
+Note: R19.01 (Echo / trail FBO) / R19.02 (3D drag handle) / R19.03
+(server-rendered OG endpoint) / R19.04 (multi-error gutter overlay)
+/ R19.05 (custom audio-reactive curve editor) all deferred — first
+three are dedicated infrastructure batches (render-pipeline /
+r3f-gizmo / backend runtime), R19.04 + R19.05 each need their own
+focused batch. Substituted R19.12, R19.13, R19.16, R19.19, R19.20
+from the future queue to keep the batch at 5 great slices.
+
+### Batch 20 — next 5 (refilled)
+- [ ] R20.01 Echo / trail FBO that survives EffectComposer [carried — render pipeline refactor, dedicated batch]
+- [ ] R20.02 Named attractor 3D drag handle (r3f gizmo) [carried — dedicated batch]
+- [ ] R20.03 OpenGraph snapshot endpoint (server-rendered share card) [carried — needs backend]
+- [ ] R20.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [carried]
+- [ ] R20.05 Audio-reactive bg curve chips → custom curve editor for power users (visual spline / 3-knot bezier) [carried]
 
 ### Future queue (refill when batch closes)
-- [ ] R19.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view [was R18.07]
-- [ ] R19.07 Smash bias: user-editable per-chip ranges (open the bias as JSON, tweak, re-save) [was R18.08]
-- [ ] R19.08 Minimap: hover a saved-view dot for ~1s shows a thumbnail preview (canvas2D sample of the scene from that camera) [was R18.10]
-- [ ] R19.09 Wind chip overrides: per-chip live "what slot is this CC bound to" badge if the chip's seconds is bound to a CC (cross-reference between MIDI map + wind chips) [was R18.11]
-- [ ] R19.10 Crossfade chip overrides: same MIDI cross-reference badge as R19.09 [was R18.12]
-- [ ] R19.11 MIDI user bundle: per-bundle keyboard shortcut binding (assign a hotkey to apply each bundle without opening the panel) [was R18.13]
-- [ ] R19.12 Spectrum peak trail: per-curve tunable parameters (exp's exponent, log's base) — power users can taste-shape beyond the 3 shipped presets [was R18.14, graduates from R16.17]
-- [ ] R19.13 Carousel: per-preset thumb metadata badge (cached date, dimensions, time since last view) on hover [was R18.15]
-- [ ] R19.14 Camera path: drag-and-drop reorder ALSO works on touch (R17.07 is desktop-only — touch users need a long-press-to-drag gesture) [was R18.17]
-- [ ] R19.15 Spectrum peak trail: per-bar colour tint based on frequency (low bars warm, high bars cool — graduates from R15.07 trail) [was R18.20]
-- [ ] R19.16 MIDI per-attractor TYPE: tooltip on each row showing the current quarter the live CC value sits in (so users SEE the band picker working without watching the type chip on the row) [new — graduates R18.16]
-- [ ] R19.17 Snapshot grid: bulk download all selected as a zip (graduates R18.06 selection mode) [new]
-- [ ] R19.18 Theme pack drag-drop: progress indicator when N > 10 files (current parallel Promise.all is fast but visible delay on big drops) [new — graduates R18.18]
-- [ ] R19.19 Named attractor drag-reorder: also accepts drops on the empty gap between rows for "insert here" semantics (current R18.19 only drops on rows) [new — graduates R18.19]
-- [ ] R19.20 MIDI bundle drag-drop: multi-file drop (drop N bundle files at once, same parallel-parse + combined preview as R18.18 themes) [new — graduates R18.09]
+- [ ] R20.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view [was R19.06]
+- [ ] R20.07 Smash bias: user-editable per-chip ranges (open the bias as JSON, tweak, re-save) [was R19.07]
+- [ ] R20.08 Minimap: hover a saved-view dot for ~1s shows a thumbnail preview (canvas2D sample of the scene from that camera) [was R19.08]
+- [ ] R20.09 Wind chip overrides: per-chip live "what slot is this CC bound to" badge if the chip's seconds is bound to a CC (cross-reference between MIDI map + wind chips) [was R19.09]
+- [ ] R20.10 Crossfade chip overrides: same MIDI cross-reference badge as R20.09 [was R19.10]
+- [ ] R20.11 MIDI user bundle: per-bundle keyboard shortcut binding (assign a hotkey to apply each bundle without opening the panel) [was R19.11]
+- [ ] R20.12 Camera path: drag-and-drop reorder ALSO works on touch (R17.07 is desktop-only — touch users need a long-press-to-drag gesture) [was R19.14]
+- [ ] R20.13 Spectrum peak trail: per-bar colour tint based on frequency (low bars warm, high bars cool — graduates from R15.07 trail) [was R19.15]
+- [ ] R20.14 Snapshot grid: bulk download all selected as a zip (graduates R18.06 selection mode) [was R19.17]
+- [ ] R20.15 Theme pack drag-drop: progress indicator when N > 10 files (current parallel Promise.all is fast but visible delay on big drops) [was R19.18 — graduates R18.18]
+- [ ] R20.16 Per-attractor MIDI TYPE tooltip: also show a small bar-graph proximity meter on the row showing distance to next/previous boundary (graduates R19.16's distanceToEdge01 projector)
+- [ ] R20.17 MIDI bundle drag-drop: per-file progress indicator for very large drops (parallels R20.15 themes; graduates R19.20)
+- [ ] R20.18 Spectrum peak trail params: persist per-bar OVERRIDES so a user can tune only the bass bars' curve while leaving the rest at default (graduates R19.12 to per-bar granularity)
+- [ ] R20.19 Carousel thumb metadata badge: click the badge to surface a richer panel (compile time, render time, controls captured at save, scene resolution if live)
+- [ ] R20.20 Named attractor gap-drop: also work for the MidiPanel per-attractor binding groups (drop a group into another's gap to reorder MIDI sections without touching the underlying attractor list) — graduates R19.19
 
 ## TICK LOG
 - 2026-06-19 23:41 PT — Bootstrap + Batch 1 (5/5).
@@ -813,3 +838,93 @@ R18.19 from the future queue to keep the batch at 5 great slices.
   8 no-op shapes + drop-all behaviour + mixed-valid-invalid +
   corrupt-rows cleanup · ~115 fresh asserts this batch).
   ATTRACTOR_FIELDS now at 8 (was 7).
+- 2026-06-22 12:53 PT — Batch 19 (5/5).
+  Commits: f66dff3 (R19.12 spectrum peak trail per-curve tunable
+  params — PEAK_TRAIL_CURVE_PARAMS roster + defaultPeakTrailCurveParams
+  / sanitizeCurveParamValue / sanitizeCurveParams / setCurveParam /
+  isCurveParamsAtDefaults helpers + applyTrailCurve params arg
+  threaded through both branches + readPeakTrail opts.curveParams
+  passthrough; default exp.exponent=2 preserves R16.17 t^2 visual;
+  default log.base=4 replaces sqrt with log(1+(base-1)*t)/log(base);
+  endpoint anchoring 0→0, 1→1 INVARIANT across every shape; store
+  persisted to `spectrum-peak-curve-params-v1` with sanitize-on-read
+  + reset-to-defaults action; UI CurveChipWithLongPress wraps the
+  R16.17 chip with ≥400ms long-press → params popover + sky-blue dot
+  cue when curve has non-default params),
+  c55527e (R19.16 per-attractor MIDI TYPE row live band tooltip —
+  describeTypeBand projector returns {index, label, total, holdingPrev,
+  distanceToEdge01} using same band-math as pickAttractorTypeForCC so
+  the tag never lies about the picker's decision; holdingPrev only
+  near TRUE boundaries; MidiPanel lastCCByNumber state cache with
+  functional setState + same-value-skip + bound-CC-only filter so
+  unbound CCs don't trigger 60Hz re-renders; badge wears type's
+  accent colour via attractorTypeStyle),
+  6d4bd68 (R19.13 carousel per-preset thumb metadata badge on hover —
+  recordThumbMetadata / readThumbMetadata / clearThumbMetadata /
+  summarizeThumbAge helpers; parallel storage key preset-thumb-meta-
+  <id>; captureThumbnailToStorage + capturePresetThumbnail (live
+  path) both record metadata; clearThumbnail + clearAllThumbnails
+  cascade-wipe; PresetCarousel hover badge "120×80 · render · 3h"
+  source-coloured (live=green, render=indigo); compact summarizeThumbAge
+  formatter (now/Ns/Nm/Nh/Nd/Nw/Ny, future timestamps clamp to "now"
+  so no negative ages),
+  22f05d6 (R19.20 MIDI bundle drag-drop multi-file — combineDroppedBundles
+  pure helper takes per-file FileReader reads + returns {bundles,
+  parseFails, totalFilesRead} with same parseImportMulti → parseImport
+  precedence; per-bundle sanitisation through both paths; partial-
+  success preserved; PresetBar accepts onDropFiles alongside onDropFile;
+  drop banner adds "(multi-file ok)" hint),
+  9ecc15f (R19.19 named attractor drag-reorder gap-drop semantics —
+  dropIndexForGap helper encapsulates splice-bookkeeping math + no-op
+  cases (gap above/below self return null); LeftSidebar renders thin
+  6px gap zones between rows that expand to 22px with indigo dashed
+  strip on hover-during-drag; trailing gap below last row only
+  renders during active drag; gapOverIdx state mutually exclusive
+  with dragOverIdx so visual indicators don't double up;
+  NamedAttractorRow wraps in fragment with leading gap div).
+  Plus f4717f5 (lint-gate cleanup: lastCCByNumber useRef → useState
+  to satisfy react-hooks/refs; identical behaviour but render-time
+  read now passes the lint rule).
+  R19.01-R19.05 all deferred — first three are dedicated infrastructure
+  batches (render-pipeline / r3f-gizmo / backend runtime), R19.04
+  + R19.05 each need their own focused batch. Substituted R19.12,
+  R19.13, R19.16, R19.19, R19.20 from the future queue.
+  Gates: lint 23 errors / 3 warnings — exactly matches baseline
+  (one new error surfaced mid-batch on lastCCByNumberRef render-time
+  read; rolled into f4717f5 cleanup commit). Build: 911 ms green
+  (1.76 MB bundle, gzip 521 KB — +0 KB vs Batch 18; new lib helpers
+  + popover + gap-drop wires + metadata side-store are tiny).
+  Unit tests: 39/39 files pass (extended waveform with ~90 R19.12
+  asserts pinning PEAK_TRAIL_CURVE_PARAMS roster + per-curve metadata
+  + default snapshot non-aliasing + sanitizeCurveParamValue clamp +
+  fallback + sanitizeCurveParams partial / corrupt / unknown-drop +
+  setCurveParam ref-equal-on-no-op + clamp + bad-curve/key + null-
+  rebuild + isCurveParamsAtDefaults + applyTrailCurve endpoint
+  invariance across 6 exponents + 5 bases + exponent=1 degenerates
+  to linear + higher-exponent more-head-biased + higher-base more-
+  tail-biased + monotonicity on t + corrupt-params-fallback +
+  readPeakTrail honours curveParams + partial-params falls back;
+  extended midiMap with ~30 R19.16 asserts pinning describeTypeBand
+  basic band selection + endpoint behaviour + clamp + dead-band
+  detection both sides + extreme-never-holds + distanceToEdge01
+  mid-band + near-boundary + defensive null returns + single-type
+  roster + custom hysteresis + label/index invariant across full
+  sweep; extended presetThumbnails with ~55 R19.13 asserts pinning
+  thumbMetadataKey shape + recordThumbMetadata happy-path + defensive
+  (empty/null/non-string id, no-storage, missing-dimensions, unknown-
+  source, negative/NaN) + readThumbMetadata roundtrip + corrupt-JSON
+  + array-top-level + missing-capturedAt + defensive + partial-but-
+  valid + clearThumbMetadata + cascade-from-clearThumbnail +
+  cascade-from-clearAllThumbnails + summarizeThumbAge boundary
+  table (1s/5s/60s/1m/1h/24h/1d/7d/1w/52w/1y) + future-clamps-to-
+  now + defensive; extended midiUserBundleIO with ~30 R19.20
+  asserts pinning combineDroppedBundles single-bundle + multi-bundle
+  + bare-array + mixed-shapes-flattened + partial-success-counted +
+  empty-raw-explicit-error + per-bundle-sanitisation + defensive +
+  non-object-entries-skipped; extended namedAttractors with ~30
+  R19.19 asserts pinning dropIndexForGap mapping for down-move-with-
+  shift + up-move-no-shift + move-to-end + move-to-top + no-op
+  detection (gap above/below self) + boundary no-ops + adjacent
+  moves + defensive (NaN/negative/out-of-range/zero-length) +
+  single-item-always-noop + full sweep invariant against
+  moveAttractorByIndex · ~235 fresh asserts this batch).
