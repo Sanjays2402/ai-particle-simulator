@@ -3,7 +3,10 @@ import { useStore } from '../store'
 import {
   ACTIONS, loadMidiMap, saveMidiMap, setBinding, clearAllBindings,
   decodeMidiMessage, applyCC, attractorActions,
+  // R19.16 — pure projector for "current band" tooltip on TYPE rows
+  describeTypeBand, ccToNormalized,
 } from '../lib/midiMap'
+import { ATTRACTOR_TYPES } from '../lib/namedAttractors'
 import {
   MIDI_PRESETS, applyPresetToMap, detectPresetForInput, presetBindingCount,
   // R13.05 — user preset bundle editor
@@ -45,6 +48,15 @@ export default function MidiPanel({ open, onClose }) {
   const [inputs, setInputs] = useState([])
   const [bindings, setBindings] = useState(() => loadMidiMap())
   const [lastCC, setLastCC] = useState(null)   // {cc, value, deviceName}
+  // R19.16 — per-CC last-seen value cache so each TYPE row can show
+  // which BAND its bound CC currently sits in. Indexed by CC number;
+  // updated alongside lastCC whenever a message arrives. We use a
+  // useRef + a counter state to keep the React re-render path tight:
+  // the ref holds the live map (read by render-time helpers), the
+  // counter forces a re-render only when the SPECIFIC CC for one
+  // of our visible rows changed (filtered in handleMessage).
+  const lastCCByNumberRef = useRef({})
+  const [lastCCTick, setLastCCTick] = useState(0)
   const [learnFor, setLearnFor] = useState(null) // actionId waiting for next CC
   // R13.05 — user-authored bundle list. Persisted separately from the
   // live binding map so saving a bundle never touches the live state.
@@ -98,6 +110,16 @@ export default function MidiPanel({ open, onClose }) {
         if (!msg) return
         if (msg.type !== 0xB0) return  // CC only for now
         setLastCC({ cc: msg.data1, value: msg.data2, deviceName: event.currentTarget?.name || 'MIDI' })
+        // R19.16 — cache the per-CC last value so the TYPE row tooltip
+        // can show which BAND the live CC sits in. Only bump the tick
+        // counter (which triggers a re-render of the visible rows)
+        // when this CC is actually bound to something — otherwise a
+        // chatty controller pumping CCs we don't listen to would
+        // re-render the panel ~60 times/sec for no reason.
+        lastCCByNumberRef.current[msg.data1] = msg.data2
+        if (bindingsRef.current && bindingsRef.current[String(msg.data1)]) {
+          setLastCCTick(t => (t + 1) & 0xffff)  // wrap at 16-bit so the counter never grows unbounded
+        }
         // If a Learn is pending, capture this CC instead of dispatching.
         // We read the latest bindings via the ref (sync-updated by the
         // effect above) so we don't need this effect to depend on
@@ -664,6 +686,25 @@ export default function MidiPanel({ open, onClose }) {
                       {group.rows.map(a => {
                         const cc = ccFor(a.id)
                         const isLearning = learnFor === a.id
+                        // R19.16 — for TYPE rows, project the live CC value
+                        // through the same band picker the dispatcher uses
+                        // so the user sees which quarter the CC currently
+                        // sits in. Reads lastCCByNumberRef which is touched
+                        // every message, so this re-derives on every paint
+                        // (cheap — single floor + 2 compares).
+                        // lastCCTick gating: React Compiler's deps tracker
+                        // already sees the useState read at the top of the
+                        // component, so the render runs when the tick changes;
+                        // we just reference it once below in a guard so the
+                        // unused-var lint doesn't fire (a tick read with no
+                        // effect on output would also be a no-op).
+                        let typeBand = null
+                        if (a.field === 'type' && cc !== null && lastCCTick >= 0) {
+                          const liveCcValue = lastCCByNumberRef.current[Number(cc)]
+                          if (Number.isFinite(liveCcValue)) {
+                            typeBand = describeTypeBand(ccToNormalized(liveCcValue), ATTRACTOR_TYPES)
+                          }
+                        }
                         return (
                           <div key={a.id} style={{
                             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -696,6 +737,42 @@ export default function MidiPanel({ open, onClose }) {
                               </span>
                             </span>
                             <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                              {/* R19.16 — TYPE row's "current band" tag.
+                                  Only renders for TYPE rows with a bound CC
+                                  AND a value seen on that CC at least once.
+                                  Shows "2/4 vortex" with the band index +
+                                  type label; a tiny `·hold` suffix surfaces
+                                  when the live value sits inside the dead-
+                                  band around a boundary so the user knows
+                                  pickAttractorTypeForCC is holding the
+                                  previous type rather than ping-ponging.
+                                  Borrows the type's accent colour from
+                                  attractorTypeStyle so the cue is visually
+                                  consistent with the rest of the row. */}
+                              {typeBand && (() => {
+                                const tStyle = attractorTypeStyle(typeBand.label)
+                                return (
+                                  <span title={`Live CC value lands in band ${typeBand.index + 1}/${typeBand.total} (${typeBand.label}). ${typeBand.holdingPrev ? 'Inside dead-band — type held until the knob moves further into the next quarter.' : 'Moving the knob across a boundary flips the type.'}`}
+                                    style={{
+                                      padding: '1px 6px', borderRadius: 4,
+                                      fontSize: 9, fontWeight: 600, letterSpacing: '0.04em',
+                                      background: tStyle.bgSoft,
+                                      color: tStyle.fg,
+                                      border: `1px solid ${tStyle.borderFaint}`,
+                                      fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                                      textTransform: 'uppercase',
+                                      display: 'inline-flex', alignItems: 'center', gap: 3,
+                                    }}>
+                                    {typeBand.index + 1}/{typeBand.total}
+                                    {typeBand.holdingPrev && (
+                                      <span style={{
+                                        fontSize: 8, color: '#fbbf24',
+                                        letterSpacing: 0,
+                                      }} title="Dead-band — previous type held">{'\u00b7hold'}</span>
+                                    )}
+                                  </span>
+                                )
+                              })()}
                               {cc !== null && (
                                 <span style={{
                                   padding: '2px 7px', borderRadius: 5, fontSize: 10,

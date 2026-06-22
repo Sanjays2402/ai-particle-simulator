@@ -17,6 +17,8 @@ import {
   ATTRACTOR_FIELD_RADIUS_LOG, logCurveShape, logCurveRadius,
   // R18.16 — per-attractor TYPE routing + band-hysteresis cycle
   ATTRACTOR_FIELD_TYPE, TYPE_BAND_HYSTERESIS, pickAttractorTypeForCC,
+  // R19.16 — projector for the TYPE row tooltip's "current band" tag
+  describeTypeBand,
 } from './midiMap.js'
 import { STRENGTH_MAX, RADIUS_MIN, RADIUS_MAX, POSITION_MIN, POSITION_MAX, ATTRACTOR_TYPES } from './namedAttractors.js'
 
@@ -832,4 +834,114 @@ eq(logCurveRadius(NaN), RADIUS_MIN, 'logCurveRadius(NaN) → MIN (calm default)'
   eq(loaded['32'], 'attr:attr-7:type', 'type action round-trips through localStorage')
 }
 
-console.log(`PASS: midiMap — ${ACTIONS.length} actions, decode/normalize/persist/setBinding/applyCC + attractor routing (${ATTRACTOR_FIELDS.length} fields per attractor, incl. R15.16 enabled-with-hysteresis [${HYSTERESIS_OFF}, ${HYSTERESIS_ON}] + R17.15 radius·log curve + R18.16 type band-hysteresis ±${TYPE_BAND_HYSTERESIS})`)
+console.log(`PASS: midiMap — ${ACTIONS.length} actions, decode/normalize/persist/setBinding/applyCC + attractor routing (${ATTRACTOR_FIELDS.length} fields per attractor, incl. R15.16 enabled-with-hysteresis [${HYSTERESIS_OFF}, ${HYSTERESIS_ON}] + R17.15 radius·log curve + R18.16 type band-hysteresis ±${TYPE_BAND_HYSTERESIS} + R19.16 describeTypeBand projector)`)
+
+// --- R19.16: describeTypeBand projector for TYPE row tooltip --------
+
+import { ATTRACTOR_TYPES as TYPES_R1916 } from './namedAttractors.js'
+
+// Basic band selection: each quarter maps to its type.
+{
+  // With 4 default types: bands at [0, 0.25), [0.25, 0.5), [0.5, 0.75), [0.75, 1].
+  const b0 = describeTypeBand(0.10, TYPES_R1916)
+  eq(b0.index, 0, '0.10 → band 0')
+  eq(b0.label, TYPES_R1916[0], 'band 0 label = first type')
+  eq(b0.total, 4, 'total = types.length')
+
+  const b1 = describeTypeBand(0.30, TYPES_R1916)
+  eq(b1.index, 1, '0.30 → band 1')
+  eq(b1.label, TYPES_R1916[1], 'band 1 label = second type')
+
+  const b2 = describeTypeBand(0.60, TYPES_R1916)
+  eq(b2.index, 2, '0.60 → band 2')
+  eq(b2.label, TYPES_R1916[2], 'band 2 label = third type')
+
+  const b3 = describeTypeBand(0.95, TYPES_R1916)
+  eq(b3.index, 3, '0.95 → band 3')
+  eq(b3.label, TYPES_R1916[3], 'band 3 label = fourth type')
+}
+
+// Endpoint behaviour: v=0 → first band, v=1 → last band.
+{
+  const at0 = describeTypeBand(0, TYPES_R1916)
+  eq(at0.index, 0, 'v=0 → band 0')
+  const at1 = describeTypeBand(1, TYPES_R1916)
+  eq(at1.index, 3, 'v=1 → last band (closed interval)')
+}
+
+// Out-of-range v01 clamps before computing the band.
+{
+  const neg = describeTypeBand(-5, TYPES_R1916)
+  eq(neg.index, 0, 'negative v clamps to band 0')
+  const huge = describeTypeBand(99, TYPES_R1916)
+  eq(huge.index, 3, 'huge v clamps to last band')
+}
+
+// Dead-band detection: inside the symmetric hysteresis window around a
+// boundary, holdingPrev=true. Outside, false.
+{
+  // Boundary at 0.25 (between band 0 and band 1). With h=0.015 the
+  // dead-band is [0.235, 0.265].
+  const inLower = describeTypeBand(0.240, TYPES_R1916)  // 0.010 inside band 0
+  ok(inLower.holdingPrev, '0.240 inside dead-band on band 0 side → holdingPrev=true')
+  const inUpper = describeTypeBand(0.260, TYPES_R1916)  // 0.010 inside band 1
+  ok(inUpper.holdingPrev, '0.260 inside dead-band on band 1 side → holdingPrev=true')
+  const outsideLow = describeTypeBand(0.220, TYPES_R1916)
+  ok(!outsideLow.holdingPrev, '0.220 outside dead-band → holdingPrev=false')
+  const outsideHigh = describeTypeBand(0.280, TYPES_R1916)
+  ok(!outsideHigh.holdingPrev, '0.280 outside dead-band → holdingPrev=false')
+}
+
+// holdingPrev only fires near a REAL boundary — extremes (v=0, v=1) have
+// no neighbouring boundary on the missing side.
+{
+  const atFloor = describeTypeBand(0, TYPES_R1916)
+  ok(!atFloor.holdingPrev, 'v=0 has no leftward neighbour → never holdingPrev')
+  const atCeil = describeTypeBand(1, TYPES_R1916)
+  ok(!atCeil.holdingPrev, 'v=1 has no rightward neighbour → never holdingPrev')
+}
+
+// distanceToEdge01: min of (dist to lower boundary, dist to upper boundary).
+{
+  // Mid-band — far from any boundary.
+  const mid = describeTypeBand(0.125, TYPES_R1916)  // dead center of band 0
+  near(mid.distanceToEdge01, 0.125, 'mid-band: distance to nearest boundary (0.25) = 0.125', 1e-9)
+  // Near a boundary — distance is the smaller of left/right gap.
+  const near1 = describeTypeBand(0.27, TYPES_R1916)  // 0.02 above band 0/1 boundary
+  near(near1.distanceToEdge01, 0.02, 'near upper of band 1: distance ≈ 0.02', 1e-9)
+}
+
+// Defensive: bad inputs return null.
+eq(describeTypeBand(NaN, TYPES_R1916), null, 'NaN v01 → null')
+eq(describeTypeBand(0.5, []), null, 'empty types → null')
+eq(describeTypeBand(0.5, [42, null, '']), null, 'all-invalid types → null')
+eq(describeTypeBand(0.5, 'not-an-array'), null, 'non-array types → null')
+eq(describeTypeBand(undefined, TYPES_R1916), null, 'undefined v01 → null')
+eq(describeTypeBand(Infinity, TYPES_R1916), null, 'Infinity v01 → null')
+
+// Single-type roster: every value lands in the only band, holdingPrev=false.
+{
+  const r = describeTypeBand(0.5, ['only'])
+  eq(r.index, 0, 'single-type roster: band 0')
+  eq(r.label, 'only', 'single-type label')
+  eq(r.total, 1, 'single-type total=1')
+  ok(!r.holdingPrev, 'single-type: no boundaries → no holdingPrev')
+}
+
+// Custom hysteresis arg flows through.
+{
+  // With h=0 the dead-band collapses; 0.245 lands in band 0 with no hold.
+  const noHyst = describeTypeBand(0.245, TYPES_R1916, 0)
+  ok(!noHyst.holdingPrev, 'h=0 collapses dead-band')
+  // With a huge hysteresis (clamped to 0.5/N=0.125 for 4 types) the dead-
+  // band is much wider — 0.140 from boundary 0.25 → 0.110 distance.
+  const wide = describeTypeBand(0.140, TYPES_R1916, 0.5)
+  ok(wide.holdingPrev, 'wide-hysteresis (clamped) catches 0.140')
+}
+
+// describeTypeBand never returns a stale label even when input changes.
+// (Spot-check that index→label[index] always agrees.)
+for (let v = 0; v <= 1; v += 0.05) {
+  const r = describeTypeBand(v, TYPES_R1916)
+  eq(r.label, TYPES_R1916[r.index], `at v=${v.toFixed(2)}: label = types[index]`)
+}

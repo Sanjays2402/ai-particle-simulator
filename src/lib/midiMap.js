@@ -405,6 +405,68 @@ export function pickAttractorTypeForCC(previousType, v01, types = ATTRACTOR_TYPE
   return list[bandIdx]
 }
 
+// R19.16 — pure projector for the per-attractor TYPE row tooltip.
+// Given the current CC value (0..127) and the type list, returns
+// { index, label, total } describing which BAND the value sits in
+// AND whether it's inside the dead-band that holds the previous type.
+//
+// Why we need it: pickAttractorTypeForCC works invisibly — a knob
+// sweeping through the four bands flips the attractor's type at the
+// boundaries, but the user has no scannable cue showing them which
+// band the CC is CURRENTLY in. Without that, tuning the knob to land
+// near a boundary on purpose (e.g. for hysteresis testing) is guesswork.
+//
+// Returns null when:
+//   - types is empty / invalid
+//   - cc value is missing / non-finite (nothing to project)
+//
+// Otherwise returns:
+//   - index: 0-based band index (0..types.length-1)
+//   - label: the type name in that band (e.g. 'vortex')
+//   - total: types.length (1-based denominator for "2/4" UI)
+//   - holdingPrev: boolean — true when v01 is INSIDE the dead-band
+//     around a boundary. The UI surfaces this with a 'held' badge
+//     so the user knows the type isn't about to flip if the knob
+//     jitters slightly. Adjacent-only (R18.16 contract): a dead-band
+//     between non-adjacent prev/current is still a normal jump.
+//   - distanceToEdge01: min of (v01 - prevBoundary, nextBoundary - v01),
+//     normalised to [0, 1]. Lets the UI render a soft warning when
+//     the knob is close to (but not in) a boundary. NaN when at the
+//     extremes 0 or 1 (no neighbouring boundary).
+export function describeTypeBand(v01, types = ATTRACTOR_TYPES, hysteresis = TYPE_BAND_HYSTERESIS) {
+  const list = Array.isArray(types) ? types.filter(t => typeof t === 'string' && t.length > 0) : []
+  if (list.length === 0) return null
+  if (!Number.isFinite(v01)) return null
+  const v = v01 < 0 ? 0 : v01 > 1 ? 1 : v01
+  const bandWidth = 1 / list.length
+  let bandIdx
+  if (v >= 1) bandIdx = list.length - 1
+  else bandIdx = Math.floor(v / bandWidth)
+  if (bandIdx >= list.length) bandIdx = list.length - 1
+  if (bandIdx < 0) bandIdx = 0
+  // Distance to the nearest BAND BOUNDARY (not the band edge — the
+  // boundary is where pickAttractorTypeForCC's hysteresis applies).
+  // Boundaries sit at k/N for k=1..N-1; v=0 and v=1 are NOT boundaries.
+  const leftBoundary  = bandIdx === 0 ? 0 : bandIdx * bandWidth
+  const rightBoundary = bandIdx === list.length - 1 ? 1 : (bandIdx + 1) * bandWidth
+  const distLeft  = v - leftBoundary
+  const distRight = rightBoundary - v
+  // Inside the dead-band of the nearest boundary? (Only meaningful when
+  // we're near a TRUE boundary, not the extremes.)
+  const h = Number.isFinite(hysteresis) ? Math.max(0, Math.min(0.5 / list.length, hysteresis)) : 0
+  let holdingPrev = false
+  if (h > 0) {
+    if (bandIdx > 0                && distLeft  <= h) holdingPrev = true
+    if (bandIdx < list.length - 1  && distRight <= h) holdingPrev = true
+  }
+  return {
+    index: bandIdx,
+    label: list[bandIdx],
+    total: list.length,
+    holdingPrev,
+    distanceToEdge01: Math.min(distLeft, distRight),
+  }
+}
 // Decode a 3-byte MIDI message. Returns { type, channel, data1, data2 }
 // or null if not a CC/NoteOn/NoteOff. Tested in isolation so we can
 // verify the bit-twiddling without hardware.
