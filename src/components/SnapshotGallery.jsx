@@ -11,7 +11,7 @@ import {
   MIN_SCALE as ZOOM_MIN, DOUBLE_TAP_MS,
   applyKeyboardZoomIn, applyKeyboardZoomOut, applyResetZoom,
   applyWheelZoom, classifyZoomKey,
-  classifyPanKey, applyKeyboardPan, aggregateHeldPan,
+  classifyPanKey, applyKeyboardPan, aggregateHeldPan, scaleDirByHold,
 } from '../lib/pinchZoom'
 import { showToast } from './Toast'
 
@@ -440,6 +440,11 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
   const heldKeysRef = useRef(new Set())
   const repeatTimerRef = useRef(0)
   const repeatTimeoutRef = useRef(0)
+  // R16.20 — timestamp of when the first pan key in the current
+  // chord went down. Used to compute the acceleration multiplier
+  // (panAccelMultiplier(now - holdStartTs)). Reset whenever the
+  // held set drops to empty so a fresh press starts at 1×.
+  const holdStartTsRef = useRef(0)
 
   useEffect(() => {
     const PAN_REPEAT_MS = 60   // ~16 ticks/second — smooth without overshoot
@@ -455,15 +460,22 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
     // Returns true if a step was actually applied (used by the
     // initial-delay path to suppress the very first repeat if every
     // key lifted during the delay window).
+    // R16.20 — scales the aggregated direction by the held-time
+    // acceleration multiplier so a long sweep covers ground faster
+    // than tap-tap-tap.
     const stepHeldKeys = () => {
       const held = heldKeysRef.current
       if (held.size === 0) return false
       if (!zoomRef.current || zoomRef.current.scale <= ZOOM_MIN) return false
       const dir = aggregateHeldPan(held, classifyPanKey)
       if (!dir) return false
+      const elapsedMs = holdStartTsRef.current
+        ? Date.now() - holdStartTsRef.current
+        : 0
+      const scaledDir = scaleDirByHold(dir, elapsedMs)
       const el = stageRef.current
       const r = el ? el.getBoundingClientRect() : { width: 0, height: 0 }
-      setZoom(prev => applyKeyboardPan(prev, dir, r.width, r.height))
+      setZoom(prev => applyKeyboardPan(prev, scaledDir, r.width, r.height))
       return true
     }
 
@@ -518,6 +530,13 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
             const el = stageRef.current
             const r = el ? el.getBoundingClientRect() : { width: 0, height: 0 }
             setZoom(prev => applyKeyboardPan(prev, panDir, r.width, r.height))
+            // R16.20 — start the hold timer when the chord begins
+            // (size === 0 before adding this key). If a second key
+            // joins later we DON'T reset the timer — the user's
+            // single sustained sweep keeps building speed.
+            if (heldKeysRef.current.size === 0) {
+              holdStartTsRef.current = Date.now()
+            }
             heldKeysRef.current.add(e.key)
             // Schedule the repeat timer once. Subsequent held keys
             // join the existing beat (the stepHeldKeys closure
@@ -558,16 +577,22 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
     // R15.13 — when a pan key lifts, drop it from the held set. If
     // that was the last held pan key, kill the repeat timer too so
     // we're not burning a 60ms tick forever.
+    // R16.20 — also reset the hold-start timestamp so the NEXT press
+    // begins at 1× rather than picking up where this hold left off.
     const onKeyUp = (e) => {
       if (!classifyPanKey(e.key)) return
       heldKeysRef.current.delete(e.key)
-      if (heldKeysRef.current.size === 0) clearRepeat()
+      if (heldKeysRef.current.size === 0) {
+        clearRepeat()
+        holdStartTsRef.current = 0
+      }
     }
     // R15.13 — also clear on blur so alt-tabbing mid-hold doesn't
     // leave a phantom auto-pan running when the window comes back.
     const onBlur = () => {
       heldKeysRef.current.clear()
       clearRepeat()
+      holdStartTsRef.current = 0
     }
     window.addEventListener('keydown', onKey)
     window.addEventListener('keyup', onKeyUp)

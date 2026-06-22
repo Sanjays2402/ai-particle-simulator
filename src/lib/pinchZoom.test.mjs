@@ -11,6 +11,9 @@ import {
   classifyPanKey, applyKeyboardPan,
   // R15.13 — hold-to-repeat pan aggregator
   aggregateHeldPan,
+  // R16.20 — pan acceleration curve for held WASD
+  PAN_ACCEL_THRESHOLD_MS, PAN_ACCEL_RAMP_MS, PAN_ACCEL_MAX,
+  panAccelMultiplier, scaleDirByHold,
 } from './pinchZoom.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -448,4 +451,106 @@ if (PAN_STEP_FRACTION <= 0 || PAN_STEP_FRACTION >= 1) {
   eq(aggregateHeldPan(new Set(['↑'])), null, 'aggregate: default classifier ignores ↑')
 }
 
-console.log(`PASS: pinchZoom — clamp/distance/midpoint/clampTranslate/idleState/beginPinch/updatePinch (centroid follow)/beginPan/updatePan/endGesture/applyDoubleTap/shouldInterceptWheel/toTransform/navAllowed + keyboard+wheel zoom (applyZoomBy/applyKeyboardZoomIn/Out/Reset/applyWheelZoom/classifyZoomKey) + WASD pan (classifyPanKey/applyKeyboardPan · step=${PAN_STEP_FRACTION}) + R15.13 aggregateHeldPan (empty/single/cancel/diagonal-normalise/garbage/custom-classifier) · MIN=${MIN_SCALE} MAX=${MAX_SCALE} DOUBLE=${DOUBLE_TAP_SCALE} STEP=${KEYBOARD_ZOOM_STEP}`)
+console.log(`PASS: pinchZoom — clamp/distance/midpoint/clampTranslate/idleState/beginPinch/updatePinch (centroid follow)/beginPan/updatePan/endGesture/applyDoubleTap/shouldInterceptWheel/toTransform/navAllowed + keyboard+wheel zoom (applyZoomBy/applyKeyboardZoomIn/Out/Reset/applyWheelZoom/classifyZoomKey) + WASD pan (classifyPanKey/applyKeyboardPan · step=${PAN_STEP_FRACTION}) + R15.13 aggregateHeldPan (empty/single/cancel/diagonal-normalise/garbage/custom-classifier) + R16.20 pan accel (threshold=${PAN_ACCEL_THRESHOLD_MS}ms / ramp=${PAN_ACCEL_RAMP_MS}ms / max=${PAN_ACCEL_MAX}×) · MIN=${MIN_SCALE} MAX=${MAX_SCALE} DOUBLE=${DOUBLE_TAP_SCALE} STEP=${KEYBOARD_ZOOM_STEP}`)
+
+// --- R16.20: panAccelMultiplier + scaleDirByHold ---
+
+// Defaults snapshot — pin so a future tune that changes them surfaces
+// in code review rather than silently shifting feel.
+eq(PAN_ACCEL_THRESHOLD_MS, 1000, 'threshold default = 1000ms')
+eq(PAN_ACCEL_RAMP_MS,      1500, 'ramp default = 1500ms')
+eq(PAN_ACCEL_MAX,          3,    'max default = 3×')
+
+// Below threshold → exactly 1× (no acceleration on quick taps)
+eq(panAccelMultiplier(0),    1, 'elapsed 0 → 1×')
+eq(panAccelMultiplier(50),   1, 'elapsed 50ms (tap window) → 1×')
+eq(panAccelMultiplier(500),  1, 'elapsed 500ms (mid-tap) → 1×')
+eq(panAccelMultiplier(999),  1, 'just under threshold → 1×')
+eq(panAccelMultiplier(1000), 1, 'AT threshold (inclusive) → 1×')
+
+// Above threshold → linear lerp from 1× toward MAX over the ramp.
+{
+  // 1ms past the threshold: barely accelerated (still very close to 1).
+  const m1 = panAccelMultiplier(1001)
+  if (!(m1 > 1 && m1 < 1.01)) fail(`just past threshold should be slightly >1 but got ${m1}`)
+
+  // Halfway through the ramp (threshold + ramp/2): exactly halfway
+  // between 1 and MAX, i.e. 2× when MAX is 3.
+  approx(panAccelMultiplier(1000 + 1500 / 2), 1 + (3 - 1) * 0.5, 'midway through ramp = midpoint of 1..MAX')
+
+  // At the end of the ramp: exactly MAX (no overshoot).
+  approx(panAccelMultiplier(1000 + 1500), PAN_ACCEL_MAX, 'end of ramp = MAX')
+
+  // Past the end of the ramp: still capped at MAX (no runaway).
+  eq(panAccelMultiplier(60_000),  PAN_ACCEL_MAX, '60s held still capped at MAX')
+  eq(panAccelMultiplier(1e9),     PAN_ACCEL_MAX, 'absurd elapsed still capped at MAX')
+}
+
+// Monotonic on the input: held longer never gives a SLOWER step.
+{
+  let prev = 1
+  for (const t of [0, 100, 999, 1000, 1100, 1500, 2000, 2500, 3000, 10_000]) {
+    const m = panAccelMultiplier(t)
+    if (m < prev) fail(`monotonicity broken at t=${t}: ${m} < ${prev}`)
+    prev = m
+  }
+}
+
+// Defensive: non-finite / negative input → 1× (no NaN / no <1).
+eq(panAccelMultiplier(NaN),       1, 'NaN elapsed → 1×')
+eq(panAccelMultiplier(undefined), 1, 'undefined elapsed → 1×')
+eq(panAccelMultiplier(null),      1, 'null elapsed → 1×')
+eq(panAccelMultiplier(-100),      1, 'negative elapsed → 1×')
+eq(panAccelMultiplier(Infinity),  PAN_ACCEL_MAX, 'Infinity elapsed → MAX (passes the ramp)')
+eq(panAccelMultiplier(-Infinity), 1,             '-Infinity elapsed → 1× (negative-safe)')
+
+// Custom opts let callers tune the curve. ramp=0 means the multiplier
+// jumps straight to MAX the moment we cross the threshold (no lerp).
+{
+  eq(panAccelMultiplier(500,  { thresholdMs: 200, rampMs: 0, max: 5 }), 5, 'ramp=0 + past threshold → MAX')
+  eq(panAccelMultiplier(150,  { thresholdMs: 200, rampMs: 0, max: 5 }), 1, 'ramp=0 + before threshold → 1')
+  approx(panAccelMultiplier(700, { thresholdMs: 200, rampMs: 1000, max: 5 }),
+         1 + (5 - 1) * 0.5, 'custom curve: midway through ramp')
+}
+
+// scaleDirByHold — pre-threshold: returns the SAME ref (no allocation
+// on the hot path).
+{
+  const dir = { dx: 0, dy: -1 }
+  eq(scaleDirByHold(dir, 100), dir, 'pre-threshold returns input ref (no churn)')
+  eq(scaleDirByHold(dir, 1000), dir, 'AT threshold returns input ref')
+}
+
+// scaleDirByHold — past threshold: scales components by the multiplier.
+{
+  const dir = { dx: 0, dy: -1 }
+  // Midway through ramp = 2× when MAX=3.
+  const mid = scaleDirByHold(dir, 1000 + 1500 / 2)
+  approx(mid.dx, 0,  'mid: dx scaled')
+  approx(mid.dy, -2, 'mid: dy scaled to 2× (1× * 2 multiplier)')
+  // Past ramp = MAX (3×).
+  const max = scaleDirByHold(dir, 60_000)
+  approx(max.dy, -3, 'max: dy at -3 (3× multiplier)')
+  // Original ref untouched.
+  eq(dir.dy, -1, 'input dir not mutated')
+}
+
+// scaleDirByHold — defensive: null dir passes through, fresh object
+// returned only when scaling actually changed something.
+{
+  eq(scaleDirByHold(null, 5000), null, 'null dir → null')
+  eq(scaleDirByHold(undefined, 5000), undefined, 'undefined dir → undefined')
+  const diag = { dx: 0.7, dy: -0.7 }
+  // Diagonal also scales each component uniformly (the multiplier
+  // is a scalar — preserves direction).
+  const scaled = scaleDirByHold(diag, 60_000)
+  approx(scaled.dx, 0.7 * 3,  'diagonal dx scaled')
+  approx(scaled.dy, -0.7 * 3, 'diagonal dy scaled')
+}
+
+// Custom-opts passthrough into scaleDirByHold.
+{
+  const dir = { dx: 1, dy: 0 }
+  const s = scaleDirByHold(dir, 250, { thresholdMs: 200, rampMs: 0, max: 4 })
+  approx(s.dx, 4, 'custom opts threaded: ramp=0 past threshold → MAX×dx')
+}

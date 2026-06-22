@@ -426,3 +426,52 @@ export function applyKeyboardPan(state, dir, stageW, stageH) {
     startTranslate: { x: desired.x, y: desired.y },
   }
 }
+
+// R16.20 — acceleration curve for held WASD pans. When the user holds
+// a key for longer than PAN_ACCEL_THRESHOLD_MS (default 1000ms = the
+// "this is a sustained sweep, not a tap" boundary), the per-tick step
+// ramps up linearly from 1× to PAN_ACCEL_MAX over PAN_ACCEL_RAMP_MS
+// (default 1500ms = a 2.5s total hold reaches max). Below the
+// threshold the multiplier stays at 1× so tap-to-nudge and short
+// hops near the centre keep their precise R15.13 behaviour.
+//
+// Pure: no DOM, no state — caller threads `elapsedMs` from a held-
+// since-press timestamp it owns. Multiplier output is monotonically
+// non-decreasing on the input (a held key never gets SLOWER).
+//
+// Defensive contract:
+//   - non-finite / negative elapsedMs → 1× (treat as "just pressed")
+//   - elapsedMs at/below threshold → 1× exactly
+//   - elapsedMs between threshold and (threshold + ramp) → linear lerp
+//   - elapsedMs at/beyond (threshold + ramp) → PAN_ACCEL_MAX exactly
+//   - opts let callsites tune the curve without re-importing the
+//     constants (used by tests to pin the contract at custom values)
+export const PAN_ACCEL_THRESHOLD_MS = 1000
+export const PAN_ACCEL_RAMP_MS      = 1500
+export const PAN_ACCEL_MAX          = 3
+
+export function panAccelMultiplier(elapsedMs, opts = {}) {
+  const threshold = Number.isFinite(opts.thresholdMs) ? opts.thresholdMs : PAN_ACCEL_THRESHOLD_MS
+  const ramp      = Number.isFinite(opts.rampMs)      ? opts.rampMs      : PAN_ACCEL_RAMP_MS
+  const max       = Number.isFinite(opts.max)         ? opts.max         : PAN_ACCEL_MAX
+  if (Number.isNaN(elapsedMs) || elapsedMs == null) return 1
+  if (elapsedMs === -Infinity || elapsedMs <= 0)     return 1
+  if (elapsedMs <= threshold)                        return 1
+  if (elapsedMs === Infinity || ramp <= 0)           return max
+  const t = (elapsedMs - threshold) / ramp  // 0..1
+  if (t >= 1)                                        return max
+  return 1 + t * (max - 1)
+}
+
+// R16.20 — scale a pan direction vector by the acceleration multiplier.
+// Convenience wrapper for the common case: caller has the elapsed hold
+// time + the aggregated direction from aggregateHeldPan, and wants to
+// feed the scaled vector into applyKeyboardPan without re-deriving the
+// curve math at the callsite. Returns a NEW direction object; the
+// input is never mutated.
+export function scaleDirByHold(dir, elapsedMs, opts = {}) {
+  if (!dir) return dir
+  const mult = panAccelMultiplier(elapsedMs, opts)
+  if (mult === 1) return dir
+  return { dx: (dir.dx || 0) * mult, dy: (dir.dy || 0) * mult }
+}
