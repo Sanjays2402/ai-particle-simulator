@@ -64,7 +64,6 @@ export default function PresetCarousel() {
   const rebuildAllThumbs = () => {
     const summary = summarizeBulkRebuild(presets)
     if (summary.withThumb === 0) return  // nothing to clear
-    // eslint-disable-next-line no-alert
     const ok = window.confirm(
       `Rebuild all ${summary.withThumb} cached thumbnails?\n\n`
       + `Stale thumbs will be wiped and re-rendered in the background `

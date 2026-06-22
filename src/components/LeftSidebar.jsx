@@ -2863,14 +2863,15 @@ function NamedAttractorRow({
   // Click the badge → edit mode; type a 1-based position; Enter/blur
   // commits, Esc cancels. Hidden behind `total > 1 && onJumpToPosition`
   // so a single-attractor list doesn't show a useless control.
+  // (No effect to sync draftPos ↔ live index — the onClick handler
+  // re-initializes the draft from `index + 1` every time editing
+  // starts, and the at-rest branch displays index + 1 directly.
+  // This mirrors the UserBundleChip pattern from R14.18 and keeps
+  // us under React Compiler's react-hooks/set-state-in-effect rule.)
   const [editingPos, setEditingPos] = useState(false)
   const [draftPos, setDraftPos] = useState(String(index + 1))
   // Sync draft on external rename.
   useEffect(() => { setDraftName(attractor.name) }, [attractor.name])
-  // Keep the draft synced to the live index when not actively editing
-  // — otherwise a reorder elsewhere (e.g. a chevron click) would leave
-  // the input showing the OLD position number.
-  useEffect(() => { if (!editingPos) setDraftPos(String(index + 1)) }, [index, editingPos])
 
   const commitPos = () => {
     const parsed = parsePositionInput(draftPos)
