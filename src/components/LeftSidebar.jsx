@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useStore, THEMES } from '../store'
 import { presets } from '../presets'
 import { GifEncoder } from '../lib/gifEncoder'
@@ -855,6 +855,17 @@ function CustomThemesRow() {
   // or 'replace' (drops all existing custom themes). Held alongside
   // the pack so the impact summary updates as the user flips modes.
   const [pendingMode, setPendingMode] = useState('merge')
+  // R17.06 — drag-and-drop import. The whole CustomThemesRow block
+  // is a drop zone; dropping a JSON file anywhere inside it parses
+  // + surfaces the same preview panel as the click-to-import path
+  // (so the user never accidentally clobbers their list — every
+  // import flows through preview/Apply). `dragDepth` counts nested
+  // dragenter/leave events so the highlight only clears when the
+  // ACTUAL drag leaves the container (browsers fire enter/leave on
+  // every child element a drag crosses; a naive on/off toggle
+  // flickers heavily).
+  const [dragDepth, setDragDepth] = useState(0)
+  const dragActive = dragDepth > 0
 
   const save = () => {
     const id = addCustomTheme({ name, neon, hueShift })
@@ -875,6 +886,25 @@ function CustomThemesRow() {
     }
   }
 
+  // R17.06 — shared parse + preview path. Used by BOTH the file
+  // picker (importFromFile) AND the drag-and-drop drop handler so
+  // a future format change only touches one place.
+  const parseAndPreview = async (file) => {
+    if (!file) return
+    try {
+      const text = await file.text()
+      const res = parseThemesImport(text)
+      if (!res.ok) {
+        showToast(`Import failed: ${res.error}`)
+        return
+      }
+      setPendingPack({ items: res.items, filename: file.name })
+      setPendingMode('merge')
+    } catch (err) {
+      showToast(`Import error: ${err.message || 'unknown'}`)
+    }
+  }
+
   // Open a file picker, parse the JSON, then surface a preview panel
   // (instead of a window.confirm) so the user can SEE the themes before
   // committing. The actual merge/replace happens in commitPendingPack
@@ -883,22 +913,7 @@ function CustomThemesRow() {
     const input = document.createElement('input')
     input.type = 'file'
     input.accept = 'application/json,.json'
-    input.onchange = async () => {
-      const file = input.files?.[0]
-      if (!file) return
-      try {
-        const text = await file.text()
-        const res = parseThemesImport(text)
-        if (!res.ok) {
-          showToast(`Import failed: ${res.error}`)
-          return
-        }
-        setPendingPack({ items: res.items, filename: file.name })
-        setPendingMode('merge')
-      } catch (e) {
-        showToast(`Import error: ${e.message || 'unknown'}`)
-      }
-    }
+    input.onchange = () => parseAndPreview(input.files?.[0])
     input.click()
   }
 
@@ -915,8 +930,83 @@ function CustomThemesRow() {
   }
   const cancelPendingPack = () => setPendingPack(null)
 
+  // R17.06 — drag-and-drop handlers. dragenter increments depth so
+  // the highlight stays on as the drag moves between child elements;
+  // dragleave decrements. The drop handler reads the first dropped
+  // file (we silently ignore multi-file drops — a theme pack is
+  // single-file by convention) and feeds it through parseAndPreview.
+  // We only intercept drags that carry FILES so a stray text-drag
+  // (e.g. selecting text on the page itself) doesn't flicker the
+  // overlay or block the default behaviour.
+  const onDragEnter = (e) => {
+    if (!e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    setDragDepth(d => d + 1)
+  }
+  const onDragOverZone = (e) => {
+    if (!e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return
+    // preventDefault is mandatory so the browser allows the drop.
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+  }
+  const onDragLeaveZone = (e) => {
+    if (!e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return
+    setDragDepth(d => Math.max(0, d - 1))
+  }
+  const onDropFile = (e) => {
+    if (!e.dataTransfer) return
+    e.preventDefault()
+    setDragDepth(0)
+    const file = e.dataTransfer.files && e.dataTransfer.files[0]
+    if (!file) {
+      showToast('Drop a .json theme pack to import')
+      return
+    }
+    if (!file.name.toLowerCase().endsWith('.json')) {
+      showToast(`Not a JSON file: ${file.name}`)
+      return
+    }
+    parseAndPreview(file)
+  }
+
   return (
-    <div>
+    <div
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOverZone}
+      onDragLeave={onDragLeaveZone}
+      onDrop={onDropFile}
+      style={{
+        position: 'relative',
+        borderRadius: 10,
+        // R17.06 — soft indigo glow + dashed outline when a file is
+        // being dragged over the zone. The dashed outline sits outside
+        // the existing content so nothing inside re-flows during the
+        // drag (outlineOffset keeps the row layout stable).
+        outline: dragActive ? '2px dashed rgba(99,102,241,0.55)' : '2px dashed transparent',
+        outlineOffset: dragActive ? 4 : 0,
+        background: dragActive ? 'rgba(99,102,241,0.05)' : 'transparent',
+        transition: 'background 0.18s ease-out, outline-color 0.18s ease-out',
+      }}
+    >
+      {/* R17.06 — overlay banner that surfaces while a JSON file is
+          being dragged over the zone. Sits absolutely positioned so
+          the underlying UI stays click-readable behind it; pointerEvents
+          off so the drag events keep hitting the parent. */}
+      {dragActive && (
+        <div style={{
+          position: 'absolute', top: -10, left: 0, right: 0,
+          padding: '4px 10px', borderRadius: 6,
+          background: 'rgba(99,102,241,0.18)',
+          color: '#dbeafe',
+          fontSize: 10.5, fontWeight: 600, letterSpacing: '0.04em',
+          textTransform: 'uppercase', textAlign: 'center',
+          border: '1px solid rgba(99,102,241,0.45)',
+          backdropFilter: 'blur(6px)',
+          pointerEvents: 'none', zIndex: 2,
+        }}>
+          Drop .json to preview theme pack
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
         <span style={{ fontSize: 11.5, fontWeight: 550, color: '#a8a8b8', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
           Custom Themes
@@ -1010,7 +1100,7 @@ function CustomThemesRow() {
       )}
       {customThemes.length === 0 && !open && (
         <button onClick={importFromFile}
-          title="Load a theme pack from a JSON file"
+          title="Load a theme pack from a JSON file — or just drag-and-drop one anywhere here (R17.06)"
           style={{
             width: '100%', marginTop: 4,
             padding: '6px 0', borderRadius: 7, fontSize: 10.5, fontWeight: 550,
@@ -1019,7 +1109,7 @@ function CustomThemesRow() {
             color: '#c7d2fe',
             border: '1px solid rgba(99,102,241,0.2)',
             letterSpacing: '0.02em',
-          }}>↑ Import Theme Pack</button>
+          }}>↑ Import Theme Pack <span style={{ opacity: 0.55, fontSize: 9, marginLeft: 6 }}>or drag .json</span></button>
       )}
 
       {pendingPack && (
@@ -2813,22 +2903,24 @@ function NamedAttractorsBlock() {
   // selection is purely a transient UI concept — a hard refresh
   // should always start with nothing selected.
   const [selectedIds, setSelectedIds] = useState(() => new Set())
-  // Reconcile selection against the live list — if an attractor was
-  // removed (single-delete or external) drop its id from the selection.
-  useEffect(() => {
-    setSelectedIds(prev => {
-      if (prev.size === 0) return prev
-      const liveIds = new Set(list.map(a => a && a.id))
-      let changed = false
-      const next = new Set()
-      for (const id of prev) {
-        if (liveIds.has(id)) next.add(id)
-        else changed = true
-      }
-      if (!changed) return prev  // no-op: skip the React re-render
-      return next
-    })
-  }, [list])
+  // Reconcile selection against the live list LAZILY at render time —
+  // if an attractor was removed (single-delete or external) drop its id
+  // from the derived set so the bar's counts + the delete action both
+  // see only live ids. We DON'T mirror this back into selectedIds via
+  // setState-in-effect (react-hooks/set-state-in-effect would fire);
+  // a stale id sitting in the raw set is harmless since every consumer
+  // reads `validSelectedIds`.
+  const validSelectedIds = useMemo(() => {
+    if (selectedIds.size === 0) return selectedIds
+    const liveIds = new Set(list.map(a => a && a.id))
+    let allLive = true
+    const next = new Set()
+    for (const id of selectedIds) {
+      if (liveIds.has(id)) next.add(id)
+      else allLive = false
+    }
+    return allLive ? selectedIds : next
+  }, [selectedIds, list])
 
   const toggleSelect = (id) => {
     setSelectedIds(prev => {
@@ -2840,10 +2932,10 @@ function NamedAttractorsBlock() {
   }
   const clearSelection = () => setSelectedIds(new Set())
   const deleteSelected = () => {
-    if (selectedIds.size === 0) return
-    const count = selectedIds.size
+    if (validSelectedIds.size === 0) return
+    const count = validSelectedIds.size
     if (!window.confirm(`Delete ${count} selected attractor${count === 1 ? '' : 's'}? This cannot be undone.`)) return
-    removeMany(selectedIds)
+    removeMany(validSelectedIds)
     setSelectedIds(new Set())
     showToast(`Removed ${count} attractor${count === 1 ? '' : 's'}`)
   }
@@ -2877,7 +2969,7 @@ function NamedAttractorsBlock() {
           Select all (when not everything is selected), and Clear. The
           live "N of M selected" counter sits inline so the user always
           sees the scope before confirming. */}
-      {selectedIds.size > 0 && (
+      {validSelectedIds.size > 0 && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 6,
           padding: '8px 10px', borderRadius: 8,
@@ -2889,9 +2981,9 @@ function NamedAttractorsBlock() {
             fontFamily: 'Geist Mono, JetBrains Mono, monospace',
             letterSpacing: '0.02em', flex: 1,
           }}>
-            {selectedIds.size} of {list.length} selected
+            {validSelectedIds.size} of {list.length} selected
           </span>
-          {selectedIds.size < list.length && (
+          {validSelectedIds.size < list.length && (
             <button onClick={selectAll}
               title="Add every remaining attractor to the selection"
               style={{
@@ -2914,7 +3006,7 @@ function NamedAttractorsBlock() {
               cursor: 'pointer',
             }}>Clear</button>
           <button onClick={deleteSelected}
-            title={`Delete the ${selectedIds.size} selected attractor${selectedIds.size === 1 ? '' : 's'}`}
+            title={`Delete the ${validSelectedIds.size} selected attractor${validSelectedIds.size === 1 ? '' : 's'}`}
             style={{
               padding: '4px 10px', borderRadius: 5,
               fontSize: 10.5, fontWeight: 700, letterSpacing: '0.04em',
@@ -2922,7 +3014,7 @@ function NamedAttractorsBlock() {
               color: '#fee2e2',
               border: '1px solid rgba(239,68,68,0.55)',
               cursor: 'pointer',
-            }}>Delete {selectedIds.size}</button>
+            }}>Delete {validSelectedIds.size}</button>
         </div>
       )}
 
@@ -2933,8 +3025,8 @@ function NamedAttractorsBlock() {
           total={list.length}
           attractor={a}
           isPlacing={placingId === a.id}
-          isSelected={selectedIds.has(a.id)}
-          hasSelection={selectedIds.size > 0}
+          isSelected={validSelectedIds.has(a.id)}
+          hasSelection={validSelectedIds.size > 0}
           onShiftClickSelect={() => toggleSelect(a.id)}
           onRename={(name) => update(a.id, { name })}
           onTypeChange={(type) => update(a.id, { type })}

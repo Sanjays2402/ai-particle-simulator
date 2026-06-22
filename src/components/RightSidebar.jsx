@@ -248,18 +248,26 @@ function CameraViews() {
   // up/down (R10.03) with a direct drag gesture for users who'd
   // rather just GRAB the row and drop it where they want it. The
   // wire layer stays thin: HTML5 dragstart sets the source index in
-  // `draggingIdxRef`, dragover on each row updates the visual hint
+  // state, dragover on each row updates the visual hint
   // (`dragOverIdx`) so the user sees where the drop will land, drop
   // calls moveView(views, from, to) (the same R10.03 lib primitive
   // that powers the chevron buttons). Ref-equal-on-no-op skip is
   // preserved through moveView so dropping a row on its current slot
   // doesn't churn state.
-  const draggingIdxRef = useRef(null)
+  //
+  // We keep `draggingIdx` in STATE (not a ref) because each row reads
+  // it during render to compute its `isBeingDragged` styling; the
+  // react-hooks/refs lint rule disallows reading refs during render.
+  // The slight extra re-render on dragstart / dragend is paid back
+  // by the dragOverIdx state already triggering renders during the
+  // hover (so we're not adding new render passes — just merging the
+  // existing dragOverIdx ones with the dragging-source state).
+  const [draggingIdx, setDraggingIdx] = useState(null)
   const [dragOverIdx, setDragOverIdx] = useState(null)
   const onDragStart = (idx) => (e) => {
-    draggingIdxRef.current = idx
+    setDraggingIdx(idx)
     // dataTransfer needs SOMETHING for Firefox to start the drag at
-    // all; the value is unused (we read draggingIdxRef in onDrop).
+    // all; the value is unused (we read draggingIdx from state in onDrop).
     try { e.dataTransfer.setData('text/plain', String(idx)) } catch { /* */ }
     e.dataTransfer.effectAllowed = 'move'
   }
@@ -279,8 +287,8 @@ function CameraViews() {
   }
   const onDrop = (idx) => (e) => {
     e.preventDefault()
-    const from = draggingIdxRef.current
-    draggingIdxRef.current = null
+    const from = draggingIdx
+    setDraggingIdx(null)
     setDragOverIdx(null)
     if (from === null || from === undefined) return
     const next = moveView(views, from, idx)
@@ -290,7 +298,7 @@ function CameraViews() {
   }
   const onDragEnd = () => {
     // Cleanup if the drop happened outside any drop target.
-    draggingIdxRef.current = null
+    setDraggingIdx(null)
     setDragOverIdx(null)
   }
 
@@ -359,8 +367,8 @@ function CameraViews() {
             // edge (border-left), only painted when dragOverIdx
             // matches AND the row isn't the row being dragged (a
             // self-drop is a no-op so the highlight would be misleading).
-            const isDropTarget = dragOverIdx === idx && draggingIdxRef.current !== idx
-            const isBeingDragged = draggingIdxRef.current === idx
+            const isDropTarget = dragOverIdx === idx && draggingIdx !== idx
+            const isBeingDragged = draggingIdx === idx
             return (
             <div key={v.id}
               draggable={views.length > 1}
