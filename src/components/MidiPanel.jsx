@@ -788,8 +788,18 @@ export default function MidiPanel({ open, onClose }) {
                                   consistent with the rest of the row. */}
                               {typeBand && (() => {
                                 const tStyle = attractorTypeStyle(typeBand.label)
+                                // R20.16 — proximity meter colour intent:
+                                //   safe (deep in band, prox >= 0.40) — type accent
+                                //   warn (entering shoulder, 0.10..0.40)  — amber
+                                //   danger (in dead-band, prox === 0)     — red
+                                const prox = typeBand.proximityToBoundary01
+                                const proxFillColor = prox < 0.001
+                                  ? 'rgba(239,68,68,0.85)'   // red — at boundary
+                                  : prox < 0.40
+                                    ? 'rgba(251,191,36,0.80)' // amber — close
+                                    : tStyle.fg                // type accent — safe
                                 return (
-                                  <span title={`Live CC value lands in band ${typeBand.index + 1}/${typeBand.total} (${typeBand.label}). ${typeBand.holdingPrev ? 'Inside dead-band — type held until the knob moves further into the next quarter.' : 'Moving the knob across a boundary flips the type.'}`}
+                                  <span title={`Live CC value lands in band ${typeBand.index + 1}/${typeBand.total} (${typeBand.label}). ${typeBand.holdingPrev ? 'Inside dead-band — type held until the knob moves further into the next quarter.' : 'Moving the knob across a boundary flips the type.'} Proximity to nearest flip boundary: ${(prox * 100).toFixed(0)}% safe (1.0=mid-band, 0.0=on boundary).`}
                                     style={{
                                       padding: '1px 6px', borderRadius: 4,
                                       fontSize: 9, fontWeight: 600, letterSpacing: '0.04em',
@@ -807,6 +817,32 @@ export default function MidiPanel({ open, onClose }) {
                                         letterSpacing: 0,
                                       }} title="Dead-band — previous type held">{'\u00b7hold'}</span>
                                     )}
+                                    {/* R20.16 — proximity bar meter. Sits inside
+                                        the type-band tag so the cue stays grouped
+                                        with the band label. 26px wide track with
+                                        a horizontal fill that scales with prox01.
+                                        Track tint follows the same safe→warn→danger
+                                        intent as the fill so users can read the
+                                        meter at a glance. */}
+                                    <span style={{
+                                      display: 'inline-block',
+                                      width: 26, height: 4,
+                                      borderRadius: 2,
+                                      background: 'rgba(0,0,0,0.45)',
+                                      border: `1px solid ${tStyle.borderFaint}`,
+                                      overflow: 'hidden',
+                                      marginLeft: 2,
+                                    }}>
+                                      <span style={{
+                                        display: 'block',
+                                        height: '100%',
+                                        // Fill goes from LEFT — wide fill = safe;
+                                        // narrow fill = boundary-close.
+                                        width: `${Math.max(0, Math.min(100, prox * 100))}%`,
+                                        background: proxFillColor,
+                                        transition: 'width 80ms linear, background 120ms linear',
+                                      }} />
+                                    </span>
                                   </span>
                                 )
                               })()}

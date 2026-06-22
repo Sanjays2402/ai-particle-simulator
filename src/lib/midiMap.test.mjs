@@ -945,3 +945,105 @@ for (let v = 0; v <= 1; v += 0.05) {
   const r = describeTypeBand(v, TYPES_R1916)
   eq(r.label, TYPES_R1916[r.index], `at v=${v.toFixed(2)}: label = types[index]`)
 }
+
+// --- R20.16: proximityToBoundary01 (safety meter for the TYPE row) ----
+// Endpoint anchors — dead-centre of any band reads 1.0 (max safe),
+// AT a boundary reads ~0.0 (max danger).
+{
+  // Band width with 4 types = 0.25. Dead centre of band 0 = 0.125.
+  // Distance to nearest boundary (0.25) = 0.125. With h=0.015 (default),
+  // safe range = 0.125 - 0.015 = 0.110. Safe dist at centre = 0.125 -
+  // 0.015 = 0.110. Proximity = 0.110 / 0.110 = 1.0.
+  const centre = describeTypeBand(0.125, TYPES_R1916)
+  near(centre.proximityToBoundary01, 1.0, 'dead centre of band 0 → proximity 1.0', 1e-9)
+
+  const centre2 = describeTypeBand(0.375, TYPES_R1916)  // mid of band 1
+  near(centre2.proximityToBoundary01, 1.0, 'dead centre of band 1 → proximity 1.0', 1e-9)
+}
+
+// AT the boundary (just inside the dead-band) reads 0.0.
+{
+  const onBoundary = describeTypeBand(0.250, TYPES_R1916)  // exact band 0/1 boundary
+  near(onBoundary.proximityToBoundary01, 0.0, 'on boundary → proximity 0.0', 1e-9)
+
+  // Just inside the dead-band — still 0.
+  const inDeadband = describeTypeBand(0.245, TYPES_R1916)  // 0.005 below boundary, hyst=0.015
+  near(inDeadband.proximityToBoundary01, 0.0, 'inside dead-band → proximity 0.0', 1e-9)
+}
+
+// Smooth ramp — proximity scales linearly across the safe range.
+{
+  // Half-way through the safe zone: 0.125 + (0.110 - 0.015) / 2 (no
+  // — let's pick a value that's halfway BETWEEN dead-band edge and
+  // mid-band). Dead-band edge near 0.25 boundary = 0.235 (0.25 - 0.015).
+  // Mid-band = 0.125. Halfway = 0.180. Distance to nearest = 0.07.
+  // Safe dist = 0.07 - 0.015 = 0.055. Proximity = 0.055 / 0.110 = 0.5.
+  const halfway = describeTypeBand(0.180, TYPES_R1916)
+  near(halfway.proximityToBoundary01, 0.5, 'halfway through safe zone → proximity 0.5', 1e-9)
+}
+
+// Monotonicity invariant: sweep through band 1 (boundary 0.25 to
+// boundary 0.50) — proximity should rise from 0 (at left boundary) to
+// 1 (mid-band 0.375) and fall back to 0 (at right boundary). No
+// surprises mid-sweep.
+{
+  let prev = -1
+  let peakIdx = -1
+  let peakVal = -1
+  const samples = []
+  for (let v = 0.250; v <= 0.500; v += 0.005) {
+    const r = describeTypeBand(v, TYPES_R1916)
+    samples.push({ v, p: r.proximityToBoundary01 })
+    if (r.proximityToBoundary01 > peakVal) {
+      peakVal = r.proximityToBoundary01
+      peakIdx = samples.length - 1
+    }
+  }
+  // Rising half — every step >= prev.
+  for (let i = 1; i <= peakIdx; i++) {
+    ok(samples[i].p >= prev - 1e-9, `band 1 rising at v=${samples[i].v.toFixed(3)}: p=${samples[i].p} >= prev=${prev}`)
+    prev = samples[i].p
+  }
+  // Falling half — every step <= prev.
+  prev = samples[peakIdx].p
+  for (let i = peakIdx + 1; i < samples.length; i++) {
+    ok(samples[i].p <= prev + 1e-9, `band 1 falling at v=${samples[i].v.toFixed(3)}: p=${samples[i].p} <= prev=${prev}`)
+    prev = samples[i].p
+  }
+  // Peak >= 0.99 (allow for float drift at the discrete grid).
+  ok(peakVal >= 0.99, `peak proximity in mid-band 1 ≥ 0.99 (got ${peakVal.toFixed(3)})`)
+}
+
+// Edge bands (first/last) only have ONE boundary — proximity at the
+// extreme end of the range should still be ≥ a normal interior value.
+{
+  const atZero = describeTypeBand(0, TYPES_R1916)
+  const atOne  = describeTypeBand(1, TYPES_R1916)
+  // At v=0, distance to right boundary 0.25 = 0.25; safe dist = 0.235;
+  // safe range = 0.110; proximity clamps to 1.
+  near(atZero.proximityToBoundary01, 1.0, 'v=0 (leftmost) → proximity clamps to 1', 1e-9)
+  near(atOne.proximityToBoundary01,  1.0, 'v=1 (rightmost) → proximity clamps to 1', 1e-9)
+}
+
+// Single-type roster has NO boundaries — proximity should always be 1.
+{
+  for (const v of [0, 0.25, 0.5, 0.75, 1]) {
+    const r = describeTypeBand(v, ['only'])
+    near(r.proximityToBoundary01, 1.0, `single-type at v=${v}: proximity = 1`, 1e-9)
+  }
+}
+
+// Range invariant — proximityToBoundary01 ∈ [0, 1] for any v01.
+for (let v = 0; v <= 1; v += 0.01) {
+  const r = describeTypeBand(v, TYPES_R1916)
+  ok(r.proximityToBoundary01 >= 0 && r.proximityToBoundary01 <= 1,
+    `proximity in [0,1] at v=${v.toFixed(2)}: got ${r.proximityToBoundary01}`)
+}
+
+// Custom hysteresis arg flows through proximity calc.
+{
+  // With h=0 the dead-band collapses — every value (except the exact
+  // boundary) reads a proportional safe distance.
+  const r = describeTypeBand(0.245, TYPES_R1916, 0)
+  ok(r.proximityToBoundary01 > 0, 'h=0: value off-boundary reads non-zero proximity')
+}

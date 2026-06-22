@@ -433,6 +433,17 @@ export function pickAttractorTypeForCC(previousType, v01, types = ATTRACTOR_TYPE
 //     normalised to [0, 1]. Lets the UI render a soft warning when
 //     the knob is close to (but not in) a boundary. NaN when at the
 //     extremes 0 or 1 (no neighbouring boundary).
+//   - R20.16 — proximityToBoundary01: a normalised [0, 1] safety
+//     score derived from distanceToEdge01. Returns 1.0 deep inside
+//     a band (knob is SAFE to stop here — far from any flip) and
+//     drops to 0.0 the moment the value enters a dead-band (knob is
+//     ON a boundary — next jitter could flip). The UI surfaces this
+//     as a small horizontal proximity meter on each TYPE row so the
+//     scannable cue scales smoothly with how close the knob is to
+//     a boundary, not just whether it's "in" or "out" of the band.
+//     The normalisation is over the band's HALF-WIDTH minus
+//     hysteresis (the value's "safe zone" inside the band), so a
+//     full sweep through one band paints a 0 → 1 → 0 ramp.
 export function describeTypeBand(v01, types = ATTRACTOR_TYPES, hysteresis = TYPE_BAND_HYSTERESIS) {
   const list = Array.isArray(types) ? types.filter(t => typeof t === 'string' && t.length > 0) : []
   if (list.length === 0) return null
@@ -459,12 +470,43 @@ export function describeTypeBand(v01, types = ATTRACTOR_TYPES, hysteresis = TYPE
     if (bandIdx > 0                && distLeft  <= h) holdingPrev = true
     if (bandIdx < list.length - 1  && distRight <= h) holdingPrev = true
   }
+  // R20.16 — proximity-to-boundary safety score.
+  // distanceToEdge01 walks 0 → bandWidth/2 across a single-band sweep
+  // (closest-to-boundary → mid-band → closest-to-OPPOSITE-boundary).
+  // Subtract the dead-band 'h' so the meter reads 0 the moment the
+  // value enters a hysteresis zone (not just when it crosses the
+  // boundary). The safe range is [h, bandWidth/2 - h], normalised
+  // to [0, 1] for an honest "how safe is this knob position" cue.
+  // Edge bands (idx=0, idx=N-1) only have ONE real boundary — v=0
+  // and v=1 are NOT flip points, so for those bands proximity is
+  // measured against the SINGLE real boundary only. That way a knob
+  // parked at the floor reads MAX SAFE (it can't fall off a boundary
+  // that doesn't exist), not "stuck on a boundary".
+  const halfBand   = bandWidth / 2
+  const hasLeftBoundary  = bandIdx > 0
+  const hasRightBoundary = bandIdx < list.length - 1
+  let realDistToBoundary
+  if (!hasLeftBoundary && !hasRightBoundary) {
+    realDistToBoundary = Infinity   // single-type roster — no boundaries at all
+  } else if (!hasLeftBoundary) {
+    realDistToBoundary = distRight
+  } else if (!hasRightBoundary) {
+    realDistToBoundary = distLeft
+  } else {
+    realDistToBoundary = Math.min(distLeft, distRight)
+  }
+  const safeRange  = Math.max(1e-9, halfBand - h)
+  const safeDist   = Math.max(0, realDistToBoundary - h)
+  const proximity01 = realDistToBoundary === Infinity
+    ? 1
+    : Math.max(0, Math.min(1, safeDist / safeRange))
   return {
     index: bandIdx,
     label: list[bandIdx],
     total: list.length,
     holdingPrev,
     distanceToEdge01: Math.min(distLeft, distRight),
+    proximityToBoundary01: proximity01,
   }
 }
 // Decode a 3-byte MIDI message. Returns { type, channel, data1, data2 }
