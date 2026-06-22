@@ -9,6 +9,11 @@ import { clampIntensity as clampWindIntensity, clampAzimuth as clampWindAzimuth,
 import { loadThemes as loadCustomThemes, saveThemes as saveCustomThemes, addTheme as addCustomThemeHelper, removeTheme as removeCustomThemeHelper, resolveTheme as resolveThemeHelper } from './lib/customThemes'
 import { clampAmplitude as clampNoiseAmp, clampFrequency as clampNoiseFreq, clampSpeed as clampNoiseSpeed } from './lib/noiseDeformer'
 import {
+  defaultPeakTrailCurveParams as defaultPeakTrailCurveParamsHelper,
+  sanitizeCurveParams as sanitizeCurveParamsHelper,
+  setCurveParam as setCurveParamHelper,
+} from './lib/waveform'
+import {
   loadAttractors as loadNamedAttractors,
   saveAttractors as saveNamedAttractors,
   addAttractor as addNamedAttractorHelper,
@@ -639,6 +644,36 @@ export const useStore = create((set, get) => {
     const next = (v === 'exp' || v === 'log') ? v : 'linear'
     try { if (typeof localStorage !== 'undefined') localStorage.setItem('spectrum-peak-curve-v1', next) } catch { /* */ }
     set({ spectrumPeakCurve: next })
+  },
+
+  // R19.12 — per-curve tunable parameters for the spectrum peak trail.
+  // Graduates R16.17's fixed-shape curves (t^2 for exp, sqrt(t) for
+  // log) with a single knob per curve (exp.exponent, log.base) so a
+  // power user can taste-shape beyond the shipped defaults. Persisted
+  // as a JSON blob — sanitizeCurveParams clamps + drops unknown keys
+  // on every read so a corrupt persisted value can never NaN out the
+  // renderer. Endpoint anchoring is preserved across every (curve,
+  // params) combination by the lib so swapping shapes never disturbs
+  // the trail's overall brightness range.
+  spectrumPeakCurveParams: (() => {
+    try {
+      if (typeof localStorage === 'undefined') return defaultPeakTrailCurveParamsHelper()
+      const raw = localStorage.getItem('spectrum-peak-curve-params-v1')
+      if (!raw) return defaultPeakTrailCurveParamsHelper()
+      return sanitizeCurveParamsHelper(JSON.parse(raw))
+    } catch { return defaultPeakTrailCurveParamsHelper() }
+  })(),
+  setSpectrumPeakCurveParam: (curve, key, value) => {
+    const live = get().spectrumPeakCurveParams
+    const next = setCurveParamHelper(live, curve, key, value)
+    if (next === live) return  // no-op (ref-equal skip)
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem('spectrum-peak-curve-params-v1', JSON.stringify(next)) } catch { /* */ }
+    set({ spectrumPeakCurveParams: next })
+  },
+  resetSpectrumPeakCurveParams: () => {
+    const defaults = defaultPeakTrailCurveParamsHelper()
+    try { if (typeof localStorage !== 'undefined') localStorage.removeItem('spectrum-peak-curve-params-v1') } catch { /* */ }
+    set({ spectrumPeakCurveParams: defaults })
   },
 
   // R17.20 — lightbox WASD pan acceleration curve preset. Parallels

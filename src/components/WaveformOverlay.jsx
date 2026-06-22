@@ -1,10 +1,12 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import {
   sampleAnalyser, projectToCanvas, peakAmplitude,
   sampleAnalyserSpectrum, projectSpectrumToBars, projectSpectrumToLogBars,
   makePeakHoldState, tickPeakHolds, resetPeakHolds, PEAK_LINE_THICKNESS,
   readPeakTrail, nextTrailCurve,
+  // R19.12 — per-curve tunable param schema (exp.exponent, log.base)
+  PEAK_TRAIL_CURVE_PARAMS, isCurveParamsAtDefaults,
 } from '../lib/waveform'
 
 // Audio waveform / oscilloscope overlay. Pinned to the canvas's
@@ -34,6 +36,18 @@ export default function WaveformOverlay() {
   const setPeakHolds = useStore(s => s.setSpectrumPeakHolds)
   const peakCurve = useStore(s => s.spectrumPeakCurve)
   const setPeakCurve = useStore(s => s.setSpectrumPeakCurve)
+  // R19.12 — per-curve tunable params (exp.exponent, log.base) live
+  // here so the trail re-paints the moment a param slider moves. The
+  // params object identity changes on every patch (lib uses spread-
+  // copy semantics) so the useEffect deps catch every change.
+  const peakCurveParams = useStore(s => s.spectrumPeakCurveParams)
+  const setPeakCurveParam = useStore(s => s.setSpectrumPeakCurveParam)
+  const resetPeakCurveParams = useStore(s => s.resetSpectrumPeakCurveParams)
+  // Popover open state for the param editor — hidden by default to
+  // keep the overlay tidy. Opens via long-press on the curve chip
+  // OR via a dedicated `…` button (rendered only when params exist
+  // for the active curve).
+  const [paramsOpen, setParamsOpen] = useState(false)
   const canvasRef = useRef(null)
   const rafRef = useRef(0)
   const scratchRef = useRef(null)
@@ -176,7 +190,10 @@ export default function WaveformOverlay() {
           // (on top) — the gradient reads as a head-leading flame.
           // R16.17 — `peakCurve` reshapes the alpha distribution:
           // 'exp' bias toward fresh, 'log' bias toward the tail.
-          const tail = readPeakTrail(peakStateRef.current, i, h, { curve: peakCurve })
+          // R19.12 — `peakCurveParams` tunes the shape per-curve
+          // (exp.exponent, log.base) — the live params object is
+          // passed straight through to readPeakTrail.
+          const tail = readPeakTrail(peakStateRef.current, i, h, { curve: peakCurve, curveParams: peakCurveParams })
           for (let k = 0; k < tail.length; k++) {
             const sample = tail[k]
             const trailY = baseY - sample.height
@@ -193,7 +210,7 @@ export default function WaveformOverlay() {
     }
     rafRef.current = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(rafRef.current)
-  }, [active, mode, spectrumScale, peakHolds, peakCurve])
+  }, [active, mode, spectrumScale, peakHolds, peakCurve, peakCurveParams])
 
   if (!active) return null
 
@@ -297,38 +314,206 @@ export default function WaveformOverlay() {
           exp → log → linear on click. Only renders when peak-holds
           are ON (the trail rides on the held peaks, so the chip would
           have no audible effect with peaks off). Sky-blue accent so it
-          reads as adjacent-but-distinct from the `pk` toggle. */}
+          reads as adjacent-but-distinct from the `pk` toggle.
+          R19.12 — also acts as a long-press handle for the params
+          popover: hold the chip for ~400ms to open the param editor
+          (exp's exponent, log's base). Linear has no params so the
+          long-press is a no-op there. A small `·` indicator next to
+          the chip label shows when the curve has non-default params. */}
       {mode === 'frequency' && peakHolds && (
-        <button
-          type="button"
+        <CurveChipWithLongPress
+          peakCurve={peakCurve}
+          peakCurveParams={peakCurveParams}
           onClick={() => setPeakCurve(nextTrailCurve(peakCurve))}
-          title={peakCurve === 'linear'
-            ? 'Trail fade curve: LINEAR — even falloff. Click to bias toward fresh samples (EXP).'
-            : peakCurve === 'exp'
-              ? 'Trail fade curve: EXP — fresh samples dominate, tail fades fast. Click for LOG (lingering tail).'
-              : 'Trail fade curve: LOG — tail lingers, recent samples ramp gently. Click for LINEAR.'}
-          style={{
-            position: 'absolute', top: 8, left: 122,
-            pointerEvents: 'auto',
-            padding: '2px 8px', borderRadius: 5,
-            fontSize: 9, fontWeight: 600, letterSpacing: '0.08em',
-            textTransform: 'uppercase',
-            color: peakCurve === 'linear' ? '#d8d8e0' : peakCurve === 'exp' ? '#7dd3fc' : '#a5f3fc',
-            background: peakCurve === 'linear'
-              ? 'rgba(255,255,255,0.06)'
-              : peakCurve === 'exp'
-                ? 'rgba(56,189,248,0.16)'
-                : 'rgba(34,211,238,0.16)',
-            border: peakCurve === 'linear'
-              ? '1px solid rgba(255,255,255,0.14)'
-              : peakCurve === 'exp'
-                ? '1px solid rgba(56,189,248,0.40)'
-                : '1px solid rgba(34,211,238,0.40)',
+          onLongPress={() => {
+            // Open the popover only when the active curve actually has
+            // tunable params — otherwise the click handler still cycles
+            // the curve, so a long-press while on 'linear' is harmless.
+            const schema = PEAK_TRAIL_CURVE_PARAMS[peakCurve]
+            if (schema && Object.keys(schema).length > 0) setParamsOpen(true)
+          }}
+        />
+      )}
+      {/* R19.12 — params popover. Renders a single slider per param
+          for the active curve. Hidden by default; opens via the curve
+          chip's long-press handler (above). Reset button surfaces a
+          single-click path back to the shipped defaults across ALL
+          curves (matches the existing chip-override patterns where
+          resets are atomic, not per-knob). */}
+      {mode === 'frequency' && peakHolds && paramsOpen && (
+        <div style={{
+          position: 'absolute', top: 36, left: 8, right: 8,
+          padding: '10px 12px',
+          borderRadius: 8,
+          background: 'linear-gradient(180deg, rgba(10,10,20,0.94), rgba(6,6,14,0.96))',
+          border: '1px solid rgba(56,189,248,0.45)',
+          boxShadow: '0 10px 32px rgba(0,0,0,0.6), 0 0 18px rgba(56,189,248,0.18)',
+          backdropFilter: 'blur(14px)',
+          pointerEvents: 'auto',
+          zIndex: 4,
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            marginBottom: 8,
+          }}>
+            <span style={{
+              fontSize: 9, fontWeight: 700, letterSpacing: '0.12em',
+              color: '#7dd3fc', textTransform: 'uppercase',
+              fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+            }}>
+              {peakCurve} curve
+            </span>
+            <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+              {!isCurveParamsAtDefaults(peakCurveParams) && (
+                <button
+                  type="button"
+                  onClick={() => resetPeakCurveParams()}
+                  title="Reset every curve's params back to the shipped defaults"
+                  style={{
+                    padding: '2px 7px', borderRadius: 4,
+                    fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
+                    color: '#fca5a5', textTransform: 'uppercase',
+                    background: 'rgba(239,68,68,0.10)',
+                    border: '1px solid rgba(239,68,68,0.32)',
+                    cursor: 'pointer',
+                    fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                  }}>reset</button>
+              )}
+              <button
+                type="button"
+                onClick={() => setParamsOpen(false)}
+                title="Close params editor"
+                style={{
+                  width: 18, height: 18, padding: 0,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  borderRadius: 4, fontSize: 10, lineHeight: 1, fontWeight: 700,
+                  background: 'rgba(255,255,255,0.05)',
+                  border: '1px solid rgba(255,255,255,0.10)',
+                  color: '#9a9ab0', cursor: 'pointer',
+                  fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                }}>{'\u00d7'}</button>
+            </div>
+          </div>
+          {Object.entries(PEAK_TRAIL_CURVE_PARAMS[peakCurve] || {}).map(([key, def]) => {
+            const live = (peakCurveParams && peakCurveParams[peakCurve]
+              && key in peakCurveParams[peakCurve])
+              ? peakCurveParams[peakCurve][key]
+              : def.default
+            const atDefault = live === def.default
+            return (
+              <div key={key} style={{ marginBottom: 6 }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  marginBottom: 3, fontSize: 10,
+                }}>
+                  <span style={{ color: '#c8c8d0', fontWeight: 500 }}>{def.label}</span>
+                  <span style={{
+                    color: atDefault ? '#7a7a90' : '#7dd3fc',
+                    fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                    fontSize: 10, fontWeight: 600,
+                  }}>{live.toFixed(2)}{!atDefault && (<span style={{ color: '#56b6e6', marginLeft: 4 }}>{'\u2022'}</span>)}</span>
+                </div>
+                <input
+                  type="range"
+                  min={def.min} max={def.max} step={def.step} value={live}
+                  onChange={(e) => setPeakCurveParam(peakCurve, key, parseFloat(e.target.value))}
+                  title={def.hint}
+                  style={{ width: '100%' }}
+                />
+              </div>
+            )
+          })}
+          <div style={{
+            fontSize: 9, color: '#7a7a90',
             fontFamily: 'Geist Mono, JetBrains Mono, monospace',
-            cursor: 'pointer',
-            backdropFilter: 'blur(4px)',
-          }}>{peakCurve === 'linear' ? 'lin' : peakCurve}</button>
+            marginTop: 4, lineHeight: 1.4,
+          }}>
+            {PEAK_TRAIL_CURVE_PARAMS[peakCurve] && Object.values(PEAK_TRAIL_CURVE_PARAMS[peakCurve])[0]?.hint}
+          </div>
+        </div>
       )}
     </div>
+  )
+}
+
+// R19.12 — tiny wrapper around the curve chip that detects a long-
+// press (≥400ms hold without movement) and fires onLongPress, while
+// preserving the original click handler for the cycle behaviour.
+// Click fires when the chord ENDS in under 400ms; long-press fires
+// at 400ms and suppresses the subsequent click. Pointer-event based
+// so it works on touch + mouse.
+function CurveChipWithLongPress({ peakCurve, peakCurveParams, onClick, onLongPress }) {
+  const timerRef = useRef(0)
+  const firedRef = useRef(false)
+  const startPress = () => {
+    firedRef.current = false
+    clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => {
+      firedRef.current = true
+      if (onLongPress) onLongPress()
+    }, 400)
+  }
+  const endPress = () => {
+    clearTimeout(timerRef.current)
+    timerRef.current = 0
+    if (!firedRef.current && onClick) onClick()
+    firedRef.current = false
+  }
+  const cancelPress = () => {
+    clearTimeout(timerRef.current)
+    timerRef.current = 0
+    firedRef.current = false
+  }
+  useEffect(() => () => clearTimeout(timerRef.current), [])
+  // R19.12 — show a small dot next to the chip label if THIS curve
+  // has been tweaked away from its shipped defaults. The dot reads
+  // as an unmistakable "I'm carrying custom params" cue without
+  // taking extra screen real estate.
+  const customDot = peakCurveParams && peakCurveParams[peakCurve]
+    && Object.entries(PEAK_TRAIL_CURVE_PARAMS[peakCurve] || {}).some(
+      ([k, def]) => peakCurveParams[peakCurve][k] !== def.default)
+  return (
+    <button
+      type="button"
+      onPointerDown={startPress}
+      onPointerUp={endPress}
+      onPointerLeave={cancelPress}
+      onPointerCancel={cancelPress}
+      title={(peakCurve === 'linear'
+        ? 'Trail fade curve: LINEAR — even falloff. Click to bias toward fresh samples (EXP).'
+        : peakCurve === 'exp'
+          ? 'Trail fade curve: EXP — fresh samples dominate, tail fades fast. Click for LOG. Hold to tweak the exponent.'
+          : 'Trail fade curve: LOG — tail lingers, recent samples ramp gently. Click for LINEAR. Hold to tweak the base.')
+        + (customDot ? ' \u2022 custom params active' : '')}
+      style={{
+        position: 'absolute', top: 8, left: 122,
+        pointerEvents: 'auto',
+        padding: '2px 8px', borderRadius: 5,
+        fontSize: 9, fontWeight: 600, letterSpacing: '0.08em',
+        textTransform: 'uppercase',
+        color: peakCurve === 'linear' ? '#d8d8e0' : peakCurve === 'exp' ? '#7dd3fc' : '#a5f3fc',
+        background: peakCurve === 'linear'
+          ? 'rgba(255,255,255,0.06)'
+          : peakCurve === 'exp'
+            ? 'rgba(56,189,248,0.16)'
+            : 'rgba(34,211,238,0.16)',
+        border: peakCurve === 'linear'
+          ? '1px solid rgba(255,255,255,0.14)'
+          : peakCurve === 'exp'
+            ? '1px solid rgba(56,189,248,0.40)'
+            : '1px solid rgba(34,211,238,0.40)',
+        fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+        cursor: 'pointer',
+        backdropFilter: 'blur(4px)',
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+      }}>
+      {peakCurve === 'linear' ? 'lin' : peakCurve}
+      {customDot && <span style={{
+        width: 4, height: 4, borderRadius: '50%',
+        background: '#7dd3fc',
+        boxShadow: '0 0 4px rgba(125,211,252,0.6)',
+        display: 'inline-block',
+      }} />}
+    </button>
   )
 }

@@ -12,6 +12,10 @@ import {
   readPeakTrail,
   // R16.17 — per-bar fade-out curve preset
   PEAK_TRAIL_CURVES, applyTrailCurve, nextTrailCurve,
+  // R19.12 — per-curve tunable params (exp.exponent, log.base)
+  PEAK_TRAIL_CURVE_PARAMS, defaultPeakTrailCurveParams,
+  sanitizeCurveParamValue, sanitizeCurveParams,
+  setCurveParam, isCurveParamsAtDefaults,
 } from './waveform.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -514,7 +518,16 @@ near(applyTrailCurve(1, 'exp'), 1, 'exp: 1 → 1')
 near(applyTrailCurve(0.5, 'exp'), 0.25, 'exp at midpoint = 0.25 (squared)')
 near(applyTrailCurve(0, 'log'), 0, 'log: 0 → 0')
 near(applyTrailCurve(1, 'log'), 1, 'log: 1 → 1')
-near(applyTrailCurve(0.25, 'log'), 0.5, 'log at 0.25 = 0.5 (sqrt)')
+// R19.12 — `log` upgraded from sqrt(t) to log(1+(base-1)*t)/log(base)
+// with default base=4 so users can tune the curve. Endpoint shape is
+// the same (0→0, 1→1); inner shape is now slightly less aggressive
+// than sqrt (base=4 lifts 0.25 to ~0.404 vs sqrt's 0.5), but still
+// solidly tail-leading vs linear (0.25). The "exp < linear < log"
+// invariant below still holds for every shipped base.
+near(applyTrailCurve(0.25, 'log'), Math.log(1 + 3 * 0.25) / Math.log(4),
+  'log at 0.25 follows default-base curve (R19.12: base=4)')
+ok(applyTrailCurve(0.25, 'log') > 0.25,
+  'log at 0.25 still lifts above linear (tail-leading invariant preserved)')
 
 // Shape invariant: at any inner point, exp < linear < log.
 // (This is the whole point — `exp` biases toward the head end, `log`
@@ -600,4 +613,174 @@ eq(nextTrailCurve(),          'linear', 'undefined current → first entry')
   }
 }
 
-console.log(`PASS: waveform peak-hold lines · HOLD=${PEAK_HOLD_FRAMES} frames · DECAY=${PEAK_DECAY_PX}px/frame (R10.19) + fade trail · TRAIL=${PEAK_TRAIL_LENGTH} frames · α ${PEAK_TRAIL_ALPHA_MIN}→${PEAK_TRAIL_ALPHA_MAX} (R15.07) + curve presets ${PEAK_TRAIL_CURVES.join('/')} (R16.17)`)
+console.log(`PASS: waveform peak-hold lines · HOLD=${PEAK_HOLD_FRAMES} frames · DECAY=${PEAK_DECAY_PX}px/frame (R10.19) + fade trail · TRAIL=${PEAK_TRAIL_LENGTH} frames · α ${PEAK_TRAIL_ALPHA_MIN}→${PEAK_TRAIL_ALPHA_MAX} (R15.07) + curve presets ${PEAK_TRAIL_CURVES.join('/')} (R16.17) + per-curve tunable params (R19.12)`)
+
+// --- R19.12: per-curve tunable params (exp.exponent, log.base) ---
+
+// Schema shape: linear has no params, exp + log each have one.
+eq(Object.keys(PEAK_TRAIL_CURVE_PARAMS.linear).length, 0, 'linear has no tunable params')
+eq(Object.keys(PEAK_TRAIL_CURVE_PARAMS.exp).length, 1, 'exp has exactly one param')
+eq(Object.keys(PEAK_TRAIL_CURVE_PARAMS.log).length, 1, 'log has exactly one param')
+ok('exponent' in PEAK_TRAIL_CURVE_PARAMS.exp, 'exp param is `exponent`')
+ok('base' in PEAK_TRAIL_CURVE_PARAMS.log, 'log param is `base`')
+// Schema defaults match the shipped R16.17 curves (exponent=2 → t^2, base=4 → ≈sqrt-ish at 4)
+eq(PEAK_TRAIL_CURVE_PARAMS.exp.exponent.default, 2, 'exp default exponent = 2 (matches R16.17 t^2)')
+eq(PEAK_TRAIL_CURVE_PARAMS.log.base.default, 4, 'log default base = 4')
+// Min/max sanity: exponent 1..6 (1 degenerates to linear), base 2..8.
+eq(PEAK_TRAIL_CURVE_PARAMS.exp.exponent.min, 1, 'exp.exponent.min = 1 (linear degenerate)')
+eq(PEAK_TRAIL_CURVE_PARAMS.exp.exponent.max, 6, 'exp.exponent.max = 6')
+eq(PEAK_TRAIL_CURVE_PARAMS.log.base.min, 2, 'log.base.min = 2')
+eq(PEAK_TRAIL_CURVE_PARAMS.log.base.max, 8, 'log.base.max = 8')
+// Every entry carries the UI's required metadata (label + hint).
+for (const [curve, schema] of Object.entries(PEAK_TRAIL_CURVE_PARAMS)) {
+  for (const [key, def] of Object.entries(schema)) {
+    ok(typeof def.label === 'string' && def.label.length > 0, `${curve}.${key} has label`)
+    ok(typeof def.hint  === 'string' && def.hint.length  > 0, `${curve}.${key} has hint`)
+    ok(Number.isFinite(def.step) && def.step > 0, `${curve}.${key} step > 0`)
+  }
+}
+
+// defaultPeakTrailCurveParams returns a fresh tree matching the schema defaults.
+{
+  const d = defaultPeakTrailCurveParams()
+  eq(d.exp.exponent, 2, 'defaults snapshot: exp.exponent = 2')
+  eq(d.log.base, 4, 'defaults snapshot: log.base = 4')
+  ok(Object.keys(d.linear).length === 0, 'defaults: linear is empty')
+  // Mutating the returned object MUST NOT change the next call's defaults.
+  d.exp.exponent = 99
+  eq(defaultPeakTrailCurveParams().exp.exponent, 2, 'defaults are not aliased — second call still 2')
+}
+
+// sanitizeCurveParamValue: clamp + non-finite → default.
+eq(sanitizeCurveParamValue('exp', 'exponent', 3.5), 3.5, 'in-range value returned as-is')
+eq(sanitizeCurveParamValue('exp', 'exponent', 0.5), 1, 'below-min clamps to min')
+eq(sanitizeCurveParamValue('exp', 'exponent', 100), 6, 'above-max clamps to max')
+eq(sanitizeCurveParamValue('exp', 'exponent', NaN), 2, 'NaN → default')
+eq(sanitizeCurveParamValue('exp', 'exponent', Infinity), 2, 'Infinity → default')
+eq(sanitizeCurveParamValue('exp', 'exponent', undefined), 2, 'undefined → default')
+eq(sanitizeCurveParamValue('log', 'base', 7), 7, 'log.base in-range')
+eq(sanitizeCurveParamValue('log', 'base', 1), 2, 'log.base below-min clamps to 2')
+// Unknown curve/key returns input unchanged (so a typo in caller code can't NaN the renderer).
+eq(sanitizeCurveParamValue('bogus', 'whatever', 42), 42, 'unknown curve: input unchanged')
+eq(sanitizeCurveParamValue('exp', 'nonsense', 42), 42, 'unknown key: input unchanged')
+
+// sanitizeCurveParams: partial input + drop unknown keys.
+{
+  const partial = sanitizeCurveParams({ exp: { exponent: 4 } })
+  eq(partial.exp.exponent, 4, 'partial: exp.exponent preserved')
+  eq(partial.log.base, 4, 'partial: missing log → fallback default')
+  const dropUnknown = sanitizeCurveParams({ exp: { exponent: 2, mystery: 99 }, foo: { bar: 1 } })
+  eq(dropUnknown.exp.exponent, 2, 'known key kept')
+  ok(!('mystery' in dropUnknown.exp), 'unknown key dropped')
+  ok(!('foo' in dropUnknown), 'unknown curve dropped')
+  const corrupt = sanitizeCurveParams({ exp: { exponent: NaN }, log: 'not-an-object' })
+  eq(corrupt.exp.exponent, 2, 'NaN exponent → default')
+  eq(corrupt.log.base, 4, 'non-object log curve map → fallback default')
+  const empty = sanitizeCurveParams(null)
+  eq(empty.exp.exponent, 2, 'null → fallback defaults')
+  const totallyEmpty = sanitizeCurveParams('not-an-object')
+  eq(totallyEmpty.log.base, 4, 'string → fallback defaults')
+}
+
+// setCurveParam: ref-equal on no-op, fresh ref on change, defensive on bad curve/key.
+{
+  const a = defaultPeakTrailCurveParams()
+  const noop = setCurveParam(a, 'exp', 'exponent', 2)
+  ok(noop === a, 'no-change → same ref returned (skip persist)')
+  const changed = setCurveParam(a, 'exp', 'exponent', 3.5)
+  ok(changed !== a, 'change → fresh ref')
+  eq(changed.exp.exponent, 3.5, 'change applied')
+  eq(a.exp.exponent, 2, 'input not mutated')
+  // Sanitised through schema — clamp on the way in.
+  const clamped = setCurveParam(a, 'exp', 'exponent', 100)
+  eq(clamped.exp.exponent, 6, 'set with out-of-range value clamps')
+  // Bad curve/key returns the input unchanged.
+  const badCurve = setCurveParam(a, 'bogus', 'whatever', 1)
+  ok(badCurve === a, 'unknown curve: input ref returned')
+  const badKey = setCurveParam(a, 'exp', 'nonsense', 1)
+  ok(badKey === a, 'unknown key: input ref returned')
+  // null/undefined input rebuilds from defaults.
+  const fromNull = setCurveParam(null, 'exp', 'exponent', 3.5)
+  eq(fromNull.exp.exponent, 3.5, 'null params: rebuild from defaults + apply')
+}
+
+// isCurveParamsAtDefaults
+ok(isCurveParamsAtDefaults(defaultPeakTrailCurveParams()), 'fresh defaults: at defaults')
+ok(isCurveParamsAtDefaults(null), 'null treated as defaults (no params = no diff)')
+ok(isCurveParamsAtDefaults({}), 'empty object treated as defaults')
+{
+  const tweaked = setCurveParam(defaultPeakTrailCurveParams(), 'exp', 'exponent', 3)
+  ok(!isCurveParamsAtDefaults(tweaked), 'after tweak: NOT at defaults')
+  const restored = setCurveParam(tweaked, 'exp', 'exponent', 2)
+  ok(isCurveParamsAtDefaults(restored), 'after restore: at defaults again')
+}
+
+// applyTrailCurve(t, curve, params) — endpoint invariance + monotonicity + extremes.
+// Endpoint anchoring: every (curve, params) combination returns 0 at t=0 and 1 at t=1.
+for (const exponent of [1, 1.5, 2, 3, 4, 6]) {
+  const p = { exp: { exponent } }
+  near(applyTrailCurve(0, 'exp', p), 0, `exp(exponent=${exponent}) at t=0 → 0`)
+  near(applyTrailCurve(1, 'exp', p), 1, `exp(exponent=${exponent}) at t=1 → 1`)
+}
+for (const base of [2, 3, 4, 6, 8]) {
+  const p = { log: { base } }
+  near(applyTrailCurve(0, 'log', p), 0, `log(base=${base}) at t=0 → 0`)
+  near(applyTrailCurve(1, 'log', p), 1, `log(base=${base}) at t=1 → 1`)
+}
+// Default exponent (2) matches the shipped R16.17 squared curve.
+near(applyTrailCurve(0.5, 'exp', defaultPeakTrailCurveParams()), 0.25, 'default exp params match R16.17 (t=0.5 → 0.25)')
+// exponent=1 degenerates to linear (identity).
+near(applyTrailCurve(0.5, 'exp', { exp: { exponent: 1 } }), 0.5, 'exp with exponent=1 degenerates to linear')
+near(applyTrailCurve(0.3, 'exp', { exp: { exponent: 1 } }), 0.3, 'exp with exponent=1: t=0.3 → 0.3')
+// Higher exponent biases more strongly toward the head — at t=0.5, t^4 < t^2 < t^1.
+{
+  const a = applyTrailCurve(0.5, 'exp', { exp: { exponent: 4 } })
+  const b = applyTrailCurve(0.5, 'exp', { exp: { exponent: 2 } })
+  ok(a < b, `higher exponent (4) more head-biased than lower (2) at midpoint: ${a} < ${b}`)
+}
+// Higher log base biases more tail-ward.
+{
+  const a = applyTrailCurve(0.5, 'log', { log: { base: 2 } })
+  const b = applyTrailCurve(0.5, 'log', { log: { base: 8 } })
+  ok(b > a, `higher log base (8) more tail-biased than lower (2) at midpoint: ${b} > ${a}`)
+}
+// Monotonicity on t: ascending t produces ascending output for every (curve, params) combo.
+for (const params of [
+  { exp: { exponent: 1.5 } },
+  { exp: { exponent: 4 } },
+  { log: { base: 3 } },
+  { log: { base: 7 } },
+]) {
+  const curve = params.exp ? 'exp' : 'log'
+  let prev = -Infinity
+  for (let t = 0; t <= 1.0001; t += 0.05) {
+    const v = applyTrailCurve(t, curve, params)
+    ok(v >= prev - 1e-9, `${curve} params monotonic at t=${t.toFixed(2)}: ${v} ≥ ${prev}`)
+    prev = v
+  }
+}
+// Corrupt params → defaults silently.
+near(applyTrailCurve(0.5, 'exp', { exp: { exponent: NaN } }), 0.25, 'NaN exponent → default (t^2)')
+near(applyTrailCurve(0.5, 'log', { log: { base: NaN } }), Math.log(1 + 3 * 0.5) / Math.log(4), 'NaN base → default (4)')
+near(applyTrailCurve(0.5, 'exp', null), 0.25, 'null params → defaults')
+near(applyTrailCurve(0.5, 'exp', {}), 0.25, 'empty params → defaults')
+
+// readPeakTrail honours curveParams — non-default exponent reshapes the alpha distribution.
+{
+  const s = makePeakHoldState(1)
+  for (let k = 0; k < PEAK_TRAIL_LENGTH; k++) tickPeakHolds(s, [[0, 50 + k * 5]])
+  const defaultExp = readPeakTrail(s, 0, 0, { curve: 'exp' })  // exponent=2 implicit
+  const sharperExp = readPeakTrail(s, 0, 0, { curve: 'exp', curveParams: { exp: { exponent: 5 } } })
+  eq(defaultExp.length, sharperExp.length, 'same trail length regardless of params')
+  // Inner sample should dim further with the sharper exponent (head bias stronger).
+  const inner = Math.floor(defaultExp.length / 2)
+  ok(sharperExp[inner].alpha < defaultExp[inner].alpha,
+    `sharper exp dims inner sample further: ${sharperExp[inner].alpha} < ${defaultExp[inner].alpha}`)
+  // Curve params object that's missing the relevant curve key falls back to defaults — no crash.
+  const partial = readPeakTrail(s, 0, 0, { curve: 'exp', curveParams: { log: { base: 5 } } })
+  eq(partial.length, defaultExp.length, 'partial params: falls back to default for unspecified curve')
+  for (let i = 0; i < partial.length; i++) {
+    near(partial[i].alpha, defaultExp[i].alpha, `partial params: alpha matches default exp at idx ${i}`)
+  }
+}
+

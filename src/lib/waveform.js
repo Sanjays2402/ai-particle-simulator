@@ -260,9 +260,124 @@ export const PEAK_TRAIL_ALPHA_MIN = 0.04 // oldest trail step still drawn
 // Defensive contract: any non-finite / out-of-range t is clamped before
 // shaping, unknown curve falls back to 'linear', so a corrupt persisted
 // value can never NaN out the renderer.
+//
+// R19.12 — per-curve tunable parameters. The shipped 'exp' uses t^2
+// and 'log' uses sqrt(t) — fine taste defaults, but a power-user who
+// wants a sharper exponential (t^3.5) or a flatter log (cube-root)
+// previously had no path forward without forking the file. The params
+// table exposes ONE knob per shaping curve:
+//   - exp.exponent (1..6, default 2 — t^exponent; >1 biases head-ward)
+//   - log.base     (2..8, default 4 — log(1+(base-1)*t) / log(base);
+//                   higher base biases tail-ward more aggressively;
+//                   base=2 gives ≈ sqrt-like, base=4 lingers more, etc)
+// 'linear' takes no params (no shape to tune).
+//
+// Endpoint anchoring is invariant: every (curve, params) combination
+// returns 0 at t=0 and 1 at t=1, so swapping curves OR tweaking a
+// param never disturbs the trail's overall MIN/MAX brightness — only
+// the distribution between. Monotonicity is also preserved on input
+// so a sweep can never retreat mid-hold.
 export const PEAK_TRAIL_CURVES = ['linear', 'exp', 'log']
 
-export function applyTrailCurve(t, curve = 'linear') {
+// Param schema — pure data so the UI can render a slider per param
+// without re-deriving min/max/step/default. Stable order matters
+// (the persistence path round-trips by key, not position, so this
+// can grow without invalidating saved values).
+export const PEAK_TRAIL_CURVE_PARAMS = {
+  linear: {},  // no shape to tune
+  exp:    {
+    exponent: { min: 1, max: 6, step: 0.1, default: 2,
+      label: 'Exponent',
+      hint: 't^exponent — higher = sharper head bloom (1 = linear)' },
+  },
+  log:    {
+    base: { min: 2, max: 8, step: 0.25, default: 4,
+      label: 'Base',
+      hint: 'log(1+(base-1)*t)/log(base) — higher = tail lingers more' },
+  },
+}
+
+// Defaults snapshot — same shape as PEAK_TRAIL_CURVE_PARAMS but flat
+// values only (no slider metadata). Useful as the seed for the store
+// + as a comparison target for "are we at defaults" checks.
+export function defaultPeakTrailCurveParams() {
+  const out = {}
+  for (const [curve, schema] of Object.entries(PEAK_TRAIL_CURVE_PARAMS)) {
+    out[curve] = {}
+    for (const [key, def] of Object.entries(schema)) {
+      out[curve][key] = def.default
+    }
+  }
+  return out
+}
+
+// Validate + clamp + sanitise a raw param value against the schema.
+// Non-finite / non-numeric → schema default. Out-of-range clamps to
+// [min, max]. Defensive: unknown curves/keys return the input
+// unchanged (so a typo in caller code can't NaN out the renderer).
+export function sanitizeCurveParamValue(curve, key, raw) {
+  const schema = PEAK_TRAIL_CURVE_PARAMS[curve]
+  if (!schema) return raw
+  const def = schema[key]
+  if (!def) return raw
+  if (!Number.isFinite(raw)) return def.default
+  if (raw < def.min) return def.min
+  if (raw > def.max) return def.max
+  return raw
+}
+
+// Merge a partial param map (e.g. from localStorage) with the
+// defaults, dropping unknown keys + clamping known ones. Returns a
+// fresh object — never mutates the input. The new map keeps the same
+// shape as defaultPeakTrailCurveParams() so callers can drop the
+// result straight into the store.
+export function sanitizeCurveParams(raw) {
+  const out = defaultPeakTrailCurveParams()
+  if (!raw || typeof raw !== 'object') return out
+  for (const [curve, schema] of Object.entries(PEAK_TRAIL_CURVE_PARAMS)) {
+    const incomingCurve = raw[curve]
+    if (!incomingCurve || typeof incomingCurve !== 'object') continue
+    for (const key of Object.keys(schema)) {
+      if (key in incomingCurve) {
+        out[curve][key] = sanitizeCurveParamValue(curve, key, incomingCurve[key])
+      }
+    }
+  }
+  return out
+}
+
+// Patch a single (curve, key) value through the same sanitiser.
+// Returns the new params map; if the new value matches the live one
+// after sanitising, returns the SAME ref so the store can skip a
+// redundant persist + render.
+export function setCurveParam(params, curve, key, raw) {
+  const safe = params && typeof params === 'object' ? params : defaultPeakTrailCurveParams()
+  const schema = PEAK_TRAIL_CURVE_PARAMS[curve]
+  if (!schema || !schema[key]) return safe
+  const sanitized = sanitizeCurveParamValue(curve, key, raw)
+  const liveCurveMap = safe[curve] || {}
+  if (liveCurveMap[key] === sanitized) return safe  // no-op skip
+  return {
+    ...safe,
+    [curve]: { ...liveCurveMap, [key]: sanitized },
+  }
+}
+
+// True if every (curve, key) in `params` matches its schema default.
+// Used by the UI to decide whether to show a "reset" badge.
+export function isCurveParamsAtDefaults(params) {
+  if (!params || typeof params !== 'object') return true
+  for (const [curve, schema] of Object.entries(PEAK_TRAIL_CURVE_PARAMS)) {
+    const liveCurveMap = params[curve] || {}
+    for (const [key, def] of Object.entries(schema)) {
+      const live = key in liveCurveMap ? liveCurveMap[key] : def.default
+      if (live !== def.default) return false
+    }
+  }
+  return true
+}
+
+export function applyTrailCurve(t, curve = 'linear', params = null) {
   // Clamp t into [0, 1]. NaN → 0 (no curve can extrapolate from NaN);
   // ±Infinity gets mapped to the corresponding boundary so a callsite
   // that accidentally divides by zero doesn't NaN out the renderer.
@@ -272,14 +387,26 @@ export function applyTrailCurve(t, curve = 'linear') {
   else if (t === -Infinity || t <= 0) clamped = 0
   else clamped = t
   switch (curve) {
-    case 'exp':
-      // Head-leading: square the input so tail (small t) gets shaped
-      // toward MIN much faster. New samples dominate visually.
-      return clamped * clamped
-    case 'log':
-      // Tail-leading: sqrt curve lifts small t values aggressively, so
-      // the oldest part of the trail stays brighter for longer.
-      return Math.sqrt(clamped)
+    case 'exp': {
+      // Head-leading: t^exponent. The default (exponent=2) matches the
+      // shipped R16.17 squared curve. Higher exponents push the head
+      // bloom further toward the freshest samples; 1.0 degenerates to
+      // linear. Exponent is sanitised so a corrupt persisted value
+      // can never NaN out the renderer.
+      const exponent = sanitizeCurveParamValue('exp', 'exponent',
+        params && params.exp ? params.exp.exponent : undefined)
+      return Math.pow(clamped, exponent)
+    }
+    case 'log': {
+      // Tail-leading: log(1 + (base-1) * t) / log(base). At t=0 this
+      // is 0 (log(1)=0), at t=1 this is 1 (log(base)/log(base)=1) —
+      // perfect endpoint anchoring across any base. base=2 gives ≈
+      // a flatter-than-sqrt curve; base=4 (default) matches R16.17's
+      // sqrt-ish look; higher bases lift the tail more aggressively.
+      const base = sanitizeCurveParamValue('log', 'base',
+        params && params.log ? params.log.base : undefined)
+      return Math.log(1 + (base - 1) * clamped) / Math.log(base)
+    }
     case 'linear':
     default:
       return clamped
@@ -385,11 +512,14 @@ export function resetPeakHolds(state) {
 // would visually live INSIDE the bar, which looks like a glitch).
 //
 // Alpha walks from PEAK_TRAIL_ALPHA_MIN (oldest) to PEAK_TRAIL_ALPHA_MAX
-// (newest) through `applyTrailCurve(t, opts.curve)` — linear by default
-// (matches R15.07's original look), 'exp' biases freshness, 'log'
-// lingers on the tail. We skip the head-most (newest) slot because
-// that's the SAME height as the live peak-hold line; rendering both at
-// full alpha would just paint over it.
+// (newest) through `applyTrailCurve(t, opts.curve, opts.curveParams)` —
+// linear by default (matches R15.07's original look), 'exp' biases
+// freshness, 'log' lingers on the tail. R19.12 — opts.curveParams
+// tunes the curve's shape (exp's exponent, log's base) for the power
+// user who wants more or less curve than the default. We skip the
+// head-most (newest) slot because that's the SAME height as the live
+// peak-hold line; rendering both at full alpha would just paint over
+// it.
 export function readPeakTrail(state, barIndex, current = 0, opts = {}) {
   if (!state || !state.trail || !state.peaks) return []
   const trailLen = state.trailLen || 0
@@ -398,6 +528,7 @@ export function readPeakTrail(state, barIndex, current = 0, opts = {}) {
   if (barIndex < 0 || barIndex >= n) return []
   const base = barIndex * trailLen
   const curve = opts && typeof opts.curve === 'string' ? opts.curve : 'linear'
+  const curveParams = opts && opts.curveParams ? opts.curveParams : null
   const out = []
   // Walk oldest → newest, but skip slot 0 (head); see comment above.
   for (let s = trailLen - 1; s >= 1; s--) {
@@ -408,9 +539,10 @@ export function readPeakTrail(state, barIndex, current = 0, opts = {}) {
     // s=1 → MAX (almost). Lerp linearly between MIN and MAX as a
     // function of how close `s` is to the head, after shaping
     // by the per-bar fade-out curve (R16.17 — 'linear' is the default
-    // R15.07 behaviour, 'exp' / 'log' redistribute intensity).
+    // R15.07 behaviour, 'exp' / 'log' redistribute intensity; R19.12 —
+    // curveParams reshapes the curve itself per user taste).
     const t = (trailLen - 1 - s) / (trailLen - 2)  // 0 (oldest) → 1 (newest non-head)
-    const shaped = applyTrailCurve(t, curve)
+    const shaped = applyTrailCurve(t, curve, curveParams)
     const alpha = PEAK_TRAIL_ALPHA_MIN + shaped * (PEAK_TRAIL_ALPHA_MAX - PEAK_TRAIL_ALPHA_MIN)
     out.push({ height: h, alpha })
   }
