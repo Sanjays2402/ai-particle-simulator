@@ -57,6 +57,35 @@ export function removeSnapshot(items, id) {
   return items.filter(s => s.id !== id)
 }
 
+// R18.06 — bulk remove by id set. Used by the grid view's long-press
+// multi-select bulk-delete UX so users can wipe several snapshots in
+// one operation. Pure: returns the input ref unchanged when nothing
+// in `idSet` actually existed in the list (so React/zustand can skip
+// the redundant write). `idSet` may be a Set, an array, or any
+// iterable; non-iterables return the input ref. Mirrors the
+// removeAttractors contract (R17.17) for cross-app consistency.
+export function removeSnapshots(items, idSet) {
+  if (!Array.isArray(items)) return []
+  if (!idSet) return items
+  let ids
+  if (idSet instanceof Set) {
+    ids = idSet
+  } else if (typeof idSet[Symbol.iterator] === 'function') {
+    ids = new Set(idSet)
+  } else {
+    return items
+  }
+  if (ids.size === 0) return items
+  let changed = false
+  const next = []
+  for (const s of items) {
+    if (!s) { changed = true; continue }
+    if (ids.has(s.id)) { changed = true; continue }
+    next.push(s)
+  }
+  return changed ? next : items
+}
+
 // Capture a snapshot from the live canvas — returns { thumb, png, w, h }
 // suitable for appendSnapshot. Done as a separate function so the UI
 // hook stays compact and the math is unit-testable via the helpers

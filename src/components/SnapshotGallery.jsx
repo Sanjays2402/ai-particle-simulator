@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { X, Download, Trash2, Images, ImageOff, LayoutGrid, Rows3, ChevronLeft, ChevronRight, Maximize2, ZoomIn } from 'lucide-react'
 import { useStore } from '../store'
 import {
-  loadSnapshots, saveSnapshots, removeSnapshot, downloadSnapshot,
+  loadSnapshots, saveSnapshots, removeSnapshot, removeSnapshots, downloadSnapshot,
 } from '../lib/snapshotGallery'
 import { gridLayout, lightboxNav, findSnapshot, formatDimensions } from '../lib/snapshotGrid'
 import {
@@ -42,6 +42,50 @@ export default function SnapshotGallery({ open, onClose }) {
   const [items, setItems] = useState(() => loadSnapshots())
   const [view, setView] = useState(() => loadView())
   const [lightboxId, setLightboxId] = useState(null)
+  // R18.06 — grid-view multi-select state. Long-press a tile to enter
+  // selection mode (a bar surfaces above the grid). Once in selection
+  // mode, taps toggle selection without opening the lightbox.
+  // Selection is purely transient UI — a hard refresh always starts
+  // empty. Cleared automatically when the gallery closes or switches
+  // back to the strip view (selection is grid-only).
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
+  // Reconcile selection at render-time against the live items list so
+  // an externally-removed snapshot drops out of the bar's counts
+  // without a setState-in-effect dance. Same trick used by
+  // NamedAttractorsBlock R17.17.
+  const validSelectedIds = useMemo(() => {
+    if (selectedIds.size === 0) return selectedIds
+    const liveIds = new Set(items.map(s => s && s.id))
+    let allLive = true
+    const next = new Set()
+    for (const id of selectedIds) {
+      if (liveIds.has(id)) next.add(id)
+      else allLive = false
+    }
+    return allLive ? selectedIds : next
+  }, [selectedIds, items])
+  const inSelectMode = validSelectedIds.size > 0
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  const clearSelection = () => setSelectedIds(new Set())
+  const selectAll = () => setSelectedIds(new Set(items.map(s => s.id)))
+  const deleteSelected = () => {
+    if (validSelectedIds.size === 0) return
+    const count = validSelectedIds.size
+    if (!window.confirm(`Delete ${count} selected snapshot${count === 1 ? '' : 's'}? This cannot be undone.`)) return
+    const next = removeSnapshots(items, validSelectedIds)
+    setItems(next)
+    saveSnapshots(next)
+    setSelectedIds(new Set())
+    if (lightboxId != null && !next.some(s => s.id === lightboxId)) setLightboxId(null)
+    window.dispatchEvent(new CustomEvent('particle:snapshot-removed', { detail: next.length }))
+  }
 
   // Refresh from disk whenever the gallery opens AND when a new
   // snapshot lands (TopBar fires particle:snapshot-saved). This keeps
@@ -98,7 +142,16 @@ export default function SnapshotGallery({ open, onClose }) {
   const handleSetView = (next) => {
     setView(next)
     saveView(next)
+    // R18.06 — clearing selection when switching away from grid keeps
+    // the strip view free of any selection-mode UI (selection is
+    // grid-only by design — strip is for scanning, not bulk ops).
+    if (next !== 'grid') setSelectedIds(new Set())
   }
+  // R18.06 — also clear selection when gallery closes so reopen
+  // starts fresh (parallels lightbox-id reset on close).
+  useEffect(() => {
+    if (!open) setSelectedIds(new Set())
+  }, [open])
 
   const layout = gridLayout(items.length)
   const lightboxEntry = lightboxId != null ? findSnapshot(items, lightboxId) : null
@@ -203,18 +256,81 @@ export default function SnapshotGallery({ open, onClose }) {
               No snapshots yet. Press <kbd style={kbdStyle}>S</kbd> or click the camera button to capture one.
             </div>
           ) : view === 'grid' ? (
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: `repeat(${layout.cols}, 1fr)`,
-              gap: 10, paddingBottom: 4,
-            }}>
-              {items.map(s => (
-                <SnapshotTile key={s.id} entry={s} compact
-                  onClick={() => setLightboxId(s.id)}
-                  onDownload={() => handleRedownload(s)}
-                  onRemove={() => handleRemove(s.id)} />
-              ))}
-            </div>
+            <>
+              {/* R18.06 — multi-select bulk-delete bar. Surfaces only
+                  in grid view when at least one tile is selected.
+                  Long-press a tile to enter selection mode; subsequent
+                  taps toggle selection (the tile's `onClick` is gated
+                  on `inSelectMode` so a normal tap-to-open-lightbox
+                  still works at rest). */}
+              {inSelectMode && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '8px 10px', marginBottom: 10, borderRadius: 8,
+                  background: 'rgba(239,68,68,0.08)',
+                  border: '1px solid rgba(239,68,68,0.30)',
+                }}>
+                  <span style={{
+                    fontSize: 11.5, fontWeight: 600, color: '#fca5a5',
+                    fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                    letterSpacing: '0.02em', flex: 1,
+                  }}>
+                    {validSelectedIds.size} of {items.length} selected
+                  </span>
+                  {validSelectedIds.size < items.length && (
+                    <button onClick={selectAll}
+                      title="Add every remaining snapshot to the selection"
+                      style={{
+                        padding: '4px 9px', borderRadius: 5,
+                        fontSize: 10.5, fontWeight: 550,
+                        background: 'rgba(255,255,255,0.04)',
+                        color: '#c8c8d0',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                        cursor: 'pointer',
+                      }}>Select all</button>
+                  )}
+                  <button onClick={clearSelection}
+                    title="Clear the selection (exit multi-select mode)"
+                    style={{
+                      padding: '4px 9px', borderRadius: 5,
+                      fontSize: 10.5, fontWeight: 550,
+                      background: 'rgba(255,255,255,0.04)',
+                      color: '#c8c8d0',
+                      border: '1px solid rgba(255,255,255,0.08)',
+                      cursor: 'pointer',
+                    }}>Clear</button>
+                  <button onClick={deleteSelected}
+                    title={`Delete the ${validSelectedIds.size} selected snapshot${validSelectedIds.size === 1 ? '' : 's'}`}
+                    style={{
+                      padding: '4px 10px', borderRadius: 5,
+                      fontSize: 10.5, fontWeight: 700, letterSpacing: '0.04em',
+                      background: 'linear-gradient(135deg, rgba(239,68,68,0.30), rgba(168,85,247,0.22))',
+                      color: '#fee2e2',
+                      border: '1px solid rgba(239,68,68,0.55)',
+                      cursor: 'pointer',
+                    }}>Delete {validSelectedIds.size}</button>
+                </div>
+              )}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: `repeat(${layout.cols}, 1fr)`,
+                gap: 10, paddingBottom: 4,
+              }}>
+                {items.map(s => (
+                  <SnapshotTile key={s.id} entry={s} compact
+                    selectable
+                    isSelected={validSelectedIds.has(s.id)}
+                    inSelectMode={inSelectMode}
+                    onLongPress={() => toggleSelect(s.id)}
+                    onClick={() => {
+                      if (inSelectMode) toggleSelect(s.id)
+                      else setLightboxId(s.id)
+                    }}
+                    onDownload={() => handleRedownload(s)}
+                    onRemove={() => handleRemove(s.id)} />
+                ))}
+              </div>
+            </>
           ) : (
             <div style={{ display: 'flex', gap: 10, paddingBottom: 4 }}>
               {items.map(s => (
@@ -249,7 +365,7 @@ export default function SnapshotGallery({ open, onClose }) {
   )
 }
 
-function SnapshotTile({ entry, compact, onClick, onDownload, onRemove }) {
+function SnapshotTile({ entry, compact, onClick, onDownload, onRemove, selectable, isSelected, inSelectMode, onLongPress }) {
   const [hover, setHover] = useState(false)
   const ts = new Date(entry.createdAt || Date.now())
   const timeLabel = ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -258,21 +374,92 @@ function SnapshotTile({ entry, compact, onClick, onDownload, onRemove }) {
   const sizing = compact
     ? { width: '100%', aspectRatio: '200 / 130' }
     : { width: 200, height: 130 }
+  // R18.06 — long-press detection. Wired to native pointer events so
+  // the same handler covers mouse + touch + pen. A press that holds
+  // for ≥ LONG_PRESS_MS or that moves more than LONG_PRESS_SLOP_PX
+  // gets treated as long-press (the move guard lets a scroll/swipe
+  // bail out cleanly without triggering selection). After firing,
+  // the next pointerup is swallowed so the subsequent synthetic
+  // click handler doesn't toggle selection a second time.
+  const LONG_PRESS_MS = 450
+  const LONG_PRESS_SLOP_PX = 8
+  const pressTimerRef = useRef(null)
+  const longPressFiredRef = useRef(false)
+  const pressStartRef = useRef(null)
+  const cancelPress = () => {
+    if (pressTimerRef.current != null) {
+      clearTimeout(pressTimerRef.current)
+      pressTimerRef.current = null
+    }
+    pressStartRef.current = null
+  }
+  const handlePointerDown = (e) => {
+    if (!selectable || typeof onLongPress !== 'function') return
+    // Right-click / middle-click never count as long-press.
+    if (e.button != null && e.button !== 0) return
+    longPressFiredRef.current = false
+    pressStartRef.current = { x: e.clientX, y: e.clientY }
+    pressTimerRef.current = setTimeout(() => {
+      longPressFiredRef.current = true
+      pressTimerRef.current = null
+      onLongPress()
+    }, LONG_PRESS_MS)
+  }
+  const handlePointerMove = (e) => {
+    if (!pressStartRef.current) return
+    const dx = e.clientX - pressStartRef.current.x
+    const dy = e.clientY - pressStartRef.current.y
+    if (Math.hypot(dx, dy) > LONG_PRESS_SLOP_PX) cancelPress()
+  }
+  const handlePointerUp = () => cancelPress()
+  const handlePointerCancel = () => cancelPress()
+  // Swallow the synthetic click after a long-press fires, so the
+  // gallery's onClick (which would normally toggle selection or
+  // open the lightbox) doesn't run twice.
+  const handleClick = (e) => {
+    if (longPressFiredRef.current) {
+      longPressFiredRef.current = false
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+    onClick?.()
+  }
   return (
     <div
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      onClick={onClick}
-      title="Click to view full-size"
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
+      onClick={handleClick}
+      title={inSelectMode
+        ? (isSelected ? 'Tap to remove from selection' : 'Tap to add to selection')
+        : (selectable ? 'Click to view full-size · long-press to multi-select' : 'Click to view full-size')}
       style={{
         position: 'relative', flexShrink: 0,
         ...sizing,
         borderRadius: 10, overflow: 'hidden',
         background: '#0a0a10',
-        border: hover ? '1px solid rgba(168,85,247,0.5)' : '1px solid rgba(255,255,255,0.06)',
-        boxShadow: hover ? '0 8px 24px rgba(0,0,0,0.5), 0 0 18px rgba(168,85,247,0.25)' : '0 4px 12px rgba(0,0,0,0.35)',
+        // R18.06 — red border + glow when selected; lifted-saturation
+        // (95% brightness) when in select mode but not selected so the
+        // current selection scope is scannable across many tiles.
+        border: isSelected
+          ? '2px solid rgba(239,68,68,0.85)'
+          : (hover ? '1px solid rgba(168,85,247,0.5)' : '1px solid rgba(255,255,255,0.06)'),
+        boxShadow: isSelected
+          ? '0 0 20px rgba(239,68,68,0.45)'
+          : (hover ? '0 8px 24px rgba(0,0,0,0.5), 0 0 18px rgba(168,85,247,0.25)' : '0 4px 12px rgba(0,0,0,0.35)'),
         transition: 'all 0.18s ease-out',
         cursor: 'pointer',
+        // Prevent native browser long-press text/image action sheet
+        // on mobile so the long-press is delivered to our handler
+        // before the OS intercepts.
+        userSelect: selectable ? 'none' : undefined,
+        WebkitUserSelect: selectable ? 'none' : undefined,
+        WebkitTouchCallout: selectable ? 'none' : undefined,
+        touchAction: 'manipulation',
       }}
     >
       <img src={entry.thumb} alt={entry.label}
@@ -298,7 +485,7 @@ function SnapshotTile({ entry, compact, onClick, onDownload, onRemove }) {
         </span>
       </div>
       {/* Hover actions */}
-      {hover && (
+      {hover && !inSelectMode && (
         <div style={{
           position: 'absolute', top: 6, right: 6, display: 'flex', gap: 4,
           animation: 'tile-fade 0.15s ease-out',
@@ -317,6 +504,26 @@ function SnapshotTile({ entry, compact, onClick, onDownload, onRemove }) {
             <Trash2 size={11} strokeWidth={2.4} color="#fff" />
           </button>
         </div>
+      )}
+      {/* R18.06 — selection checkmark indicator. Always visible in
+          select-mode so the user can see which tiles are selected
+          without hovering each one. Filled red when selected, empty
+          ring when in select-mode but unselected (visual affordance
+          to add). pointerEvents: none — the whole tile is the toggle
+          target, the badge is purely visual. */}
+      {inSelectMode && (
+        <div style={{
+          position: 'absolute', top: 6, right: 6,
+          width: 20, height: 20, borderRadius: '50%',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          background: isSelected ? 'rgba(239,68,68,0.90)' : 'rgba(0,0,0,0.55)',
+          border: isSelected ? '2px solid rgba(254,202,202,0.95)' : '2px solid rgba(255,255,255,0.55)',
+          boxShadow: isSelected ? '0 0 10px rgba(239,68,68,0.55)' : 'none',
+          color: '#fee2e2',
+          fontSize: 11, fontWeight: 800, lineHeight: 1,
+          fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+          pointerEvents: 'none', zIndex: 2,
+        }}>{isSelected ? '\u2713' : ''}</div>
       )}
       {/* "Thumbs only" badge when full PNG was dropped */}
       {!entry.png && (
