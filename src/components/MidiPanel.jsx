@@ -50,15 +50,15 @@ export default function MidiPanel({ open, onClose }) {
   const [inputs, setInputs] = useState([])
   const [bindings, setBindings] = useState(() => loadMidiMap())
   const [lastCC, setLastCC] = useState(null)   // {cc, value, deviceName}
-  // R19.16 — per-CC last-seen value cache so each TYPE row can show
-  // which BAND its bound CC currently sits in. Indexed by CC number;
-  // updated alongside lastCC whenever a message arrives. We use a
-  // useRef + a counter state to keep the React re-render path tight:
-  // the ref holds the live map (read by render-time helpers), the
-  // counter forces a re-render only when the SPECIFIC CC for one
-  // of our visible rows changed (filtered in handleMessage).
-  const lastCCByNumberRef = useRef({})
-  const [lastCCTick, setLastCCTick] = useState(0)
+  // R19.16 — per-CC last-seen value snapshot so each TYPE row can show
+  // which BAND its bound CC currently sits in. Stored as STATE (not
+  // a ref) so the render-time read in the TYPE row passes the
+  // react-hooks/refs lint rule. We only update it when the incoming
+  // CC is actually BOUND to one of our visible rows (filtered against
+  // bindingsRef.current at message time) — otherwise a chatty
+  // controller pumping unbound CCs would re-render the panel ~60×/sec
+  // for no visible effect.
+  const [lastCCByNumber, setLastCCByNumber] = useState({})
   const [learnFor, setLearnFor] = useState(null) // actionId waiting for next CC
   // R13.05 — user-authored bundle list. Persisted separately from the
   // live binding map so saving a bundle never touches the live state.
@@ -112,15 +112,16 @@ export default function MidiPanel({ open, onClose }) {
         if (!msg) return
         if (msg.type !== 0xB0) return  // CC only for now
         setLastCC({ cc: msg.data1, value: msg.data2, deviceName: event.currentTarget?.name || 'MIDI' })
-        // R19.16 — cache the per-CC last value so the TYPE row tooltip
-        // can show which BAND the live CC sits in. Only bump the tick
-        // counter (which triggers a re-render of the visible rows)
-        // when this CC is actually bound to something — otherwise a
-        // chatty controller pumping CCs we don't listen to would
-        // re-render the panel ~60 times/sec for no reason.
-        lastCCByNumberRef.current[msg.data1] = msg.data2
+        // R19.16 — only update the per-CC state if this CC is bound to
+        // SOMETHING (so we don't trigger an unrelated re-render every
+        // 16ms when a chatty controller fires unbound CCs). The
+        // functional setState lets us read+write atomically without
+        // a stale closure.
         if (bindingsRef.current && bindingsRef.current[String(msg.data1)]) {
-          setLastCCTick(t => (t + 1) & 0xffff)  // wrap at 16-bit so the counter never grows unbounded
+          setLastCCByNumber(prev => {
+            if (prev[msg.data1] === msg.data2) return prev  // same value → no-op
+            return { ...prev, [msg.data1]: msg.data2 }
+          })
         }
         // If a Learn is pending, capture this CC instead of dispatching.
         // We read the latest bindings via the ref (sync-updated by the
@@ -731,18 +732,12 @@ export default function MidiPanel({ open, onClose }) {
                         // R19.16 — for TYPE rows, project the live CC value
                         // through the same band picker the dispatcher uses
                         // so the user sees which quarter the CC currently
-                        // sits in. Reads lastCCByNumberRef which is touched
-                        // every message, so this re-derives on every paint
-                        // (cheap — single floor + 2 compares).
-                        // lastCCTick gating: React Compiler's deps tracker
-                        // already sees the useState read at the top of the
-                        // component, so the render runs when the tick changes;
-                        // we just reference it once below in a guard so the
-                        // unused-var lint doesn't fire (a tick read with no
-                        // effect on output would also be a no-op).
+                        // sits in. lastCCByNumber is component state (not
+                        // a ref) so the render-time read passes the
+                        // react-hooks/refs lint rule.
                         let typeBand = null
-                        if (a.field === 'type' && cc !== null && lastCCTick >= 0) {
-                          const liveCcValue = lastCCByNumberRef.current[Number(cc)]
+                        if (a.field === 'type' && cc !== null) {
+                          const liveCcValue = lastCCByNumber[Number(cc)]
                           if (Number.isFinite(liveCcValue)) {
                             typeBand = describeTypeBand(ccToNormalized(liveCcValue), ATTRACTOR_TYPES)
                           }
