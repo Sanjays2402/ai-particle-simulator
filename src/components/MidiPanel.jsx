@@ -352,6 +352,79 @@ export default function MidiPanel({ open, onClose }) {
     input.click()
   }
 
+  // R18.09 — drag-and-drop import. Auto-detects whether the dropped
+  // file is a single-bundle envelope (parseImport) or a multi-bundle
+  // envelope (parseImportMulti) by trying multi first (it's a strict
+  // shape match, so non-multi files fall through cleanly) then
+  // single. Bare arrays at the top level are accepted as multi-shape;
+  // bare single objects fall through to single. Pure wrapper around
+  // the same lib paths that powered R14.17 + R15.14 — no new IO
+  // module, no envelope changes. The drop zone is the PresetBar
+  // (matches R17.06's theme-row pattern: drop anywhere on the bar to
+  // trigger import). User confirms multi-imports via the same
+  // window.confirm gate as the file-picker path.
+  const importBundleFile = (file) => {
+    if (!file) return
+    if (!file.name.toLowerCase().endsWith('.json')) {
+      showToast(`Not a JSON file: ${file.name}`)
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => {
+      const raw = typeof reader.result === 'string' ? reader.result : ''
+      // Try multi first — a single-bundle file will fail this parse
+      // (kind mismatch or missing `bundles` array) without ambiguity.
+      const multi = parseUserBundlesImportMulti(raw)
+      if (multi.ok) {
+        const impact = summarizeImportImpactMulti(userPresets, multi.bundles)
+        let prompt = `Import ${impact.incoming} bundle${impact.incoming === 1 ? '' : 's'}?`
+        const bits = []
+        if (impact.willAdd)     bits.push(`${impact.willAdd} new`)
+        if (impact.willReplace) bits.push(`${impact.willReplace} replace existing`)
+        if (impact.willDrop)    bits.push(`${impact.willDrop} will FIFO-drop oldest`)
+        if (bits.length) prompt += `\n${bits.join(' · ')}`
+        if (!window.confirm(prompt)) return
+        let next = userPresets
+        let added = 0
+        for (const inc of multi.bundles) {
+          const target = inc.name.trim().toLowerCase()
+          next = next.filter(p => !p || typeof p.name !== 'string' || p.name.trim().toLowerCase() !== target)
+          const built = buildUserPresetFromMap(inc.name, inc.map, next)
+          if (!built) continue
+          next = addUserPreset(next, built)
+          added++
+        }
+        setUserPresets(next)
+        saveUserPresets(next)
+        showToast(`Imported ${added} bundle${added === 1 ? '' : 's'}${impact.willDrop ? ` · ${impact.willDrop} dropped` : ''}`)
+        return
+      }
+      // Fall through to single-bundle import.
+      if (isAtBundleCap(userPresets)) {
+        showToast(`At bundle cap (${MAX_USER_PRESETS}) — delete one first`)
+        return
+      }
+      const single = parseUserBundleImport(raw)
+      if (!single.ok) {
+        // Both parses failed — report the multi error first since
+        // it's the more permissive parse (catches bare-array shape too).
+        showToast(`Import failed: ${multi.error}`)
+        return
+      }
+      const built = buildUserPresetFromMap(single.bundle.name, single.bundle.map, userPresets)
+      if (!built) {
+        showToast('Import failed: bundle had no valid bindings')
+        return
+      }
+      const next = addUserPreset(userPresets, built)
+      setUserPresets(next)
+      saveUserPresets(next)
+      const count = Object.keys(built.map).length
+      showToast(`Imported "${built.name}" (${count} binding${count === 1 ? '' : 's'})`)
+    }
+    reader.readAsText(file)
+  }
+
   // Try to auto-detect a likely preset from the connected inputs.
   // Returns the preset id of the FIRST match, or null. Surface only —
   // we don't auto-apply, the user has to opt in.
@@ -433,6 +506,7 @@ export default function MidiPanel({ open, onClose }) {
           onExportAllUsers={exportAllUserBundles}
           onImportAllUsers={importAllUserBundles}
           onSetColorUser={setUserBundleColor}
+          onDropFile={importBundleFile}
           savingBundle={savingBundle}
           onStartSave={() => { setSavingBundle(true); setBundleName('') }}
           onCancelSave={() => { setSavingBundle(false); setBundleName('') }}
@@ -736,17 +810,86 @@ function PresetBar({
   onExportAllUsers, onImportAllUsers,
   // R16.19 — per-bundle colour tag
   onSetColorUser,
+  // R18.09 — drag-and-drop import (auto-detects single vs multi envelope)
+  onDropFile,
   savingBundle, onStartSave, onCancelSave, onCommitBundle,
   bundleName, onBundleNameChange, liveBindingCount,
 }) {
   const canSave = (bundleName || '').trim().length > 0 && liveBindingCount > 0
   const atCap = userPresets.length >= MAX_USER_PRESETS
+  // R18.09 — same dragDepth pattern as R17.06 (CustomThemesRow) — a
+  // nested-counter tracks dragenter/leave events across child
+  // elements so the highlight only clears when the drag ACTUALLY
+  // leaves the bar (browsers fire enter+leave on every child a drag
+  // crosses; a naive boolean would flicker on every chip boundary).
+  // Filters by `dataTransfer.types.includes('Files')` so stray text-
+  // drags (selecting text on the page itself) don't trigger the
+  // overlay or block the default behaviour.
+  const [dragDepth, setDragDepth] = useState(0)
+  const dragActive = dragDepth > 0 && typeof onDropFile === 'function'
+  const onDragEnter = (e) => {
+    if (!onDropFile || !e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    setDragDepth(d => d + 1)
+  }
+  const onDragOverZone = (e) => {
+    if (!onDropFile || !e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+  }
+  const onDragLeaveZone = (e) => {
+    if (!onDropFile || !e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return
+    setDragDepth(d => Math.max(0, d - 1))
+  }
+  const onDropZone = (e) => {
+    if (!onDropFile || !e.dataTransfer) return
+    e.preventDefault()
+    setDragDepth(0)
+    const file = e.dataTransfer.files && e.dataTransfer.files[0]
+    if (!file) {
+      showToast('Drop a .json bundle file to import')
+      return
+    }
+    onDropFile(file)
+  }
   return (
-    <div style={{
+    <div
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOverZone}
+      onDragLeave={onDragLeaveZone}
+      onDrop={onDropZone}
+      style={{
+      position: 'relative',
       padding: '10px 12px', marginBottom: 10, borderRadius: 8,
       background: 'rgba(168,85,247,0.06)',
-      border: '1px solid rgba(168,85,247,0.18)',
+      // R18.09 — dashed indigo outline + soft glow while a JSON file
+      // is being dragged over the bar. outlineOffset keeps layout
+      // stable through the highlight transition.
+      outline: dragActive ? '2px dashed rgba(99,102,241,0.55)' : '1px solid rgba(168,85,247,0.18)',
+      outlineOffset: dragActive ? 4 : 0,
+      border: dragActive ? '1px solid transparent' : '1px solid rgba(168,85,247,0.18)',
+      boxShadow: dragActive ? 'inset 0 0 20px rgba(99,102,241,0.08)' : 'none',
+      transition: 'outline-color 0.18s ease-out, box-shadow 0.18s ease-out',
     }}>
+      {/* R18.09 — drop-zone banner. Surfaces only while a JSON file
+          is mid-drag; pointerEvents:none keeps the underlying
+          buttons clickable behind it and lets drag events keep
+          hitting the parent. */}
+      {dragActive && (
+        <div style={{
+          position: 'absolute', top: -10, left: 0, right: 0,
+          padding: '4px 10px', borderRadius: 6,
+          background: 'rgba(99,102,241,0.20)',
+          color: '#dbeafe',
+          fontSize: 10.5, fontWeight: 600, letterSpacing: '0.04em',
+          textTransform: 'uppercase', textAlign: 'center',
+          border: '1px solid rgba(99,102,241,0.45)',
+          backdropFilter: 'blur(6px)',
+          pointerEvents: 'none', zIndex: 2,
+        }}>
+          Drop .json to import bundle
+        </div>
+      )}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         marginBottom: 6,
