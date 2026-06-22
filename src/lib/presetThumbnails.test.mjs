@@ -3,6 +3,7 @@ import {
   projectXY, thumbStorageKey, hasThumbnail, listMissingThumbnails,
   compilePresetForThumbnail, renderThumbnailToCanvas, captureThumbnailToStorage,
   clearThumbnail, recaptureThumbnail,
+  clearAllThumbnails, summarizeBulkRebuild,
   THUMB_WIDTH, THUMB_HEIGHT,
 } from './presetThumbnails.js'
 
@@ -152,4 +153,68 @@ eq(captureThumbnailToStorage({ id: 'x', code: 'target.set(0,0,0); color.setRGB(1
   eq(recaptureThumbnail({ id: 42 }), false, 'recaptureThumbnail: non-string id → false')
 }
 
-console.log(`PASS: presetThumbnails projection + storage discovery + compile + render (${THUMB_WIDTH}x${THUMB_HEIGHT}) + clearThumbnail/recaptureThumbnail`)
+console.log(`PASS: presetThumbnails projection + storage discovery + compile + render (${THUMB_WIDTH}x${THUMB_HEIGHT}) + clearThumbnail/recaptureThumbnail + R16.06 bulk clear/summarize`)
+
+// --- R16.06: clearAllThumbnails — bulk wipe + count + defensive cases ---
+{
+  const s = makeFakeStorage()
+  s.setItem(thumbStorageKey('a'), 'da')
+  s.setItem(thumbStorageKey('b'), 'db')
+  s.setItem(thumbStorageKey('c'), 'dc')
+  // (d is missing on purpose — bulk clear must not count nonexistent entries)
+  const cleared = clearAllThumbnails([{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }], s)
+  eq(cleared, 3, 'clearAllThumbnails returns count of REMOVED entries (not list length)')
+  eq(hasThumbnail('a', s), false, 'clearAllThumbnails wiped a')
+  eq(hasThumbnail('b', s), false, 'clearAllThumbnails wiped b')
+  eq(hasThumbnail('c', s), false, 'clearAllThumbnails wiped c')
+
+  // Re-clear is a no-op — everything is gone.
+  eq(clearAllThumbnails([{ id: 'a' }, { id: 'b' }], s), 0, 'clearAllThumbnails second pass: 0')
+
+  // Malformed list entries are tolerated without crashing the run.
+  s.setItem(thumbStorageKey('ok'), 'data')
+  const mixed = clearAllThumbnails([null, undefined, {}, { id: '' }, { id: 99 }, { id: 'ok' }], s)
+  eq(mixed, 1, 'clearAllThumbnails: only the one valid entry was cleared from a mixed list')
+
+  // Defensive: bad inputs return 0 without touching storage.
+  eq(clearAllThumbnails(null, s), 0, 'clearAllThumbnails: null list → 0')
+  eq(clearAllThumbnails([], s), 0, 'clearAllThumbnails: empty list → 0')
+  eq(clearAllThumbnails('not-an-array', s), 0, 'clearAllThumbnails: non-array → 0')
+  eq(clearAllThumbnails([{ id: 'x' }], null), 0, 'clearAllThumbnails: no storage → 0')
+}
+
+// --- R16.06: summarizeBulkRebuild — withThumb / withoutThumb / total ---
+{
+  const s = makeFakeStorage()
+  const list = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }]
+  // No thumbs cached yet → everyone is in withoutThumb.
+  const empty = summarizeBulkRebuild(list, s)
+  eq(empty.withThumb, 0, 'summarizeBulkRebuild: no cache → 0 withThumb')
+  eq(empty.withoutThumb, 4, 'summarizeBulkRebuild: no cache → all 4 withoutThumb')
+  eq(empty.total, 4, 'summarizeBulkRebuild: total counts every valid preset')
+  s.setItem(thumbStorageKey('a'), 'data')
+  s.setItem(thumbStorageKey('c'), 'data')
+  const partial = summarizeBulkRebuild(list, s)
+  eq(partial.withThumb, 2, 'summarizeBulkRebuild: 2 cached → 2 withThumb')
+  eq(partial.withoutThumb, 2, 'summarizeBulkRebuild: 2 cached → 2 withoutThumb')
+  eq(partial.total, 4, 'summarizeBulkRebuild: total unchanged when some are cached')
+
+  // Malformed entries don't inflate the total.
+  const mixed = summarizeBulkRebuild([null, { id: '' }, { id: 7 }, { id: 'a' }], s)
+  eq(mixed.total, 1, 'summarizeBulkRebuild: skips malformed entries from total')
+  eq(mixed.withThumb, 1, 'summarizeBulkRebuild: the one valid entry IS cached')
+  eq(mixed.withoutThumb, 0, 'summarizeBulkRebuild: complementary count is correct')
+
+  // Defensive: bad inputs return all-zero.
+  const z1 = summarizeBulkRebuild(null, s)
+  eq(z1.withThumb + z1.withoutThumb + z1.total, 0, 'summarizeBulkRebuild: null → all zero')
+  const z2 = summarizeBulkRebuild([], s)
+  eq(z2.withThumb + z2.withoutThumb + z2.total, 0, 'summarizeBulkRebuild: empty → all zero')
+
+  // No storage: with no place to check, every preset is "not cached"
+  // — total still counts valid entries so the UI knows the scale.
+  const noStore = summarizeBulkRebuild(list, null)
+  eq(noStore.total, 4, 'summarizeBulkRebuild: no storage still counts total')
+  eq(noStore.withThumb, 0, 'summarizeBulkRebuild: no storage → 0 cached')
+  eq(noStore.withoutThumb, 4, 'summarizeBulkRebuild: no storage → all uncached')
+}

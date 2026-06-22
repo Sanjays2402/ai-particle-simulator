@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useStore } from '../store'
 import { presets } from '../presets'
-import { recaptureThumbnail } from '../lib/presetThumbnails'
+import { recaptureThumbnail, clearAllThumbnails, summarizeBulkRebuild } from '../lib/presetThumbnails'
 
 export default function PresetCarousel() {
   const { loadPreset, currentPreset, favoritedPresets, recentPresets, toggleFavorite } = useStore()
@@ -11,6 +11,9 @@ export default function PresetCarousel() {
   // Track which preset just had its thumb rebuilt — used to animate the
   // refresh icon for a moment so the user gets feedback the click landed.
   const [busyId, setBusyId] = useState(null)
+  // While the bulk rebuild is wiping + the prerenderer is repopulating,
+  // surface a compact "rebuilding..." state on the filter button.
+  const [bulkBusy, setBulkBusy] = useState(false)
 
   // Load thumbnails from localStorage. Also listens for the
   // 'particle:thumbnail-ready' event the prerenderer fires so
@@ -46,6 +49,49 @@ export default function PresetCarousel() {
       setBusyId(null)
     }, 16)
   }
+
+  // Bulk "rebuild all stale thumbs": confirm, wipe every cached entry,
+  // and let the existing PresetThumbnailPrerenderer + live-capture path
+  // repopulate during idle frames. We DON'T re-render synchronously
+  // here because compiling 46 presets back-to-back on the main thread
+  // would jank the UI for ~3-5s. Wiping is O(N) and the prerenderer's
+  // requestIdleCallback cadence is invisible to the user.
+  //
+  // bulkBusy stays true until the prerenderer fires `particle:
+  // thumbnail-ready` at least once or 12s pass — either way the user
+  // sees their carousel refilling tile-by-tile so the "rebuilding"
+  // label feels honest.
+  const rebuildAllThumbs = () => {
+    const summary = summarizeBulkRebuild(presets)
+    if (summary.withThumb === 0) return  // nothing to clear
+    // eslint-disable-next-line no-alert
+    const ok = window.confirm(
+      `Rebuild all ${summary.withThumb} cached thumbnails?\n\n`
+      + `Stale thumbs will be wiped and re-rendered in the background `
+      + `as the carousel refreshes. This is safe to cancel at any time.`,
+    )
+    if (!ok) return
+    const cleared = clearAllThumbnails(presets)
+    // Refresh the in-memory map immediately so the placeholder emoji
+    // tiles return for everything — visually confirms the wipe landed.
+    setThumbs({})
+    setBulkBusy(true)
+    // The prerenderer already listens for its own cadence; just emit
+    // a sentinel event so any other listener can re-sync immediately.
+    try { window.dispatchEvent(new CustomEvent('particle:thumbnail-bulk-cleared', { detail: { cleared } })) }
+    catch { /* CustomEvent unsupported on ancient browsers */ }
+    // Auto-clear the bulkBusy state once the prerenderer drips in
+    // the first refresh OR after a hard timeout — whichever first.
+    const sweep = () => { setBulkBusy(false); window.removeEventListener('particle:thumbnail-ready', sweep) }
+    window.addEventListener('particle:thumbnail-ready', sweep)
+    window.setTimeout(sweep, 12000)
+  }
+
+  // Recompute the bulk-summary on every render — cheap O(N) localStorage
+  // reads for ~46 presets, well under a frame. Kept in render so the
+  // counter on the bulk button updates the moment a single rebuild lands.
+  const bulkSummary = summarizeBulkRebuild(presets)
+  const canBulkRebuild = bulkSummary.withThumb > 0
 
   // Sort: favorites first
   const sorted = (filter === 'recent')
@@ -95,6 +141,44 @@ export default function PresetCarousel() {
         </span>
         <span style={{ fontSize: 9 }}>{filter === 'favs' ? 'Favs' : filter === 'recent' ? 'Recent' : 'All'}</span>
       </button>
+      {/* Bulk "Rebuild all stale thumbs" — sits next to the filter so
+          power users can find it without a hunt, but only renders when
+          there's actually something cached to clear. Compact 56px wide
+          mirror of the filter button. Counter line hints at scale
+          ("32 / 46") so the click feels informed. */}
+      {canBulkRebuild && (
+        <button
+          onClick={rebuildAllThumbs}
+          disabled={bulkBusy}
+          title={bulkBusy
+            ? 'Rebuilding thumbnails in the background — they\'ll refill as you watch.'
+            : `Wipe all ${bulkSummary.withThumb} cached thumbnails and re-render them in the background.`}
+          style={{
+            flexShrink: 0,
+            height: 70, width: 56,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            borderRadius: 10, cursor: bulkBusy ? 'progress' : 'pointer',
+            background: bulkBusy
+              ? 'linear-gradient(135deg, rgba(34,197,94,0.32), rgba(16,185,129,0.22))'
+              : 'rgba(255,255,255,0.04)',
+            color: bulkBusy ? '#a7f3d0' : '#8a8aa0',
+            border: bulkBusy ? '1px solid rgba(34,197,94,0.45)' : '1px solid rgba(255,255,255,0.07)',
+            fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase',
+            flexDirection: 'column', gap: 4,
+            transition: 'background 0.18s, border-color 0.18s, color 0.18s',
+          }}
+        >
+          <span style={{
+            fontSize: 18, lineHeight: 1,
+            display: 'inline-block',
+            animation: bulkBusy ? 'thumb-rebuild-spin 1.4s linear infinite' : 'none',
+            transformOrigin: 'center',
+          }}>↻</span>
+          <span style={{ fontSize: 9 }}>
+            {bulkBusy ? 'Building' : `${bulkSummary.withThumb}/${bulkSummary.total}`}
+          </span>
+        </button>
+      )}
       {sorted.map(p => {
         const isFav = favoritedPresets.includes(p.id)
         const thumb = thumbs[p.id]

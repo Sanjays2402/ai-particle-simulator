@@ -236,3 +236,57 @@ export function recaptureThumbnail(preset, opts = {}) {
   clearThumbnail(preset.id, opts.storage)
   return captureThumbnailToStorage(preset, opts)
 }
+
+// Bulk: wipe every cached thumbnail for the supplied preset list.
+// Returns the count of entries actually removed (so the caller can show
+// a "cleared N thumbs" toast). Used by the carousel's "Rebuild all"
+// button — clear here, then let the prerenderer + live-capture paths
+// repopulate during the next idle window.
+//
+// Defensive contract:
+//   - non-array presets: returns 0 (no storage touched).
+//   - missing/unavailable storage: returns 0.
+//   - per-entry: malformed presets (null / no .id / non-string .id)
+//     are skipped; one bad entry never aborts the run.
+//   - thrown storage errors (e.g. quota during removeItem... unlikely
+//     but possible on some implementations): swallowed for that entry.
+export function clearAllThumbnails(presets, storage) {
+  if (!Array.isArray(presets) || presets.length === 0) return 0
+  const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null)
+  if (!store) return 0
+  let cleared = 0
+  for (const p of presets) {
+    if (!p || typeof p.id !== 'string' || !p.id) continue
+    try {
+      if (store.getItem(thumbStorageKey(p.id)) != null) {
+        store.removeItem(thumbStorageKey(p.id))
+        cleared++
+      }
+    } catch { /* per-entry safety */ }
+  }
+  return cleared
+}
+
+// Pure projector for the "Rebuild all" affordance label + confirmation:
+// returns how many of the supplied presets currently have a cached
+// thumbnail vs how many don't. Used by PresetCarousel to:
+//   - show a compact counter on the bulk button ("↻ 32/46")
+//   - skip rendering the button at all when nothing's cached yet
+//     (no point clearing zero thumbs).
+//
+// Returns `{ withThumb, withoutThumb, total }` — all non-negative
+// integers, even on defensive input (null presets → all zero).
+export function summarizeBulkRebuild(presets, storage) {
+  if (!Array.isArray(presets) || presets.length === 0) {
+    return { withThumb: 0, withoutThumb: 0, total: 0 }
+  }
+  const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null)
+  let withThumb = 0
+  let total = 0
+  for (const p of presets) {
+    if (!p || typeof p.id !== 'string' || !p.id) continue
+    total++
+    if (store && hasThumbnail(p.id, store)) withThumb++
+  }
+  return { withThumb, withoutThumb: total - withThumb, total }
+}
