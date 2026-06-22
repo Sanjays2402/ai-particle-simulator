@@ -224,6 +224,140 @@ export function setUserPresetColor(list, id, color) {
   return changed ? next : list
 }
 
+// R20.11 — per-bundle keyboard shortcut. Lets a user assign a hotkey
+// to apply a bundle without opening the MIDI panel. The hotkey is a
+// stable string token (e.g. 'shift+1', 'alt+f4') that's matched
+// against a normalised event signature so cross-platform layouts
+// produce the same hotkey identity.
+//
+// Format: 'meta+ctrl+alt+shift+<key>'. Modifiers in canonical order
+// (meta first, then ctrl, alt, shift) so two equivalent hotkeys with
+// reversed modifier order both compare equal. Key part uses
+// e.key.toLowerCase() for letters / digits / punctuation. Function
+// keys, arrows, etc. are normalised: 'arrowup' → 'up', 'arrowdown'
+// → 'down', 'arrowleft' → 'left', 'arrowright' → 'right'. Backspace
+// / escape / tab / space stay as their literal lowercase names.
+//
+// Cap: 1 hotkey per bundle. The same hotkey can't be bound to two
+// bundles (the second assignment silently un-binds the first to
+// avoid a "which bundle wins?" question).
+//
+// Defensive: invalid hotkey tokens (empty, non-string, no key part)
+// → null setter behaviour returns the input list unchanged. Setting
+// to null clears the hotkey.
+const VALID_HOTKEY_KEYS = new Set([
+  // Letters
+  'a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z',
+  // Digits
+  '0','1','2','3','4','5','6','7','8','9',
+  // Function keys
+  'f1','f2','f3','f4','f5','f6','f7','f8','f9','f10','f11','f12',
+  // Arrows + nav
+  'up','down','left','right',
+  // Common controls
+  'escape','tab','space','backspace','enter','delete','home','end','pageup','pagedown',
+  // Punctuation (small allowlist — broader than this gets layout-dependent)
+  ',','.','/',';',"'",'[',']','\\','-','=','`',
+])
+
+// Normalise a raw event into a stable hotkey string.
+// Returns null when no actionable key is pressed (modifier-only).
+export function hotkeyFromEvent(event) {
+  if (!event || typeof event !== 'object' || typeof event.key !== 'string') return null
+  let key = event.key.toLowerCase()
+  if (key.startsWith('arrow')) key = key.slice(5)
+  if (key === ' ') key = 'space'
+  // Skip pure modifier presses ('control', 'shift', 'alt', 'meta').
+  if (key === 'control' || key === 'shift' || key === 'alt' || key === 'meta') return null
+  if (!VALID_HOTKEY_KEYS.has(key)) return null
+  const parts = []
+  if (event.metaKey)  parts.push('meta')
+  if (event.ctrlKey)  parts.push('ctrl')
+  if (event.altKey)   parts.push('alt')
+  if (event.shiftKey) parts.push('shift')
+  parts.push(key)
+  return parts.join('+')
+}
+
+// Validate a hotkey token string. Returns the CANONICAL form (modifiers
+// re-ordered to meta/ctrl/alt/shift; key part lowercased) or null when
+// invalid. Used by the persistence path + by the UI's "is this binding
+// valid" check.
+export function sanitizeHotkey(raw) {
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim().toLowerCase()
+  if (!trimmed) return null
+  const parts = trimmed.split('+').map(s => s.trim()).filter(Boolean)
+  if (parts.length === 0) return null
+  const key = parts[parts.length - 1]
+  if (!VALID_HOTKEY_KEYS.has(key)) return null
+  const mods = new Set(parts.slice(0, -1))
+  // Reject any unknown modifier.
+  for (const m of mods) {
+    if (m !== 'meta' && m !== 'ctrl' && m !== 'alt' && m !== 'shift') return null
+  }
+  const out = []
+  if (mods.has('meta'))  out.push('meta')
+  if (mods.has('ctrl'))  out.push('ctrl')
+  if (mods.has('alt'))   out.push('alt')
+  if (mods.has('shift')) out.push('shift')
+  out.push(key)
+  return out.join('+')
+}
+
+// Set a user bundle's hotkey in place. Two-step semantics:
+//   1. If `hotkey` is null/'' → clears the bundle's hotkey (no-op
+//      when already empty).
+//   2. If `hotkey` is valid → un-binds the same hotkey from any
+//      OTHER bundle (avoids ambiguous mappings), then assigns it
+//      to the named bundle.
+// Returns a NEW array on change OR the input ref on no-op. Caller
+// persists via saveUserPresets.
+export function setUserPresetHotkey(list, id, hotkey) {
+  if (!Array.isArray(list) || !id) return list
+  const safe = hotkey === null || hotkey === '' ? null : sanitizeHotkey(hotkey)
+  // Invalid input — refuse, return input ref unchanged.
+  if (hotkey != null && hotkey !== '' && safe == null) return list
+  let changed = false
+  const next = list.map(p => {
+    if (!p) return p
+    if (p.id === id) {
+      const current = sanitizeHotkey(p.hotkey)
+      if (current === safe) return p   // no-op
+      changed = true
+      const np = { ...p }
+      if (safe) np.hotkey = safe
+      else delete np.hotkey
+      return np
+    }
+    // Other bundles: strip the hotkey if it matches what we're about
+    // to assign (one-binding-per-hotkey invariant). Only relevant when
+    // safe is non-null.
+    if (safe && sanitizeHotkey(p.hotkey) === safe) {
+      changed = true
+      const np = { ...p }
+      delete np.hotkey
+      return np
+    }
+    return p
+  })
+  return changed ? next : list
+}
+
+// Look up a user bundle by hotkey. Returns the bundle or null.
+// Used by the global keydown listener to resolve a key event to the
+// bundle it should apply.
+export function findUserPresetByHotkey(list, hotkey) {
+  if (!Array.isArray(list)) return null
+  const safe = sanitizeHotkey(hotkey)
+  if (!safe) return null
+  for (const p of list) {
+    if (!p) continue
+    if (sanitizeHotkey(p.hotkey) === safe) return p
+  }
+  return null
+}
+
 // Load + sanitize the persisted user-preset list. Drops any entry
 // that fails the same validateMap gate as shipped bundles.
 export function loadUserPresets() {
@@ -250,6 +384,10 @@ export function loadUserPresets() {
         map,
         // R16.19 — colour tag for the chip; missing/invalid → DEFAULT.
         color: sanitizeUserPresetColor(item.color),
+        // R20.11 — per-bundle hotkey. Missing/invalid → undefined
+        // (no hotkey). Sanitised on load so a corrupt persisted value
+        // can never reject the whole bundle.
+        ...(sanitizeHotkey(item.hotkey) ? { hotkey: sanitizeHotkey(item.hotkey) } : {}),
         createdAt: typeof item.createdAt === 'number' ? item.createdAt : Date.now(),
       })
       if (out.length >= MAX_USER_PRESETS) break
@@ -275,6 +413,8 @@ export function saveUserPresets(list) {
           map,
           // R16.19 — colour tag; missing/invalid → DEFAULT.
           color: sanitizeUserPresetColor(p.color),
+          // R20.11 — per-bundle hotkey; sanitised; absent when null.
+          ...(sanitizeHotkey(p.hotkey) ? { hotkey: sanitizeHotkey(p.hotkey) } : {}),
           createdAt: typeof p.createdAt === 'number' ? p.createdAt : Date.now(),
         }
       })

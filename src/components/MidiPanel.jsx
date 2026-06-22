@@ -17,6 +17,8 @@ import {
   // R16.19 — per-bundle colour tag
   setUserPresetColor, userPresetColorStyle, USER_PRESET_COLORS, DEFAULT_USER_PRESET_COLOR,
   MAX_USER_PRESETS,
+  // R20.11 — per-bundle keyboard shortcut
+  setUserPresetHotkey, hotkeyFromEvent, sanitizeHotkey, findUserPresetByHotkey,
 } from '../lib/midiPresets'
 import {
   // R14.17 — single-bundle JSON export/import
@@ -236,6 +238,49 @@ export default function MidiPanel({ open, onClose }) {
     saveUserPresets(next)
     return true
   }
+
+  // R20.11 — set the keyboard shortcut for a user bundle. Mirrors
+  // setUserBundleColor's ref-equal-on-no-op skip. Hotkey conflicts
+  // are resolved at the lib layer (the same hotkey can only be bound
+  // to ONE bundle; the lib silently un-binds it from any other).
+  const setUserBundleHotkey = (id, hotkey) => {
+    const next = setUserPresetHotkey(userPresets, id, hotkey)
+    if (next === userPresets) return false
+    setUserPresets(next)
+    saveUserPresets(next)
+    return true
+  }
+
+  // R20.11 — global keydown listener that resolves the event's hotkey
+  // signature to a bundle and applies it. Bound at the component
+  // level so it's only active while the MidiPanel is mounted (which
+  // matches the rest of the app's panel-scoped shortcuts). Skips
+  // events that originate inside text inputs / textareas / editable
+  // content so a power user can type a binding's name without the
+  // shortcut firing.
+  useEffect(() => {
+    const onKey = (e) => {
+      // Skip events inside editable surfaces (TopBar search, rename
+      // inputs, etc).
+      const t = e.target
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      const hk = hotkeyFromEvent(e)
+      if (!hk) return
+      const bundle = findUserPresetByHotkey(userPresets, hk)
+      if (!bundle) return
+      // Only consume the event when we know a bundle is bound to it.
+      e.preventDefault()
+      // Use 'replace' mode to match the chip's default apply behaviour.
+      const incoming = applyPresetToMap(map, bundle.id, 'replace', userPresets)
+      setMap(incoming)
+      saveMidiMap(incoming)
+      const color = userPresetColorStyle(bundle.color || DEFAULT_USER_PRESET_COLOR)
+      showToast(`Applied \u201c${bundle.name}\u201d (\u2328\ufe0f ${hk})`,
+        <Music4 size={10} color={color.accent} strokeWidth={2.4} />)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [userPresets, map])
 
   // R14.17 — download one user bundle as a portable JSON file. The
   // filename is auto-slugified from the bundle name + dated. We use
@@ -570,6 +615,7 @@ export default function MidiPanel({ open, onClose }) {
           onExportAllUsers={exportAllUserBundles}
           onImportAllUsers={importAllUserBundles}
           onSetColorUser={setUserBundleColor}
+          onSetHotkeyUser={setUserBundleHotkey}
           onDropFile={importBundleFile}
           onDropFiles={importBundleFiles}
           savingBundle={savingBundle}
@@ -960,6 +1006,8 @@ function PresetBar({
   onExportAllUsers, onImportAllUsers,
   // R16.19 — per-bundle colour tag
   onSetColorUser,
+  // R20.11 — per-bundle keyboard shortcut
+  onSetHotkeyUser,
   // R18.09 — drag-and-drop import (auto-detects single vs multi envelope)
   // R19.20 — accepts multi-file drops; PresetBar passes the full file
   // list to the parent so the import path can fan out + combine.
@@ -1140,6 +1188,7 @@ function PresetBar({
                   onRename={onRenameUser ? (newName) => onRenameUser(p.id, newName) : null}
                   onExport={onExportUser ? () => onExportUser(p) : null}
                   onSetColor={onSetColorUser ? (color) => onSetColorUser(p.id, color) : null}
+                  onSetHotkey={onSetHotkeyUser ? (hk) => onSetHotkeyUser(p.id, hk) : null}
                 />
               ))}
             </div>
@@ -1298,7 +1347,7 @@ function PresetBar({
 // NamedAttractorRow in LeftSidebar so the pattern is consistent
 // across the app). Enter saves; Escape cancels; blur saves with
 // fallback-to-cancel when the trimmed name is empty.
-function UserBundleChip({ preset, onApply, onDelete, onRename, onExport, onSetColor }) {
+function UserBundleChip({ preset, onApply, onDelete, onRename, onExport, onSetColor, onSetHotkey }) {
   const [editing, setEditing] = useState(false)
   const [draftName, setDraftName] = useState(preset.name)
   // R16.19 — colour palette popover toggle. Local state because the
@@ -1306,6 +1355,11 @@ function UserBundleChip({ preset, onApply, onDelete, onRename, onExport, onSetCo
   // 8 chips would be 8 conditional renders for no benefit. Click the
   // swatch to open; click outside (or pick a colour) to close.
   const [colorOpen, setColorOpen] = useState(false)
+  // R20.11 — hotkey-capture mode. When ON, the next keydown in the
+  // chip's hidden input captures the modifier+key combo and binds
+  // it to the bundle. Escape cancels. Click the hotkey badge to
+  // enter capture mode; click again (or press a hotkey) to exit.
+  const [capturingHotkey, setCapturingHotkey] = useState(false)
   // (No useEffect needed to sync `draftName` ↔ `preset.name`: the
   // onDoubleClick handler re-initializes the draft from preset.name
   // every time editing starts, and the at-rest branch displays
@@ -1448,6 +1502,60 @@ function UserBundleChip({ preset, onApply, onDelete, onRename, onExport, onSetCo
             boxShadow: `0 0 6px rgba(${colorStyle.accentRgb},0.55)`,
             border: '1px solid rgba(255,255,255,0.18)',
           }} />
+        </button>
+      )}
+      {/* R20.11 — per-bundle hotkey badge. Shows the bound hotkey
+          when set; "set hotkey" placeholder when unbound. Click to
+          enter capture mode — the next keydown sets the binding.
+          Escape cancels. Right-click clears the binding. Only
+          renders when onSetHotkey is wired. */}
+      {onSetHotkey && (
+        <button
+          onClick={(e) => { e.stopPropagation(); setCapturingHotkey(c => !c) }}
+          onContextMenu={(e) => { e.preventDefault(); onSetHotkey(null) }}
+          onKeyDown={(e) => {
+            if (!capturingHotkey) return
+            if (e.key === 'Escape') {
+              e.preventDefault()
+              setCapturingHotkey(false)
+              return
+            }
+            const hk = hotkeyFromEvent(e)
+            if (!hk) return  // skip modifier-only / unbindable
+            e.preventDefault()
+            e.stopPropagation()
+            onSetHotkey(hk)
+            setCapturingHotkey(false)
+          }}
+          title={preset.hotkey
+            ? `Hotkey: ${preset.hotkey}. Click to re-bind. Right-click to clear.`
+            : 'Click to bind a keyboard shortcut for this bundle.'}
+          style={{
+            padding: '0 6px', fontSize: 9, fontWeight: 600,
+            letterSpacing: '0.04em', textTransform: 'uppercase',
+            cursor: 'pointer',
+            background: capturingHotkey
+              ? 'rgba(251,191,36,0.18)'
+              : preset.hotkey
+                ? colorStyle.bgSoft
+                : 'rgba(255,255,255,0.03)',
+            color: capturingHotkey
+              ? '#fcd34d'
+              : preset.hotkey
+                ? colorStyle.fg
+                : '#7a7a90',
+            border: 'none',
+            borderRight: `1px solid ${colorStyle.borderFaint}`,
+            display: 'inline-flex', alignItems: 'center',
+            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+            minWidth: 26,
+            justifyContent: 'center',
+            // R20.11 — focus outline reinforces that capture mode is
+            // listening for the next key event.
+            outline: capturingHotkey ? '1px dashed rgba(251,191,36,0.55)' : 'none',
+            outlineOffset: -2,
+          }}>
+          {capturingHotkey ? 'press\u2026' : (preset.hotkey || '\u2328')}
         </button>
       )}
       {/* R14.17 — per-bundle Export. Between apply + trash so the

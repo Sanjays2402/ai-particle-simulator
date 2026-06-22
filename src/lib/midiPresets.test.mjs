@@ -16,6 +16,8 @@ import {
   USER_PRESET_COLORS, DEFAULT_USER_PRESET_COLOR,
   isValidUserPresetColor, sanitizeUserPresetColor,
   userPresetColorStyle, setUserPresetColor,
+  // R20.11 — per-bundle keyboard shortcut
+  sanitizeHotkey, hotkeyFromEvent, setUserPresetHotkey, findUserPresetByHotkey,
 } from './midiPresets.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -487,4 +489,141 @@ for (const c of USER_PRESET_COLORS) {
   eq(loadedBad[0].color, DEFAULT_USER_PRESET_COLOR,   'bad colour → default on load')
 
   delete globalThis.localStorage
+}
+
+// --- R20.11: per-bundle keyboard shortcut ---------------------------
+// sanitizeHotkey — accepts canonical + non-canonical input,
+// returns canonical form (or null on invalid).
+{
+  // Canonical pass-through.
+  eq(sanitizeHotkey('shift+1'), 'shift+1', 'simple shift+1 canonical')
+  eq(sanitizeHotkey('meta+ctrl+alt+shift+a'), 'meta+ctrl+alt+shift+a', 'all-mod canonical')
+  eq(sanitizeHotkey('1'), '1', 'no-modifier hotkey valid')
+  eq(sanitizeHotkey('escape'), 'escape', 'escape valid')
+  eq(sanitizeHotkey('f12'), 'f12', 'function key valid')
+  eq(sanitizeHotkey('up'), 'up', 'arrow up valid')
+  // Modifier reordering — meta/ctrl/alt/shift in any order produces
+  // the same canonical output.
+  eq(sanitizeHotkey('alt+shift+ctrl+meta+a'), 'meta+ctrl+alt+shift+a', 'modifier reorder')
+  eq(sanitizeHotkey('shift+meta+a'),          'meta+shift+a',          'two-mod reorder')
+  // Case normalisation.
+  eq(sanitizeHotkey('SHIFT+A'), 'shift+a', 'uppercase normalised')
+  // Whitespace tolerance.
+  eq(sanitizeHotkey('  shift + 1 '), 'shift+1', 'whitespace tolerated')
+  // Defensive — invalid input → null.
+  eq(sanitizeHotkey(''), null, 'empty → null')
+  eq(sanitizeHotkey(null), null, 'null → null')
+  eq(sanitizeHotkey(undefined), null, 'undefined → null')
+  eq(sanitizeHotkey(42), null, 'number → null')
+  eq(sanitizeHotkey('shift'), null, 'modifier-only → null')
+  eq(sanitizeHotkey('shift+'), null, 'trailing plus → null')
+  eq(sanitizeHotkey('shift+bogus'), null, 'unknown key → null')
+  eq(sanitizeHotkey('windows+a'), null, 'unknown modifier → null')
+}
+
+// hotkeyFromEvent — accepts a synthetic event-like obj + returns
+// canonical form (matches sanitizeHotkey output).
+{
+  eq(hotkeyFromEvent({ key: '1', shiftKey: true }), 'shift+1', 'event shift+1')
+  eq(hotkeyFromEvent({ key: 'a', metaKey: true, ctrlKey: true }), 'meta+ctrl+a', 'event meta+ctrl+a')
+  eq(hotkeyFromEvent({ key: 'ArrowUp' }), 'up', 'event ArrowUp → up')
+  eq(hotkeyFromEvent({ key: 'ArrowDown', shiftKey: true }), 'shift+down', 'event shift+arrowdown → shift+down')
+  eq(hotkeyFromEvent({ key: ' ' }), 'space', 'event space normalised')
+  eq(hotkeyFromEvent({ key: 'F4', altKey: true }), 'alt+f4', 'event alt+F4')
+  // Modifier-only / unbindable → null.
+  eq(hotkeyFromEvent({ key: 'Shift' }), null, 'modifier-only event → null')
+  eq(hotkeyFromEvent({ key: 'Meta' }), null, 'Meta-only event → null')
+  eq(hotkeyFromEvent({ key: 'Unidentified' }), null, 'Unidentified → null')
+  eq(hotkeyFromEvent({ key: 'Tab' }), 'tab', 'Tab valid')
+  // Defensive — null/missing event → null.
+  eq(hotkeyFromEvent(null), null, 'null event → null')
+  eq(hotkeyFromEvent({}), null, 'event without key → null')
+  eq(hotkeyFromEvent({ key: 42 }), null, 'non-string key → null')
+}
+
+// setUserPresetHotkey — assignment, clearing, conflict resolution.
+{
+  const list = [
+    { id: 'user-1', name: 'A', map: { '21': 'speed' }, color: 'pink' },
+    { id: 'user-2', name: 'B', map: { '22': 'glow' }, color: 'cyan' },
+  ]
+  // Assign a hotkey to user-1.
+  const r1 = setUserPresetHotkey(list, 'user-1', 'shift+1')
+  ok(r1 !== list, 'assignment produces new array')
+  eq(r1[0].hotkey, 'shift+1', 'user-1 has hotkey')
+  ok(!('hotkey' in r1[1]), 'user-2 unaffected')
+
+  // No-op: re-assigning the same hotkey returns the input ref.
+  const r1b = setUserPresetHotkey(r1, 'user-1', 'shift+1')
+  ok(r1b === r1, 'no-op (same hotkey) ref-equal skip')
+
+  // Clear by passing null.
+  const r2 = setUserPresetHotkey(r1, 'user-1', null)
+  ok(r2 !== r1, 'clear produces new array')
+  ok(!('hotkey' in r2[0]), 'user-1 hotkey cleared')
+
+  // Clear by passing empty string.
+  const r2b = setUserPresetHotkey(r1, 'user-1', '')
+  ok(r2b !== r1, 'clear via "" produces new array')
+  ok(!('hotkey' in r2b[0]), 'user-1 hotkey cleared via ""')
+
+  // Conflict: assigning the same hotkey to two bundles strips the
+  // first binding silently.
+  const conflict = setUserPresetHotkey(r1, 'user-2', 'shift+1')
+  ok(!('hotkey' in conflict[0]), 'user-1 hotkey stripped on conflict')
+  eq(conflict[1].hotkey, 'shift+1', 'user-2 wins the conflict')
+
+  // No-op when bundle id missing.
+  const noid = setUserPresetHotkey(list, 'user-bogus', 'shift+1')
+  ok(noid === list, 'missing id → ref-equal skip')
+
+  // No-op when input not an array.
+  ok(setUserPresetHotkey(null, 'user-1', 'shift+1') === null, 'null list → ref unchanged')
+
+  // Invalid hotkey input → ref unchanged.
+  const bad = setUserPresetHotkey(list, 'user-1', 'shift+bogus')
+  ok(bad === list, 'invalid hotkey input → ref-equal skip')
+}
+
+// findUserPresetByHotkey — resolves a hotkey to its bundle.
+{
+  const list = [
+    { id: 'user-1', name: 'A', map: { '21': 'speed' }, hotkey: 'shift+1' },
+    { id: 'user-2', name: 'B', map: { '22': 'glow' },  hotkey: 'alt+f5' },
+    { id: 'user-3', name: 'C', map: { '23': 'speed' } },  // no hotkey
+  ]
+  eq(findUserPresetByHotkey(list, 'shift+1').id, 'user-1', 'finds user-1 by shift+1')
+  eq(findUserPresetByHotkey(list, 'alt+f5').id, 'user-2', 'finds user-2 by alt+f5')
+  eq(findUserPresetByHotkey(list, 'unbound'), null, 'unbound hotkey → null')
+  // Canonical match — input is normalised before lookup, so an
+  // input "shift+meta+a" matches a stored "meta+shift+a".
+  const canon = [{ id: 'user-1', name: 'A', map: { '21': 'speed' }, hotkey: 'meta+shift+a' }]
+  eq(findUserPresetByHotkey(canon, 'shift+meta+a').id, 'user-1', 'canonical lookup match')
+  // Defensive: null/empty list / invalid hotkey → null.
+  eq(findUserPresetByHotkey(null, 'shift+1'), null, 'null list → null')
+  eq(findUserPresetByHotkey([], 'shift+1'), null, 'empty list → null')
+  eq(findUserPresetByHotkey(list, ''), null, 'empty hotkey → null')
+  eq(findUserPresetByHotkey(list, null), null, 'null hotkey → null')
+}
+
+// Hotkey survives a load/save round-trip.
+{
+  const store = installLocalStorage()
+  const list = [
+    { id: 'user-1', name: 'A', map: { '21': 'speed' }, color: 'pink', hotkey: 'shift+1' },
+    { id: 'user-2', name: 'B', map: { '22': 'glow' }, color: 'cyan' /* no hotkey */ },
+  ]
+  saveUserPresets(list)
+  const loaded = loadUserPresets()
+  eq(loaded.length, 2, 'both bundles round-tripped')
+  eq(loaded[0].hotkey, 'shift+1', 'hotkey survives save/load')
+  ok(!('hotkey' in loaded[1]), 'absent hotkey stays absent')
+  // Corrupt hotkey in storage gets DROPPED (bundle keeps everything else).
+  store.set(STORAGE_KEY_USER_PRESETS, JSON.stringify({
+    v: 1, items: [{ id: 'user-1', name: 'A', map: { '21': 'speed' }, hotkey: 'shift+bogus' }],
+  }))
+  const loadedBad = loadUserPresets()
+  eq(loadedBad.length, 1, 'bad hotkey didn\'t reject the bundle')
+  ok(!('hotkey' in loadedBad[0]), 'bad hotkey silently dropped on load')
+  uninstallLocalStorage()
 }
