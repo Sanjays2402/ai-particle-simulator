@@ -16,6 +16,9 @@ import {
   PEAK_TRAIL_CURVE_PARAMS, defaultPeakTrailCurveParams,
   sanitizeCurveParamValue, sanitizeCurveParams,
   setCurveParam, isCurveParamsAtDefaults,
+  // R20.13 — per-bar frequency-coloured tint for the trail
+  TRAIL_HUE_START, TRAIL_HUE_END, TRAIL_HUE_DEFAULT,
+  peakTrailHueForBarIndex,
 } from './waveform.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -782,5 +785,63 @@ near(applyTrailCurve(0.5, 'exp', {}), 0.25, 'empty params → defaults')
   for (let i = 0; i < partial.length; i++) {
     near(partial[i].alpha, defaultExp[i].alpha, `partial params: alpha matches default exp at idx ${i}`)
   }
+}
+
+// --- R20.13: peakTrailHueForBarIndex (frequency-coloured trail tint) ---
+// Roster + constants — pinned so the warm→cool intent doesn't drift.
+ok(TRAIL_HUE_START   < TRAIL_HUE_END,    `warm start (${TRAIL_HUE_START}) < cool end (${TRAIL_HUE_END})`)
+ok(TRAIL_HUE_DEFAULT >= 0 && TRAIL_HUE_DEFAULT <= 360, 'default hue in [0,360]')
+ok(TRAIL_HUE_START   >= 0 && TRAIL_HUE_START   <= 60,  'warm start in warm zone (≤60° red/orange)')
+ok(TRAIL_HUE_END     >= 200 && TRAIL_HUE_END   <= 320, 'cool end in cool zone (200°-320° blue/violet)')
+
+// Endpoint anchors — first bar = warm start, last bar = cool end.
+{
+  near(peakTrailHueForBarIndex(0, 32),  TRAIL_HUE_START, 'bar 0 → warm start')
+  near(peakTrailHueForBarIndex(31, 32), TRAIL_HUE_END,   'last bar (31/32) → cool end')
+  near(peakTrailHueForBarIndex(0, 1),   (TRAIL_HUE_START + TRAIL_HUE_END) / 2, 'totalBars=1 → midpoint')
+}
+
+// Mid-bar lerps to midpoint hue.
+{
+  const mid = peakTrailHueForBarIndex(15, 31)  // exactly halfway (idx 15 of [0..30])
+  near(mid, (TRAIL_HUE_START + TRAIL_HUE_END) / 2, `mid-bar = midpoint hue (got ${mid.toFixed(2)})`)
+}
+
+// Monotonicity — ascending barIndex → ascending hue (warm → cool, no folding back).
+{
+  let prev = -Infinity
+  for (let i = 0; i < 32; i++) {
+    const h = peakTrailHueForBarIndex(i, 32)
+    ok(h >= prev - 1e-9, `monotonic at i=${i}: ${h} >= ${prev}`)
+    prev = h
+  }
+}
+
+// Defensive contract.
+near(peakTrailHueForBarIndex(NaN, 32),       TRAIL_HUE_DEFAULT, 'NaN barIndex → default hue')
+near(peakTrailHueForBarIndex(Infinity, 32),  TRAIL_HUE_DEFAULT, '+Infinity barIndex → default hue')
+near(peakTrailHueForBarIndex(-Infinity, 32), TRAIL_HUE_DEFAULT, '-Infinity barIndex → default hue')
+near(peakTrailHueForBarIndex(5, 0),          TRAIL_HUE_DEFAULT, 'totalBars=0 → default hue')
+near(peakTrailHueForBarIndex(5, -10),        TRAIL_HUE_DEFAULT, 'negative totalBars → default hue')
+near(peakTrailHueForBarIndex(5, NaN),        TRAIL_HUE_DEFAULT, 'NaN totalBars → default hue')
+near(peakTrailHueForBarIndex(5, Infinity),   TRAIL_HUE_DEFAULT, 'Infinity totalBars → default hue')
+
+// Out-of-range barIndex clamps before lerp (no extrapolation past endpoints).
+near(peakTrailHueForBarIndex(-5, 32),  TRAIL_HUE_START, 'negative barIndex clamps to first')
+near(peakTrailHueForBarIndex(100, 32), TRAIL_HUE_END,   'huge barIndex clamps to last')
+near(peakTrailHueForBarIndex(32, 32),  TRAIL_HUE_END,   'barIndex === totalBars clamps to last (off-by-one safe)')
+
+// Float barIndex floors to int — barIndex=15.7 with 32 bars equals barIndex=15.
+{
+  const a = peakTrailHueForBarIndex(15, 32)
+  const b = peakTrailHueForBarIndex(15.7, 32)
+  near(b, a, 'float barIndex floors to int (15.7 → 15)')
+}
+
+// Pure — same input always returns same output.
+{
+  const a = peakTrailHueForBarIndex(10, 32)
+  const b = peakTrailHueForBarIndex(10, 32)
+  eq(a, b, 'pure: deterministic across calls')
 }
 

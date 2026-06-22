@@ -683,6 +683,24 @@ export const useStore = create((set, get) => {
     set({ spectrumPeakCurveParams: defaults })
   },
 
+  // R20.13 — peak-hold trail frequency-coloured tint. When ON, the
+  // trail uses a warm→cool hue ramp keyed to barIndex (low bars warm,
+  // high bars cool) so the trail layer reads as a frequency map on top
+  // of the bar fills (which use their own hue ramp). When OFF (default),
+  // the trail inherits the bar's own hue and reads as a glow extension
+  // (R15.07 / R16.17 / R19.12 look). Persisted; corrupt value → false.
+  spectrumPeakTrailTint: (() => {
+    try {
+      const v = typeof localStorage !== 'undefined' ? localStorage.getItem('spectrum-peak-trail-tint-v1') : null
+      return v === '1'
+    } catch { return false }
+  })(),
+  setSpectrumPeakTrailTint: (v) => {
+    const next = !!v
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem('spectrum-peak-trail-tint-v1', next ? '1' : '0') } catch { /* */ }
+    set({ spectrumPeakTrailTint: next })
+  },
+
   // R17.20 — lightbox WASD pan acceleration curve preset. Parallels
   // spectrumPeakCurve (R16.17): a single string token persisted across
   // sessions, validated on read. 'linear' (default) keeps the R16.20

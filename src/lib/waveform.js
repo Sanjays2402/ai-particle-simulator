@@ -520,6 +520,40 @@ export function resetPeakHolds(state) {
 // head-most (newest) slot because that's the SAME height as the live
 // peak-hold line; rendering both at full alpha would just paint over
 // it.
+// R20.13 — frequency-coloured tint for the peak-hold trail. The bar
+// fills + held-peak lines already use a bar-index hue ramp (250° → 170°
+// in the renderer's local code). The TRAIL today inherits that same
+// hue which means the trail blends into its bar visually — a busy
+// spectrum looks like a single colour wash. R20.13 gives the trail
+// its OWN frequency-driven hue ramp: warm (red/orange) for low bars
+// (bass), cool (blue/violet) for high bars (treble). This makes the
+// trail layer readable as a frequency map on top of the amplitude
+// bars without having to count bars.
+//
+// Mapping: lerp linearly from TRAIL_HUE_START (warm red-orange) to
+// TRAIL_HUE_END (cool blue-violet) across barIndex/totalBars. Stays
+// well away from green so the trail never reads as "neutral" against
+// the bar's hue.
+//
+// Defensive contract: NaN/non-finite barIndex → TRAIL_HUE_DEFAULT
+// (cool blue 210°, matches the existing trail look at idx > 0). Out-
+// of-range barIndex clamps to [0, totalBars-1] before lerp. totalBars
+// <= 0 / non-finite → TRAIL_HUE_DEFAULT. totalBars === 1 → midpoint
+// (no meaningful frequency axis with a single bar).
+export const TRAIL_HUE_START   = 20    // warm — red-orange (bass)
+export const TRAIL_HUE_END     = 260   // cool — blue-violet (treble)
+export const TRAIL_HUE_DEFAULT = 210   // safe fallback (cool blue)
+
+export function peakTrailHueForBarIndex(barIndex, totalBars) {
+  if (!Number.isFinite(totalBars) || totalBars <= 0) return TRAIL_HUE_DEFAULT
+  if (!Number.isFinite(barIndex)) return TRAIL_HUE_DEFAULT
+  if (totalBars === 1) return (TRAIL_HUE_START + TRAIL_HUE_END) / 2
+  const intIdx = Math.floor(barIndex)
+  const safeIdx = intIdx < 0 ? 0 : intIdx >= totalBars ? totalBars - 1 : intIdx
+  const t = safeIdx / (totalBars - 1)
+  return TRAIL_HUE_START + t * (TRAIL_HUE_END - TRAIL_HUE_START)
+}
+
 export function readPeakTrail(state, barIndex, current = 0, opts = {}) {
   if (!state || !state.trail || !state.peaks) return []
   const trailLen = state.trailLen || 0

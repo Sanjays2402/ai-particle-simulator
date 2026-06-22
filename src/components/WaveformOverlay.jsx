@@ -7,6 +7,8 @@ import {
   readPeakTrail, nextTrailCurve,
   // R19.12 — per-curve tunable param schema (exp.exponent, log.base)
   PEAK_TRAIL_CURVE_PARAMS, isCurveParamsAtDefaults,
+  // R20.13 — per-bar frequency-coloured tint for the peak-hold trail
+  peakTrailHueForBarIndex,
 } from '../lib/waveform'
 
 // Audio waveform / oscilloscope overlay. Pinned to the canvas's
@@ -43,6 +45,14 @@ export default function WaveformOverlay() {
   const peakCurveParams = useStore(s => s.spectrumPeakCurveParams)
   const setPeakCurveParam = useStore(s => s.setSpectrumPeakCurveParam)
   const resetPeakCurveParams = useStore(s => s.resetSpectrumPeakCurveParams)
+  // R20.13 — frequency-coloured tint for the trail. When ON, the trail
+  // overlay paints in a warm→cool ramp keyed to barIndex (low bars =
+  // warm red-orange, high bars = cool blue-violet) so the trail layer
+  // reads as a frequency map distinct from the bar fills below. When
+  // OFF (default — matches R19.12's look), the trail inherits the bar's
+  // own hue and reads as a glow extension. Persisted across sessions.
+  const peakTrailTint = useStore(s => s.spectrumPeakTrailTint)
+  const setPeakTrailTint = useStore(s => s.setSpectrumPeakTrailTint)
   // Popover open state for the param editor — hidden by default to
   // keep the overlay tidy. Opens via long-press on the curve chip
   // OR via a dedicated `…` button (rendered only when params exist
@@ -194,10 +204,17 @@ export default function WaveformOverlay() {
           // (exp.exponent, log.base) — the live params object is
           // passed straight through to readPeakTrail.
           const tail = readPeakTrail(peakStateRef.current, i, h, { curve: peakCurve, curveParams: peakCurveParams })
+          // R20.13 — when tint is ON, the trail uses its OWN warm→cool
+          // hue ramp keyed to barIndex (separate from the bar's hue
+          // above). When OFF, the trail inherits the bar's own hue so
+          // it reads as a glow extension (R15.07 / R16.17 / R19.12 look).
+          const trailHue = peakTrailTint
+            ? peakTrailHueForBarIndex(i, bars.length)
+            : hueWrapped
           for (let k = 0; k < tail.length; k++) {
             const sample = tail[k]
             const trailY = baseY - sample.height
-            ctx.fillStyle = `hsla(${hueWrapped}, 100%, 84%, ${sample.alpha})`
+            ctx.fillStyle = `hsla(${trailHue}, 100%, 84%, ${sample.alpha})`
             ctx.fillRect(x + 0.5, trailY, barW, PEAK_LINE_THICKNESS)
           }
         }
@@ -210,7 +227,7 @@ export default function WaveformOverlay() {
     }
     rafRef.current = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(rafRef.current)
-  }, [active, mode, spectrumScale, peakHolds, peakCurve, peakCurveParams])
+  }, [active, mode, spectrumScale, peakHolds, peakCurve, peakCurveParams, peakTrailTint])
 
   if (!active) return null
 
@@ -333,6 +350,38 @@ export default function WaveformOverlay() {
             if (schema && Object.keys(schema).length > 0) setParamsOpen(true)
           }}
         />
+      )}
+      {/* R20.13 — frequency-coloured tint chip. Toggles between trail
+          inheriting the bar's hue (default, R15.07/R16.17/R19.12 look)
+          and the warm→cool frequency-keyed ramp (bass warm, treble
+          cool). Only renders alongside the peak-hold chip so the
+          option only surfaces when there's actually a trail to tint. */}
+      {mode === 'frequency' && peakHolds && (
+        <button
+          type="button"
+          onClick={() => setPeakTrailTint(!peakTrailTint)}
+          title={peakTrailTint
+            ? 'Frequency tint ON — trail uses warm (bass) → cool (treble) hue ramp. Click to inherit the bar\u2019s own hue.'
+            : 'Frequency tint OFF — trail inherits the bar\u2019s hue. Click to paint the trail as a warm→cool frequency map.'}
+          style={{
+            position: 'absolute', top: 8, left: 154,
+            pointerEvents: 'auto',
+            padding: '2px 8px', borderRadius: 5,
+            fontSize: 9, fontWeight: 600, letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            // When ON, use a gradient that hints at the warm→cool ramp
+            // so the chip itself previews the visual it controls.
+            color: peakTrailTint ? '#fed7aa' : '#d8d8e0',
+            background: peakTrailTint
+              ? 'linear-gradient(90deg, rgba(251,146,60,0.22), rgba(139,92,246,0.22))'
+              : 'rgba(255,255,255,0.06)',
+            border: peakTrailTint
+              ? '1px solid rgba(251,146,60,0.40)'
+              : '1px solid rgba(255,255,255,0.14)',
+            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+            cursor: 'pointer',
+            backdropFilter: 'blur(4px)',
+          }}>tint</button>
       )}
       {/* R19.12 — params popover. Renders a single slider per param
           for the active curve. Hidden by default; opens via the curve
