@@ -99,6 +99,11 @@ Existing capabilities (do not re-ship):
 - Named attractor bulk-delete via shift-click multi-select (R17.17). Graduates the single-× delete with a multi-select bar that surfaces above the list as soon as one row is selected; offers Select all / Clear / Delete N (gradient red, window.confirm gate). Shift-click on any row toggles its membership in the selection set; selected rows wear a red border + glow + on-row checkbox indicator. Selection auto-reconciles via a `useMemo(validSelectedIds)` derived value (no setState-in-effect) so ids that vanish externally drop from the bar's counts silently. New pure helper `removeAttractors(list, idSet)` in namedAttractors.js accepts Set | Array | iterable (incl. generators), normalises to Set internally for O(1) hits, returns input REF unchanged when nothing in idSet existed (ref-equal-on-no-op skips redundant save), drops corrupt null rows as a side-effect (parallels removeView contract). Store action `removeNamedAttractors(ids)` wraps with the same skip contract.
 - Camera path drag-and-drop reorder (R17.07). Graduates the chevron up/down buttons (R10.03) with a direct drag gesture for users who'd rather GRAB the row and DROP it where they want. The chevrons stay (precision moves + keyboard-only users). Pure wire layer on top of `moveView(views, fromIdx, toIdx)` from R10.03 so no new lib helpers / no new unit tests — the ref-equal-on-no-op skip + happy paths + defensive cases were already pinned in cameraViews.test.mjs. `useState(null)` for `draggingIdx` (NOT a ref — each row reads it during render to compute its `isBeingDragged` styling, and react-hooks/refs disallows reading refs during render). `dragOverIdx` state drives the indigo drop-target highlight; the dragLeave handler clears only when leaving the SAME row currently highlighted so sibling enter events don't flicker the indicator across row boundaries.
 - Custom theme pack drag-and-drop import (R17.06). Graduates the click-to-import button with a file-drop zone covering the entire CustomThemesRow block. Drop a .json theme pack anywhere on the row and the same R10.10 preview panel surfaces — no auto-apply, every import still flows through the Merge/Replace dry-run summary. Implementation: `dragDepth` counter tracks nested dragenter/leave so the highlight only clears when the ACTUAL drag leaves the container (browsers fire enter+leave on every child element a drag crosses; naive boolean would flicker at every chip). Filters by `dataTransfer.types.includes('Files')` so stray text-drags don't trigger the overlay. Only the FIRST file in a multi-file drop is read; non-.json files toast an error. Drop handler shares `parseAndPreview(file)` with the file-picker path so a future format change only touches one place. Visual feedback: dashed indigo outline (outlineOffset:4 keeps layout stable), 5% bg tint, "Drop .json to preview theme pack" banner pinned to top with pointerEvents:none so drag events keep hitting the parent.
+- Per-attractor MIDI: route a CC to TYPE — knob cycles 4 force-field types (R18.16). Graduates the ENABLED routing R15.16 with band-hysteresis selection: [0..1] split into N equal-width bands (4 with current ATTRACTOR_TYPES), with a symmetric TYPE_BAND_HYSTERESIS=0.015 dead-band at each boundary that holds the previous type when the boundary is between the live type and its immediate neighbour (non-adjacent jumps skip the hold). Pure helper `pickAttractorTypeForCC(prevType, v01, types?, hysteresis?)` in midiMap.js; full defensive contract pinned (NaN/±Infinity holds previous, empty/invalid types returns previous, single-type list always wins, custom hysteresis arg). ATTRACTOR_FIELDS extended to 8 entries with `attr:<id>:type` slot; resolveActionForId reads LIVE attractor type at apply-time for dead-band decisions and writes only on transition. MidiPanel TYPE row gets a "cycle 4" range hint + boundary-semantics tooltip. ~90 fresh asserts: band selection, endpoint anchors, clamp behaviour, dead-band hold (lower + upper neighbour, both sweep directions), non-adjacent skip, full-sweep round-trip invariant (≤3 transitions across 0→1, every type visited).
+- MIDI user bundle drag-and-drop import (R18.09). Graduates the click-Import-bundle / Import-all buttons with direct drag-and-drop on the entire Controller Presets bar (parallels R17.06 theme-pack drag-import). Auto-detects single-bundle (kind=`midi-user-bundle`) vs multi-bundle (kind=`midi-user-bundles`) by trying parseImportMulti first then falling through to parseImport (single). Bare-array top-level shorthand still works via parseImportMulti. Pure wire layer — no new IO module, no envelope changes; the panel passes a single `onDropFile` handler to a presentational PresetBar that does the dragDepth-counter highlight + filter-by-Files-mimetype + drop-zone banner. Multi-imports gate through the same window.confirm impact summary as the file-picker path; single-imports respect the bundle cap (rejects when at MAX_USER_PRESETS with a toast instead of silent FIFO drop). Non-.json files toast an error.
+- Theme pack drag-and-drop multiple .json files at once (R18.18). Graduates R17.06's first-file-only convention. Drops every .json file in a single gesture, reads them in parallel via Promise.all, combines valid items into a single preview panel. Failed parses surface as per-file error counts in a toast but don't block valid ones — partial success is preserved. Sorted by filename for stable preview/commit ordering across machines. New helper `parseAndPreviewMulti(files, skipped)` runs alongside `parseAndPreview` so the file-picker path is untouched. Cross-file duplicate names aren't deduped here — the existing mergeThemesImport step handles collisions when the user clicks Apply. Preview header shows "12 themes · 3 files" with a tooltip listing every contributing filename; filename slot widens to 160px. Drop banner gains "(multi-file ok)" hint.
+- Named attractor drag-and-drop reorder via #N badge handle (R18.19). Parallels R17.07's camera-path drag-and-drop. Grab any attractor row (the #N badge wears cursor:grab so affordance matches camera-path) and drop on another row to move it. Chevron up/down (R15.20) + jump-to-position click-to-edit (R16.18) stay alongside — three layered controls cover precise single-step, arbitrary numeric jump, and direct visual drag. Pure wire layer on top of moveAttractorByIndex (already pinned in tests). draggable attribute gated on `!editing && !editingPos` so a user double-clicking the name or typing a jump-position doesn't have their text-selection drag converted to a row drag mid-keystroke. Drop-target row gets indigo tint + indigo border + 3px violet left stripe; dragged row drops to 0.55 opacity + muted-violet stripe. dragOverIdx clears only on leaving the SAME row currently highlighted (sibling-enter-before-leave guard, same as R17.07).
+- Snapshot grid long-press multi-select for bulk delete (R18.06). Long-press (≥450ms) any tile in grid view to enter selection mode; a delete bar surfaces above the grid with Select all / Clear / Delete N (parallels R17.17 attractor multi-select). Tap-at-rest opens lightbox (unchanged); tap-in-select-mode toggles selection. Move guard (LONG_PRESS_SLOP_PX=8) bails out if the user starts to scroll/swipe — long-press only fires on a genuine hold. After firing, the synthetic click is swallowed. validSelectedIds reconciled at render-time via useMemo so externally-removed snapshots drop out of counts without setState-in-effect. Selection clears on gallery close / view-change (grid-only by design). New pure helper `removeSnapshots(items, idSet)` mirrors removeAttractors contract — Set | Array | iterable inputs, ref-equal-on-no-op skip, corrupt-row cleanup. Visual: selected tiles get red border + glow + filled red checkmark; unselected-in-select-mode get an empty ring; hover actions hidden in select mode so a careful tap doesn't fight the toggle. touchAction:'manipulation' + WebkitTouchCallout:'none' prevents iOS native long-press action sheet from intercepting.
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -296,29 +301,44 @@ overlay) and R17.05 (custom audio-reactive curve editor) each need
 their own focused batch. Substituted R17.06, R17.07, R17.15, R17.17,
 R17.20 from the future queue.
 
-### Batch 18 — next 5 (refilled)
-- [ ] R18.01 Echo / trail FBO that survives EffectComposer [carried from R17.01 — render pipeline refactor, dedicated batch]
-- [ ] R18.02 Named attractor 3D drag handle (r3f gizmo) [carried from R17.02 — dedicated batch]
-- [ ] R18.03 OpenGraph snapshot endpoint (server-rendered share card) [carried from R17.03 — needs backend]
-- [ ] R18.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [carried from R17.04]
-- [ ] R18.05 Audio-reactive bg curve chips → custom curve editor for power users (visual spline / 3-knot bezier) [carried from R17.05]
+### Batch 18 — TYPE routing + 3 drag-drop + grid long-press  (SHIPPED)
+- [x] **R18.16** Per-attractor MIDI: route CC to TYPE (cycles 4 force-field types with band hysteresis)  — 658695f
+- [x] **R18.09** MIDI user bundle drag-and-drop import (auto-detects single vs multi envelope)  — 4c5059e
+- [x] **R18.18** Theme pack drag-and-drop accepts multiple .json files at once  — 4a0fcec
+- [x] **R18.19** Named attractor drag-and-drop reorder via #N badge handle  — 8980f4d
+- [x] **R18.06** Snapshot grid long-press multi-select for bulk delete  — 2b48af4
+
+Note: R18.01 (Echo / trail FBO) and R18.02 (Named attractor 3D drag
+handle) deferred yet again — both need their own dedicated render-
+pipeline / r3f-gizmo batches. R18.03 (server-rendered OG endpoint)
+still deferred — no backend runtime. R18.04 (multi-error gutter
+overlay) and R18.05 (custom audio-reactive curve editor) each need
+their own focused batch. Substituted R18.06, R18.09, R18.16, R18.18,
+R18.19 from the future queue to keep the batch at 5 great slices.
+
+### Batch 19 — next 5 (refilled)
+- [ ] R19.01 Echo / trail FBO that survives EffectComposer [carried from R18.01 — render pipeline refactor, dedicated batch]
+- [ ] R19.02 Named attractor 3D drag handle (r3f gizmo) [carried from R18.02 — dedicated batch]
+- [ ] R19.03 OpenGraph snapshot endpoint (server-rendered share card) [carried from R18.03 — needs backend]
+- [ ] R19.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [carried from R18.04]
+- [ ] R19.05 Audio-reactive bg curve chips → custom curve editor for power users (visual spline / 3-knot bezier) [carried from R18.05]
 
 ### Future queue (refill when batch closes)
-- [ ] R18.06 Snapshot grid: long-press a tile to multi-select for bulk delete [was R17.08]
-- [ ] R18.07 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view [was R17.09]
-- [ ] R18.08 Smash bias: user-editable per-chip ranges (open the bias as JSON, tweak, re-save) [was R17.10]
-- [ ] R18.09 MIDI user bundle: drag-and-drop a bundle JSON onto the MidiPanel to import (skip the file picker) [was R17.11]
-- [ ] R18.10 Minimap: hover a saved-view dot for ~1s shows a thumbnail preview (canvas2D sample of the scene from that camera) [was R17.12]
-- [ ] R18.11 Wind chip overrides: per-chip live "what slot is this CC bound to" badge if the chip's seconds is bound to a CC (cross-reference between MIDI map + wind chips) [was R17.13]
-- [ ] R18.12 Crossfade chip overrides: same MIDI cross-reference badge as R18.11 [was R17.14]
-- [ ] R18.13 MIDI user bundle: per-bundle keyboard shortcut binding (assign a hotkey to apply each bundle without opening the panel) [was R17.16]
-- [ ] R18.14 Spectrum peak trail: per-curve tunable parameters (exp's exponent, log's base) — power users can taste-shape beyond the 3 shipped presets [was R17.18, graduates from R16.17]
-- [ ] R18.15 Carousel: per-preset thumb metadata badge (cached date, dimensions, time since last view) on hover [was R17.19]
-- [ ] R18.16 Per-attractor MIDI: route CC to TYPE (cycle through attractor/repulsor/vortex/turbulence as the knob sweeps) [new — graduates from R15.16 enabled-routing concept]
-- [ ] R18.17 Camera path: drag-and-drop reorder ALSO works on touch (current R17.07 is desktop-only — touch users need a long-press-to-drag gesture)
-- [ ] R18.18 Theme pack: drag-and-drop multiple .json files at once (current R17.06 reads only the FIRST file)
-- [ ] R18.19 Named attractor row: drag-and-drop reorder via the #N badge handle (parallel to R17.07 camera-path drag — would replace the chevron R15.20 buttons with a single grab handle)
-- [ ] R18.20 Spectrum peak trail: per-bar colour tint based on frequency (low bars warm, high bars cool — graduates from R15.07 trail)
+- [ ] R19.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view [was R18.07]
+- [ ] R19.07 Smash bias: user-editable per-chip ranges (open the bias as JSON, tweak, re-save) [was R18.08]
+- [ ] R19.08 Minimap: hover a saved-view dot for ~1s shows a thumbnail preview (canvas2D sample of the scene from that camera) [was R18.10]
+- [ ] R19.09 Wind chip overrides: per-chip live "what slot is this CC bound to" badge if the chip's seconds is bound to a CC (cross-reference between MIDI map + wind chips) [was R18.11]
+- [ ] R19.10 Crossfade chip overrides: same MIDI cross-reference badge as R19.09 [was R18.12]
+- [ ] R19.11 MIDI user bundle: per-bundle keyboard shortcut binding (assign a hotkey to apply each bundle without opening the panel) [was R18.13]
+- [ ] R19.12 Spectrum peak trail: per-curve tunable parameters (exp's exponent, log's base) — power users can taste-shape beyond the 3 shipped presets [was R18.14, graduates from R16.17]
+- [ ] R19.13 Carousel: per-preset thumb metadata badge (cached date, dimensions, time since last view) on hover [was R18.15]
+- [ ] R19.14 Camera path: drag-and-drop reorder ALSO works on touch (R17.07 is desktop-only — touch users need a long-press-to-drag gesture) [was R18.17]
+- [ ] R19.15 Spectrum peak trail: per-bar colour tint based on frequency (low bars warm, high bars cool — graduates from R15.07 trail) [was R18.20]
+- [ ] R19.16 MIDI per-attractor TYPE: tooltip on each row showing the current quarter the live CC value sits in (so users SEE the band picker working without watching the type chip on the row) [new — graduates R18.16]
+- [ ] R19.17 Snapshot grid: bulk download all selected as a zip (graduates R18.06 selection mode) [new]
+- [ ] R19.18 Theme pack drag-drop: progress indicator when N > 10 files (current parallel Promise.all is fast but visible delay on big drops) [new — graduates R18.18]
+- [ ] R19.19 Named attractor drag-reorder: also accepts drops on the empty gap between rows for "insert here" semantics (current R18.19 only drops on rows) [new — graduates R18.19]
+- [ ] R19.20 MIDI bundle drag-drop: multi-file drop (drop N bundle files at once, same parallel-parse + combined preview as R18.18 themes) [new — graduates R18.09]
 
 ## TICK LOG
 - 2026-06-19 23:41 PT — Bootstrap + Batch 1 (5/5).
@@ -745,3 +765,51 @@ R17.20 from the future queue.
   + ref-equal-on-no-op 8 different no-op shapes + corrupt-row cleanup
   + input list never mutated + empty-array return on non-array list
   · ~110 fresh asserts this batch). ATTRACTOR_FIELDS now at 7 (was 6).
+- 2026-06-22 09:19 PT — Batch 18 (5/5).
+  Commits: 658695f (R18.16 per-attractor MIDI route CC to TYPE —
+  pickAttractorTypeForCC band-hysteresis with TYPE_BAND_HYSTERESIS=
+  0.015 + resolveActionForId TYPE setter + label / range / tooltip
+  in MidiPanel; ATTRACTOR_FIELDS grew from 7 to 8), 4c5059e (R18.09
+  MIDI user bundle drag-and-drop import — auto-detects single vs
+  multi envelope by trying parseImportMulti first then falling
+  through to parseImport; PresetBar drop zone with dragDepth
+  counter + filter-by-Files-mimetype + drop banner; no new IO
+  module), 4a0fcec (R18.18 theme pack drag-drop multiple files —
+  Promise.all parallel parse, partial-success semantics, filename-
+  sorted preview, "12 themes · 3 files" header + tooltip listing
+  sources, "(multi-file ok)" hint on drop banner; parseAndPreviewMulti
+  alongside parseAndPreview so file-picker path is untouched),
+  8980f4d (R18.19 named attractor drag-and-drop reorder — STATE not
+  ref draggingIdx + dragOverIdx wired through NamedAttractorRow;
+  draggable={!!onDragStart && !editing && !editingPos} so text
+  edits aren't interrupted; #N badge wears cursor:grab; chevrons
+  R15.20 + jump-to-position R16.18 stay), 2b48af4 (R18.06 snapshot
+  grid long-press multi-select — LONG_PRESS_MS=450 + SLOP_PX=8
+  pointer-event detection, swallow-synthetic-click guard, multi-
+  select bar above grid, selection clears on close/view-change,
+  new removeSnapshots lib helper mirroring removeAttractors
+  contract).
+  R18.01 (Echo / trail FBO) / R18.02 (3D drag handle) / R18.03
+  (server-rendered OG endpoint) / R18.04 (multi-error gutter
+  overlay) / R18.05 (custom audio-reactive curve editor) all
+  deferred — first three are dedicated infrastructure batches
+  (render-pipeline / r3f-gizmo / backend runtime), R18.04 + R18.05
+  each need their own focused batch. Substituted R18.06, R18.09,
+  R18.16, R18.18, R18.19 from the future queue to keep the batch
+  at 5 great slices instead of padding.
+  Gates: lint 23 errors / 3 warnings — exactly matches baseline
+  (zero new errors / warnings in any of the 6 modified .js/.jsx
+  files + 2 modified .test.mjs files; no lint-gate cleanup commits
+  needed this batch). Build: 1.03 s green (1.74 MB bundle, gzip
+  518 KB — +3 KB vs Batch 17 for the new band-picker helper +
+  drop-zone wires + removeSnapshots + long-press state machine).
+  Unit tests: 39/39 files pass (extended midiMap with ~90 R18.16
+  asserts pinning band selection / endpoint anchors / clamp /
+  dead-band hold both directions / non-adjacent skip / full-sweep
+  ≤3-transitions invariant / defensive contract / empty types /
+  single-type / custom hysteresis / load-save round-trip;
+  extended snapshotGallery with ~25 R18.06 asserts pinning Set /
+  Array / iterable input forms + ref-equal-on-no-op contract for
+  8 no-op shapes + drop-all behaviour + mixed-valid-invalid +
+  corrupt-rows cleanup · ~115 fresh asserts this batch).
+  ATTRACTOR_FIELDS now at 8 (was 7).
