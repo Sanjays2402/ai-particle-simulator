@@ -10,6 +10,8 @@ import {
   EXPORT_KIND_MULTI, MAX_IMPORT_BYTES_MULTI,
   buildExportPayloadMulti, serializeUserBundlesMulti, makeFilenameMulti,
   parseImportMulti, summarizeImportImpactMulti,
+  // R19.20 — multi-file drop combiner
+  combineDroppedBundles,
 } from './midiUserBundleIO.js'
 import { ACTIONS } from './midiMap.js'
 
@@ -390,3 +392,131 @@ eq(serializeUserBundlesMulti([]),   null, 'multi serialize empty → null')
 }
 
 console.log(`PASS: midiUserBundleIO — envelope build/parse, bare-bundle shorthand, sanitize (out-of-range CC + unknown action + blank name + long-name/desc truncation), serialize (success + null on unencodable), filename slugify (punctuation/case/blank/null/multi-space/leading-trailing), parseImport (envelope + bare + all rejection cases), id/vendor/createdAt stripped on round-trip, isAtBundleCap (empty/null/non-array/full/past-cap/below) + R15.14 multi-bundle (envelope/serialize/filename/parse/bare-array/per-bundle-sanitize/rejection/summarize-impact)`)
+
+// --- R19.20: combineDroppedBundles — multi-file drop combiner ---
+
+// Helper: build a `reads` entry shaped like the FileReader output
+// the panel's importBundleFiles passes through.
+const readOf = (raw, name = 'f.json', error = null) => ({ raw, name, error })
+
+// Single file (single-bundle shape) yields one bundle.
+{
+  const json = serializeUserBundle({ name: 'Solo', map: { 16: SOME_ACTION } })
+  const r = combineDroppedBundles([readOf(json)])
+  eq(r.bundles.length, 1, 'single-bundle file: one bundle')
+  eq(r.bundles[0].name, 'Solo', 'preserves name')
+  eq(r.parseFails, 0, 'no failures')
+  eq(r.totalFilesRead, 1, 'totalFilesRead counts attempts')
+}
+
+// Single file (multi-bundle shape) yields N bundles.
+{
+  const json = serializeUserBundlesMulti([
+    { name: 'A', map: { 16: SOME_ACTION } },
+    { name: 'B', map: { 17: OTHER_ACTION } },
+  ])
+  const r = combineDroppedBundles([readOf(json)])
+  eq(r.bundles.length, 2, 'multi-bundle file: bundles flattened into array')
+  eq(r.bundles[0].name, 'A', 'order preserved A first')
+  eq(r.bundles[1].name, 'B', 'order preserved B second')
+  eq(r.parseFails, 0, 'no failures')
+}
+
+// Mix of single + multi + bare-array files combined into one flat array.
+{
+  const singleJson = serializeUserBundle({ name: 'Stage Rig', map: { 16: SOME_ACTION } })
+  const multiJson  = serializeUserBundlesMulti([
+    { name: 'Backup A', map: { 17: SOME_ACTION } },
+    { name: 'Backup B', map: { 18: OTHER_ACTION } },
+  ])
+  // Bare-array shorthand: top-level JSON array of {name,map} objects.
+  const bareArrayJson = JSON.stringify([{ name: 'Bare', map: { 19: SOME_ACTION } }])
+  const r = combineDroppedBundles([
+    readOf(singleJson, 'rig.json'),
+    readOf(multiJson, 'backups.json'),
+    readOf(bareArrayJson, 'bare.json'),
+  ])
+  eq(r.bundles.length, 4, 'mixed shapes: 1 + 2 + 1 = 4 bundles')
+  eq(r.parseFails, 0, 'mixed valid files: no failures')
+  eq(r.totalFilesRead, 3, 'totalFilesRead = total attempts')
+  // Order preserved across the file list — first file's bundles come
+  // before second file's, etc.
+  eq(r.bundles[0].name, 'Stage Rig', 'order: file 1 first')
+  eq(r.bundles[1].name, 'Backup A',  'order: file 2 first bundle')
+  eq(r.bundles[2].name, 'Backup B',  'order: file 2 second bundle')
+  eq(r.bundles[3].name, 'Bare',      'order: file 3')
+}
+
+// Partial-success: valid files combined, invalid files counted in parseFails.
+{
+  const goodJson = serializeUserBundle({ name: 'Good', map: { 16: SOME_ACTION } })
+  const r = combineDroppedBundles([
+    readOf(goodJson, 'good.json'),
+    readOf('{not-json', 'broken.json'),
+    readOf('{"kind":"wrong-thing","v":1,"bundle":{"name":"x","map":{}}}', 'wrong-kind.json'),
+    readOf('not a json string at all', 'plain-text.json'),
+  ])
+  eq(r.bundles.length, 1, 'partial: one valid bundle survived')
+  eq(r.parseFails, 3, 'partial: three failures counted')
+  eq(r.bundles[0].name, 'Good', 'the good one is preserved')
+}
+
+// Empty raw / explicit error counts as a parse failure (no bundle, no crash).
+{
+  const r = combineDroppedBundles([
+    readOf('', 'empty.json'),
+    readOf('valid-but-empty-after-parse', 'invalid.json', null),
+    { raw: '', error: 'read failed', name: 'died-reading.json' },
+  ])
+  eq(r.bundles.length, 0, 'no bundles from empty/error reads')
+  eq(r.parseFails, 3, 'all three counted as failures')
+}
+
+// Per-bundle sanitisation applies through both code paths — corrupt
+// CC keys + unknown actions inside a valid envelope are dropped, the
+// bundle returned still has the surviving rows.
+{
+  // Bundle with one valid binding + one invalid (CC > 127) + one with
+  // an unknown action — single-bundle shape.
+  const dirty = JSON.stringify({
+    kind: 'ai-particle-simulator/midi-user-bundle',
+    v: 1,
+    bundle: {
+      name: 'Dirty',
+      map: { '16': SOME_ACTION, '200': SOME_ACTION, '17': 'totally-bogus-action' },
+    },
+  })
+  const r = combineDroppedBundles([readOf(dirty)])
+  eq(r.bundles.length, 1, 'sanitised bundle still surfaces')
+  eq(r.bundles[0].name, 'Dirty', 'name preserved')
+  eq(Object.keys(r.bundles[0].map).length, 1, 'only the valid row survived')
+  eq(r.bundles[0].map['16'], SOME_ACTION, 'the valid row points at the right action')
+}
+
+// Defensive: non-array input returns empty.
+{
+  const z1 = combineDroppedBundles(null)
+  eq(z1.bundles.length, 0, 'null input → empty bundles')
+  eq(z1.parseFails, 0, 'null input → 0 failures')
+  eq(z1.totalFilesRead, 0, 'null input → 0 reads')
+  const z2 = combineDroppedBundles('not-an-array')
+  eq(z2.bundles.length, 0, 'string input → empty bundles')
+  const z3 = combineDroppedBundles([])
+  eq(z3.bundles.length, 0, 'empty array → empty bundles')
+  eq(z3.totalFilesRead, 0, 'empty array → 0 reads')
+}
+
+// Defensive: non-object entries inside the array are skipped silently
+// (don't count toward totalFilesRead OR parseFails — they were never
+// "attempted").
+{
+  const r = combineDroppedBundles([null, undefined, 42, 'string', { /* no raw */ }])
+  // The bare {} (no raw, no error) still gets counted as a read
+  // attempt — and yields a parse failure since raw isn't a string.
+  // null/undefined/42/string are skipped entirely.
+  eq(r.totalFilesRead, 1, 'only the {} object was attempted')
+  eq(r.parseFails, 1, 'attempted read with no raw → parse fail')
+  eq(r.bundles.length, 0, 'no bundles from any of these')
+}
+
+console.log('PASS: midiUserBundleIO R19.20 combineDroppedBundles — single/multi/bare-array/mixed + partial-success + sanitisation + defensive')

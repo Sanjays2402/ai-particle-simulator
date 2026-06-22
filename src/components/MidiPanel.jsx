@@ -27,6 +27,8 @@ import {
   downloadUserBundlesFileMulti,
   parseImportMulti as parseUserBundlesImportMulti,
   summarizeImportImpactMulti,
+  // R19.20 — multi-file drop combiner (pure helper, no DOM)
+  combineDroppedBundles,
 } from '../lib/midiUserBundleIO'
 import { attractorTypeStyle } from '../lib/namedAttractors'
 import { Music4, X, CheckCircle2, AlertCircle, Zap, Save, Trash2, Download, Upload } from 'lucide-react'
@@ -385,67 +387,106 @@ export default function MidiPanel({ open, onClose }) {
   // (matches R17.06's theme-row pattern: drop anywhere on the bar to
   // trigger import). User confirms multi-imports via the same
   // window.confirm gate as the file-picker path.
-  const importBundleFile = (file) => {
-    if (!file) return
-    if (!file.name.toLowerCase().endsWith('.json')) {
-      showToast(`Not a JSON file: ${file.name}`)
+  //
+  // R19.20 — graduates to MULTI-FILE drops (parallels R18.18 theme
+  // pack multi-file drop). When N>1 .json files are dropped, each
+  // is read in parallel via Promise.all and the per-file parses are
+  // COMBINED into a single in-memory multi-bundle envelope before
+  // the impact summary fires. Per-file failures (corrupt JSON,
+  // wrong-kind envelope, non-.json extension) are counted + toasted
+  // but don't block valid files in the same drop — partial success
+  // is preserved. Single-file drops keep the exact same behaviour
+  // as R18.09; the parseAndImportFiles helper just sees a list of
+  // length 1 in that case.
+  const importBundleFiles = async (files) => {
+    if (!files || files.length === 0) return
+    const fileArray = Array.from(files)
+    // Pre-filter: drop non-.json files with a per-file toast count.
+    // Same UX as R18.18 — invalid files are surfaced but don't
+    // abort the valid ones.
+    const jsonFiles = []
+    let skippedNonJson = 0
+    for (const f of fileArray) {
+      if (f && typeof f.name === 'string' && f.name.toLowerCase().endsWith('.json')) {
+        jsonFiles.push(f)
+      } else {
+        skippedNonJson++
+      }
+    }
+    if (jsonFiles.length === 0) {
+      showToast(skippedNonJson > 0
+        ? `${skippedNonJson} non-JSON file${skippedNonJson === 1 ? '' : 's'} skipped`
+        : 'No .json files in drop')
       return
     }
-    const reader = new FileReader()
-    reader.onload = () => {
-      const raw = typeof reader.result === 'string' ? reader.result : ''
-      // Try multi first — a single-bundle file will fail this parse
-      // (kind mismatch or missing `bundles` array) without ambiguity.
-      const multi = parseUserBundlesImportMulti(raw)
-      if (multi.ok) {
-        const impact = summarizeImportImpactMulti(userPresets, multi.bundles)
-        let prompt = `Import ${impact.incoming} bundle${impact.incoming === 1 ? '' : 's'}?`
-        const bits = []
-        if (impact.willAdd)     bits.push(`${impact.willAdd} new`)
-        if (impact.willReplace) bits.push(`${impact.willReplace} replace existing`)
-        if (impact.willDrop)    bits.push(`${impact.willDrop} will FIFO-drop oldest`)
-        if (bits.length) prompt += `\n${bits.join(' · ')}`
-        if (!window.confirm(prompt)) return
-        let next = userPresets
-        let added = 0
-        for (const inc of multi.bundles) {
-          const target = inc.name.trim().toLowerCase()
-          next = next.filter(p => !p || typeof p.name !== 'string' || p.name.trim().toLowerCase() !== target)
-          const built = buildUserPresetFromMap(inc.name, inc.map, next)
-          if (!built) continue
-          next = addUserPreset(next, built)
-          added++
-        }
-        setUserPresets(next)
-        saveUserPresets(next)
-        showToast(`Imported ${added} bundle${added === 1 ? '' : 's'}${impact.willDrop ? ` · ${impact.willDrop} dropped` : ''}`)
-        return
-      }
-      // Fall through to single-bundle import.
-      if (isAtBundleCap(userPresets)) {
-        showToast(`At bundle cap (${MAX_USER_PRESETS}) — delete one first`)
-        return
-      }
-      const single = parseUserBundleImport(raw)
-      if (!single.ok) {
-        // Both parses failed — report the multi error first since
-        // it's the more permissive parse (catches bare-array shape too).
-        showToast(`Import failed: ${multi.error}`)
-        return
-      }
-      const built = buildUserPresetFromMap(single.bundle.name, single.bundle.map, userPresets)
-      if (!built) {
-        showToast('Import failed: bundle had no valid bindings')
-        return
-      }
-      const next = addUserPreset(userPresets, built)
-      setUserPresets(next)
-      saveUserPresets(next)
-      const count = Object.keys(built.map).length
-      showToast(`Imported "${built.name}" (${count} binding${count === 1 ? '' : 's'})`)
+    // R19.20 — parallel parse via Promise.all + per-file FileReader.
+    // Even on a slow disk a 4-file drop completes in well under a
+    // frame, but the parallel path keeps the UI responsive even for
+    // larger drops (a friend's whole bundle collection: 8 files).
+    const readFile = (file) => new Promise((resolve) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve({
+        name: file.name,
+        raw: typeof reader.result === 'string' ? reader.result : '',
+      })
+      reader.onerror = () => resolve({ name: file.name, raw: '', error: 'read failed' })
+      reader.readAsText(file)
+    })
+    const reads = await Promise.all(jsonFiles.map(readFile))
+    // R19.20 — combine logic lives in midiUserBundleIO.combineDroppedBundles
+    // so it can be unit-tested without a DOM. Same parseImportMulti →
+    // parseImport precedence as the single-file drop; per-file failures
+    // are counted but don't block the valid ones.
+    const { bundles: combined, parseFails } = combineDroppedBundles(reads)
+    if (combined.length === 0) {
+      const bits = []
+      if (parseFails > 0)     bits.push(`${parseFails} parse failure${parseFails === 1 ? '' : 's'}`)
+      if (skippedNonJson > 0) bits.push(`${skippedNonJson} non-JSON skipped`)
+      showToast(`Import failed: ${bits.join(' \u00b7 ') || 'no valid bundles in drop'}`)
+      return
     }
-    reader.readAsText(file)
+    // From here we always go through the multi-bundle impact path
+    // (even for length-1 since impactMulti's prompt phrasing covers
+    // the single case fine + the replace-by-name semantics are the
+    // safer default). Cap-respect comes for free: addUserPreset's
+    // FIFO drop is projected into the prompt by summarizeImportImpactMulti.
+    const impact = summarizeImportImpactMulti(userPresets, combined)
+    let prompt = jsonFiles.length === 1
+      ? `Import ${impact.incoming} bundle${impact.incoming === 1 ? '' : 's'}?`
+      : `Import ${impact.incoming} bundle${impact.incoming === 1 ? '' : 's'} from ${jsonFiles.length} files?`
+    const bits = []
+    if (impact.willAdd)     bits.push(`${impact.willAdd} new`)
+    if (impact.willReplace) bits.push(`${impact.willReplace} replace existing`)
+    if (impact.willDrop)    bits.push(`${impact.willDrop} will FIFO-drop oldest`)
+    if (bits.length) prompt += `\n${bits.join(' \u00b7 ')}`
+    if (parseFails > 0)     prompt += `\n${parseFails} file${parseFails === 1 ? '' : 's'} failed to parse`
+    if (skippedNonJson > 0) prompt += `\n${skippedNonJson} non-JSON file${skippedNonJson === 1 ? '' : 's'} skipped`
+    if (!window.confirm(prompt)) return
+    let next = userPresets
+    let added = 0
+    for (const inc of combined) {
+      const target = inc.name.trim().toLowerCase()
+      next = next.filter(p => !p || typeof p.name !== 'string' || p.name.trim().toLowerCase() !== target)
+      const built = buildUserPresetFromMap(inc.name, inc.map, next)
+      if (!built) continue
+      next = addUserPreset(next, built)
+      added++
+    }
+    setUserPresets(next)
+    saveUserPresets(next)
+    const failBits = []
+    if (parseFails > 0)     failBits.push(`${parseFails} fail`)
+    if (skippedNonJson > 0) failBits.push(`${skippedNonJson} non-JSON skipped`)
+    showToast(`Imported ${added} bundle${added === 1 ? '' : 's'}${impact.willDrop ? ` \u00b7 ${impact.willDrop} dropped` : ''}${failBits.length ? ` \u00b7 ${failBits.join(' \u00b7 ')}` : ''}`)
   }
+
+  // R19.20 — backward-compatible single-file wrapper kept so the
+  // PresetBar's onDropFile prop signature doesn't need to change
+  // for callers that pass a single File (older R18.09 callsites,
+  // any future programmatic drop). Routes through importBundleFiles
+  // so all the multi-file handling (impact summary, replace-by-name,
+  // FIFO projection, partial-success counting) reuses one code path.
+  const importBundleFile = (file) => importBundleFiles(file ? [file] : [])
 
   // Try to auto-detect a likely preset from the connected inputs.
   // Returns the preset id of the FIRST match, or null. Surface only —
@@ -529,6 +570,7 @@ export default function MidiPanel({ open, onClose }) {
           onImportAllUsers={importAllUserBundles}
           onSetColorUser={setUserBundleColor}
           onDropFile={importBundleFile}
+          onDropFiles={importBundleFiles}
           savingBundle={savingBundle}
           onStartSave={() => { setSavingBundle(true); setBundleName('') }}
           onCancelSave={() => { setSavingBundle(false); setBundleName('') }}
@@ -888,7 +930,9 @@ function PresetBar({
   // R16.19 — per-bundle colour tag
   onSetColorUser,
   // R18.09 — drag-and-drop import (auto-detects single vs multi envelope)
-  onDropFile,
+  // R19.20 — accepts multi-file drops; PresetBar passes the full file
+  // list to the parent so the import path can fan out + combine.
+  onDropFile, onDropFiles,
   savingBundle, onStartSave, onCancelSave, onCommitBundle,
   bundleName, onBundleNameChange, liveBindingCount,
 }) {
@@ -903,31 +947,36 @@ function PresetBar({
   // drags (selecting text on the page itself) don't trigger the
   // overlay or block the default behaviour.
   const [dragDepth, setDragDepth] = useState(0)
-  const dragActive = dragDepth > 0 && typeof onDropFile === 'function'
+  const hasDropHandler = typeof onDropFiles === 'function' || typeof onDropFile === 'function'
+  const dragActive = dragDepth > 0 && hasDropHandler
   const onDragEnter = (e) => {
-    if (!onDropFile || !e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return
+    if (!hasDropHandler || !e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return
     e.preventDefault()
     setDragDepth(d => d + 1)
   }
   const onDragOverZone = (e) => {
-    if (!onDropFile || !e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return
+    if (!hasDropHandler || !e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'copy'
   }
   const onDragLeaveZone = (e) => {
-    if (!onDropFile || !e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return
+    if (!hasDropHandler || !e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return
     setDragDepth(d => Math.max(0, d - 1))
   }
   const onDropZone = (e) => {
-    if (!onDropFile || !e.dataTransfer) return
+    if (!hasDropHandler || !e.dataTransfer) return
     e.preventDefault()
     setDragDepth(0)
-    const file = e.dataTransfer.files && e.dataTransfer.files[0]
-    if (!file) {
+    const files = e.dataTransfer.files
+    if (!files || files.length === 0) {
       showToast('Drop a .json bundle file to import')
       return
     }
-    onDropFile(file)
+    // R19.20 — prefer onDropFiles when available (multi-file path);
+    // fall back to onDropFile with just the first file so legacy
+    // callsites keep working.
+    if (typeof onDropFiles === 'function') onDropFiles(files)
+    else if (typeof onDropFile === 'function') onDropFile(files[0])
   }
   return (
     <div
@@ -964,7 +1013,7 @@ function PresetBar({
           backdropFilter: 'blur(6px)',
           pointerEvents: 'none', zIndex: 2,
         }}>
-          Drop .json to import bundle
+          Drop .json to import bundle <span style={{ opacity: 0.65, fontWeight: 500, marginLeft: 4 }}>(multi-file ok)</span>
         </div>
       )}
       <div style={{

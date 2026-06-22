@@ -339,3 +339,55 @@ export function summarizeImportImpactMulti(existing, incoming) {
 // Re-export so the panel UI can keep its import + cap-check coupled
 // to the same module (saves a second import line).
 export { MAX_USER_PRESETS, isUserPresetId }
+
+// --- R19.20 — multi-file drop combiner ---------------------------------
+//
+// R18.09 wired single-file drag-and-drop to the panel; R18.18 graduated
+// theme-pack drops to handle N files at once. R19.20 brings the same
+// multi-file gesture to MIDI bundles: drop a folder of .json files
+// (a friend's whole collection + your local backup) and the panel
+// COMBINES them into one impact summary before the confirm fires.
+//
+// combineDroppedBundles takes an array of "per-file parse results"
+// shaped like { raw, error?, name? } and runs each through the same
+// parseImportMulti → parseImport precedence the single-file drop uses.
+// Successful parses are flattened into one bundles[] array; per-file
+// failures are counted but never abort the drop. Returns:
+//   {
+//     bundles,             // flat array of safe-bundle objects ready
+//                          // to feed addUserPreset
+//     parseFails,          // count of files that yielded zero bundles
+//     totalFilesRead,      // count of files we actually attempted
+//                          // (excludes ones the caller already filtered)
+//   }
+//
+// Pure / no DOM — caller is responsible for the FileReader stage so
+// this module stays test-pure (Node's `--test` runs in a sandbox
+// with no FileReader). The browser path lives in MidiPanel.jsx;
+// this helper exists so the combine logic is regression-pinned.
+export function combineDroppedBundles(reads) {
+  if (!Array.isArray(reads)) return { bundles: [], parseFails: 0, totalFilesRead: 0 }
+  const bundles = []
+  let parseFails = 0
+  let totalFilesRead = 0
+  for (const r of reads) {
+    if (!r || typeof r !== 'object') continue
+    totalFilesRead++
+    if (r.error || typeof r.raw !== 'string' || !r.raw) {
+      parseFails++
+      continue
+    }
+    const multi = parseImportMulti(r.raw)
+    if (multi.ok) {
+      bundles.push(...multi.bundles)
+      continue
+    }
+    const single = parseImport(r.raw)
+    if (single.ok) {
+      bundles.push(single.bundle)
+      continue
+    }
+    parseFails++
+  }
+  return { bundles, parseFails, totalFilesRead }
+}
