@@ -15,8 +15,10 @@ import {
   ATTRACTOR_FIELDS, labelForAttractorField,
   // R17.15 — log-curve radius routing
   ATTRACTOR_FIELD_RADIUS_LOG, logCurveShape, logCurveRadius,
+  // R18.16 — per-attractor TYPE routing + band-hysteresis cycle
+  ATTRACTOR_FIELD_TYPE, TYPE_BAND_HYSTERESIS, pickAttractorTypeForCC,
 } from './midiMap.js'
-import { STRENGTH_MAX, RADIUS_MIN, RADIUS_MAX, POSITION_MIN, POSITION_MAX } from './namedAttractors.js'
+import { STRENGTH_MAX, RADIUS_MIN, RADIUS_MAX, POSITION_MIN, POSITION_MAX, ATTRACTOR_TYPES } from './namedAttractors.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
 function eq(a, b, m) { if (a !== b) fail(`${m} — got ${JSON.stringify(a)} expected ${JSON.stringify(b)}`) }
@@ -669,4 +671,165 @@ eq(logCurveRadius(NaN), RADIUS_MIN, 'logCurveRadius(NaN) → MIN (calm default)'
   eq(log, lin + 1, 'radiusLog sits adjacent to radius (slot-pair layout)')
 }
 
-console.log(`PASS: midiMap — ${ACTIONS.length} actions, decode/normalize/persist/setBinding/applyCC + attractor routing (${ATTRACTOR_FIELDS.length} fields per attractor, incl. R15.16 enabled-with-hysteresis [${HYSTERESIS_OFF}, ${HYSTERESIS_ON}] + R17.15 radius·log curve)`)
+// --- R18.16 — pickAttractorTypeForCC: band-hysteresis cycle ---
+// 4 types in ATTRACTOR_TYPES (attractor / repulsor / vortex / turbulence).
+// With band width = 0.25, boundaries sit at 0.25, 0.50, 0.75. The
+// dead-band ± TYPE_BAND_HYSTERESIS (0.015) at each boundary holds the
+// previous type ONLY when the previous type is a direct neighbour.
+{
+  // Defaults snapshot — pinning the live shape so a future refactor
+  // can't silently shift the band picker.
+  eq(TYPE_BAND_HYSTERESIS, 0.015, 'TYPE_BAND_HYSTERESIS pinned')
+  eq(ATTRACTOR_FIELD_TYPE, 'type', 'ATTRACTOR_FIELD_TYPE pinned')
+  ok(ATTRACTOR_FIELDS.includes('type'), 'TYPE present in ATTRACTOR_FIELDS')
+  ok(ATTRACTOR_FIELDS.length === 8, `ATTRACTOR_FIELDS now at 8 fields (was 7) — got ${ATTRACTOR_FIELDS.length}`)
+}
+// Out-of-band picks the correct type by which quarter v01 falls in.
+{
+  eq(pickAttractorTypeForCC('attractor', 0.10), 'attractor', '0.10 → attractor (band 0)')
+  eq(pickAttractorTypeForCC('attractor', 0.30), 'repulsor',  '0.30 → repulsor (band 1)')
+  eq(pickAttractorTypeForCC('attractor', 0.60), 'vortex',    '0.60 → vortex (band 2)')
+  eq(pickAttractorTypeForCC('attractor', 0.90), 'turbulence','0.90 → turbulence (band 3)')
+}
+// Endpoint anchors — 0 → first type, 1 → last type.
+{
+  eq(pickAttractorTypeForCC('attractor', 0),   'attractor',  'v01=0 → first band (attractor)')
+  eq(pickAttractorTypeForCC('attractor', 1),   'turbulence', 'v01=1 → last band (turbulence)')
+}
+// Clamp behaviour — out-of-range values still map cleanly.
+{
+  eq(pickAttractorTypeForCC('attractor', -0.5), 'attractor',  'v01<0 clamps to 0 (first band)')
+  eq(pickAttractorTypeForCC('vortex',    1.5),  'turbulence', 'v01>1 clamps to 1 (last band)')
+}
+// Boundary tie — exact 0.25 lands in the HIGHER band (half-open).
+{
+  // Use a previous type that's NOT adjacent so the dead-band doesn't
+  // hold us — confirms the band-selection rule independently.
+  // vortex (idx 2) is non-adjacent to band 0 and band 3 — both transitions skip the hold.
+  eq(pickAttractorTypeForCC('vortex',    0.25), 'repulsor',   '0.25 lands in higher band (repulsor) [prev vortex is non-adjacent → no hold]')
+  // For 0.50 prev=attractor (idx 0) is non-adjacent to band 2 (vortex).
+  eq(pickAttractorTypeForCC('attractor', 0.50), 'vortex',     '0.50 lands in higher band (vortex) [prev attractor is non-adjacent → no hold]')
+  // For 0.75 prev=attractor (idx 0) is non-adjacent to band 3 (turbulence).
+  eq(pickAttractorTypeForCC('attractor', 0.75), 'turbulence', '0.75 lands in higher band (turbulence) [prev attractor is non-adjacent → no hold]')
+}
+// Dead-band holds the previous type when previous was the LOWER
+// neighbour (e.g. user sweeps from attractor up, lands in the
+// 0.235..0.265 window — should stay on attractor).
+{
+  eq(pickAttractorTypeForCC('attractor', 0.235), 'attractor', '0.235 (boundary-h) holds previous attractor')
+  eq(pickAttractorTypeForCC('attractor', 0.250), 'attractor', '0.250 exactly: dead-band holds previous attractor')
+  eq(pickAttractorTypeForCC('attractor', 0.265), 'attractor', '0.265 (boundary+h) still holds previous attractor')
+  // Just past the dead-band → switches.
+  eq(pickAttractorTypeForCC('attractor', 0.266), 'repulsor', '0.266 past dead-band → repulsor')
+}
+// Dead-band holds the previous type when previous was the HIGHER
+// neighbour (sweep DOWN — symmetry).
+{
+  eq(pickAttractorTypeForCC('repulsor', 0.260), 'repulsor', '0.260 sweep-down holds previous repulsor')
+  eq(pickAttractorTypeForCC('repulsor', 0.240), 'repulsor', '0.240 sweep-down still holds repulsor')
+  eq(pickAttractorTypeForCC('repulsor', 0.234), 'attractor','0.234 past dead-band → attractor (lower band)')
+}
+// Non-adjacent jumps SKIP the dead-band hold — a sudden knob slam
+// from attractor to vortex (0.60) doesn't pause in the dead-band.
+{
+  eq(pickAttractorTypeForCC('attractor', 0.510), 'vortex', 'non-adjacent slam → snap to new band, no hold')
+  eq(pickAttractorTypeForCC('attractor', 0.490), 'repulsor', 'non-adjacent: from attractor at 0.49 → repulsor (band 1)')
+}
+// Defensive contract — non-finite / invalid inputs never crash.
+{
+  eq(pickAttractorTypeForCC('attractor', NaN),       'attractor',  'NaN → holds previous type')
+  eq(pickAttractorTypeForCC('attractor', Infinity),  'attractor',  'Infinity → holds previous type')
+  eq(pickAttractorTypeForCC('attractor', -Infinity), 'attractor',  '-Infinity → holds previous type')
+  eq(pickAttractorTypeForCC(null,        NaN),       'attractor',  'null prev + NaN v01 → first band')
+  eq(pickAttractorTypeForCC('garbage',   NaN),       'attractor',  'unknown prev + NaN v01 → first band')
+  eq(pickAttractorTypeForCC(undefined,   0.5),       'vortex',     'undefined prev + 0.5 → band 2 (no hold)')
+}
+// Empty / invalid types list — returns previousType (defensive).
+{
+  eq(pickAttractorTypeForCC('attractor', 0.5, []),       'attractor', 'empty types → holds previous')
+  eq(pickAttractorTypeForCC(null,        0.5, []),       null,        'empty types + null prev → null')
+  eq(pickAttractorTypeForCC('attractor', 0.5, null),     'attractor', 'non-array types → holds previous')
+}
+// Single-type list — always returns that one type.
+{
+  eq(pickAttractorTypeForCC('whatever', 0.0, ['only']),  'only', 'single-type list always returns only entry')
+  eq(pickAttractorTypeForCC('whatever', 0.5, ['only']),  'only', 'single-type list returns only entry at midpoint')
+  eq(pickAttractorTypeForCC('whatever', 1.0, ['only']),  'only', 'single-type list returns only entry at v01=1')
+}
+// Custom hysteresis arg — passing 0 disables the dead-band entirely.
+{
+  eq(pickAttractorTypeForCC('attractor', 0.25, ATTRACTOR_TYPES, 0), 'repulsor', 'hysteresis=0: 0.25 snaps to higher band immediately')
+  eq(pickAttractorTypeForCC('attractor', 0.249,ATTRACTOR_TYPES, 0), 'attractor','hysteresis=0: 0.249 stays in lower band')
+}
+// Full-sweep round-trip — 0 → 1 visits every type once in order.
+{
+  const seen = []
+  let prev = 'attractor'
+  for (let i = 0; i <= 100; i++) {
+    const v = i / 100
+    const t = pickAttractorTypeForCC(prev, v)
+    if (t !== prev) seen.push(t)
+    prev = t
+  }
+  // Expect at most 3 transitions across a 0→1 sweep.
+  ok(seen.length <= 3, `0→1 sweep produces ≤3 transitions — got ${seen.length}: ${seen.join(',')}`)
+  // Visits every type in order (allowing for the starting type).
+  const visitedTypes = new Set(['attractor', ...seen])
+  for (const t of ATTRACTOR_TYPES) ok(visitedTypes.has(t), `0→1 sweep visits ${t}`)
+}
+
+// --- R18.16 — attractorActions now emits a type row per attractor ---
+{
+  const store = { namedAttractors: [{ id: 'attr-1', name: 'A', strength: 1, type: 'vortex' }] }
+  const rows = attractorActions(store)
+  const fields = rows.map(r => r.field)
+  ok(fields.includes('type'), 'type row emitted by attractorActions (R18.16)')
+  const typeRow = rows.find(r => r.field === 'type')
+  eq(typeRow.min, 0, 'type row min=0')
+  eq(typeRow.max, 1, 'type row max=1 (band cycle)')
+  eq(typeRow.label, 'A · Type', 'type row label matches "Name · Type"')
+  eq(labelForAttractorField(ATTRACTOR_FIELD_TYPE), 'Type', 'labelForAttractorField(type)=Type')
+}
+
+// --- R18.16 — resolveActionForId TYPE setter writes through to store ---
+{
+  const calls = []
+  const store = {
+    namedAttractors: [{ id: 'attr-1', name: 'A', strength: 1, type: 'attractor' }],
+    updateNamedAttractor(id, patch) { calls.push({ id, patch }) },
+  }
+  const a = resolveActionForId('attr:attr-1:type', store)
+  ok(a, 'type action resolves')
+  // CC value in attractor band (band 0) — no change from existing attractor type.
+  a.set(0.1, store)
+  eq(calls.length, 0, 'set in same band as live type → no-op (skip redundant write)')
+  // CC value in repulsor band — writes through.
+  a.set(0.4, store)
+  eq(calls.length, 1, 'set in different band → one write')
+  eq(calls[0].patch.type, 'repulsor', 'patch.type=repulsor')
+  // Live store mutation simulation — change the type on the store and
+  // verify the next call reads the LIVE state for dead-band decisions.
+  store.namedAttractors[0].type = 'repulsor'
+  a.set(0.260, store)  // dead-band around 0.25 — holds repulsor
+  eq(calls.length, 1, '0.260 in dead-band holds live type repulsor (no write)')
+  a.set(0.300, store)  // past dead-band but still in repulsor band
+  eq(calls.length, 1, '0.300 still in repulsor band → no write')
+  a.set(0.600, store)  // vortex band
+  eq(calls.length, 2, '0.600 → vortex (1 new write)')
+  eq(calls[1].patch.type, 'vortex', 'patch.type=vortex')
+}
+
+// --- R18.16 — load/save accepts attr:<id>:type bindings ---
+// Round-trips through the existing setBinding + load/save without
+// any extra handling (parseAttractorActionId validates the field).
+{
+  installLocalStorage()
+  let map = {}
+  map = setBinding(map, 32, attractorActionId('attr-7', ATTRACTOR_FIELD_TYPE))
+  eq(map['32'], 'attr:attr-7:type', 'setBinding accepts type action')
+  saveMidiMap(map)
+  const loaded = loadMidiMap()
+  eq(loaded['32'], 'attr:attr-7:type', 'type action round-trips through localStorage')
+}
+
+console.log(`PASS: midiMap — ${ACTIONS.length} actions, decode/normalize/persist/setBinding/applyCC + attractor routing (${ATTRACTOR_FIELDS.length} fields per attractor, incl. R15.16 enabled-with-hysteresis [${HYSTERESIS_OFF}, ${HYSTERESIS_ON}] + R17.15 radius·log curve + R18.16 type band-hysteresis ±${TYPE_BAND_HYSTERESIS})`)

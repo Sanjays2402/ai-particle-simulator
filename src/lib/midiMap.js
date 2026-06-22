@@ -32,7 +32,7 @@
 //      drives the strength slider of the attractor with id `attr-3`).
 //      These are resolved through resolveActionForId(id, store).
 
-import { clampStrength, clampRadius, clampPositionScalar, STRENGTH_MAX, RADIUS_MIN, RADIUS_MAX, POSITION_MIN, POSITION_MAX } from './namedAttractors.js'
+import { clampStrength, clampRadius, clampPositionScalar, STRENGTH_MAX, RADIUS_MIN, RADIUS_MAX, POSITION_MIN, POSITION_MAX, ATTRACTOR_TYPES } from './namedAttractors.js'
 
 export const STORAGE_KEY = 'particle-midi-map-v1'
 
@@ -77,6 +77,23 @@ export const ATTRACTOR_FIELD_Z = 'z'
 export const ATTRACTOR_FIELD_ENABLED = 'enabled'
 export const HYSTERESIS_ON  = 0.55
 export const HYSTERESIS_OFF = 0.45
+// R18.16 — route a CC to the per-attractor TYPE. A continuous knob
+// sweeps through every intermediate value, so we split [0..1] into
+// N equal-width bands (one per ATTRACTOR_TYPES entry) and apply a
+// small dead-band at each boundary so a knob sitting on the boundary
+// doesn't ping-pong between two adjacent types every frame. The
+// previous type lives on the live attractor (a.type) — no extra
+// state map needed (parallels the ENABLED routing R15.16).
+//
+// Mathematical model: with 4 types, boundaries sit at 0.25, 0.50,
+// 0.75. The dead-band is symmetric around each boundary; inside it
+// the binding holds the previous type. Outside, the type is selected
+// by which band v01 falls into. The dead-band width is conservative
+// (0.015 on each side, so 0.03 total) — narrow enough that a steady
+// knob sweep still hits every type but wide enough that micro-jitter
+// from a noisy controller doesn't chatter.
+export const ATTRACTOR_FIELD_TYPE = 'type'
+export const TYPE_BAND_HYSTERESIS = 0.015
 export const ATTRACTOR_FIELDS = [
   ATTRACTOR_FIELD_STRENGTH,
   ATTRACTOR_FIELD_RADIUS,
@@ -85,6 +102,7 @@ export const ATTRACTOR_FIELDS = [
   ATTRACTOR_FIELD_Y,
   ATTRACTOR_FIELD_Z,
   ATTRACTOR_FIELD_ENABLED,
+  ATTRACTOR_FIELD_TYPE,
 ]
 const ATTRACTOR_FIELD_SET = new Set(ATTRACTOR_FIELDS)
 
@@ -271,6 +289,29 @@ export function resolveActionForId(id, store) {
       },
     }
   }
+  if (parsed.field === ATTRACTOR_FIELD_TYPE) {
+    // R18.16 — route a CC to the per-attractor type. Cycles through
+    // ATTRACTOR_TYPES in equal-width bands with a dead-band at each
+    // boundary so a knob sitting on a boundary doesn't flicker.
+    // Reads the LIVE attractor's current type at apply-time so the
+    // dead-band sees the same state the user sees.
+    return {
+      id, attractor: target, field: parsed.field,
+      label: `${target.name} · Type`,
+      min: 0, max: 1,
+      set: (v01, s) => {
+        if (typeof s.updateNamedAttractor !== 'function') return
+        const live = Array.isArray(s.namedAttractors)
+          ? s.namedAttractors.find(a => a && a.id === target.id)
+          : null
+        if (!live) return
+        const wasType = live.type
+        const nextType = pickAttractorTypeForCC(wasType, v01)
+        if (!nextType || nextType === wasType) return  // no-op — hold previous type
+        s.updateNamedAttractor(target.id, { type: nextType })
+      },
+    }
+  }
   return null
 }
 
@@ -303,6 +344,65 @@ export function applyEnabledHysteresis(wasEnabled, v01) {
   // Currently off: flip on only when we climb past the HIGH threshold.
   if (v > HYSTERESIS_ON) return true
   return false
+}
+
+// R18.16 — pure type-band picker for the per-attractor TYPE routing.
+// Splits [0..1] into N equal bands (one per type in ATTRACTOR_TYPES)
+// and returns the type the CC value lands in, with a symmetric dead-
+// band around each boundary that holds the previous type.
+//
+// Behaviour:
+//   - non-finite v01 → return previousType unchanged (defensive; a
+//     misbehaving controller can't blow up the binding)
+//   - v01 clamps to [0..1] (Math.max/min) so callers don't have to
+//   - inside a dead-band (boundary ± TYPE_BAND_HYSTERESIS): hold
+//     previousType IF it's one of the two neighbouring band types
+//     (so the user can stop a knob anywhere near a boundary and the
+//     state stays put). If previousType is something further away,
+//     we still select the new band — the dead-band only locks the
+//     immediate neighbours.
+//   - outside any dead-band: the band that v01 falls into wins.
+//   - empty/invalid types list → return previousType (or null if it
+//     was also invalid)
+//
+// Boundary handling on exact ties:
+//   v01 === N/types.length lands in the HIGHER band (i.e. the half-open
+//   interval is [a, b)) — except at v01 === 1 where the LAST band wins.
+export function pickAttractorTypeForCC(previousType, v01, types = ATTRACTOR_TYPES, hysteresis = TYPE_BAND_HYSTERESIS) {
+  const list = Array.isArray(types) ? types.filter(t => typeof t === 'string' && t.length > 0) : []
+  if (list.length === 0) {
+    return (typeof previousType === 'string' && previousType.length > 0) ? previousType : null
+  }
+  if (list.length === 1) return list[0]
+  if (!Number.isFinite(v01)) {
+    return list.includes(previousType) ? previousType : list[0]
+  }
+  const h = Number.isFinite(hysteresis) ? Math.max(0, Math.min(0.5 / list.length, hysteresis)) : 0
+  const v = v01 < 0 ? 0 : v01 > 1 ? 1 : v01
+  const bandWidth = 1 / list.length
+  // Compute the band v01 falls into (half-open [a, b), last band is closed).
+  let bandIdx
+  if (v >= 1) bandIdx = list.length - 1
+  else bandIdx = Math.floor(v / bandWidth)
+  if (bandIdx >= list.length) bandIdx = list.length - 1
+  if (bandIdx < 0) bandIdx = 0
+  // If we have a valid previousType AND we're inside a dead-band
+  // around the boundary between the previous band and the current
+  // band, hold the previous type.
+  const prevIdx = list.indexOf(previousType)
+  if (prevIdx !== -1 && prevIdx !== bandIdx && h > 0) {
+    // The boundary we just crossed (if any) is the EDGE between
+    // prevIdx and bandIdx. Both must be adjacent for the dead-band
+    // to hold; non-adjacent jumps (e.g. a sudden knob slam) skip the
+    // hold and snap to the new band.
+    if (Math.abs(prevIdx - bandIdx) === 1) {
+      const boundary = Math.max(prevIdx, bandIdx) * bandWidth
+      if (v >= boundary - h && v <= boundary + h) {
+        return list[prevIdx]
+      }
+    }
+  }
+  return list[bandIdx]
 }
 
 // Decode a 3-byte MIDI message. Returns { type, channel, data1, data2 }
@@ -427,6 +527,7 @@ export function labelForAttractorField(field) {
   if (field === ATTRACTOR_FIELD_Y)        return 'Y'
   if (field === ATTRACTOR_FIELD_Z)        return 'Z'
   if (field === ATTRACTOR_FIELD_ENABLED)  return 'Enabled'
+  if (field === ATTRACTOR_FIELD_TYPE)     return 'Type'    // R18.16 — type cycle
   return field || '?'
 }
 
@@ -454,6 +555,7 @@ export function attractorActions(store) {
       if (field === ATTRACTOR_FIELD_STRENGTH) { min = 0; max = STRENGTH_MAX }
       else if (field === ATTRACTOR_FIELD_RADIUS || field === ATTRACTOR_FIELD_RADIUS_LOG) { min = RADIUS_MIN; max = RADIUS_MAX }
       else if (field === ATTRACTOR_FIELD_ENABLED) { min = 0; max = 1 }
+      else if (field === ATTRACTOR_FIELD_TYPE) { min = 0; max = 1 }  // R18.16 — cycles through ATTRACTOR_TYPES
       else { min = POSITION_MIN; max = POSITION_MAX } // x/y/z share the same span
       out.push({
         id,
