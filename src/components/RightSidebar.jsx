@@ -3,7 +3,7 @@ import { useStore } from '../store'
 import { Activity, Sparkles, Palette, Gauge, Camera, X, BarChart3, Code2, Copy, ChevronDown, ChevronUp, Bookmark, BookmarkPlus, Pencil, Play, RotateCcw, Route, Square, Repeat, Download, Upload, Shuffle } from 'lucide-react'
 import { presets } from '../presets'
 import { generateRandomScene, SCENE_BIASES, SCENE_BIAS_DEFAULT } from '../lib/randomScene'
-import { loadCameraViews, saveCameraViews, appendView, moveViewUp, moveViewDown, removeView, CAMERA_VIEWS_MAX } from '../lib/cameraViews'
+import { loadCameraViews, saveCameraViews, appendView, moveView, moveViewUp, moveViewDown, removeView, CAMERA_VIEWS_MAX } from '../lib/cameraViews'
 import {
   PATH_SECONDS_MIN, PATH_SECONDS_MAX, PATH_SECONDS_DEFAULT,
   PATH_MIN_WAYPOINTS, pathDuration, clampSeconds,
@@ -244,6 +244,56 @@ function CameraViews() {
     saveCameraViews(next)
   }
 
+  // R17.07 — drag-and-drop reorder. Graduates the chevron-button
+  // up/down (R10.03) with a direct drag gesture for users who'd
+  // rather just GRAB the row and drop it where they want it. The
+  // wire layer stays thin: HTML5 dragstart sets the source index in
+  // `draggingIdxRef`, dragover on each row updates the visual hint
+  // (`dragOverIdx`) so the user sees where the drop will land, drop
+  // calls moveView(views, from, to) (the same R10.03 lib primitive
+  // that powers the chevron buttons). Ref-equal-on-no-op skip is
+  // preserved through moveView so dropping a row on its current slot
+  // doesn't churn state.
+  const draggingIdxRef = useRef(null)
+  const [dragOverIdx, setDragOverIdx] = useState(null)
+  const onDragStart = (idx) => (e) => {
+    draggingIdxRef.current = idx
+    // dataTransfer needs SOMETHING for Firefox to start the drag at
+    // all; the value is unused (we read draggingIdxRef in onDrop).
+    try { e.dataTransfer.setData('text/plain', String(idx)) } catch { /* */ }
+    e.dataTransfer.effectAllowed = 'move'
+  }
+  const onDragOver = (idx) => (e) => {
+    // Calling preventDefault here is what tells the browser that a
+    // drop is allowed at this position; without it, no `drop` fires.
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (dragOverIdx !== idx) setDragOverIdx(idx)
+  }
+  const onDragLeave = (idx) => () => {
+    // Clear the highlight only if we're leaving the SAME row that's
+    // currently highlighted — sibling enter events fire before this
+    // leave, so a naive clear would flicker the indicator off and
+    // back on across each row boundary.
+    setDragOverIdx(prev => (prev === idx ? null : prev))
+  }
+  const onDrop = (idx) => (e) => {
+    e.preventDefault()
+    const from = draggingIdxRef.current
+    draggingIdxRef.current = null
+    setDragOverIdx(null)
+    if (from === null || from === undefined) return
+    const next = moveView(views, from, idx)
+    if (next === views) return  // dropped on itself OR out of bounds
+    setViews(next)
+    saveCameraViews(next)
+  }
+  const onDragEnd = () => {
+    // Cleanup if the drop happened outside any drop target.
+    draggingIdxRef.current = null
+    setDragOverIdx(null)
+  }
+
   // Keyboard quick-save on the active "saveView" binding (default V).
   // Routed through the keymap so the rebinding UI in Settings can
   // change which key triggers it. We re-bind whenever the views list
@@ -303,21 +353,49 @@ function CameraViews() {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {views.map((v, idx) => (
-            <div key={v.id} style={{
+          {views.map((v, idx) => {
+            // R17.07 — visual hint when the row is the active drop
+            // target during a drag. Indigo bar tucked on the LEFT
+            // edge (border-left), only painted when dragOverIdx
+            // matches AND the row isn't the row being dragged (a
+            // self-drop is a no-op so the highlight would be misleading).
+            const isDropTarget = dragOverIdx === idx && draggingIdxRef.current !== idx
+            const isBeingDragged = draggingIdxRef.current === idx
+            return (
+            <div key={v.id}
+              draggable={views.length > 1}
+              onDragStart={onDragStart(idx)}
+              onDragOver={onDragOver(idx)}
+              onDragLeave={onDragLeave(idx)}
+              onDrop={onDrop(idx)}
+              onDragEnd={onDragEnd}
+              style={{
               display: 'flex', alignItems: 'center', gap: 6,
               padding: '7px 9px', borderRadius: 7,
-              background: 'rgba(255,255,255,0.025)',
-              border: '1px solid rgba(255,255,255,0.05)',
+              background: isDropTarget
+                ? 'rgba(99,102,241,0.12)'
+                : 'rgba(255,255,255,0.025)',
+              border: isDropTarget
+                ? '1px solid rgba(99,102,241,0.45)'
+                : '1px solid rgba(255,255,255,0.05)',
+              borderLeft: isDropTarget
+                ? '3px solid rgba(168,85,247,0.85)'
+                : (isBeingDragged
+                  ? '3px solid rgba(168,85,247,0.4)'
+                  : '1px solid rgba(255,255,255,0.05)'),
               transition: 'all 0.15s ease-out',
+              opacity: isBeingDragged ? 0.55 : 1,
+              cursor: views.length > 1 ? 'grab' : 'default',
             }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(168,85,247,0.07)'; e.currentTarget.style.borderColor = 'rgba(168,85,247,0.25)' }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.025)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)' }}
+              onMouseEnter={e => { if (!isDropTarget && !isBeingDragged) { e.currentTarget.style.background = 'rgba(168,85,247,0.07)'; e.currentTarget.style.borderColor = 'rgba(168,85,247,0.25)' } }}
+              onMouseLeave={e => { if (!isDropTarget && !isBeingDragged) { e.currentTarget.style.background = 'rgba(255,255,255,0.025)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)' } }}
             >
               {/* Play order index — also serves as the drop target label when
                   we eventually wire drag-and-drop. Monospace so the column
                   stays aligned even with 10+ views. */}
-              <span title={`Path order ${idx + 1}`}
+              <span title={views.length > 1
+                ? `Path order ${idx + 1} — drag to reorder, or use the arrows`
+                : `Path order ${idx + 1}`}
                 style={{
                   width: 16, textAlign: 'center',
                   fontSize: 9.5, fontWeight: 600,
@@ -385,7 +463,8 @@ function CameraViews() {
                 <X size={9} strokeWidth={2.5} />
               </button>
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
       {views.length >= PATH_MIN_WAYPOINTS && (
