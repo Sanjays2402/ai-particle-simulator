@@ -128,6 +128,162 @@ export function getSceneBias(id) {
   return SCENE_BIAS_BY_ID.get(id)
 }
 
+// R20.07 — Smash bias OVERRIDES. Graduates R12.04's hard-coded chips
+// by letting power users tweak any bias's range values (counts /
+// speed / glow / attract / chances / forceTypes) and persist the
+// edits per-chip. Three shipped chips ('calm' / 'surprise' / 'wild')
+// can carry independent overrides; the rest of getSceneBias's
+// behaviour stays — the chip's ID, label, and hint never change, so
+// the UI stays familiar after a power-user edit.
+//
+// Storage: per-chip JSON blob under `smash-bias-overrides-<id>`.
+// Each entry's value is a PARTIAL bias map — only the keys the user
+// overrode are stored. resolveSceneBias(id, storage) merges the
+// shipped default with any override and returns the live bias.
+//
+// Fields that can be tweaked (every key on the SCENE_BIASES entry
+// except the immutable 'id' / 'label' / 'hint' identity triple).
+// Defensive: unknown keys are dropped on import; non-finite values
+// fall back to defaults; corrupt JSON → no override applied.
+export const SCENE_BIAS_RANGE_FIELDS = [
+  'counts', 'speedRange', 'glowRange', 'attractRange',
+]
+export const SCENE_BIAS_CHANCE_FIELDS = [
+  'bgChance', 'forceFieldChance', 'kaleidoChance', 'hueCycleChance',
+  'trailsChance', 'shakeChance', 'reactiveBgChance',
+  'chromaChance', 'vignetteChance', 'grainChance',
+]
+export const SCENE_BIAS_OVERRIDE_FIELDS = [
+  ...SCENE_BIAS_RANGE_FIELDS,
+  ...SCENE_BIAS_CHANCE_FIELDS,
+  'forceTypes',   // string-array, validated by entry
+]
+
+// Validate a single [min, max] pair. Returns null on bad input so the
+// caller can drop the field. Floats accepted; min <= max enforced.
+// Sub-zero values are rejected (every range in SCENE_BIASES is
+// non-negative — keeps a power-user from breaking the generator with
+// negative counts or glow).
+function sanitizeRange(raw) {
+  if (!Array.isArray(raw) || raw.length !== 2) return null
+  const [a, b] = raw
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null
+  if (a < 0 || b < 0) return null
+  if (a > b) return null
+  return [a, b]
+}
+
+// Validate a single chance probability — finite, [0, 1].
+function sanitizeChance(raw) {
+  if (!Number.isFinite(raw)) return null
+  if (raw < 0 || raw > 1) return null
+  return raw
+}
+
+// Validate forceTypes — array of valid force-field strings (or null
+// entries, which the random generator interprets as "no force field").
+// Empty array is rejected (would deadlock pick()).
+const VALID_FORCE_TYPES = new Set([null, 'attractor', 'repulsor', 'vortex', 'turbulence'])
+function sanitizeForceTypes(raw) {
+  if (!Array.isArray(raw) || raw.length === 0) return null
+  const out = []
+  for (const f of raw) {
+    if (!VALID_FORCE_TYPES.has(f)) return null
+    out.push(f)
+  }
+  return out
+}
+
+// Sanitize a partial bias override against the schema. Returns a fresh
+// object with ONLY the keys the user actually overrode (and that pass
+// validation). Unknown keys are silently dropped. Used both on import
+// from localStorage and on every save.
+export function sanitizeBiasOverride(raw) {
+  const out = {}
+  if (!raw || typeof raw !== 'object') return out
+  for (const k of SCENE_BIAS_RANGE_FIELDS) {
+    if (k in raw) {
+      const r = sanitizeRange(raw[k])
+      if (r) out[k] = r
+    }
+  }
+  for (const k of SCENE_BIAS_CHANCE_FIELDS) {
+    if (k in raw) {
+      const c = sanitizeChance(raw[k])
+      if (c !== null) out[k] = c
+    }
+  }
+  if ('forceTypes' in raw) {
+    const f = sanitizeForceTypes(raw.forceTypes)
+    if (f) out.forceTypes = f
+  }
+  return out
+}
+
+// Storage key for one bias chip's overrides. Per-chip so a 'calm'
+// edit doesn't clobber a 'wild' edit (matches the UX intent — every
+// chip has its own personality).
+export function biasOverrideStorageKey(biasId) {
+  return `smash-bias-overrides-${biasId}`
+}
+
+// Load one chip's override map. Returns {} when none exists / corrupt.
+export function loadBiasOverride(biasId, storage) {
+  if (!isValidSceneBias(biasId)) return {}
+  const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null)
+  if (!store) return {}
+  try {
+    const raw = store.getItem(biasOverrideStorageKey(biasId))
+    if (!raw) return {}
+    return sanitizeBiasOverride(JSON.parse(raw))
+  } catch { return {} }
+}
+
+// Persist one chip's override map. Pass {} (or null) to CLEAR the
+// override and restore the shipped defaults. Returns the sanitised
+// version that was actually written so the caller can update state.
+export function saveBiasOverride(biasId, override, storage) {
+  if (!isValidSceneBias(biasId)) return {}
+  const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null)
+  if (!store) return {}
+  const key = biasOverrideStorageKey(biasId)
+  const safe = sanitizeBiasOverride(override)
+  try {
+    if (Object.keys(safe).length === 0) {
+      store.removeItem(key)
+    } else {
+      store.setItem(key, JSON.stringify(safe))
+    }
+  } catch { /* quota / private mode */ }
+  return safe
+}
+
+// Reset one chip's override (cascading remove). Convenience wrapper
+// around saveBiasOverride({}).
+export function resetBiasOverride(biasId, storage) {
+  return saveBiasOverride(biasId, {}, storage)
+}
+
+// True when the bias has at least one user override active. Used by
+// the UI to surface a "edited" badge next to the chip.
+export function hasBiasOverride(biasId, storage) {
+  return Object.keys(loadBiasOverride(biasId, storage)).length > 0
+}
+
+// Resolve a chip ID to its LIVE bias map (shipped default merged
+// with any persisted override). Returns the same shape as
+// getSceneBias — generateRandomScene accepts the result unchanged.
+// Pure of localStorage when an override object is passed explicitly
+// (used by tests + the editor's preview path).
+export function resolveSceneBias(id, opts = {}) {
+  const baseline = getSceneBias(id)
+  const override = opts.override
+    ? sanitizeBiasOverride(opts.override)
+    : loadBiasOverride(baseline.id, opts.storage)
+  if (Object.keys(override).length === 0) return baseline
+  return { ...baseline, ...override }
+}
+
 // A small palette of hand-picked colour pairs known to look good
 // together. Pure random hex pairs are mud half the time, so we
 // pre-select 12 combinations across the warm / cool / neon axes.
@@ -189,7 +345,14 @@ export function makeSmashName(now = new Date()) {
 export function generateRandomScene(presetIds, opts = {}) {
   const rng = typeof opts.rng === 'function' ? opts.rng : Math.random
   const now = opts.now || new Date()
-  const bias = getSceneBias(opts.bias)
+  // R20.07 — resolve via the override-aware path so any persisted
+  // per-chip edits flow through automatically. Tests can pin a
+  // specific override via opts.biasOverride; the live UI path picks
+  // up overrides from localStorage transparently.
+  const bias = resolveSceneBias(opts.bias, {
+    override: opts.biasOverride,
+    storage: opts.storage,
+  })
 
   if (!Array.isArray(presetIds) || presetIds.length === 0) {
     throw new Error('generateRandomScene: presetIds must be a non-empty array')

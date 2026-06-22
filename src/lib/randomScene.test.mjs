@@ -6,6 +6,11 @@ import {
   PALETTE_PAIRS, BG_GRADIENT_PAIRS,
   SCENE_BIASES, SCENE_BIAS_DEFAULT,
   isValidSceneBias, getSceneBias,
+  // R20.07 — bias override helpers
+  sanitizeBiasOverride, loadBiasOverride, saveBiasOverride,
+  resetBiasOverride, hasBiasOverride, resolveSceneBias,
+  biasOverrideStorageKey,
+  SCENE_BIAS_RANGE_FIELDS, SCENE_BIAS_CHANCE_FIELDS, SCENE_BIAS_OVERRIDE_FIELDS,
 } from './randomScene.js'
 import { SCENE_FIELDS, appendBookmark } from './sceneBookmarks.js'
 
@@ -202,6 +207,200 @@ const presetIds = ['spiral-galaxy', 'starfield', 'aurora', 'storm', 'helix']
     const { scene } = generateRandomScene(presetIds, { rng: mulberry32(9000 + i), bias: 'wild' })
     if (scene.speed < 1.5 || scene.speed > 2.5) fail(`wild speed ${scene.speed} out of band`)
     if (scene.glowIntensity < 0.55 || scene.glowIntensity > 0.9) fail(`wild glow ${scene.glowIntensity} out of band`)
+  }
+}
+
+// --- R20.07: bias override helpers --------------------------------
+// In-memory storage shim for tests (no localStorage in node).
+function makeStorage() {
+  const data = new Map()
+  return {
+    getItem: (k) => (data.has(k) ? data.get(k) : null),
+    setItem: (k, v) => { data.set(k, String(v)) },
+    removeItem: (k) => { data.delete(k) },
+    get size() { return data.size },
+  }
+}
+function ok(c, m) { if (!c) fail(m) }
+
+// Schema roster pinned — the rest of the contract relies on these
+// being the canonical editable field sets.
+if (SCENE_BIAS_RANGE_FIELDS.length !== 4) fail(`expected 4 range fields, got ${SCENE_BIAS_RANGE_FIELDS.length}`)
+if (SCENE_BIAS_CHANCE_FIELDS.length !== 10) fail(`expected 10 chance fields, got ${SCENE_BIAS_CHANCE_FIELDS.length}`)
+ok(SCENE_BIAS_OVERRIDE_FIELDS.includes('forceTypes'), 'forceTypes in override fields')
+ok(SCENE_BIAS_OVERRIDE_FIELDS.includes('counts'), 'counts in override fields')
+ok(SCENE_BIAS_OVERRIDE_FIELDS.includes('bgChance'), 'bgChance in override fields')
+
+// sanitize: happy paths.
+{
+  const safe = sanitizeBiasOverride({
+    counts: [100, 200],
+    speedRange: [0.5, 1.5],
+    bgChance: 0.7,
+    forceTypes: ['attractor', 'vortex'],
+  })
+  if (safe.counts[0] !== 100) fail('counts pass-through')
+  if (safe.speedRange[1] !== 1.5) fail('speedRange pass-through')
+  if (safe.bgChance !== 0.7) fail('bgChance pass-through')
+  if (!Array.isArray(safe.forceTypes) || safe.forceTypes.length !== 2) fail('forceTypes pass-through')
+}
+
+// sanitize: bad ranges (non-array, wrong length, negative, min>max,
+// non-finite) drop the field silently.
+{
+  eq(sanitizeBiasOverride({ counts: 'not-array' }).counts, undefined, 'non-array range drop')
+  eq(sanitizeBiasOverride({ counts: [10] }).counts, undefined, 'wrong-length range drop')
+  eq(sanitizeBiasOverride({ counts: [10, 20, 30] }).counts, undefined, 'too-long range drop')
+  eq(sanitizeBiasOverride({ counts: [-5, 10] }).counts, undefined, 'negative range drop')
+  eq(sanitizeBiasOverride({ counts: [20, 10] }).counts, undefined, 'min>max range drop')
+  eq(sanitizeBiasOverride({ counts: [NaN, 100] }).counts, undefined, 'NaN range drop')
+  eq(sanitizeBiasOverride({ counts: [Infinity, 100] }).counts, undefined, '±Infinity range drop')
+}
+
+// sanitize: bad chances (out of [0,1], non-finite) drop the field.
+{
+  eq(sanitizeBiasOverride({ bgChance: -0.1 }).bgChance, undefined, 'negative chance drop')
+  eq(sanitizeBiasOverride({ bgChance: 1.5 }).bgChance, undefined, '>1 chance drop')
+  eq(sanitizeBiasOverride({ bgChance: NaN }).bgChance, undefined, 'NaN chance drop')
+  eq(sanitizeBiasOverride({ bgChance: 'half' }).bgChance, undefined, 'string chance drop')
+  // 0 and 1 are valid (full silence / full intent).
+  eq(sanitizeBiasOverride({ bgChance: 0 }).bgChance, 0, 'chance 0 valid')
+  eq(sanitizeBiasOverride({ bgChance: 1 }).bgChance, 1, 'chance 1 valid')
+}
+
+// sanitize: bad forceTypes (empty array, unknown member) drop the field.
+{
+  eq(sanitizeBiasOverride({ forceTypes: [] }).forceTypes, undefined, 'empty forceTypes drop')
+  eq(sanitizeBiasOverride({ forceTypes: ['bogus'] }).forceTypes, undefined, 'unknown member drop')
+  eq(sanitizeBiasOverride({ forceTypes: 'not-array' }).forceTypes, undefined, 'non-array drop')
+  // null is a valid member (means "no force this roll").
+  const r = sanitizeBiasOverride({ forceTypes: [null, 'attractor', null] })
+  eq(r.forceTypes.length, 3, 'null member valid in forceTypes')
+}
+
+// sanitize: unknown keys silently dropped.
+{
+  const safe = sanitizeBiasOverride({ foo: 'bar', counts: [1, 2], badField: 99 })
+  eq(safe.foo, undefined, 'unknown key dropped')
+  eq(safe.badField, undefined, 'unknown numeric key dropped')
+  eq(safe.counts[0], 1, 'valid key kept alongside drops')
+}
+
+// sanitize: defensive against null / non-object inputs.
+{
+  eq(Object.keys(sanitizeBiasOverride(null)).length, 0, 'null → empty override')
+  eq(Object.keys(sanitizeBiasOverride(undefined)).length, 0, 'undefined → empty')
+  eq(Object.keys(sanitizeBiasOverride('not obj')).length, 0, 'string → empty')
+  eq(Object.keys(sanitizeBiasOverride(42)).length, 0, 'number → empty')
+}
+
+// Storage keys per chip.
+{
+  eq(biasOverrideStorageKey('calm'), 'smash-bias-overrides-calm', 'storage key for calm')
+  eq(biasOverrideStorageKey('wild'), 'smash-bias-overrides-wild', 'storage key for wild')
+}
+
+// load/save round-trip — what you save is what you read back.
+{
+  const s = makeStorage()
+  const written = saveBiasOverride('calm', { counts: [500, 1000], bgChance: 0.9 }, s)
+  eq(written.counts[0], 500, 'save round-trips counts')
+  eq(written.bgChance, 0.9, 'save round-trips bgChance')
+  const loaded = loadBiasOverride('calm', s)
+  eq(loaded.counts[0], 500, 'load round-trips counts')
+  eq(loaded.bgChance, 0.9, 'load round-trips bgChance')
+}
+
+// save: empty override removes the storage entry (clean reset path).
+{
+  const s = makeStorage()
+  saveBiasOverride('calm', { counts: [100, 200] }, s)
+  ok(s.size > 0, 'save populated storage')
+  saveBiasOverride('calm', {}, s)
+  eq(s.size, 0, 'save empty wipes entry')
+}
+
+// resetBiasOverride is a convenience wrapper around save({}, ...).
+{
+  const s = makeStorage()
+  saveBiasOverride('wild', { counts: [50, 100] }, s)
+  ok(hasBiasOverride('wild', s), 'override active after save')
+  resetBiasOverride('wild', s)
+  ok(!hasBiasOverride('wild', s), 'reset clears override')
+}
+
+// load: invalid bias id → empty map (no storage touched).
+{
+  const s = makeStorage()
+  eq(Object.keys(loadBiasOverride('not-a-real-bias', s)).length, 0, 'unknown bias id → empty load')
+  eq(Object.keys(saveBiasOverride('not-a-real-bias', { counts: [1, 2] }, s)).length, 0, 'unknown id → empty save')
+}
+
+// load: corrupt JSON in storage → empty map (defensive).
+{
+  const s = makeStorage()
+  s.setItem(biasOverrideStorageKey('calm'), 'not valid json{')
+  eq(Object.keys(loadBiasOverride('calm', s)).length, 0, 'corrupt JSON → empty load')
+}
+
+// load: corrupt schema (every field invalid) → empty map.
+{
+  const s = makeStorage()
+  s.setItem(biasOverrideStorageKey('calm'), JSON.stringify({ counts: 'bogus', bgChance: 'half' }))
+  eq(Object.keys(loadBiasOverride('calm', s)).length, 0, 'corrupt schema → empty load')
+}
+
+// resolveSceneBias: with no override, returns shipped baseline.
+{
+  const s = makeStorage()
+  const r = resolveSceneBias('calm', { storage: s })
+  eq(r.label, 'Mostly Calm', 'no override: shipped label')
+  // Same reference as shipped (when override is empty we return baseline directly).
+  if (r !== getSceneBias('calm')) fail('no override should return baseline ref')
+}
+
+// resolveSceneBias: with persisted override, fields are overridden.
+{
+  const s = makeStorage()
+  saveBiasOverride('calm', { counts: [9999, 10000], bgChance: 0.99 }, s)
+  const r = resolveSceneBias('calm', { storage: s })
+  eq(r.label, 'Mostly Calm', 'overridden bias keeps label')
+  eq(r.id, 'calm', 'overridden bias keeps id')
+  eq(r.counts[0], 9999, 'override flows through')
+  eq(r.bgChance, 0.99, 'override flows through')
+  // Untouched fields stay at shipped values.
+  if (!Array.isArray(r.forceTypes)) fail('shipped forceTypes preserved')
+}
+
+// resolveSceneBias: explicit override arg trumps storage.
+{
+  const s = makeStorage()
+  saveBiasOverride('calm', { counts: [1, 2] }, s)
+  const r = resolveSceneBias('calm', {
+    storage: s,
+    override: { counts: [100, 200] },
+  })
+  eq(r.counts[0], 100, 'explicit override wins over storage')
+}
+
+// generateRandomScene: override flows through — produced scene reflects
+// override clamps. We pick a custom counts range and check that across
+// many seeds, every count lands inside it (the per-bias range tests
+// above use the shipped ranges; this proves overrides actually steer
+// the generator).
+{
+  for (let i = 0; i < 50; i++) {
+    const { scene } = generateRandomScene(presetIds, {
+      rng: mulberry32(50000 + i),
+      bias: 'calm',
+      biasOverride: { counts: [3000, 3500], speedRange: [0.10, 0.12] },
+    })
+    if (scene.particleCount < 3000 || scene.particleCount > 3500) {
+      fail(`override counts ignored: got ${scene.particleCount}`)
+    }
+    if (scene.speed < 0.10 || scene.speed > 0.13) {
+      fail(`override speedRange ignored: got ${scene.speed}`)
+    }
   }
 }
 

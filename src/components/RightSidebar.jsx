@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { Activity, Sparkles, Palette, Gauge, Camera, X, BarChart3, Code2, Copy, ChevronDown, ChevronUp, Bookmark, BookmarkPlus, Pencil, Play, RotateCcw, Route, Square, Repeat, Download, Upload, Shuffle } from 'lucide-react'
 import { presets } from '../presets'
-import { generateRandomScene, SCENE_BIASES, SCENE_BIAS_DEFAULT } from '../lib/randomScene'
+import { generateRandomScene, SCENE_BIASES, SCENE_BIAS_DEFAULT,
+  // R20.07 — per-chip bias overrides
+  loadBiasOverride, saveBiasOverride, hasBiasOverride, resetBiasOverride,
+  getSceneBias, sanitizeBiasOverride,
+} from '../lib/randomScene'
 import { loadCameraViews, saveCameraViews, appendView, moveView, moveViewUp, moveViewDown, removeView, CAMERA_VIEWS_MAX } from '../lib/cameraViews'
 import {
   PATH_SECONDS_MIN, PATH_SECONDS_MAX, PATH_SECONDS_DEFAULT,
@@ -634,6 +638,71 @@ function SceneBookmarks() {
     try { if (typeof localStorage !== 'undefined') localStorage.setItem('smash-bias', id) }
     catch { /* quota / private mode */ }
   }
+  // R20.07 — per-chip bias override editor. `editingBias` holds the
+  // chip id currently being edited (or null when the editor is closed).
+  // `draftJSON` is the textarea content; commit-on-Apply runs through
+  // sanitizeBiasOverride so corrupt input never corrupts state.
+  // `overrideError` shows JSON parse / schema failures inline so the
+  // user knows why Apply didn't land. `overrideTick` is a render-only
+  // counter that re-evaluates hasBiasOverride() after a save (the
+  // helper reads localStorage directly so we need an explicit nudge).
+  const [editingBias, setEditingBias] = useState(null)
+  const [draftJSON, setDraftJSON] = useState('')
+  const [overrideError, setOverrideError] = useState(null)
+  const [overrideTick, setOverrideTick] = useState(0)
+  const openBiasEditor = (id) => {
+    const live = loadBiasOverride(id)
+    setEditingBias(id)
+    // Seed the textarea with EITHER the existing override (so a
+    // re-open shows previous edits) OR the shipped default so the
+    // user has a complete schema to tweak from. Pretty-printed so
+    // hand-editing is comfortable.
+    if (Object.keys(live).length > 0) {
+      setDraftJSON(JSON.stringify(live, null, 2))
+    } else {
+      const shipped = getSceneBias(id)
+      // Strip the immutable identity triple from the seed — those
+      // aren't editable and would be silently dropped on Apply.
+      // eslint-disable-next-line no-unused-vars
+      const { id: _, label: __, hint: ___, ...editable } = shipped
+      setDraftJSON(JSON.stringify(editable, null, 2))
+    }
+    setOverrideError(null)
+  }
+  const closeBiasEditor = () => {
+    setEditingBias(null)
+    setDraftJSON('')
+    setOverrideError(null)
+  }
+  const applyBiasEdit = () => {
+    try {
+      const parsed = JSON.parse(draftJSON)
+      const safe = sanitizeBiasOverride(parsed)
+      // If sanitisation drops EVERY key, treat as "user typed garbage"
+      // rather than silently writing an empty override (which would
+      // wipe any existing edit).
+      const sourceKeys = parsed && typeof parsed === 'object'
+        ? Object.keys(parsed).length : 0
+      if (sourceKeys > 0 && Object.keys(safe).length === 0) {
+        setOverrideError('No valid override fields found. Check key names + value shapes.')
+        return
+      }
+      saveBiasOverride(editingBias, safe)
+      setOverrideError(null)
+      setOverrideTick(t => t + 1)
+      showToast(`Bias "${editingBias}" updated (${Object.keys(safe).length} field${Object.keys(safe).length === 1 ? '' : 's'})`, <Pencil size={10} color="#fff" strokeWidth={2.4} />)
+      closeBiasEditor()
+    } catch (e) {
+      setOverrideError(`JSON parse error: ${e.message || 'invalid'}`)
+    }
+  }
+  const resetBiasEdit = () => {
+    if (!editingBias) return
+    resetBiasOverride(editingBias)
+    setOverrideTick(t => t + 1)
+    showToast(`Bias "${editingBias}" reset to defaults`, <RotateCcw size={10} color="#fff" strokeWidth={2.4} />)
+    closeBiasEditor()
+  }
 
   const save = (name) => {
     const scene = captureScene(useStore.getState())
@@ -801,10 +870,17 @@ function SceneBookmarks() {
       }}>
         {SCENE_BIASES.map(b => {
           const active = smashBias === b.id
+          // R20.07 — refresh on overrideTick so the dot appears the
+          // moment Apply lands without waiting for the next render
+          // pass from elsewhere.
+          // eslint-disable-next-line no-unused-vars
+          const _tick = overrideTick
+          const isEdited = hasBiasOverride(b.id)
           return (
             <button key={b.id}
               onClick={() => pickBias(b.id)}
-              title={b.hint}
+              onContextMenu={(e) => { e.preventDefault(); openBiasEditor(b.id) }}
+              title={`${b.hint}${isEdited ? '\n\nThis bias has user overrides — right-click (or Edit) to view + tweak the JSON.' : '\n\nRight-click to edit this bias as JSON.'}`}
               style={{
                 padding: '5px 0', borderRadius: 6, fontSize: 10, fontWeight: 600,
                 cursor: 'pointer', transition: 'all 0.12s ease-out',
@@ -816,12 +892,138 @@ function SceneBookmarks() {
                   ? '1px solid rgba(236,72,153,0.4)'
                   : '1px solid rgba(255,255,255,0.06)',
                 boxShadow: active ? '0 0 10px rgba(236,72,153,0.2)' : 'none',
+                position: 'relative',
               }}>
               {b.label}
+              {/* R20.07 — small dot in the corner shows when this chip
+                  has user overrides applied. Lets the user spot which
+                  chips they've customised at a glance. */}
+              {isEdited && (
+                <span style={{
+                  position: 'absolute', top: 3, right: 4,
+                  width: 5, height: 5, borderRadius: '50%',
+                  background: '#22d3ee',
+                  boxShadow: '0 0 4px rgba(34,211,238,0.7)',
+                }} title="User overrides active" />
+              )}
             </button>
           )
         })}
       </div>
+      {/* R20.07 — small "edit bias" link row. Surfaces the editor for
+          the currently-selected chip so users discover the override
+          path without having to right-click. */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+        marginBottom: 6, gap: 6, fontSize: 10,
+      }}>
+        <button
+          onClick={() => openBiasEditor(smashBias)}
+          title={`Open the JSON editor for the "${SCENE_BIASES.find(b => b.id === smashBias)?.label || smashBias}" bias (counts, speed, chances, force-type weights).`}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            padding: '2px 6px', borderRadius: 4,
+            background: 'rgba(255,255,255,0.04)',
+            color: '#9a9ab0',
+            border: '1px solid rgba(255,255,255,0.06)',
+            cursor: 'pointer', fontSize: 9, letterSpacing: '0.04em',
+            textTransform: 'uppercase', fontWeight: 600,
+            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+          }}>
+          <Pencil size={9} strokeWidth={2.2} /> Edit bias JSON
+        </button>
+      </div>
+      {editingBias && (
+        <div style={{
+          padding: 10, marginBottom: 8,
+          borderRadius: 8,
+          background: 'linear-gradient(180deg, rgba(34,211,238,0.06), rgba(168,85,247,0.04))',
+          border: '1px solid rgba(34,211,238,0.30)',
+          boxShadow: '0 8px 22px rgba(0,0,0,0.4)',
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            marginBottom: 6,
+          }}>
+            <span style={{
+              fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
+              color: '#67e8f9', textTransform: 'uppercase',
+              fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+            }}>
+              Editing: {editingBias}
+            </span>
+            <button onClick={closeBiasEditor} style={{
+              width: 18, height: 18, padding: 0,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              borderRadius: 4, fontSize: 10, lineHeight: 1, fontWeight: 700,
+              background: 'rgba(255,255,255,0.05)',
+              border: '1px solid rgba(255,255,255,0.10)',
+              color: '#9a9ab0', cursor: 'pointer',
+              fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+            }}>{'\u00d7'}</button>
+          </div>
+          <textarea
+            value={draftJSON}
+            onChange={(e) => setDraftJSON(e.target.value)}
+            spellCheck={false}
+            rows={10}
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              padding: 8, borderRadius: 5,
+              background: 'rgba(2,2,8,0.65)',
+              border: overrideError
+                ? '1px solid rgba(239,68,68,0.55)'
+                : '1px solid rgba(255,255,255,0.08)',
+              color: '#e2e8f0',
+              fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+              fontSize: 10, lineHeight: 1.45,
+              resize: 'vertical',
+            }}
+          />
+          {overrideError && (
+            <div style={{
+              fontSize: 10, color: '#fda4af',
+              padding: '4px 0',
+              fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+            }}>{overrideError}</div>
+          )}
+          <div style={{
+            display: 'flex', gap: 6, marginTop: 6, justifyContent: 'flex-end',
+          }}>
+            <button onClick={resetBiasEdit}
+              title="Wipe ALL overrides for this bias and restore the shipped defaults"
+              style={{
+                padding: '4px 9px', borderRadius: 4,
+                fontSize: 10, fontWeight: 600, letterSpacing: '0.06em',
+                background: 'rgba(239,68,68,0.12)',
+                color: '#fca5a5', cursor: 'pointer',
+                border: '1px solid rgba(239,68,68,0.30)',
+                fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                textTransform: 'uppercase',
+              }}>Reset</button>
+            <button onClick={applyBiasEdit}
+              title="Validate + apply overrides. Corrupt values are dropped; unknown keys are ignored."
+              style={{
+                padding: '4px 11px', borderRadius: 4,
+                fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
+                background: 'linear-gradient(135deg, rgba(34,211,238,0.35), rgba(168,85,247,0.25))',
+                color: '#e0f2fe', cursor: 'pointer',
+                border: '1px solid rgba(34,211,238,0.50)',
+                fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                textTransform: 'uppercase',
+              }}>Apply</button>
+          </div>
+          <div style={{
+            fontSize: 9, color: '#7a7a90', marginTop: 6,
+            lineHeight: 1.4,
+            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+          }}>
+            Editable fields: counts/speedRange/glowRange/attractRange ([min,max] arrays),
+            *Chance probabilities (0..1), forceTypes (array of attractor/repulsor/vortex/turbulence/null).
+            Unknown keys silently dropped. Corrupt values fall back to shipped defaults.
+          </div>
+        </div>
+      )}
       <button
         onClick={() => {
           if (!canSaveMore) {
