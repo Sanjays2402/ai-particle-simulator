@@ -18,7 +18,7 @@ import {
   setUserPresetColor, userPresetColorStyle, USER_PRESET_COLORS, DEFAULT_USER_PRESET_COLOR,
   MAX_USER_PRESETS,
   // R20.11 — per-bundle keyboard shortcut
-  setUserPresetHotkey, hotkeyFromEvent, sanitizeHotkey, findUserPresetByHotkey,
+  setUserPresetHotkey, hotkeyFromEvent, findUserPresetByHotkey,
 } from '../lib/midiPresets'
 import {
   // R14.17 — single-bundle JSON export/import
@@ -271,8 +271,8 @@ export default function MidiPanel({ open, onClose }) {
       // Only consume the event when we know a bundle is bound to it.
       e.preventDefault()
       // Use 'replace' mode to match the chip's default apply behaviour.
-      const incoming = applyPresetToMap(map, bundle.id, 'replace', userPresets)
-      setMap(incoming)
+      const incoming = applyPresetToMap(bindings, bundle.id, 'replace', userPresets)
+      setBindings(incoming)
       saveMidiMap(incoming)
       const color = userPresetColorStyle(bundle.color || DEFAULT_USER_PRESET_COLOR)
       showToast(`Applied \u201c${bundle.name}\u201d (\u2328\ufe0f ${hk})`,
@@ -280,7 +280,7 @@ export default function MidiPanel({ open, onClose }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [userPresets, map])
+  }, [userPresets, bindings])
 
   // R14.17 — download one user bundle as a portable JSON file. The
   // filename is auto-slugified from the bundle name + dated. We use

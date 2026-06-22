@@ -660,11 +660,16 @@ function SceneBookmarks() {
     if (Object.keys(live).length > 0) {
       setDraftJSON(JSON.stringify(live, null, 2))
     } else {
+      // Build a seed map of ONLY the editable fields (skip the
+      // immutable id/label/hint identity triple — those would be
+      // silently dropped on Apply if a user typed them, and they
+      // never need to be edited).
       const shipped = getSceneBias(id)
-      // Strip the immutable identity triple from the seed — those
-      // aren't editable and would be silently dropped on Apply.
-      // eslint-disable-next-line no-unused-vars
-      const { id: _, label: __, hint: ___, ...editable } = shipped
+      const editable = {}
+      for (const k of Object.keys(shipped)) {
+        if (k === 'id' || k === 'label' || k === 'hint') continue
+        editable[k] = shipped[k]
+      }
       setDraftJSON(JSON.stringify(editable, null, 2))
     }
     setOverrideError(null)
@@ -872,10 +877,10 @@ function SceneBookmarks() {
           const active = smashBias === b.id
           // R20.07 — refresh on overrideTick so the dot appears the
           // moment Apply lands without waiting for the next render
-          // pass from elsewhere.
-          // eslint-disable-next-line no-unused-vars
+          // pass from elsewhere. Reading the value here marks it as
+          // a render-time dependency without setState-in-effect.
           const _tick = overrideTick
-          const isEdited = hasBiasOverride(b.id)
+          const isEdited = (_tick, hasBiasOverride(b.id))
           return (
             <button key={b.id}
               onClick={() => pickBias(b.id)}
