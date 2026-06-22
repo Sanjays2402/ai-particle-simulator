@@ -5,6 +5,8 @@ import {
   recaptureThumbnail, clearAllThumbnails, summarizeBulkRebuild,
   // R19.13 — per-thumb metadata side-store powers the hover badge
   readThumbMetadata, summarizeThumbAge,
+  // R20.19 — rich-detail formatter for the click-to-expand panel
+  formatThumbDetails,
 } from '../lib/presetThumbnails'
 
 export default function PresetCarousel() {
@@ -14,6 +16,10 @@ export default function PresetCarousel() {
   // source). Refreshed alongside thumbs whenever a particle:thumbnail-
   // ready event fires so the badge reflects the freshest cache state.
   const [meta, setMeta] = useState({})
+  // R20.19 — which tile's metadata detail panel is currently open.
+  // Toggles via badge click. Auto-closes on Escape, on outside-click,
+  // and when the tile's metadata is wiped (rebuild / bulk-clear).
+  const [detailId, setDetailId] = useState(null)
   // Tri-state filter: 'all' | 'favs' | 'recent'.
   const [filter, setFilter] = useState('all')
   // Track which preset just had its thumb rebuilt — used to animate the
@@ -51,6 +57,22 @@ export default function PresetCarousel() {
     window.addEventListener('particle:thumbnail-ready', refresh)
     return () => window.removeEventListener('particle:thumbnail-ready', refresh)
   }, [currentPreset])
+
+  // R20.19 — Escape closes the detail panel; outside-click handler
+  // lives on the panel itself (stopPropagation on clicks INSIDE it).
+  // Bulk-clear / rebuild-this-thumb listeners drop the open detail
+  // automatically so a wiped tile doesn't keep a stale panel open.
+  useEffect(() => {
+    if (!detailId) return
+    const onKey = (e) => { if (e.key === 'Escape') setDetailId(null) }
+    const onBulk = () => setDetailId(null)
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('particle:thumbnail-bulk-cleared', onBulk)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('particle:thumbnail-bulk-cleared', onBulk)
+    }
+  }, [detailId])
 
   // Rebuild exactly one preset's thumbnail on demand. Fires the same
   // particle:thumbnail-ready event the prerenderer uses so the in-memory
@@ -324,11 +346,20 @@ export default function PresetCarousel() {
                 renders when both the thumb AND its metadata are present
                 so a half-stale state (thumb without meta) skips the
                 badge entirely rather than showing junk. Format:
-                "120×80 · render · 3h" — dimensions, source, age. */}
+                "120×80 · render · 3h" — dimensions, source, age.
+                R20.19 — also clickable: opens a richer detail panel
+                with the full ISO time, particle count (when present),
+                render time (when present), byte size (when present)
+                and a "Rebuild" / "Clear" pair scoped to the open tile. */}
             {thumb && md && age && (
-              <span
+              <button
+                type="button"
                 className="thumb-meta-badge"
-                title={`Captured ${new Date(md.capturedAt).toLocaleString()} at ${md.width}\u00d7${md.height} via ${md.source === 'live' ? 'live canvas capture (during preset playback)' : 'offline sampler (background prerender)'}`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setDetailId(prev => prev === p.id ? null : p.id)
+                }}
+                title="Click to see full thumbnail metadata"
                 style={{
                   position: 'absolute', bottom: 26, left: 5,
                   padding: '1px 5px',
@@ -336,11 +367,13 @@ export default function PresetCarousel() {
                   fontSize: 8.5, fontWeight: 600,
                   letterSpacing: '0.04em',
                   fontFamily: 'Geist Mono, JetBrains Mono, monospace',
-                  background: 'rgba(0,0,0,0.75)',
+                  background: detailId === p.id ? 'rgba(99,102,241,0.55)' : 'rgba(0,0,0,0.75)',
                   color: md.source === 'live' ? '#a7f3d0' : '#c7d2fe',
-                  border: `1px solid ${md.source === 'live' ? 'rgba(34,197,94,0.40)' : 'rgba(99,102,241,0.40)'}`,
+                  border: detailId === p.id
+                    ? '1px solid rgba(99,102,241,0.85)'
+                    : `1px solid ${md.source === 'live' ? 'rgba(34,197,94,0.40)' : 'rgba(99,102,241,0.40)'}`,
                   backdropFilter: 'blur(4px)',
-                  pointerEvents: 'none',
+                  cursor: 'pointer',
                   whiteSpace: 'nowrap',
                   zIndex: 2,
                   textTransform: 'lowercase',
@@ -350,8 +383,91 @@ export default function PresetCarousel() {
                 {md.source}
                 <span style={{ color: '#7a7a90', margin: '0 3px' }}>{'\u00b7'}</span>
                 {age}
-              </span>
+              </button>
             )}
+            {/* R20.19 — metadata detail panel. Renders ABOVE the tile
+                (anchored to its bottom-left) when the badge is clicked.
+                Pure key/value table from formatThumbDetails — the lib
+                handles every shape decision so the renderer stays
+                paint-only. Click-outside (handled by the panel's stop-
+                propagation guards + ambient Escape listener) closes
+                the panel. */}
+            {thumb && md && detailId === p.id && (() => {
+              const rows = formatThumbDetails(md)
+              return (
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className="thumb-detail-panel"
+                  style={{
+                    position: 'absolute',
+                    bottom: 50, left: 0,
+                    minWidth: 240, maxWidth: 320,
+                    padding: '8px 10px',
+                    borderRadius: 7,
+                    background: 'linear-gradient(180deg, rgba(8,8,18,0.96), rgba(4,4,12,0.98))',
+                    border: '1px solid rgba(99,102,241,0.45)',
+                    boxShadow: '0 16px 36px rgba(0,0,0,0.7), 0 0 24px rgba(99,102,241,0.18)',
+                    backdropFilter: 'blur(14px)',
+                    zIndex: 5,
+                    color: '#e2e8f0',
+                    fontSize: 11,
+                    fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                  }}>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    paddingBottom: 6, marginBottom: 6,
+                    borderBottom: '1px solid rgba(255,255,255,0.06)',
+                  }}>
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, letterSpacing: '0.12em',
+                      color: '#a5b4fc', textTransform: 'uppercase',
+                    }}>{p.name} thumb</span>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setDetailId(null) }}
+                      title="Close"
+                      style={{
+                        width: 18, height: 18, padding: 0,
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        borderRadius: 4, fontSize: 10, lineHeight: 1, fontWeight: 700,
+                        background: 'rgba(255,255,255,0.05)',
+                        border: '1px solid rgba(255,255,255,0.10)',
+                        color: '#9a9ab0', cursor: 'pointer',
+                      }}>{'\u00d7'}</button>
+                  </div>
+                  {rows.length === 0 ? (
+                    <div style={{ fontSize: 10, color: '#7a7a90' }}>
+                      No metadata available.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px' }}>
+                      {rows.map(row => (
+                        <div key={row.key} style={{ display: 'contents' }}>
+                          <span style={{
+                            color: '#7a7a90',
+                            fontSize: 9.5, letterSpacing: '0.04em',
+                            textTransform: 'uppercase',
+                            paddingTop: 1,
+                          }}>{row.label}</span>
+                          <span title={row.hint || undefined} style={{
+                            color: '#e2e8f0',
+                            fontSize: 10.5,
+                            wordBreak: 'break-word',
+                          }}>{row.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{
+                    marginTop: 8, paddingTop: 6,
+                    borderTop: '1px solid rgba(255,255,255,0.06)',
+                    fontSize: 9, color: '#7a7a90',
+                  }}>
+                    Press Esc to close. Click outside to dismiss.
+                  </div>
+                </div>
+              )
+            })()}
             {/* Favorite star */}
             <button
               onClick={e => { e.stopPropagation(); toggleFavorite(p.id) }}

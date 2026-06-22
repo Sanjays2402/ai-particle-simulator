@@ -81,6 +81,20 @@ export function recordThumbMetadata(presetId, opts = {}, storage) {
     ? opts.capturedAt
     : new Date().toISOString()
   const meta = { capturedAt, width, height, source }
+  // R20.19 — optional richer fields the badge-detail panel surfaces.
+  // All optional; missing fields are dropped (no schema rev needed when
+  // we later add more — readThumbMetadata picks them up automatically
+  // through the spread). Defensive: each field has a clamp so a bad
+  // caller can't write garbage.
+  if (Number.isFinite(opts.particleCount) && opts.particleCount >= 0) {
+    meta.particleCount = Math.round(opts.particleCount)
+  }
+  if (Number.isFinite(opts.captureMs) && opts.captureMs >= 0) {
+    meta.captureMs = Math.round(opts.captureMs)
+  }
+  if (Number.isFinite(opts.byteSize) && opts.byteSize >= 0) {
+    meta.byteSize = Math.round(opts.byteSize)
+  }
   try {
     store.setItem(thumbMetadataKey(presetId), JSON.stringify(meta))
     return true
@@ -109,7 +123,20 @@ export function readThumbMetadata(presetId, storage) {
   const width  = Number.isFinite(parsed.width)  && parsed.width  > 0 ? Math.round(parsed.width)  : THUMB_WIDTH
   const height = Number.isFinite(parsed.height) && parsed.height > 0 ? Math.round(parsed.height) : THUMB_HEIGHT
   const source = VALID_SOURCES.has(parsed.source) ? parsed.source : 'render'
-  return { capturedAt, width, height, source }
+  const out = { capturedAt, width, height, source }
+  // R20.19 — optional rich fields. Each one is independently validated
+  // so a partial / corrupt rich field can't reject the whole entry.
+  // Missing fields stay undefined; the UI hides the corresponding row.
+  if (Number.isFinite(parsed.particleCount) && parsed.particleCount >= 0) {
+    out.particleCount = Math.round(parsed.particleCount)
+  }
+  if (Number.isFinite(parsed.captureMs) && parsed.captureMs >= 0) {
+    out.captureMs = Math.round(parsed.captureMs)
+  }
+  if (Number.isFinite(parsed.byteSize) && parsed.byteSize >= 0) {
+    out.byteSize = Math.round(parsed.byteSize)
+  }
+  return out
 }
 
 // Clear metadata for one preset id. Returns true when an entry was
@@ -155,6 +182,97 @@ export function summarizeThumbAge(metadata, now = Date.now()) {
   if (wk < 52) return `${wk}w`
   const yr = Math.floor(wk / 52)
   return `${yr}y`
+}
+
+// R20.19 — compact byte-size formatter for the metadata detail panel.
+// Returns 'X B' / 'X KB' / 'X MB' rounded to 1 decimal place. Pure,
+// defensive against non-finite / negative input (returns null so the
+// UI hides the corresponding row).
+export function formatByteSize(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return null
+  if (bytes < 1024) return `${Math.round(bytes)} B`
+  const kb = bytes / 1024
+  if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`
+  const mb = kb / 1024
+  return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`
+}
+
+// R20.19 — project metadata into UI-ready key/value rows for the
+// detail panel. Pure data so the React layer stays render-only.
+// Returns an array of { key, label, value, hint? } entries; the
+// renderer paints them as a table. Missing optional fields are
+// SKIPPED rather than rendered as 'unknown' — keeps the panel tight.
+//
+// `now` injectable for tests; defaults to Date.now() so the relative
+// timestamp tracks the wall clock.
+export function formatThumbDetails(metadata, now = Date.now()) {
+  if (!metadata || typeof metadata !== 'object') return []
+  const out = []
+  // Captured-at — full ISO time + relative age. Always present (this
+  // field is required for readThumbMetadata to return a non-null).
+  if (typeof metadata.capturedAt === 'string') {
+    const age = summarizeThumbAge(metadata, now)
+    let pretty = metadata.capturedAt
+    try {
+      const d = new Date(metadata.capturedAt)
+      if (!Number.isNaN(d.valueOf())) {
+        pretty = d.toLocaleString(undefined, {
+          year: 'numeric', month: 'short', day: 'numeric',
+          hour: '2-digit', minute: '2-digit', second: '2-digit',
+        })
+      }
+    } catch { /* fall back to raw ISO */ }
+    out.push({
+      key: 'capturedAt',
+      label: 'Captured',
+      value: pretty + (age ? ` (${age} ago)` : ''),
+    })
+  }
+  // Source — capture path classifier.
+  if (typeof metadata.source === 'string') {
+    out.push({
+      key: 'source',
+      label: 'Source',
+      value: metadata.source,
+      hint: metadata.source === 'live'
+        ? 'Captured from the live WebGL canvas during preset playback'
+        : 'Pre-rendered by the offline Canvas2D sampler',
+    })
+  }
+  // Resolution.
+  if (Number.isFinite(metadata.width) && Number.isFinite(metadata.height)) {
+    out.push({
+      key: 'resolution',
+      label: 'Resolution',
+      value: `${metadata.width}\u00d7${metadata.height}`,
+    })
+  }
+  // Particle count — only when present.
+  if (Number.isFinite(metadata.particleCount) && metadata.particleCount > 0) {
+    out.push({
+      key: 'particleCount',
+      label: 'Particles',
+      value: metadata.particleCount.toLocaleString(),
+    })
+  }
+  // Capture time — only when present.
+  if (Number.isFinite(metadata.captureMs) && metadata.captureMs >= 0) {
+    out.push({
+      key: 'captureMs',
+      label: 'Render time',
+      value: metadata.captureMs < 1000
+        ? `${metadata.captureMs} ms`
+        : `${(metadata.captureMs / 1000).toFixed(2)} s`,
+    })
+  }
+  // Approximate byte size — only when present.
+  if (Number.isFinite(metadata.byteSize) && metadata.byteSize >= 0) {
+    const sizeStr = formatByteSize(metadata.byteSize)
+    if (sizeStr) {
+      out.push({ key: 'byteSize', label: 'Size', value: sizeStr })
+    }
+  }
+  return out
 }
 
 // Has a thumbnail already been recorded for this preset id?

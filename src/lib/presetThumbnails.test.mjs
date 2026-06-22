@@ -7,6 +7,8 @@ import {
   // R19.13 — per-thumb metadata side-store + relative-time formatter
   thumbMetadataKey, recordThumbMetadata, readThumbMetadata, clearThumbMetadata,
   summarizeThumbAge,
+  // R20.19 — rich-detail formatter + byte-size formatter
+  formatThumbDetails, formatByteSize,
   THUMB_WIDTH, THUMB_HEIGHT,
 } from './presetThumbnails.js'
 
@@ -364,6 +366,152 @@ eq(thumbMetadataKey('spiral-galaxy'), 'preset-thumb-meta-spiral-galaxy', 'metada
   eq(summarizeThumbAge({}), null, 'no capturedAt → null')
   eq(summarizeThumbAge({ capturedAt: 'not-a-date' }), null, 'unparseable capturedAt → null')
   eq(summarizeThumbAge({ capturedAt: 42 }), null, 'non-string capturedAt → null')
+}
+
+// --- R20.19: rich-detail formatter + byte-size formatter ---
+// formatByteSize across the boundaries.
+{
+  eq(formatByteSize(0), '0 B', '0 → 0 B')
+  eq(formatByteSize(512), '512 B', 'sub-KB → bytes')
+  eq(formatByteSize(1024), '1.0 KB', 'exactly 1KB')
+  eq(formatByteSize(2048), '2.0 KB', '2KB')
+  eq(formatByteSize(10 * 1024), '10 KB', '10KB → rounded (no decimal)')
+  eq(formatByteSize(1024 * 1024), '1.0 MB', 'exactly 1MB')
+  eq(formatByteSize(5 * 1024 * 1024), '5.0 MB', '5MB')
+  eq(formatByteSize(50 * 1024 * 1024), '50 MB', '50MB → rounded')
+  // Defensive: non-finite/negative → null.
+  eq(formatByteSize(null), null, 'null → null')
+  eq(formatByteSize(NaN), null, 'NaN → null')
+  eq(formatByteSize(-100), null, 'negative → null')
+  eq(formatByteSize(Infinity), null, 'Infinity → null')
+  eq(formatByteSize('1000'), null, 'string → null')
+}
+
+// formatThumbDetails: defensive against bad input.
+{
+  eq(formatThumbDetails(null).length, 0, 'null → empty rows')
+  eq(formatThumbDetails(undefined).length, 0, 'undefined → empty rows')
+  eq(formatThumbDetails('not obj').length, 0, 'string → empty rows')
+  eq(formatThumbDetails({}).length, 0, 'empty obj → empty rows (no capturedAt)')
+}
+
+// formatThumbDetails: minimal metadata (no rich fields) — produces
+// 3 base rows: captured, source, resolution.
+{
+  const meta = {
+    capturedAt: '2026-06-22T16:00:00.000Z',
+    width: 120, height: 80, source: 'render',
+  }
+  const rows = formatThumbDetails(meta, Date.parse('2026-06-22T16:01:00.000Z'))
+  if (rows.length !== 3) fail(`expected 3 base rows, got ${rows.length}`)
+  const labels = rows.map(r => r.label)
+  truthy(labels.includes('Captured'), 'Captured row present')
+  truthy(labels.includes('Source'), 'Source row present')
+  truthy(labels.includes('Resolution'), 'Resolution row present')
+  // The captured row includes the relative age suffix when summarizeThumbAge returns one.
+  const capturedRow = rows.find(r => r.label === 'Captured')
+  truthy(capturedRow.value.includes('(1m ago)') || capturedRow.value.includes('ago'), 'captured row has age suffix')
+  // Resolution row format.
+  const resRow = rows.find(r => r.label === 'Resolution')
+  truthy(resRow.value === '120\u00d780', `resolution = "120×80", got "${resRow.value}"`)
+}
+
+// formatThumbDetails: rich metadata (all fields) — produces 6 rows.
+{
+  const meta = {
+    capturedAt: '2026-06-22T16:00:00.000Z',
+    width: 120, height: 80, source: 'live',
+    particleCount: 5000,
+    captureMs: 250,
+    byteSize: 12345,
+  }
+  const rows = formatThumbDetails(meta, Date.parse('2026-06-22T16:00:30.000Z'))
+  if (rows.length !== 6) fail(`expected 6 rich rows, got ${rows.length}`)
+  const map = Object.fromEntries(rows.map(r => [r.label, r.value]))
+  truthy(map.Particles.includes('5,000') || map.Particles === '5000', 'Particles formatted with locale')
+  eq(map['Render time'], '250 ms', 'Render time < 1s formatted as ms')
+  truthy(map.Size.includes('KB'), 'Size formatted via formatByteSize')
+}
+
+// formatThumbDetails: render time >= 1s switches to seconds.
+{
+  const meta = {
+    capturedAt: '2026-06-22T16:00:00.000Z',
+    width: 120, height: 80, source: 'render',
+    captureMs: 1500,
+  }
+  const rows = formatThumbDetails(meta, Date.parse('2026-06-22T16:00:30.000Z'))
+  const renderRow = rows.find(r => r.label === 'Render time')
+  truthy(renderRow.value === '1.50 s', `render >= 1s as seconds, got "${renderRow.value}"`)
+}
+
+// formatThumbDetails: partial rich fields — only the present ones get rows.
+{
+  const meta = {
+    capturedAt: '2026-06-22T16:00:00.000Z',
+    width: 120, height: 80, source: 'render',
+    particleCount: 100,  // only this rich field
+  }
+  const rows = formatThumbDetails(meta, Date.parse('2026-06-22T16:00:30.000Z'))
+  if (rows.length !== 4) fail(`expected 4 rows (3 base + Particles), got ${rows.length}`)
+  truthy(rows.some(r => r.label === 'Particles'), 'Particles row present')
+  truthy(!rows.some(r => r.label === 'Render time'), 'Render time row absent (no captureMs)')
+  truthy(!rows.some(r => r.label === 'Size'), 'Size row absent (no byteSize)')
+}
+
+// formatThumbDetails: missing required field (no capturedAt) → empty rows.
+{
+  const meta = { width: 120, height: 80, source: 'render' }  // no capturedAt
+  const rows = formatThumbDetails(meta)
+  eq(rows.length, 2, 'missing capturedAt: only source + resolution rows')
+}
+
+// Source row gets a hint string when present (the UI surfaces it as a tooltip).
+{
+  const meta = {
+    capturedAt: '2026-06-22T16:00:00.000Z',
+    width: 120, height: 80, source: 'live',
+  }
+  const rows = formatThumbDetails(meta)
+  const srcRow = rows.find(r => r.label === 'Source')
+  truthy(typeof srcRow.hint === 'string' && srcRow.hint.length > 0, 'live source has hint string')
+  // 'render' source also gets a (different) hint.
+  const renderRows = formatThumbDetails({ ...meta, source: 'render' })
+  const renderSrcRow = renderRows.find(r => r.label === 'Source')
+  truthy(typeof renderSrcRow.hint === 'string' && renderSrcRow.hint.length > 0, 'render source has hint string')
+  // The two hints differ — each describes its own capture path.
+  truthy(srcRow.hint !== renderSrcRow.hint, 'live vs render hints differ')
+}
+
+// Rich metadata round-trips through record/read — the new optional
+// fields survive a save/load cycle.
+{
+  const storage = makeFakeStorage()
+  recordThumbMetadata('roundtrip-1', {
+    width: 200, height: 100, source: 'live',
+    particleCount: 5000, captureMs: 250, byteSize: 12345,
+    capturedAt: '2026-06-22T16:00:00.000Z',
+  }, storage)
+  const read = readThumbMetadata('roundtrip-1', storage)
+  eq(read.particleCount, 5000, 'particleCount survives round-trip')
+  eq(read.captureMs, 250, 'captureMs survives round-trip')
+  eq(read.byteSize, 12345, 'byteSize survives round-trip')
+}
+
+// Defensive: bad rich-field values are silently dropped on record.
+{
+  const storage = makeFakeStorage()
+  recordThumbMetadata('def-1', {
+    width: 100, height: 100, source: 'render',
+    particleCount: -50,     // negative → dropped
+    captureMs: NaN,         // NaN → dropped
+    byteSize: 'huge',       // string → dropped
+    capturedAt: '2026-06-22T16:00:00.000Z',
+  }, storage)
+  const read = readThumbMetadata('def-1', storage)
+  eq(read.particleCount, undefined, 'negative particleCount dropped')
+  eq(read.captureMs, undefined, 'NaN captureMs dropped')
+  eq(read.byteSize, undefined, 'string byteSize dropped')
 }
 
 console.log('PASS: presetThumbnails R19.13 metadata side-store + relative-time formatter')
