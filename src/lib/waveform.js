@@ -227,11 +227,34 @@ export const PEAK_HOLD_FRAMES = 18
 export const PEAK_DECAY_PX = 0.6
 export const PEAK_LINE_THICKNESS = 1.5
 
+// R15.07 — peak-hold fade-out tail. After the peak line decays / drops,
+// we keep painting it at a quickly-falling alpha for ~12 frames (200ms
+// @ 60Hz) so transients leave a cinematic afterimage instead of
+// vanishing crisply. A ring buffer per bar records (peakY, alpha)
+// samples so the renderer can replay the trail with no extra state
+// management — the trail walks itself forward on every tick.
+//
+// Footprint: TRAIL_LENGTH * barCount Float32 entries. At 32 bars * 12
+// frames = 384 entries (~1.5 KB total) — well under any frame budget.
+//
+// The trail is INTENTIONALLY separate from the held-peak math above so
+// disabling the trail (e.g. for a performance mode) is a one-line guard
+// in the renderer; the live peak-hold lines keep working unchanged.
+export const PEAK_TRAIL_LENGTH = 12      // ~200ms @ 60Hz
+export const PEAK_TRAIL_ALPHA_MAX = 0.55 // freshest trail step alpha
+export const PEAK_TRAIL_ALPHA_MIN = 0.04 // oldest trail step still drawn
+
 export function makePeakHoldState(barCount) {
   const n = Math.max(0, barCount | 0)
   return {
     peaks: new Float32Array(n),
     ages:  new Int32Array(n),
+    // Trail: row-major (barIndex * TRAIL_LENGTH + step) of recent
+    // peak heights. Slot 0 is the head (latest frame); we shift-down
+    // on every tick by copying entries[1..end] to entries[0..end-1].
+    // A typed array beats a 2D array for the row-major copy speed.
+    trail:     n > 0 ? new Float32Array(n * PEAK_TRAIL_LENGTH) : new Float32Array(0),
+    trailLen:  PEAK_TRAIL_LENGTH,
   }
 }
 
@@ -240,11 +263,18 @@ export function makePeakHoldState(barCount) {
 // state in-place for speed (this runs at 60Hz) and returns it for
 // fluent use. New peaks lock in instantly; lower bars trigger the hold
 // timer; expired holds decay by PEAK_DECAY_PX per frame, never below 0.
+//
+// R15.07 — also advances the per-bar trail ring buffer: shift all
+// trail samples down one slot and write the freshly-resolved peak
+// height into slot 0. Reading the trail later (drawPeakTrails) walks
+// from oldest to newest and paints each step at a decreasing alpha.
 export function tickPeakHolds(state, bars, opts = {}) {
   if (!state || !state.peaks || !state.ages) return state
   const n = state.peaks.length
   const holdFrames = Number.isFinite(opts.holdFrames) ? opts.holdFrames : PEAK_HOLD_FRAMES
   const decayPx    = Number.isFinite(opts.decayPx)    ? opts.decayPx    : PEAK_DECAY_PX
+  const trail    = state.trail
+  const trailLen = state.trailLen || 0
   for (let i = 0; i < n; i++) {
     const fresh = (bars && i < bars.length) ? Math.max(0, bars[i][1] || 0) : 0
     const prev = state.peaks[i]
@@ -264,16 +294,68 @@ export function tickPeakHolds(state, bars, opts = {}) {
         state.peaks[i] = Math.max(0, next, fresh)
       }
     }
+    // R15.07 — shift the trail ring buffer down one slot, then write
+    // the latest peak height to head. We do this even when the peak
+    // didn't change so the trail spacing stays in lockstep with the
+    // 60Hz tick (a missed shift would compress the visible trail).
+    if (trail && trailLen > 0) {
+      const base = i * trailLen
+      // Walk from the OLDEST slot backwards so we never overwrite a
+      // source before we've copied it. (trailLen-1) gets (trailLen-2),
+      // (trailLen-2) gets (trailLen-3), …, slot 1 gets slot 0.
+      for (let s = trailLen - 1; s > 0; s--) {
+        trail[base + s] = trail[base + s - 1]
+      }
+      trail[base] = state.peaks[i]
+    }
   }
   return state
 }
 
 // Reset the hold state without re-allocating — used when the bar count
 // changes or the mode flips back to time-domain (peaks shouldn't carry
-// over a mode swap and look stale).
+// over a mode swap and look stale). R15.07 — also zeroes the trail.
 export function resetPeakHolds(state) {
   if (!state || !state.peaks || !state.ages) return state
   state.peaks.fill(0)
   state.ages.fill(0)
+  if (state.trail) state.trail.fill(0)
   return state
+}
+
+// R15.07 — read the trail for a single bar. Returns an array of
+// { height, alpha } samples from OLDEST to NEWEST. Zero-height samples
+// (the buffer hasn't filled in yet, OR the trail is at the floor for
+// that bar) are filtered out so the renderer doesn't paint a million
+// no-op rectangles at y = floor. `current` (optional) is the live bar
+// height; the trail filters out any sample at or below it because the
+// trail is meant to live ABOVE the bar (a sample lower than the bar
+// would visually live INSIDE the bar, which looks like a glitch).
+//
+// Alpha walks linearly from PEAK_TRAIL_ALPHA_MIN (oldest) to
+// PEAK_TRAIL_ALPHA_MAX (newest) — gives the trail a clean head-leading
+// gradient. We skip the head-most (newest) slot because that's the
+// SAME height as the live peak-hold line; rendering both at full alpha
+// would just paint over it.
+export function readPeakTrail(state, barIndex, current = 0) {
+  if (!state || !state.trail || !state.peaks) return []
+  const trailLen = state.trailLen || 0
+  if (trailLen <= 1) return []
+  const n = state.peaks.length
+  if (barIndex < 0 || barIndex >= n) return []
+  const base = barIndex * trailLen
+  const out = []
+  // Walk oldest → newest, but skip slot 0 (head); see comment above.
+  for (let s = trailLen - 1; s >= 1; s--) {
+    const h = state.trail[base + s] || 0
+    // Skip floor samples + anything not visibly above the live bar.
+    if (h <= current + 1) continue
+    // Alpha grows as we approach the head. s=trailLen-1 → MIN,
+    // s=1 → MAX (almost). Lerp linearly between MIN and MAX as a
+    // function of how close `s` is to the head.
+    const t = (trailLen - 1 - s) / (trailLen - 2)  // 0 (oldest) → 1 (newest non-head)
+    const alpha = PEAK_TRAIL_ALPHA_MIN + t * (PEAK_TRAIL_ALPHA_MAX - PEAK_TRAIL_ALPHA_MIN)
+    out.push({ height: h, alpha })
+  }
+  return out
 }

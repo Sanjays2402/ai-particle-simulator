@@ -7,6 +7,9 @@ import {
   projectSpectrumToBars, projectSpectrumToLogBars, normalizeWaveformMode,
   makePeakHoldState, tickPeakHolds, resetPeakHolds,
   PEAK_HOLD_FRAMES, PEAK_DECAY_PX,
+  // R15.07 — peak-hold fade-out tail
+  PEAK_TRAIL_LENGTH, PEAK_TRAIL_ALPHA_MAX, PEAK_TRAIL_ALPHA_MIN,
+  readPeakTrail,
 } from './waveform.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -391,4 +394,105 @@ eq(resetPeakHolds(null), null, 'resetPeakHolds null → null')
   eq(s.ages[0], 1,  'empty bars increments age')
 }
 
-console.log(`PASS: waveform peak-hold lines · HOLD=${PEAK_HOLD_FRAMES} frames · DECAY=${PEAK_DECAY_PX}px/frame (R10.19)`)
+// --- R15.07 peak-hold fade trail ---
+// State allocates a per-bar trail of the documented length.
+{
+  const s = makePeakHoldState(4)
+  ok(s.trail instanceof Float32Array, 'trail allocated as Float32Array')
+  eq(s.trail.length, 4 * PEAK_TRAIL_LENGTH, 'trail sized barCount * TRAIL_LENGTH')
+  eq(s.trailLen, PEAK_TRAIL_LENGTH, 'trailLen recorded on state')
+  for (let i = 0; i < s.trail.length; i++) eq(s.trail[i], 0, `trail slot[${i}] starts at 0`)
+}
+// Empty trail allocation when bar count is 0.
+{
+  const s = makePeakHoldState(0)
+  eq(s.trail.length, 0, 'zero-bar trail is empty')
+}
+
+// Each tick writes the latest peak height into trail slot 0 of every bar.
+{
+  const s = makePeakHoldState(1)
+  tickPeakHolds(s, [[0, 30]])
+  eq(s.trail[0], 30, 'head slot reflects fresh peak after first tick')
+  tickPeakHolds(s, [[0, 20]])  // bar dropped — peak held at 30
+  eq(s.trail[0], 30, 'head slot stays at held peak')
+  eq(s.trail[1], 30, 'previous head shifted down to slot 1')
+  // 9 more ticks at the held height — slots 0..9 all see 30.
+  for (let k = 0; k < 9; k++) tickPeakHolds(s, [[0, 20]])
+  for (let i = 0; i < Math.min(PEAK_TRAIL_LENGTH, 11); i++) {
+    eq(s.trail[i], 30, `slot ${i} held peak after ${i + 1} ticks`)
+  }
+}
+
+// readPeakTrail returns oldest → newest non-head samples with alpha
+// climbing from MIN (oldest) to MAX (newest). Skips samples at or
+// below the live bar (they would visually live INSIDE the bar).
+{
+  const s = makePeakHoldState(1)
+  // Lock peak high.
+  tickPeakHolds(s, [[0, 50]])
+  // Decay it down by feeding lower bars for many ticks — the trail
+  // captures successive decayed peak heights.
+  for (let k = 0; k < PEAK_TRAIL_LENGTH; k++) tickPeakHolds(s, [[0, 10]])
+  // Live bar = 10 → trail samples ≤ 11 are filtered out by the
+  // `current` arg. Everything above the bar shows up.
+  const tail = readPeakTrail(s, 0, 10)
+  ok(tail.length > 0, 'trail emits non-floor samples above the live bar')
+  // Alpha is monotonically non-decreasing across the returned array
+  // (oldest → newest) — the head-leading flame gradient contract.
+  for (let i = 1; i < tail.length; i++) {
+    ok(tail[i].alpha >= tail[i - 1].alpha, `alpha[${i}] >= alpha[${i - 1}]`)
+  }
+  // Alpha bounds.
+  for (const sample of tail) {
+    ok(sample.alpha >= PEAK_TRAIL_ALPHA_MIN, `alpha >= MIN`)
+    ok(sample.alpha <= PEAK_TRAIL_ALPHA_MAX, `alpha <= MAX`)
+    ok(sample.height > 10, 'sample height above live bar')
+  }
+}
+
+// `current` filter: a tall current bar suppresses tail samples beneath it.
+{
+  const s = makePeakHoldState(1)
+  tickPeakHolds(s, [[0, 30]])
+  for (let k = 0; k < 4; k++) tickPeakHolds(s, [[0, 10]])  // trail fills with 30s
+  // Live bar = 40 (taller than every trail sample at 30) → empty tail.
+  eq(readPeakTrail(s, 0, 40).length, 0, 'tall live bar suppresses entire trail')
+  // Live bar = 0 → all non-zero samples emerge.
+  ok(readPeakTrail(s, 0, 0).length > 0, 'zero live bar lets trail through')
+}
+
+// readPeakTrail defensive cases.
+eq(readPeakTrail(null,        0, 0).length, 0, 'null state → empty')
+eq(readPeakTrail({},          0, 0).length, 0, 'no trail field → empty')
+eq(readPeakTrail(makePeakHoldState(2), -1, 0).length, 0, 'bad index → empty')
+eq(readPeakTrail(makePeakHoldState(2),  5, 0).length, 0, 'out-of-range index → empty')
+
+// resetPeakHolds zeroes the trail in-place.
+{
+  const s = makePeakHoldState(2)
+  tickPeakHolds(s, [[0, 10], [10, 20]])
+  for (let k = 0; k < 5; k++) tickPeakHolds(s, [[0, 5], [10, 5]])
+  resetPeakHolds(s)
+  for (let i = 0; i < s.trail.length; i++) eq(s.trail[i], 0, `trail zeroed[${i}]`)
+}
+
+// Trail walks at exactly one slot per tick — verify shift semantics
+// don't accidentally smear by checking that the oldest slot stays
+// blank until we've ticked TRAIL_LENGTH frames.
+{
+  const s = makePeakHoldState(1)
+  tickPeakHolds(s, [[0, 100]])
+  for (let k = 1; k < PEAK_TRAIL_LENGTH - 1; k++) {
+    eq(s.trail[PEAK_TRAIL_LENGTH - 1], 0, `oldest slot still empty at tick ${k}`)
+    tickPeakHolds(s, [[0, 100]])
+  }
+  // One more tick fills the very last slot.
+  tickPeakHolds(s, [[0, 100]])
+  eq(s.trail[PEAK_TRAIL_LENGTH - 1], 100, 'oldest slot filled exactly at TRAIL_LENGTH ticks')
+}
+
+// Alpha bounds for a trivial 2-sample trail (degenerate divisor guard).
+ok(PEAK_TRAIL_LENGTH >= 3, 'trail length ≥ 3 so the lerp denominator is non-zero')
+
+console.log(`PASS: waveform peak-hold lines · HOLD=${PEAK_HOLD_FRAMES} frames · DECAY=${PEAK_DECAY_PX}px/frame (R10.19) + fade trail · TRAIL=${PEAK_TRAIL_LENGTH} frames · α ${PEAK_TRAIL_ALPHA_MIN}→${PEAK_TRAIL_ALPHA_MAX} (R15.07)`)

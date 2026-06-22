@@ -4,6 +4,7 @@ import {
   sampleAnalyser, projectToCanvas, peakAmplitude,
   sampleAnalyserSpectrum, projectSpectrumToBars, projectSpectrumToLogBars,
   makePeakHoldState, tickPeakHolds, resetPeakHolds, PEAK_LINE_THICKNESS,
+  readPeakTrail,
 } from '../lib/waveform'
 
 // Audio waveform / oscilloscope overlay. Pinned to the canvas's
@@ -165,6 +166,18 @@ export default function WaveformOverlay() {
             const peakY = baseY - peakH
             ctx.fillStyle = `hsla(${hueWrapped}, 100%, 84%, 0.92)`
             ctx.fillRect(x + 0.5, peakY, barW, PEAK_LINE_THICKNESS)
+          }
+          // R15.07 — peak-hold trail. Replays the last ~200ms of peak
+          // positions at a falling alpha so transients leave a
+          // cinematic afterimage instead of vanishing in one frame.
+          // Walks oldest → newest so the youngest sample paints LAST
+          // (on top) — the gradient reads as a head-leading flame.
+          const tail = readPeakTrail(peakStateRef.current, i, h)
+          for (let k = 0; k < tail.length; k++) {
+            const sample = tail[k]
+            const trailY = baseY - sample.height
+            ctx.fillStyle = `hsla(${hueWrapped}, 100%, 84%, ${sample.alpha})`
+            ctx.fillRect(x + 0.5, trailY, barW, PEAK_LINE_THICKNESS)
           }
         }
         sumIntensity += (h / HEIGHT)
