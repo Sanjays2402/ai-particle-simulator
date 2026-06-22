@@ -444,6 +444,12 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
   useEffect(() => {
     const PAN_REPEAT_MS = 60   // ~16 ticks/second — smooth without overshoot
     const PAN_HOLD_DELAY_MS = 180 // wait this long before repeat kicks in
+    // Capture the held-keys Set up-front so the cleanup function
+    // refers to a stable local rather than reaching back through
+    // heldKeysRef.current (ESLint's react-hooks/exhaustive-deps
+    // warns against that pattern because a ref CAN swap mid-lifecycle;
+    // ours doesn't, but a local capture keeps the lint output clean).
+    const heldKeys = heldKeysRef.current
 
     // Apply one aggregated step from the currently-held keys.
     // Returns true if a step was actually applied (used by the
@@ -571,7 +577,7 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
       window.removeEventListener('keyup', onKeyUp)
       window.removeEventListener('blur', onBlur)
       clearRepeat()
-      heldKeysRef.current.clear()
+      heldKeys.clear()
     }
   }, [onNext, onPrev])
 
