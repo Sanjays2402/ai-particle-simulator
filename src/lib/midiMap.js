@@ -52,12 +52,26 @@ export const ATTRACTOR_FIELD_RADIUS = 'radius'
 export const ATTRACTOR_FIELD_X = 'x'
 export const ATTRACTOR_FIELD_Y = 'y'
 export const ATTRACTOR_FIELD_Z = 'z'
+// R15.16 — route a CC to the per-attractor ENABLED flag. Continuous
+// controllers (sliders, knobs) sweep through every intermediate value;
+// blindly routing them to a boolean would chatter the attractor on/off
+// every frame. Instead we use a Schmitt-trigger style hysteresis:
+//   - flip ON  when v01 rises above HYSTERESIS_ON  (0.55)
+//   - flip OFF when v01 falls below HYSTERESIS_OFF (0.45)
+// Inside the dead-band (0.45..0.55) the binding holds its previous
+// state, so a noisy knob at 0.50 doesn't oscillate. The per-binding
+// previous state lives on the live attractor (a.enabled) — no extra
+// state map needed.
+export const ATTRACTOR_FIELD_ENABLED = 'enabled'
+export const HYSTERESIS_ON  = 0.55
+export const HYSTERESIS_OFF = 0.45
 export const ATTRACTOR_FIELDS = [
   ATTRACTOR_FIELD_STRENGTH,
   ATTRACTOR_FIELD_RADIUS,
   ATTRACTOR_FIELD_X,
   ATTRACTOR_FIELD_Y,
   ATTRACTOR_FIELD_Z,
+  ATTRACTOR_FIELD_ENABLED,
 ]
 const ATTRACTOR_FIELD_SET = new Set(ATTRACTOR_FIELDS)
 
@@ -176,7 +190,58 @@ export function resolveActionForId(id, store) {
       },
     }
   }
+  if (parsed.field === ATTRACTOR_FIELD_ENABLED) {
+    return {
+      id, attractor: target, field: parsed.field,
+      label: `${target.name} · Enabled`,
+      min: 0, max: 1,
+      set: (v01, s) => {
+        if (typeof s.updateNamedAttractor !== 'function') return
+        // Read the LIVE attractor's current enabled flag so the
+        // hysteresis decision sees the same state the user sees.
+        const live = Array.isArray(s.namedAttractors)
+          ? s.namedAttractors.find(a => a && a.id === target.id)
+          : null
+        if (!live) return
+        const wasEnabled = live.enabled !== false  // default true
+        const nextEnabled = applyEnabledHysteresis(wasEnabled, v01)
+        if (nextEnabled === wasEnabled) return  // no-op — hold previous state
+        s.updateNamedAttractor(target.id, { enabled: nextEnabled })
+      },
+    }
+  }
   return null
+}
+
+// R15.16 — Schmitt-trigger style hysteresis for the per-attractor
+// ENABLED routing. Pure helper so the decision logic is unit-testable
+// without a store.
+//
+// Behaviour:
+//   - When already ENABLED:  drop to OFF only when v01 falls BELOW
+//                            HYSTERESIS_OFF (0.45). Above 0.45 stays
+//                            on, regardless of how high.
+//   - When already DISABLED: rise to ON only when v01 climbs ABOVE
+//                            HYSTERESIS_ON (0.55). Below 0.55 stays
+//                            off.
+//   - Inside the dead-band (0.45..0.55): hold previous state. This
+//     is what stops a noisy knob at "half" from chattering on/off
+//     every frame.
+//
+// The thresholds are constants (not opts) on purpose: a per-attractor
+// override would push complexity without obvious user benefit. If we
+// ever need it, the constants are exported and a future overload can
+// accept opts.
+export function applyEnabledHysteresis(wasEnabled, v01) {
+  const v = Number.isFinite(v01) ? v01 : (wasEnabled ? 1 : 0)
+  if (wasEnabled) {
+    // Currently on: stay on unless we fall below the LOW threshold.
+    if (v < HYSTERESIS_OFF) return false
+    return true
+  }
+  // Currently off: flip on only when we climb past the HIGH threshold.
+  if (v > HYSTERESIS_ON) return true
+  return false
 }
 
 // Decode a 3-byte MIDI message. Returns { type, channel, data1, data2 }
@@ -299,6 +364,7 @@ export function labelForAttractorField(field) {
   if (field === ATTRACTOR_FIELD_X)        return 'X'
   if (field === ATTRACTOR_FIELD_Y)        return 'Y'
   if (field === ATTRACTOR_FIELD_Z)        return 'Z'
+  if (field === ATTRACTOR_FIELD_ENABLED)  return 'Enabled'
   return field || '?'
 }
 
@@ -322,6 +388,7 @@ export function attractorActions(store) {
       let min = 0, max = 1
       if (field === ATTRACTOR_FIELD_STRENGTH) { min = 0; max = STRENGTH_MAX }
       else if (field === ATTRACTOR_FIELD_RADIUS) { min = RADIUS_MIN; max = RADIUS_MAX }
+      else if (field === ATTRACTOR_FIELD_ENABLED) { min = 0; max = 1 }
       else { min = POSITION_MIN; max = POSITION_MAX } // x/y/z share the same span
       out.push({
         id,

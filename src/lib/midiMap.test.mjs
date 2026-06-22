@@ -1,14 +1,17 @@
 // midiMap: CC→action persistence, MIDI message decode, CC normalization,
 // applyCC dispatch, immutability of setBinding.
 import {
-  STORAGE_KEY, ACTIONS,
-  decodeMidiMessage, ccToNormalized,
+  STORAGE_KEY, ACTIONS, decodeMidiMessage, ccToNormalized,
   loadMidiMap, saveMidiMap, setBinding, clearAllBindings,
-  applyCC, actionLabel,
-  attractorActionId, parseAttractorActionId,
-  resolveActionForId, attractorActions,
+  applyCC,
+  // R12.05 + R13.18 — attractor routing (5 fields per attractor)
+  attractorActionId, parseAttractorActionId, resolveActionForId,
+  actionLabel, attractorActions,
   ATTRACTOR_ACTION_PREFIX, ATTRACTOR_FIELD_STRENGTH,
   ATTRACTOR_FIELD_RADIUS, ATTRACTOR_FIELD_X, ATTRACTOR_FIELD_Y, ATTRACTOR_FIELD_Z,
+  // R15.16 — per-attractor ENABLED routing + Schmitt-trigger hysteresis
+  ATTRACTOR_FIELD_ENABLED, HYSTERESIS_ON, HYSTERESIS_OFF,
+  applyEnabledHysteresis,
   ATTRACTOR_FIELDS, labelForAttractorField,
 } from './midiMap.js'
 import { STRENGTH_MAX, RADIUS_MIN, RADIUS_MAX, POSITION_MIN, POSITION_MAX } from './namedAttractors.js'
@@ -290,17 +293,18 @@ eq(actionLabel('totally-fake'), 'Unmapped', 'unknown → Unmapped')
 }
 
 // attractorActions exposes a UI-shaped list.
-// R13.18 — now emits one row PER FIELD per attractor (strength,
-// radius, x, y, z = 5 rows each).
+// R13.18 — emits one row PER FIELD per attractor (strength,
+// radius, x, y, z). R15.16 — adds `enabled` so the count is now 6 per
+// attractor.
 {
   const store = {
     namedAttractors: [
-      { id: 'attr-1', name: 'Eye', strength: 1, type: 'attractor' },
-      { id: 'attr-9', name: 'Beam', strength: 2, type: 'vortex' },
+      { id: 'attr-1', name: 'Eye', strength: 1, type: 'attractor', enabled: true },
+      { id: 'attr-9', name: 'Beam', strength: 2, type: 'vortex', enabled: true },
     ],
   }
   const rows = attractorActions(store)
-  eq(rows.length, 2 * ATTRACTOR_FIELDS.length, '5 rows per attractor (strength/radius/x/y/z)')
+  eq(rows.length, 2 * ATTRACTOR_FIELDS.length, `${ATTRACTOR_FIELDS.length} rows per attractor (strength/radius/x/y/z/enabled)`)
   // First attractor's first row is still strength (back-compat with
   // R12.05 — strength is field index 0 in ATTRACTOR_FIELDS).
   eq(rows[0].id, 'attr:attr-1:strength', 'row 0 is strength of attractor 1')
@@ -319,15 +323,64 @@ eq(actionLabel('totally-fake'), 'Unmapped', 'unknown → Unmapped')
   eq(rows[2].max, POSITION_MAX, 'x max = POSITION_MAX')
   eq(rows[3].id, 'attr:attr-1:y', 'row 3 is y')
   eq(rows[4].id, 'attr:attr-1:z', 'row 4 is z')
-  // Second attractor starts at index 5.
-  eq(rows[5].id, 'attr:attr-9:strength', 'second attractor begins after first')
-  eq(rows[5].label, 'Beam · Strength', 'second attractor strength label')
+  // R15.16 — field 5 (last) is enabled and carries the [0, 1] range.
+  eq(rows[5].id, 'attr:attr-1:enabled', 'row 5 is enabled of attractor 1')
+  eq(rows[5].label, 'Eye · Enabled', 'enabled label')
+  eq(rows[5].min, 0, 'enabled min')
+  eq(rows[5].max, 1, 'enabled max')
+  eq(rows[5].field, 'enabled', 'enabled field id')
+  // Second attractor starts at index ATTRACTOR_FIELDS.length (= 6).
+  eq(rows[ATTRACTOR_FIELDS.length].id, 'attr:attr-9:strength', 'second attractor begins after first')
+  eq(rows[ATTRACTOR_FIELDS.length].label, 'Beam · Strength', 'second attractor strength label')
   // Empty / missing input is safe.
   eq(attractorActions(null).length, 0, 'null store → empty')
   eq(attractorActions({}).length, 0, 'no list → empty')
   // Corrupt entry (no id) is dropped without breaking the loop.
   const corrupt = { namedAttractors: [{ id: 'attr-7', name: 'Good' }, { name: 'broken' }] }
-  eq(attractorActions(corrupt).length, ATTRACTOR_FIELDS.length, 'corrupt entry dropped, valid one keeps all 5 fields')
+  eq(attractorActions(corrupt).length, ATTRACTOR_FIELDS.length, 'corrupt entry dropped, valid one keeps all 6 fields')
+}
+
+// --- R15.16 — resolveActionForId('attr:<id>:enabled') drives the
+// store's updateNamedAttractor with hysteresis ---
+{
+  const calls = []
+  const liveAtt = { id: 'attr-2', name: 'Pulse', enabled: false, strength: 1, type: 'attractor' }
+  const store = {
+    namedAttractors: [liveAtt],
+    updateNamedAttractor: (id, patch) => {
+      calls.push({ id, patch })
+      if (id === liveAtt.id) Object.assign(liveAtt, patch)
+    },
+  }
+  const a = resolveActionForId('attr:attr-2:enabled', store)
+  ok(a, 'enabled action resolves')
+  eq(a.label, 'Pulse · Enabled', 'enabled label')
+  eq(a.min, 0, 'enabled min')
+  eq(a.max, 1, 'enabled max')
+  eq(a.field, 'enabled', 'enabled field')
+  // Sweep: 0 → 0.5 → 0.55 (stays off, AT threshold), 0.6 (flips on),
+  // 0.5 (stays on, dead band), 0.44 (flips off).
+  a.set(0,    store);  eq(calls.length, 0, '0 with off → no-op (was off)')
+  a.set(0.5,  store);  eq(calls.length, 0, '0.5 with off → no-op (dead-band, held off)')
+  a.set(0.55, store);  eq(calls.length, 0, 'AT threshold with off → no-op (must EXCEED)')
+  a.set(0.6,  store);  eq(calls.length, 1, '0.6 with off → fires (above high)')
+  eq(calls[0].patch.enabled, true, 'enable flip writes enabled=true')
+  a.set(0.5,  store);  eq(calls.length, 1, '0.5 with on → no-op (dead-band, held on)')
+  a.set(0.44, store);  eq(calls.length, 2, '0.44 with on → fires (below low)')
+  eq(calls[1].patch.enabled, false, 'disable flip writes enabled=false')
+}
+
+// Deleted attractor → silent no-op (the setter bails before touching store).
+{
+  const calls = []
+  const store = {
+    namedAttractors: [],  // attractor-2 not present
+    updateNamedAttractor: (id, patch) => calls.push({ id, patch }),
+  }
+  // resolveActionForId still returns null (no such attractor) — defensive parity
+  // with the other per-attractor fields.
+  eq(resolveActionForId('attr:attr-2:enabled', store), null, 'deleted attractor → null action')
+  eq(calls.length, 0, 'no call to updateNamedAttractor')
 }
 
 // --- R13.18 — radius routing ---
@@ -397,26 +450,31 @@ eq(actionLabel('totally-fake'), 'Unmapped', 'unknown → Unmapped')
     const m = setBinding({}, 30, `attr:attr-1:${field}`)
     eq(m['30'], `attr:attr-1:${field}`, `setBinding accepts attr:${field}`)
   }
-  // Unknown field still rejected.
-  const m2 = setBinding({}, 31, 'attr:attr-1:enabled')
-  eq(m2['31'], undefined, 'unknown field still rejected (no `enabled` route yet)')
+  // R15.16 — enabled is now a documented routing field.
+  const me = setBinding({}, 31, 'attr:attr-1:enabled')
+  eq(me['31'], 'attr:attr-1:enabled', 'setBinding accepts attr:enabled (R15.16)')
+  // Genuinely unknown field still rejected.
+  const m2 = setBinding({}, 32, 'attr:attr-1:gizmo')
+  eq(m2['32'], undefined, 'unknown field still rejected (no `gizmo` route)')
 }
 
 // --- R13.18 — parseAttractorActionId validates the field too ---
 {
   ok(parseAttractorActionId('attr:attr-1:radius'), 'radius parses')
   ok(parseAttractorActionId('attr:attr-1:x'), 'x parses')
-  eq(parseAttractorActionId('attr:attr-1:enabled'), null, 'unknown field rejected')
+  ok(parseAttractorActionId('attr:attr-1:enabled'), 'enabled parses (R15.16)')
+  eq(parseAttractorActionId('attr:attr-1:gizmo'), null, 'unknown field rejected')
   eq(parseAttractorActionId('attr:attr-1:STRENGTH'), null, 'case-sensitive — uppercase rejected')
 }
 
-// --- R13.18 — labelForAttractorField covers all five ---
+// --- R15.16 — labelForAttractorField covers all six (incl. enabled) ---
 {
   eq(labelForAttractorField(ATTRACTOR_FIELD_STRENGTH), 'Strength', 'strength label')
   eq(labelForAttractorField(ATTRACTOR_FIELD_RADIUS),   'Radius',   'radius label')
   eq(labelForAttractorField(ATTRACTOR_FIELD_X),        'X',        'x label')
   eq(labelForAttractorField(ATTRACTOR_FIELD_Y),        'Y',        'y label')
   eq(labelForAttractorField(ATTRACTOR_FIELD_Z),        'Z',        'z label')
+  eq(labelForAttractorField(ATTRACTOR_FIELD_ENABLED),  'Enabled',  'enabled label (R15.16)')
   // Unknown field falls back to its raw value.
   eq(labelForAttractorField('mystery'), 'mystery', 'unknown field passes through')
   // Empty / nullish → fallback question mark.
@@ -424,4 +482,69 @@ eq(actionLabel('totally-fake'), 'Unmapped', 'unknown → Unmapped')
   eq(labelForAttractorField(null), '?', 'null → ?')
 }
 
-console.log(`PASS: midiMap — ${ACTIONS.length} actions, decode/normalize/persist/setBinding/applyCC + attractor routing (${ATTRACTOR_FIELDS.length} fields per attractor)`)
+// --- R15.16 — applyEnabledHysteresis (Schmitt-trigger semantics) ---
+// Sanity: thresholds are documented + sane.
+ok(HYSTERESIS_OFF < 0.5 && HYSTERESIS_OFF > 0,    'OFF threshold in (0, 0.5)')
+ok(HYSTERESIS_ON  > 0.5 && HYSTERESIS_ON  < 1,    'ON threshold in (0.5, 1)')
+ok(HYSTERESIS_ON  > HYSTERESIS_OFF,               'ON > OFF (proper dead-band)')
+
+// Off → stays off below the HIGH threshold; flips on only above it.
+eq(applyEnabledHysteresis(false, 0),                  false, 'off + 0 = off')
+eq(applyEnabledHysteresis(false, HYSTERESIS_OFF),     false, 'off + low-threshold = off')
+eq(applyEnabledHysteresis(false, 0.5),                false, 'off + dead-band centre = off (hold)')
+eq(applyEnabledHysteresis(false, HYSTERESIS_ON),      false, 'off + AT high-threshold = off (must EXCEED)')
+eq(applyEnabledHysteresis(false, HYSTERESIS_ON + 0.001), true,  'off + just above high = on')
+eq(applyEnabledHysteresis(false, 1),                  true,  'off + 1 = on')
+
+// On → stays on above the LOW threshold; flips off only below it.
+eq(applyEnabledHysteresis(true, 1),                   true,  'on + 1 = on')
+eq(applyEnabledHysteresis(true, HYSTERESIS_ON),       true,  'on + high-threshold = on')
+eq(applyEnabledHysteresis(true, 0.5),                 true,  'on + dead-band centre = on (hold)')
+eq(applyEnabledHysteresis(true, HYSTERESIS_OFF),      true,  'on + AT low-threshold = on (must FALL below)')
+eq(applyEnabledHysteresis(true, HYSTERESIS_OFF - 0.001), false, 'on + just below low = off')
+eq(applyEnabledHysteresis(true, 0),                   false, 'on + 0 = off')
+
+// Knob jitter in the dead-band doesn't chatter: walk through 50 values
+// inside [OFF, ON] and verify the state never flips.
+{
+  for (const start of [false, true]) {
+    let state = start
+    for (let i = 0; i <= 50; i++) {
+      const v = HYSTERESIS_OFF + (i / 50) * (HYSTERESIS_ON - HYSTERESIS_OFF)
+      state = applyEnabledHysteresis(state, v)
+      eq(state, start, `dead-band: state held from ${start} at v=${v.toFixed(3)}`)
+    }
+  }
+}
+
+// Defensive: NaN / non-finite input degrades to the current state
+// (NEVER flips because of bad data).
+eq(applyEnabledHysteresis(true,  NaN),       true,  'on + NaN = on')
+eq(applyEnabledHysteresis(false, NaN),       false, 'off + NaN = off')
+eq(applyEnabledHysteresis(true,  undefined), true,  'on + undefined = on')
+eq(applyEnabledHysteresis(false, Infinity),  false, 'off + Infinity = off (NOT flipped)')
+
+// Full cycle: rising sweep through the dead-band → fires ON exactly
+// once at the high threshold. Falling sweep back through → fires OFF
+// exactly once at the low threshold.
+{
+  let s = false
+  let flips = 0
+  const samples = []
+  for (let v = 0; v <= 1.0001; v += 0.01) samples.push(v)
+  for (const v of samples) {
+    const n = applyEnabledHysteresis(s, v)
+    if (n !== s) flips++
+    s = n
+  }
+  for (let i = samples.length - 1; i >= 0; i--) {
+    const v = samples[i]
+    const n = applyEnabledHysteresis(s, v)
+    if (n !== s) flips++
+    s = n
+  }
+  // Up + back: ON once on the way up, OFF once on the way down.
+  eq(flips, 2, 'full up+down sweep produces exactly two flips')
+}
+
+console.log(`PASS: midiMap — ${ACTIONS.length} actions, decode/normalize/persist/setBinding/applyCC + attractor routing (${ATTRACTOR_FIELDS.length} fields per attractor, incl. R15.16 enabled-with-hysteresis [${HYSTERESIS_OFF}, ${HYSTERESIS_ON}])`)
