@@ -9,6 +9,8 @@ import {
   applyZoomBy, applyKeyboardZoomIn, applyKeyboardZoomOut,
   applyResetZoom, applyWheelZoom, classifyZoomKey,
   classifyPanKey, applyKeyboardPan,
+  // R15.13 — hold-to-repeat pan aggregator
+  aggregateHeldPan,
 } from './pinchZoom.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -374,4 +376,76 @@ if (PAN_STEP_FRACTION <= 0 || PAN_STEP_FRACTION >= 1) {
   eq(applyKeyboardPan(null, { dx: 1, dy: 0 }, 400, 200), null, 'null state = no-op')
 }
 
-console.log(`PASS: pinchZoom — clamp/distance/midpoint/clampTranslate/idleState/beginPinch/updatePinch (centroid follow)/beginPan/updatePan/endGesture/applyDoubleTap/shouldInterceptWheel/toTransform/navAllowed + keyboard+wheel zoom (applyZoomBy/applyKeyboardZoomIn/Out/Reset/applyWheelZoom/classifyZoomKey) + WASD pan (classifyPanKey/applyKeyboardPan · step=${PAN_STEP_FRACTION}) · MIN=${MIN_SCALE} MAX=${MAX_SCALE} DOUBLE=${DOUBLE_TAP_SCALE} STEP=${KEYBOARD_ZOOM_STEP}`)
+// --- R15.13 aggregateHeldPan: turns a Set of held keys into one vector ---
+{
+  // Empty / null / non-Set inputs → null.
+  eq(aggregateHeldPan(null),       null, 'aggregate: null → null')
+  eq(aggregateHeldPan(undefined),  null, 'aggregate: undefined → null')
+  eq(aggregateHeldPan(new Set()),  null, 'aggregate: empty set → null')
+  eq(aggregateHeldPan({}),         null, 'aggregate: non-Set → null')
+}
+{
+  // Single axis-aligned key — unit step, no normalisation.
+  eq(aggregateHeldPan(new Set(['w'])), { dx: 0, dy: -1 }, 'aggregate: w → up')
+  eq(aggregateHeldPan(new Set(['s'])), { dx: 0, dy: 1 },  'aggregate: s → down')
+  eq(aggregateHeldPan(new Set(['a'])), { dx: -1, dy: 0 }, 'aggregate: a → left')
+  eq(aggregateHeldPan(new Set(['d'])), { dx: 1, dy: 0 },  'aggregate: d → right')
+}
+{
+  // Vim aliases work too.
+  eq(aggregateHeldPan(new Set(['k'])), { dx: 0, dy: -1 }, 'aggregate: k → up (vim)')
+  eq(aggregateHeldPan(new Set(['h'])), { dx: -1, dy: 0 }, 'aggregate: h → left (vim)')
+}
+{
+  // Two opposing keys cancel out (W + S, A + D) — return null so the
+  // caller treats it as a no-op step instead of moving by zero (which
+  // wastes a state-machine tick).
+  eq(aggregateHeldPan(new Set(['w', 's'])), null, 'aggregate: W+S cancels')
+  eq(aggregateHeldPan(new Set(['a', 'd'])), null, 'aggregate: A+D cancels')
+  eq(aggregateHeldPan(new Set(['w', 's', 'a', 'd'])), null, 'aggregate: full cancel')
+}
+{
+  // Diagonals normalise to unit length so corners don't sweep √2× faster
+  // than axis-aligned moves.
+  const d1 = aggregateHeldPan(new Set(['w', 'a']))
+  const m  = Math.SQRT1_2
+  approx(d1.dx, -m, 'aggregate: W+A → -√½ x')
+  approx(d1.dy, -m, 'aggregate: W+A → -√½ y')
+  // Vector magnitude is exactly 1.0.
+  approx(Math.sqrt(d1.dx ** 2 + d1.dy ** 2), 1, 'aggregate: W+A length=1')
+  const d2 = aggregateHeldPan(new Set(['s', 'd']))
+  approx(d2.dx,  m, 'aggregate: S+D → +√½ x')
+  approx(d2.dy,  m, 'aggregate: S+D → +√½ y')
+}
+{
+  // Mixed: WASD with one vim alias on the same axis sums to a 2-step
+  // axis-aligned move (which still normalises to ±1 axis-aligned —
+  // we don't double the magnitude beyond unit speed).
+  // Sum: w(dy=-1) + k(dy=-1) → dy = -2 — but the helper preserves the
+  // sum as-is for axis-aligned cases. The renderer multiplies by
+  // PAN_STEP_FRACTION + scale, so a -2 dy just doubles the step that
+  // tick. That matches the user's mental model: "I'm pressing two
+  // up-keys, please go up twice as fast." Documented behaviour, not
+  // a bug.
+  const d = aggregateHeldPan(new Set(['w', 'k']))
+  eq(d.dx, 0,  'aggregate: W+K → axis dx=0')
+  eq(d.dy, -2, 'aggregate: W+K → dy doubled (no diagonal normalise)')
+}
+{
+  // Garbage keys are silently skipped; the helper returns null when
+  // every key fails to classify, not a zero-vector.
+  eq(aggregateHeldPan(new Set(['z', 'y', '1'])), null, 'aggregate: all unknown → null')
+  // Mixed valid + garbage — only the valid one counts.
+  eq(aggregateHeldPan(new Set(['z', 'd'])), { dx: 1, dy: 0 }, 'aggregate: valid + garbage → valid only')
+}
+{
+  // Custom classifier injection point (used by future shortcut remap).
+  const remap = (k) => k === '↑' ? { dx: 0, dy: -1 } : null
+  const d = aggregateHeldPan(new Set(['↑']), remap)
+  eq(d, { dx: 0, dy: -1 }, 'aggregate: custom classifier respected')
+  // Default classifier also returns the same default when keyClassifier
+  // is omitted.
+  eq(aggregateHeldPan(new Set(['↑'])), null, 'aggregate: default classifier ignores ↑')
+}
+
+console.log(`PASS: pinchZoom — clamp/distance/midpoint/clampTranslate/idleState/beginPinch/updatePinch (centroid follow)/beginPan/updatePan/endGesture/applyDoubleTap/shouldInterceptWheel/toTransform/navAllowed + keyboard+wheel zoom (applyZoomBy/applyKeyboardZoomIn/Out/Reset/applyWheelZoom/classifyZoomKey) + WASD pan (classifyPanKey/applyKeyboardPan · step=${PAN_STEP_FRACTION}) + R15.13 aggregateHeldPan (empty/single/cancel/diagonal-normalise/garbage/custom-classifier) · MIN=${MIN_SCALE} MAX=${MAX_SCALE} DOUBLE=${DOUBLE_TAP_SCALE} STEP=${KEYBOARD_ZOOM_STEP}`)

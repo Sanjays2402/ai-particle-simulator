@@ -11,7 +11,7 @@ import {
   MIN_SCALE as ZOOM_MIN, DOUBLE_TAP_MS,
   applyKeyboardZoomIn, applyKeyboardZoomOut, applyResetZoom,
   applyWheelZoom, classifyZoomKey,
-  classifyPanKey, applyKeyboardPan,
+  classifyPanKey, applyKeyboardPan, aggregateHeldPan,
 } from '../lib/pinchZoom'
 import { showToast } from './Toast'
 
@@ -431,7 +431,47 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
   // Keyboard nav lives in the lightbox itself so we can gate it by zoom.
   // R11.15: +/=/- and 0 also drive desktop zoom — mirrors the pinch
   // behaviour for users without a touchscreen.
+  // R15.13: WASD pan now AUTO-REPEATS while the key is held. We run
+  // our own deterministic ~60ms repeat timer (instead of relying on
+  // OS-defined keyboard repeat which varies by platform) so pan speed
+  // feels identical on macOS / Windows / Linux. Holding W produces a
+  // smooth upward sweep; W + A together produce a diagonal sweep that
+  // stays unit-speed (normalised inside aggregateHeldPan).
+  const heldKeysRef = useRef(new Set())
+  const repeatTimerRef = useRef(0)
+  const repeatTimeoutRef = useRef(0)
+
   useEffect(() => {
+    const PAN_REPEAT_MS = 60   // ~16 ticks/second — smooth without overshoot
+    const PAN_HOLD_DELAY_MS = 180 // wait this long before repeat kicks in
+
+    // Apply one aggregated step from the currently-held keys.
+    // Returns true if a step was actually applied (used by the
+    // initial-delay path to suppress the very first repeat if every
+    // key lifted during the delay window).
+    const stepHeldKeys = () => {
+      const held = heldKeysRef.current
+      if (held.size === 0) return false
+      if (!zoomRef.current || zoomRef.current.scale <= ZOOM_MIN) return false
+      const dir = aggregateHeldPan(held, classifyPanKey)
+      if (!dir) return false
+      const el = stageRef.current
+      const r = el ? el.getBoundingClientRect() : { width: 0, height: 0 }
+      setZoom(prev => applyKeyboardPan(prev, dir, r.width, r.height))
+      return true
+    }
+
+    const clearRepeat = () => {
+      if (repeatTimerRef.current) {
+        clearInterval(repeatTimerRef.current)
+        repeatTimerRef.current = 0
+      }
+      if (repeatTimeoutRef.current) {
+        clearTimeout(repeatTimeoutRef.current)
+        repeatTimeoutRef.current = 0
+      }
+    }
+
     const onKey = (e) => {
       if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
         if (!zoomNavAllowed(zoomRef.current)) {
@@ -449,21 +489,51 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
       // typing "+" / "-" in a search box (none today, but defensive)
       // doesn't accidentally zoom the image.
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return
-      // WASD pan (R12.19) — desktop alternative to drag when zoomed.
-      // Checked BEFORE the zoom intent so 'a' / 'd' (which look like
-      // unrelated letters) don't accidentally trigger zoom logic.
-      // Only intercept the key when actually zoomed in — at idle
-      // scale we let WASD fall through to the rest of the app so
-      // future shortcuts can claim them. zoomRef.current keeps us
-      // in sync with the latest state without re-binding this
-      // listener every zoom change.
+      // WASD pan (R12.19 + R15.13 hold-to-repeat) — desktop alternative
+      // to drag when zoomed. Checked BEFORE the zoom intent so 'a' / 'd'
+      // (which look like unrelated letters) don't accidentally trigger
+      // zoom logic. Only intercept the key when actually zoomed in — at
+      // idle scale we let WASD fall through to the rest of the app so
+      // future shortcuts can claim them. zoomRef.current keeps us in
+      // sync with the latest state without re-binding this listener
+      // every zoom change.
       const panDir = classifyPanKey(e.key)
       if (panDir) {
         if (zoomRef.current && zoomRef.current.scale > ZOOM_MIN) {
-          const el = stageRef.current
-          const r = el ? el.getBoundingClientRect() : { width: 0, height: 0 }
           e.preventDefault()
-          setZoom(prev => applyKeyboardPan(prev, panDir, r.width, r.height))
+          // R15.13 — only the initial keydown (NOT browser-fired
+          // KeyboardEvent.repeat) drives our state machine. The
+          // browser would otherwise double-step every tick because
+          // its repeat rate is separate from ours.
+          if (!e.repeat) {
+            // Apply the first step immediately so a single tap feels
+            // identical to R12.19's behaviour — the auto-repeat is a
+            // bonus on TOP of the per-press step.
+            const el = stageRef.current
+            const r = el ? el.getBoundingClientRect() : { width: 0, height: 0 }
+            setZoom(prev => applyKeyboardPan(prev, panDir, r.width, r.height))
+            heldKeysRef.current.add(e.key)
+            // Schedule the repeat timer once. Subsequent held keys
+            // join the existing beat (the stepHeldKeys closure
+            // re-reads the held set every tick), so we don't stack
+            // intervals.
+            if (!repeatTimerRef.current && !repeatTimeoutRef.current) {
+              repeatTimeoutRef.current = setTimeout(() => {
+                repeatTimeoutRef.current = 0
+                // Every pan key may have lifted during the delay
+                // window — bail without kicking off a stale loop.
+                if (heldKeysRef.current.size === 0) return
+                repeatTimerRef.current = setInterval(() => {
+                  if (!stepHeldKeys()) {
+                    // All keys lifted (or scale dropped back to idle
+                    // mid-repeat) — kill the timer.
+                    clearInterval(repeatTimerRef.current)
+                    repeatTimerRef.current = 0
+                  }
+                }, PAN_REPEAT_MS)
+              }, PAN_HOLD_DELAY_MS)
+            }
+          }
         }
         // At idle: don't preventDefault, don't return — but also
         // don't fall through to the zoom classifier (none of WASD
@@ -479,8 +549,30 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
       else if (intent === 'out') setZoom(prev => applyKeyboardZoomOut(prev, r.width, r.height))
       else if (intent === 'reset') setZoom(applyResetZoom())
     }
+    // R15.13 — when a pan key lifts, drop it from the held set. If
+    // that was the last held pan key, kill the repeat timer too so
+    // we're not burning a 60ms tick forever.
+    const onKeyUp = (e) => {
+      if (!classifyPanKey(e.key)) return
+      heldKeysRef.current.delete(e.key)
+      if (heldKeysRef.current.size === 0) clearRepeat()
+    }
+    // R15.13 — also clear on blur so alt-tabbing mid-hold doesn't
+    // leave a phantom auto-pan running when the window comes back.
+    const onBlur = () => {
+      heldKeysRef.current.clear()
+      clearRepeat()
+    }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', onBlur)
+      clearRepeat()
+      heldKeysRef.current.clear()
+    }
   }, [onNext, onPrev])
 
   // Wheel zoom on the stage — desktop equivalent of pinch. Anchor at
@@ -536,7 +628,7 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
             </span>
           )}
           {isZoomed && (
-            <span title="Pinch / wheel zoom is active. Use WASD or hjkl to pan. Double-tap, press 0, or click Reset to zoom out."
+            <span title="Pinch / wheel zoom is active. Use WASD or hjkl to pan (hold for smooth sweep). Double-tap, press 0, or click Reset to zoom out."
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 4,
                 padding: '2px 7px', borderRadius: 5,
@@ -546,7 +638,7 @@ function Lightbox({ entry, items, onClose, onPrev, onNext, onDownload, onRemove 
                 letterSpacing: '0.04em', textTransform: 'uppercase',
               }}>
               <ZoomIn size={9} strokeWidth={2.4} />
-              {zoom.scale.toFixed(1)}x · WASD
+              {zoom.scale.toFixed(1)}x · WASD·hold
             </span>
           )}
         </div>

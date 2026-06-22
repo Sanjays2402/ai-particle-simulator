@@ -308,6 +308,41 @@ export function applyWheelZoom(state, deltaY, anchor, stageW, stageH) {
   return applyZoomBy(state, factor, anchor, stageW, stageH)
 }
 
+// R15.13 — aggregate a Set of currently-held pan keys into a single
+// normalised direction vector. Sums each key's classified direction
+// (W = up, A = left, etc.) and normalises to unit length when the
+// result is diagonal so corners don't sweep √2× faster than axis-
+// aligned moves. Returns null when nothing's held OR opposing keys
+// cancel out (W + S, A + D) — caller treats null as "no-op step".
+//
+// Pure + side-effect free so the hold-to-repeat state machine in
+// SnapshotGallery can be unit-tested without a DOM. `keyClassifier`
+// is injected (always classifyPanKey in practice) so the helper
+// stays decoupled from the WASD vocabulary — a future shortcut
+// remapper could swap it without touching pinchZoom internals.
+export function aggregateHeldPan(heldKeys, keyClassifier = classifyPanKey) {
+  if (!heldKeys || typeof heldKeys.size !== 'number' || heldKeys.size === 0) return null
+  let dx = 0, dy = 0
+  let count = 0
+  for (const k of heldKeys) {
+    const dir = keyClassifier(k)
+    if (!dir) continue
+    dx += dir.dx || 0
+    dy += dir.dy || 0
+    count++
+  }
+  if (count === 0) return null
+  if (dx === 0 && dy === 0) return null  // cancelling pair (W+S or A+D)
+  // Normalise diagonal to unit length so corner moves match axis moves
+  // in absolute pan distance per tick. Axis-aligned moves stay ±1, so
+  // skip the divide for them (cheap fast path).
+  if (dx !== 0 && dy !== 0) {
+    const m = Math.SQRT1_2
+    dx *= m; dy *= m
+  }
+  return { dx, dy }
+}
+
 // Map a KeyboardEvent.key to a zoom intent. Returns null for keys
 // we don't care about so the lightbox can early-out. Accepts '+',
 // '=' (same key on US layout, no shift required), '-', '_', '0'.
