@@ -541,7 +541,7 @@ export default function MidiPanel({ open, onClose }) {
                   <span style={{
                     fontWeight: 500, color: '#7a7a90', letterSpacing: 0,
                     textTransform: 'none', fontSize: 10,
-                  }}>· strength / radius / x / y / z / enabled</span>
+                  }}>· strength / radius / radius·log / x / y / z / enabled</span>
                 </div>
                 {grouped.map(group => {
                   // R14.05 — pull the LIVE attractor so the group header
@@ -600,15 +600,20 @@ export default function MidiPanel({ open, onClose }) {
                           }}>
                             <span title={a.field === 'enabled'
                               ? 'Schmitt-trigger toggle: above 0.55 enables, below 0.45 disables, in-between holds previous state.'
-                              : undefined}>
+                              : a.field === 'radiusLog'
+                                ? 'Log-curve radius: bottom half of the knob covers radii 4..8 (fine control at the low end), top half covers 8..16. Pairs well with the linear Radius row above for users who want either feel.'
+                                : undefined}>
                               {a.field === 'strength' ? 'Strength'
                                 : a.field === 'radius' ? 'Radius'
+                                : a.field === 'radiusLog' ? 'Radius\u00B7log'
                                 : a.field === 'enabled' ? 'Enabled'
                                 : a.field.toUpperCase()}
                               <span style={{ color: '#6a6a80', fontSize: 10, marginLeft: 6 }}>
                                 {a.field === 'enabled'
                                   ? 'on/off'
-                                  : `${a.min}..${a.max}`}
+                                  : a.field === 'radiusLog'
+                                    ? `${a.min}..${a.max} log`
+                                    : `${a.min}..${a.max}`}
                               </span>
                             </span>
                             <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>

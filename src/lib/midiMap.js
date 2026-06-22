@@ -49,6 +49,18 @@ export const ATTRACTOR_FIELD_STRENGTH = 'strength'
 //   - radius    → 4..16  (R13.18, new — sculpt influence size live)
 //   - x / y / z → ±50    (R13.18, new — sweep the field through 3D)
 export const ATTRACTOR_FIELD_RADIUS = 'radius'
+// R17.15 — radius routing with an inverse log curve. Pure-linear CC
+// → radius maps a knob's first 25% to radii 4..7 (the LOW end where
+// small radius changes have the biggest visible effect on a scene),
+// then the remaining 75% spreads across 7..16. That's backwards for
+// fine control: you can't sculpt a tight orbit because half a knob
+// turn near 0 jumps from 4 to 5 with no granularity. The log-curve
+// variant remaps so the FIRST half of the knob covers 4..8 with
+// equal-feeling steps and the SECOND half flows up through 8..16.
+// Same action-id format (`attr:<id>:radiusLog`) so per-attractor MIDI
+// routing keeps its uniform shape — the field tag is what carries
+// the curve semantic.
+export const ATTRACTOR_FIELD_RADIUS_LOG = 'radiusLog'
 export const ATTRACTOR_FIELD_X = 'x'
 export const ATTRACTOR_FIELD_Y = 'y'
 export const ATTRACTOR_FIELD_Z = 'z'
@@ -68,12 +80,42 @@ export const HYSTERESIS_OFF = 0.45
 export const ATTRACTOR_FIELDS = [
   ATTRACTOR_FIELD_STRENGTH,
   ATTRACTOR_FIELD_RADIUS,
+  ATTRACTOR_FIELD_RADIUS_LOG,
   ATTRACTOR_FIELD_X,
   ATTRACTOR_FIELD_Y,
   ATTRACTOR_FIELD_Z,
   ATTRACTOR_FIELD_ENABLED,
 ]
 const ATTRACTOR_FIELD_SET = new Set(ATTRACTOR_FIELDS)
+
+// R17.15 — pure curve helper. Maps a normalised CC value v01 ∈ [0, 1]
+// to a normalised "where am I on the radius range" value in [0, 1]
+// using an exponential shape so the low half of the knob covers a
+// larger fraction of the LOW end of the radius range:
+//   shape(0)   = 0
+//   shape(0.5) ≈ 0.414  (vs 0.5 linear — the knob lands ~41% up at half-turn)
+//   shape(1)   = 1
+// (2^v - 1) normalises perfectly across [0, 1] since 2^0 = 1 and
+// 2^1 = 2, so the divisor (2 - 1) = 1 is implicit.
+//
+// Defensive contract:
+//   - non-finite v01 → 0 (anchor to the radius minimum)
+//   - v01 < 0 → clamped to 0
+//   - v01 > 1 → clamped to 1
+export function logCurveShape(v01) {
+  if (!Number.isFinite(v01)) return 0
+  const v = v01 < 0 ? 0 : v01 > 1 ? 1 : v01
+  return (Math.pow(2, v) - 1)
+}
+
+// Convenience wrapper — convert v01 directly to a clamped radius value
+// using the same curve. Used by resolveActionForId's radiusLog setter
+// and exported so the per-attractor MIDI panel can preview "what
+// radius will this knob give me" without re-deriving the math.
+export function logCurveRadius(v01) {
+  const t = logCurveShape(v01)
+  return clampRadius(RADIUS_MIN + t * (RADIUS_MAX - RADIUS_MIN))
+}
 
 // Build the namespaced action id for a given attractor + field.
 // Validates against ATTRACTOR_FIELDS so a typo in caller code can't
@@ -165,6 +207,25 @@ export function resolveActionForId(id, store) {
         if (typeof s.updateNamedAttractor === 'function') {
           const next = RADIUS_MIN + v01 * (RADIUS_MAX - RADIUS_MIN)
           s.updateNamedAttractor(target.id, { radius: clampRadius(next) })
+        }
+      },
+    }
+  }
+  if (parsed.field === ATTRACTOR_FIELD_RADIUS_LOG) {
+    // R17.15 — identical setter contract to RADIUS but the CC value
+    // passes through the inverse-log shaper first so a knob's bottom
+    // half resolves ~4..8 (fine control at the low end) and the top
+    // half flows up through 8..16. Visible to the user as a `Radius·log`
+    // row in the MIDI panel sitting next to (not replacing) the linear
+    // Radius row, so users can pick the curve that matches the knob's
+    // physical feel without losing the original mapping.
+    return {
+      id, attractor: target, field: parsed.field,
+      label: `${target.name} · Radius·log`,
+      min: RADIUS_MIN, max: RADIUS_MAX,
+      set: (v01, s) => {
+        if (typeof s.updateNamedAttractor === 'function') {
+          s.updateNamedAttractor(target.id, { radius: logCurveRadius(v01) })
         }
       },
     }
@@ -361,6 +422,7 @@ export function actionLabel(id, store) {
 export function labelForAttractorField(field) {
   if (field === ATTRACTOR_FIELD_STRENGTH) return 'Strength'
   if (field === ATTRACTOR_FIELD_RADIUS)   return 'Radius'
+  if (field === ATTRACTOR_FIELD_RADIUS_LOG) return 'Radius·log'  // R17.15 — log-curve variant
   if (field === ATTRACTOR_FIELD_X)        return 'X'
   if (field === ATTRACTOR_FIELD_Y)        return 'Y'
   if (field === ATTRACTOR_FIELD_Z)        return 'Z'
@@ -377,6 +439,9 @@ export function labelForAttractorField(field) {
 // x + y + z), so a 12-attractor scene yields up to 60 rows. The UI
 // groups them visually by attractor, but the data shape stays flat so
 // the existing Learn-tap flow keeps working without any refactor.
+// R17.15 — radiusLog joins the lineup as a 7th field (parallel to
+// radius, with the log-curve setter); grouping in MidiPanel keeps
+// them adjacent so the user sees both options side-by-side.
 export function attractorActions(store) {
   if (!store || !Array.isArray(store.namedAttractors)) return []
   const out = []
@@ -387,7 +452,7 @@ export function attractorActions(store) {
       if (!id) continue
       let min = 0, max = 1
       if (field === ATTRACTOR_FIELD_STRENGTH) { min = 0; max = STRENGTH_MAX }
-      else if (field === ATTRACTOR_FIELD_RADIUS) { min = RADIUS_MIN; max = RADIUS_MAX }
+      else if (field === ATTRACTOR_FIELD_RADIUS || field === ATTRACTOR_FIELD_RADIUS_LOG) { min = RADIUS_MIN; max = RADIUS_MAX }
       else if (field === ATTRACTOR_FIELD_ENABLED) { min = 0; max = 1 }
       else { min = POSITION_MIN; max = POSITION_MAX } // x/y/z share the same span
       out.push({

@@ -13,6 +13,8 @@ import {
   ATTRACTOR_FIELD_ENABLED, HYSTERESIS_ON, HYSTERESIS_OFF,
   applyEnabledHysteresis,
   ATTRACTOR_FIELDS, labelForAttractorField,
+  // R17.15 — log-curve radius routing
+  ATTRACTOR_FIELD_RADIUS_LOG, logCurveShape, logCurveRadius,
 } from './midiMap.js'
 import { STRENGTH_MAX, RADIUS_MIN, RADIUS_MAX, POSITION_MIN, POSITION_MAX } from './namedAttractors.js'
 
@@ -304,7 +306,7 @@ eq(actionLabel('totally-fake'), 'Unmapped', 'unknown → Unmapped')
     ],
   }
   const rows = attractorActions(store)
-  eq(rows.length, 2 * ATTRACTOR_FIELDS.length, `${ATTRACTOR_FIELDS.length} rows per attractor (strength/radius/x/y/z/enabled)`)
+  eq(rows.length, 2 * ATTRACTOR_FIELDS.length, `${ATTRACTOR_FIELDS.length} rows per attractor (strength/radius/radiusLog/x/y/z/enabled)`)
   // First attractor's first row is still strength (back-compat with
   // R12.05 — strength is field index 0 in ATTRACTOR_FIELDS).
   eq(rows[0].id, 'attr:attr-1:strength', 'row 0 is strength of attractor 1')
@@ -316,20 +318,26 @@ eq(actionLabel('totally-fake'), 'Unmapped', 'unknown → Unmapped')
   eq(rows[1].label, 'Eye · Radius', 'radius label')
   eq(rows[1].min, RADIUS_MIN, 'radius min')
   eq(rows[1].max, RADIUS_MAX, 'radius max')
-  // Fields 2-4 are x/y/z and share the position range.
-  eq(rows[2].id, 'attr:attr-1:x', 'row 2 is x')
-  eq(rows[2].label, 'Eye · X', 'x label')
-  eq(rows[2].min, POSITION_MIN, 'x min = POSITION_MIN')
-  eq(rows[2].max, POSITION_MAX, 'x max = POSITION_MAX')
-  eq(rows[3].id, 'attr:attr-1:y', 'row 3 is y')
-  eq(rows[4].id, 'attr:attr-1:z', 'row 4 is z')
-  // R15.16 — field 5 (last) is enabled and carries the [0, 1] range.
-  eq(rows[5].id, 'attr:attr-1:enabled', 'row 5 is enabled of attractor 1')
-  eq(rows[5].label, 'Eye · Enabled', 'enabled label')
-  eq(rows[5].min, 0, 'enabled min')
-  eq(rows[5].max, 1, 'enabled max')
-  eq(rows[5].field, 'enabled', 'enabled field id')
-  // Second attractor starts at index ATTRACTOR_FIELDS.length (= 6).
+  // R17.15 — Field 2 is radiusLog, slotted directly after the linear
+  // Radius row so the MidiPanel groups them visually as a pair.
+  eq(rows[2].id, 'attr:attr-1:radiusLog', 'row 2 is radiusLog (R17.15)')
+  eq(rows[2].label, 'Eye · Radius·log', 'radiusLog label uses the · separator')
+  eq(rows[2].min, RADIUS_MIN, 'radiusLog min matches linear radius (same target range)')
+  eq(rows[2].max, RADIUS_MAX, 'radiusLog max matches linear radius (same target range)')
+  // Fields 3-5 are x/y/z and share the position range.
+  eq(rows[3].id, 'attr:attr-1:x', 'row 3 is x')
+  eq(rows[3].label, 'Eye · X', 'x label')
+  eq(rows[3].min, POSITION_MIN, 'x min = POSITION_MIN')
+  eq(rows[3].max, POSITION_MAX, 'x max = POSITION_MAX')
+  eq(rows[4].id, 'attr:attr-1:y', 'row 4 is y')
+  eq(rows[5].id, 'attr:attr-1:z', 'row 5 is z')
+  // R15.16 — last field is enabled and carries the [0, 1] range.
+  eq(rows[6].id, 'attr:attr-1:enabled', 'row 6 is enabled of attractor 1')
+  eq(rows[6].label, 'Eye · Enabled', 'enabled label')
+  eq(rows[6].min, 0, 'enabled min')
+  eq(rows[6].max, 1, 'enabled max')
+  eq(rows[6].field, 'enabled', 'enabled field id')
+  // Second attractor starts at index ATTRACTOR_FIELDS.length (= 7).
   eq(rows[ATTRACTOR_FIELDS.length].id, 'attr:attr-9:strength', 'second attractor begins after first')
   eq(rows[ATTRACTOR_FIELDS.length].label, 'Beam · Strength', 'second attractor strength label')
   // Empty / missing input is safe.
@@ -337,7 +345,7 @@ eq(actionLabel('totally-fake'), 'Unmapped', 'unknown → Unmapped')
   eq(attractorActions({}).length, 0, 'no list → empty')
   // Corrupt entry (no id) is dropped without breaking the loop.
   const corrupt = { namedAttractors: [{ id: 'attr-7', name: 'Good' }, { name: 'broken' }] }
-  eq(attractorActions(corrupt).length, ATTRACTOR_FIELDS.length, 'corrupt entry dropped, valid one keeps all 6 fields')
+  eq(attractorActions(corrupt).length, ATTRACTOR_FIELDS.length, 'corrupt entry dropped, valid one keeps all fields')
 }
 
 // --- R15.16 — resolveActionForId('attr:<id>:enabled') drives the
@@ -467,10 +475,11 @@ eq(actionLabel('totally-fake'), 'Unmapped', 'unknown → Unmapped')
   eq(parseAttractorActionId('attr:attr-1:STRENGTH'), null, 'case-sensitive — uppercase rejected')
 }
 
-// --- R15.16 — labelForAttractorField covers all six (incl. enabled) ---
+// --- R15.16 — labelForAttractorField covers all fields (incl. enabled + radiusLog) ---
 {
   eq(labelForAttractorField(ATTRACTOR_FIELD_STRENGTH), 'Strength', 'strength label')
   eq(labelForAttractorField(ATTRACTOR_FIELD_RADIUS),   'Radius',   'radius label')
+  eq(labelForAttractorField(ATTRACTOR_FIELD_RADIUS_LOG), 'Radius·log', 'radiusLog label (R17.15)')
   eq(labelForAttractorField(ATTRACTOR_FIELD_X),        'X',        'x label')
   eq(labelForAttractorField(ATTRACTOR_FIELD_Y),        'Y',        'y label')
   eq(labelForAttractorField(ATTRACTOR_FIELD_Z),        'Z',        'z label')
@@ -547,4 +556,117 @@ eq(applyEnabledHysteresis(false, Infinity),  false, 'off + Infinity = off (NOT f
   eq(flips, 2, 'full up+down sweep produces exactly two flips')
 }
 
-console.log(`PASS: midiMap — ${ACTIONS.length} actions, decode/normalize/persist/setBinding/applyCC + attractor routing (${ATTRACTOR_FIELDS.length} fields per attractor, incl. R15.16 enabled-with-hysteresis [${HYSTERESIS_OFF}, ${HYSTERESIS_ON}])`)
+// --- R17.15 — logCurveShape + logCurveRadius (inverse-log radius routing) ---
+
+// Endpoint anchors: 0 → 0, 1 → 1 (curve never overshoots the linear range).
+near(logCurveShape(0), 0, 'logCurveShape: 0 → 0')
+near(logCurveShape(1), 1, 'logCurveShape: 1 → 1')
+// Defensive: out-of-range and non-finite values clamp safely.
+eq(logCurveShape(-1),       0, 'logCurveShape: negative → 0 (clamped)')
+eq(logCurveShape(2),        1, 'logCurveShape: > 1 → 1 (clamped)')
+eq(logCurveShape(NaN),      0, 'logCurveShape: NaN → 0')
+eq(logCurveShape(Infinity), 0, 'logCurveShape: Infinity → 0 (non-finite falls to the calm default)')
+eq(logCurveShape(-Infinity),0, 'logCurveShape: -Infinity → 0')
+eq(logCurveShape(null),     0, 'logCurveShape: null → 0')
+
+// The midpoint test that names this curve "log": v=0.5 should land
+// BELOW the linear 0.5 mark (knob's middle gives a result tilted
+// toward the low end of the radius range). 2^0.5 - 1 ≈ 0.414.
+{
+  const mid = logCurveShape(0.5)
+  if (!(mid > 0.4 && mid < 0.42)) {
+    fail(`logCurveShape(0.5) expected ≈0.414, got ${mid}`)
+  }
+  // Strictly less than linear midpoint — that's the WHOLE point.
+  ok(mid < 0.5, 'logCurveShape(0.5) sits below linear 0.5 (low-end bias)')
+}
+
+// Monotonic on the input: a rising knob never produces a falling shape.
+{
+  let prev = -1
+  for (let v = 0; v <= 1.0001; v += 0.05) {
+    const s = logCurveShape(v)
+    if (s < prev) fail(`logCurveShape not monotonic at v=${v}: ${s} < ${prev}`)
+    prev = s
+  }
+}
+
+// logCurveRadius wraps the shape with the radius range + clamp:
+// v=0 → RADIUS_MIN exactly, v=1 → RADIUS_MAX exactly.
+near(logCurveRadius(0), RADIUS_MIN, 'logCurveRadius(0) = RADIUS_MIN')
+near(logCurveRadius(1), RADIUS_MAX, 'logCurveRadius(1) = RADIUS_MAX')
+// Midpoint sits below the linear midpoint (lower-end bias).
+{
+  const linearMid = RADIUS_MIN + 0.5 * (RADIUS_MAX - RADIUS_MIN)
+  const logMid    = logCurveRadius(0.5)
+  if (!(logMid < linearMid)) {
+    fail(`logCurveRadius(0.5)=${logMid} should be < linear mid ${linearMid}`)
+  }
+  // Concretely: with RADIUS_MIN=4 and RADIUS_MAX=16, midpoint ≈ 4 + 0.414*12 = 8.97
+  // (linear mid is 10), so we sit in the 8..9 range — fine control at
+  // the low end is preserved.
+  if (!(logMid > 8 && logMid < 9.5)) {
+    fail(`logCurveRadius(0.5) expected ~8..9.5 (RADIUS_MIN=${RADIUS_MIN}, RADIUS_MAX=${RADIUS_MAX}), got ${logMid}`)
+  }
+}
+// Out-of-range still clamps to the radius bounds.
+near(logCurveRadius(-1), RADIUS_MIN, 'logCurveRadius(-1) clamps to MIN')
+near(logCurveRadius(2),  RADIUS_MAX, 'logCurveRadius(2)  clamps to MAX')
+eq(logCurveRadius(NaN), RADIUS_MIN, 'logCurveRadius(NaN) → MIN (calm default)')
+
+// --- R17.15 — attractorActionId / parseAttractorActionId support radiusLog ---
+{
+  const id = attractorActionId('attr-1', ATTRACTOR_FIELD_RADIUS_LOG)
+  eq(id, 'attr:attr-1:radiusLog', 'attractorActionId mints the radiusLog id')
+  const parsed = parseAttractorActionId(id)
+  ok(parsed, 'radiusLog id parses back')
+  eq(parsed.attractorId, 'attr-1', 'parsed attractorId')
+  eq(parsed.field, 'radiusLog',    'parsed field')
+}
+
+// --- R17.15 — resolveActionForId('attr:<id>:radiusLog') writes log-curve radii ---
+{
+  const live = { id: 'attr-3', name: 'Pulse', strength: 1, type: 'attractor', radius: 10, enabled: true }
+  const calls = []
+  const store = {
+    namedAttractors: [live],
+    updateNamedAttractor: (id, patch) => { calls.push({ id, patch }); if (id === live.id) Object.assign(live, patch) },
+  }
+  const a = resolveActionForId('attr:attr-3:radiusLog', store)
+  ok(a, 'radiusLog action resolves')
+  eq(a.label, 'Pulse · Radius·log', 'radiusLog label')
+  eq(a.min, RADIUS_MIN, 'radiusLog action min')
+  eq(a.max, RADIUS_MAX, 'radiusLog action max')
+  // Endpoint anchors at the slider extremes.
+  a.set(0, store)
+  near(calls[0].patch.radius, RADIUS_MIN, 'set(0) → RADIUS_MIN')
+  a.set(1, store)
+  near(calls[1].patch.radius, RADIUS_MAX, 'set(1) → RADIUS_MAX')
+  // Midpoint produces the curve-shaped result (lower than linear mid).
+  a.set(0.5, store)
+  const linearMid = RADIUS_MIN + 0.5 * (RADIUS_MAX - RADIUS_MIN)
+  if (!(calls[2].patch.radius < linearMid)) {
+    fail(`set(0.5) radius ${calls[2].patch.radius} should be < linear mid ${linearMid}`)
+  }
+  // Defensive: NaN doesn't crash the store, falls back to RADIUS_MIN.
+  a.set(NaN, store)
+  near(calls[3].patch.radius, RADIUS_MIN, 'set(NaN) → RADIUS_MIN (defensive)')
+}
+
+// --- R17.15 — radiusLog and linear radius co-exist (no replacement) ---
+// Both rows are emitted by attractorActions so users can bind a CC to
+// EITHER, with both bindings concurrently active (different CCs).
+{
+  const store = { namedAttractors: [{ id: 'attr-1', name: 'A', strength: 1, type: 'attractor' }] }
+  const rows = attractorActions(store)
+  const fields = rows.map(r => r.field)
+  ok(fields.includes('radius'),    'linear radius row present')
+  ok(fields.includes('radiusLog'), 'log-curve radius row present (R17.15)')
+  // radiusLog sits right after radius (the MidiPanel grouping uses
+  // array order to lay out the per-attractor section).
+  const lin = fields.indexOf('radius')
+  const log = fields.indexOf('radiusLog')
+  eq(log, lin + 1, 'radiusLog sits adjacent to radius (slot-pair layout)')
+}
+
+console.log(`PASS: midiMap — ${ACTIONS.length} actions, decode/normalize/persist/setBinding/applyCC + attractor routing (${ATTRACTOR_FIELDS.length} fields per attractor, incl. R15.16 enabled-with-hysteresis [${HYSTERESIS_OFF}, ${HYSTERESIS_ON}] + R17.15 radius·log curve)`)
