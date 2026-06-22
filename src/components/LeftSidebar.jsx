@@ -29,7 +29,7 @@ import {
   parseImport as parseCrossfadeOverridesImport,
   mergeImport as mergeCrossfadeOverridesImport,
 } from '../lib/crossfadeOverridesIO'
-import { ATTRACTOR_TYPES, MAX_ATTRACTORS } from '../lib/namedAttractors'
+import { ATTRACTOR_TYPES, MAX_ATTRACTORS, attractorTypeStyle } from '../lib/namedAttractors'
 import { showToast } from './Toast'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
@@ -2396,6 +2396,11 @@ function NamedAttractorRow({
     turbulence:'Turb.',
   }
 
+  // R14.05 — type-specific accent so the whole row carries the same
+  // colour cue as the active type chip. Looks up the live `type` so
+  // tapping a chip flips the row's border + index badge instantly.
+  const typeStyle = attractorTypeStyle(attractor.type)
+
   return (
     <div style={{
       borderRadius: 10,
@@ -2403,7 +2408,7 @@ function NamedAttractorRow({
       border: isPlacing
         ? '1px solid rgba(34,197,94,0.45)'
         : (attractor.enabled
-            ? '1px solid rgba(99,102,241,0.18)'
+            ? `1px solid ${typeStyle.borderFaint}`
             : '1px solid rgba(255,255,255,0.05)'),
       boxShadow: isPlacing ? '0 0 14px rgba(34,197,94,0.25)' : 'none',
       padding: '10px 11px',
@@ -2414,11 +2419,13 @@ function NamedAttractorRow({
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
         <span style={{
           fontSize: 9, fontWeight: 700, letterSpacing: '0.12em',
-          color: '#6a6a80', textTransform: 'uppercase',
-          background: 'rgba(255,255,255,0.04)',
+          color: attractor.enabled ? typeStyle.fg : '#6a6a80',
+          textTransform: 'uppercase',
+          background: attractor.enabled ? typeStyle.bgSoft : 'rgba(255,255,255,0.04)',
           padding: '1px 5px', borderRadius: 4,
           fontFamily: 'Geist Mono, JetBrains Mono, monospace',
-        }}>#{index + 1}</span>
+          border: attractor.enabled ? `1px solid ${typeStyle.borderFaint}` : '1px solid transparent',
+        }} title={`Type: ${TYPE_LABELS[attractor.type] || attractor.type} (${typeStyle.label})`}>#{index + 1}</span>
         {editing ? (
           <input
             type="text"
@@ -2477,18 +2484,21 @@ function NamedAttractorRow({
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 4, marginBottom: 8 }}>
         {ATTRACTOR_TYPES.map(t => {
           const active = attractor.type === t
+          // R14.05 — each chip uses its own type's accent so the
+          // colour the active type carries elsewhere in the row is
+          // also visible while picking it.
+          const chipStyle = attractorTypeStyle(t)
           return (
             <button key={t}
               onClick={() => onTypeChange(t)}
-              title={TYPE_LABELS[t]}
+              title={`${TYPE_LABELS[t]} (${chipStyle.label})`}
               style={{
                 padding: '5px 0', borderRadius: 5, fontSize: 10, fontWeight: 600,
                 cursor: 'pointer',
-                background: active
-                  ? 'linear-gradient(135deg, rgba(168,85,247,0.22), rgba(99,102,241,0.18))'
-                  : 'rgba(255,255,255,0.03)',
-                color: active ? '#f3e8ff' : '#9a9ab0',
-                border: active ? '1px solid rgba(168,85,247,0.4)' : '1px solid rgba(255,255,255,0.05)',
+                background: active ? chipStyle.bg : 'rgba(255,255,255,0.03)',
+                color: active ? chipStyle.fg : '#9a9ab0',
+                border: active ? `1px solid ${chipStyle.border}` : '1px solid rgba(255,255,255,0.05)',
+                transition: 'background 0.12s ease, border-color 0.12s ease',
               }}>
               {TYPE_LABELS[t]}
             </button>

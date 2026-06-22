@@ -11,6 +11,7 @@ import {
   buildUserPresetFromMap, addUserPreset, removeUserPreset,
   MAX_USER_PRESETS,
 } from '../lib/midiPresets'
+import { attractorTypeStyle } from '../lib/namedAttractors'
 import { Music4, X, CheckCircle2, AlertCircle, Zap, Save, Trash2 } from 'lucide-react'
 
 // Floating Web MIDI control panel. Opens from the LeftSidebar's
@@ -358,75 +359,108 @@ export default function MidiPanel({ open, onClose }) {
                     textTransform: 'none', fontSize: 10,
                   }}>· strength / radius / x / y / z</span>
                 </div>
-                {grouped.map(group => (
-                  <div key={group.attractorId} style={{
-                    border: '1px solid rgba(168,85,247,0.18)',
-                    borderRadius: 8,
-                    padding: '6px 8px',
-                    marginBottom: 6,
-                    background: 'rgba(168,85,247,0.03)',
-                  }}>
-                    <div style={{
-                      fontSize: 11, fontWeight: 600, color: '#e9d5ff',
-                      marginBottom: 4, padding: '2px 0',
-                    }}>{group.name}</div>
-                    {group.rows.map(a => {
-                      const cc = ccFor(a.id)
-                      const isLearning = learnFor === a.id
-                      return (
-                        <div key={a.id} style={{
-                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                          padding: '5px 6px', marginBottom: 3, borderRadius: 6,
-                          background: isLearning ? 'rgba(168,85,247,0.14)' : 'rgba(255,255,255,0.02)',
-                          border: isLearning ? '1px solid rgba(168,85,247,0.40)' : '1px solid rgba(255,255,255,0.03)',
-                          fontSize: 11, color: '#d8d8e0',
-                        }}>
-                          <span>
-                            {a.field === 'strength' ? 'Strength'
-                              : a.field === 'radius' ? 'Radius'
-                              : a.field.toUpperCase()}
-                            <span style={{ color: '#6a6a80', fontSize: 10, marginLeft: 6 }}>
-                              {a.min}..{a.max}
+                {grouped.map(group => {
+                  // R14.05 — pull the LIVE attractor so the group header
+                  // borrows the attractor's type-specific accent. Stale
+                  // groups (deleted attractor still has bindings) fall
+                  // back to the violet "missing" tone via the FALLBACK
+                  // path inside attractorTypeStyle.
+                  const liveAttr = (namedAttractors || []).find(a => a && a.id === group.attractorId)
+                  const groupStyle = liveAttr
+                    ? attractorTypeStyle(liveAttr.type)
+                    : attractorTypeStyle('attractor')
+                  const isStale = !liveAttr
+                  return (
+                    <div key={group.attractorId} style={{
+                      border: `1px solid ${isStale ? 'rgba(168,85,247,0.18)' : groupStyle.borderFaint}`,
+                      borderRadius: 8,
+                      padding: '6px 8px',
+                      marginBottom: 6,
+                      background: isStale ? 'rgba(168,85,247,0.03)' : groupStyle.bgFaint,
+                    }}>
+                      <div style={{
+                        fontSize: 11, fontWeight: 600,
+                        color: isStale ? '#e9d5ff' : groupStyle.fg,
+                        marginBottom: 4, padding: '2px 0',
+                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                      }}>
+                        {/* Tiny dot — same colour, just a denser cue
+                            so the header is scannable even at narrow
+                            widths where the border isn't obvious. */}
+                        <span aria-hidden="true" style={{
+                          width: 7, height: 7, borderRadius: '50%',
+                          background: isStale ? 'rgba(168,85,247,0.85)' : groupStyle.accent,
+                          boxShadow: isStale ? 'none' : `0 0 6px ${groupStyle.borderSoft}`,
+                          display: 'inline-block',
+                        }} />
+                        {group.name}
+                        {liveAttr && (
+                          <span style={{
+                            fontSize: 9, fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                            color: groupStyle.fgMuted, opacity: 0.85,
+                            textTransform: 'uppercase', letterSpacing: '0.06em',
+                            fontWeight: 500,
+                          }}>{liveAttr.type === 'turbulence' ? 'turb' : liveAttr.type}</span>
+                        )}
+                      </div>
+                      {group.rows.map(a => {
+                        const cc = ccFor(a.id)
+                        const isLearning = learnFor === a.id
+                        return (
+                          <div key={a.id} style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            padding: '5px 6px', marginBottom: 3, borderRadius: 6,
+                            background: isLearning ? 'rgba(168,85,247,0.14)' : 'rgba(255,255,255,0.02)',
+                            border: isLearning ? '1px solid rgba(168,85,247,0.40)' : '1px solid rgba(255,255,255,0.03)',
+                            fontSize: 11, color: '#d8d8e0',
+                          }}>
+                            <span>
+                              {a.field === 'strength' ? 'Strength'
+                                : a.field === 'radius' ? 'Radius'
+                                : a.field.toUpperCase()}
+                              <span style={{ color: '#6a6a80', fontSize: 10, marginLeft: 6 }}>
+                                {a.min}..{a.max}
+                              </span>
                             </span>
-                          </span>
-                          <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                            {cc !== null && (
-                              <span style={{
-                                padding: '2px 7px', borderRadius: 5, fontSize: 10,
-                                background: 'rgba(34,197,94,0.10)', color: '#86efac',
-                                border: '1px solid rgba(34,197,94,0.25)',
-                                fontFamily: 'Geist Mono, JetBrains Mono, monospace',
-                              }}>CC {cc}</span>
-                            )}
-                            <button onClick={() => startLearn(a.id)}
-                              title={isLearning ? 'Press a knob/slider on the controller…' : 'Click then move the controller'}
-                              style={{
-                                padding: '2px 8px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
-                                background: isLearning
-                                  ? 'linear-gradient(135deg, rgba(168,85,247,0.25), rgba(99,102,241,0.18))'
-                                  : 'rgba(255,255,255,0.05)',
-                                color: isLearning ? '#e9d5ff' : '#c8c8d0',
-                                border: isLearning
-                                  ? '1px solid rgba(168,85,247,0.45)'
-                                  : '1px solid rgba(255,255,255,0.08)',
-                                fontFamily: 'Geist Mono, monospace', minWidth: 54, textAlign: 'center',
-                              }}
-                            >{isLearning ? 'Move…' : 'Learn'}</button>
-                            {cc !== null && (
-                              <button onClick={() => clearBinding(a.id)}
-                                title="Remove this binding"
+                            <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                              {cc !== null && (
+                                <span style={{
+                                  padding: '2px 7px', borderRadius: 5, fontSize: 10,
+                                  background: 'rgba(34,197,94,0.10)', color: '#86efac',
+                                  border: '1px solid rgba(34,197,94,0.25)',
+                                  fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                                }}>CC {cc}</span>
+                              )}
+                              <button onClick={() => startLearn(a.id)}
+                                title={isLearning ? 'Press a knob/slider on the controller…' : 'Click then move the controller'}
                                 style={{
-                                  padding: '2px 6px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
-                                  background: 'rgba(255,255,255,0.03)', color: '#9a9ab0',
-                                  border: '1px solid rgba(255,255,255,0.06)',
-                                }}><X size={10} /></button>
-                            )}
-                          </span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                ))}
+                                  padding: '2px 8px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
+                                  background: isLearning
+                                    ? 'linear-gradient(135deg, rgba(168,85,247,0.25), rgba(99,102,241,0.18))'
+                                    : 'rgba(255,255,255,0.05)',
+                                  color: isLearning ? '#e9d5ff' : '#c8c8d0',
+                                  border: isLearning
+                                    ? '1px solid rgba(168,85,247,0.45)'
+                                    : '1px solid rgba(255,255,255,0.08)',
+                                  fontFamily: 'Geist Mono, monospace', minWidth: 54, textAlign: 'center',
+                                }}
+                              >{isLearning ? 'Move…' : 'Learn'}</button>
+                              {cc !== null && (
+                                <button onClick={() => clearBinding(a.id)}
+                                  title="Remove this binding"
+                                  style={{
+                                    padding: '2px 6px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
+                                    background: 'rgba(255,255,255,0.03)', color: '#9a9ab0',
+                                    border: '1px solid rgba(255,255,255,0.06)',
+                                  }}><X size={10} /></button>
+                              )}
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })}
               </>
             )
           })()}

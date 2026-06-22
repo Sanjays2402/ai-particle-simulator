@@ -10,6 +10,8 @@ import {
   loadAttractors, saveAttractors,
   addAttractor, removeAttractor, updateAttractor,
   toggleAttractor, moveAttractor,
+  // R14.05 — type-specific color cues
+  ATTRACTOR_TYPE_STYLES, attractorTypeStyle,
 } from './namedAttractors.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -237,4 +239,62 @@ eq(sanitizeName('x'.repeat(100)).length, NAME_MAX, 'long name truncated')
   deepEq(list[0].position, [POSITION_MAX, POSITION_MAX, POSITION_MAX], 'wild move clamped')
 }
 
-console.log(`PASS: namedAttractors — types/clamps, normalize (full/defaults/enabled:false/rejection), id mint, defaultAttractor, save/load (round-trip + corrupted + missing storage), add/remove (+ cap), update (patch + bad-type + bad-id), toggle, move (+ clamp)`)
+// --- R14.05: type-specific color cues ---
+{
+  // Every documented type has a style entry.
+  for (const t of ATTRACTOR_TYPES) {
+    ok(ATTRACTOR_TYPE_STYLES[t], `style table covers ${t}`)
+    const s = ATTRACTOR_TYPE_STYLES[t]
+    ok(typeof s.accent === 'string' && /^#[0-9a-f]{6}$/i.test(s.accent), `${t} accent is hex`)
+    ok(typeof s.accentRgb === 'string' && /^\d+,\d+,\d+$/.test(s.accentRgb), `${t} accentRgb is r,g,b`)
+    ok(typeof s.label === 'string' && s.label.length > 0, `${t} has a human label`)
+  }
+  // The four types resolve to DISTINCT accent hexes (so a glance
+  // distinguishes them — the whole point of the slice).
+  const accents = new Set(ATTRACTOR_TYPES.map(t => ATTRACTOR_TYPE_STYLES[t].accent))
+  eq(accents.size, ATTRACTOR_TYPES.length, 'all four types have distinct accent hexes')
+  // Specific palette pins — guards against accidental reshuffles.
+  eq(ATTRACTOR_TYPE_STYLES.attractor.label, 'indigo', 'attractor=indigo')
+  eq(ATTRACTOR_TYPE_STYLES.repulsor.label,  'red',    'repulsor=red')
+  eq(ATTRACTOR_TYPE_STYLES.vortex.label,    'violet', 'vortex=violet')
+  eq(ATTRACTOR_TYPE_STYLES.turbulence.label,'amber',  'turbulence=amber')
+}
+{
+  // attractorTypeStyle returns a complete bundle for every type and
+  // every field is a non-empty string the UI can drop into a CSS prop.
+  for (const t of ATTRACTOR_TYPES) {
+    const s = attractorTypeStyle(t)
+    for (const field of ['accent','accentRgb','label','border','borderSoft','borderFaint','bg','bgSoft','bgFaint','fg','fgMuted','glow']) {
+      ok(typeof s[field] === 'string' && s[field].length > 0, `${t}.${field} is non-empty string`)
+    }
+    // rgba() strings carry the accentRgb verbatim — round-trip check.
+    ok(s.border.includes(s.accentRgb), `${t} border carries accentRgb`)
+    ok(s.bg.includes(s.accentRgb),     `${t} bg carries accentRgb`)
+    ok(s.fg === s.accent,              `${t} fg matches accent hex`)
+    ok(s.glow.includes(s.accentRgb),   `${t} glow carries accentRgb`)
+  }
+}
+{
+  // Unknown / null type falls back to the indigo "attractor" style
+  // so a stale localStorage entry never paints a borderless ghost.
+  const fallback = attractorTypeStyle('void')
+  eq(fallback.accent, ATTRACTOR_TYPE_STYLES.attractor.accent, 'unknown type → attractor fallback')
+  const fallback2 = attractorTypeStyle(null)
+  eq(fallback2.accent, ATTRACTOR_TYPE_STYLES.attractor.accent, 'null type → attractor fallback')
+  const fallback3 = attractorTypeStyle(undefined)
+  eq(fallback3.accent, ATTRACTOR_TYPE_STYLES.attractor.accent, 'undefined type → attractor fallback')
+}
+{
+  // Border opacities walk strong → faint so callers can layer them
+  // (the LeftSidebar uses borderFaint for the row, border for the
+  // active type chip, the gap proves the visual hierarchy survives).
+  const s = attractorTypeStyle('repulsor')
+  ok(s.border.includes('0.45'),     'border at 0.45 alpha')
+  ok(s.borderSoft.includes('0.30'), 'borderSoft at 0.30 alpha')
+  ok(s.borderFaint.includes('0.18'),'borderFaint at 0.18 alpha')
+  ok(s.bg.includes('0.14'),         'bg at 0.14 alpha')
+  ok(s.bgSoft.includes('0.06'),     'bgSoft at 0.06 alpha')
+  ok(s.bgFaint.includes('0.03'),    'bgFaint at 0.03 alpha')
+}
+
+console.log(`PASS: namedAttractors — types/clamps, normalize (full/defaults/enabled:false/rejection), id mint, defaultAttractor, save/load (round-trip + corrupted + missing storage), add/remove (+ cap), update (patch + bad-type + bad-id), toggle, move (+ clamp), R14.05 type styles (4 distinct accents + bundle completeness + fallback + opacity hierarchy)`)

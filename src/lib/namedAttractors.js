@@ -25,6 +25,77 @@ export const STORAGE_KEY = 'named-attractors-v1'
 
 export const ATTRACTOR_TYPES = ['attractor', 'repulsor', 'vortex', 'turbulence']
 
+// R14.05 — type-specific color cues so a glance tells the user which
+// kind of force field they're looking at without having to read the
+// "Attract / Repulse / Vortex / Turb." chips. Each entry exposes the
+// same fields a UI button needs (accent rgb, soft border / bg, text
+// fg, glow shadow) so callers don't have to assemble color strings
+// inline. The accent is the SHIPPED palette in this order:
+//   attractor  → indigo  (pull, matches the existing #6366f1 lane)
+//   repulsor   → red     (push away — the "danger" lane)
+//   vortex     → violet  (swirl — the "twist" lane)
+//   turbulence → amber   (chaos — the "noise" lane)
+// These deliberately match colours already used elsewhere in the app
+// (indigo = primary, red = destructive, violet = MIDI presets, amber
+// = warnings) so the UI palette stays small and learnable.
+export const ATTRACTOR_TYPE_STYLES = {
+  attractor: {
+    accent:    '#6366f1',
+    accentRgb: '99,102,241',
+    label:     'indigo',
+  },
+  repulsor: {
+    accent:    '#ef4444',
+    accentRgb: '239,68,68',
+    label:     'red',
+  },
+  vortex: {
+    accent:    '#a855f7',
+    accentRgb: '168,85,247',
+    label:     'violet',
+  },
+  turbulence: {
+    accent:    '#f59e0b',
+    accentRgb: '245,158,11',
+    label:     'amber',
+  },
+}
+
+// Fallback used when a stale localStorage entry has a type that
+// isn't in ATTRACTOR_TYPES anymore (shouldn't happen post-sanitize,
+// but the UI calls this freely so we keep it safe). Matches the
+// previous app-wide muted indigo so an unknown attractor looks
+// neutral rather than jarring.
+const FALLBACK_STYLE = ATTRACTOR_TYPE_STYLES.attractor
+
+// Build a small style bundle for one attractor type. Returns the raw
+// accent + a set of pre-built CSS-ready strings (border, background,
+// text colour, glow) at conservative opacities — same opacity levels
+// the existing UI uses so the new colour cues drop into the existing
+// design language without raising the visual weight of any one row.
+export function attractorTypeStyle(type) {
+  const base = ATTRACTOR_TYPE_STYLES[type] || FALLBACK_STYLE
+  const rgb = base.accentRgb
+  return {
+    accent:      base.accent,
+    accentRgb:   rgb,
+    label:       base.label,
+    // Borders + backgrounds at common opacity stops.
+    border:      `rgba(${rgb},0.45)`,
+    borderSoft:  `rgba(${rgb},0.30)`,
+    borderFaint: `rgba(${rgb},0.18)`,
+    bg:          `rgba(${rgb},0.14)`,
+    bgSoft:      `rgba(${rgb},0.06)`,
+    bgFaint:     `rgba(${rgb},0.03)`,
+    // Text colours — use the accent itself for the "on" state and a
+    // muted variant for headings on subtle backgrounds.
+    fg:          base.accent,
+    fgMuted:     `rgba(${rgb},0.75)`,
+    // Box-shadow / glow for the "active" row.
+    glow:        `0 0 12px rgba(${rgb},0.25)`,
+  }
+}
+
 export const MAX_ATTRACTORS = 12
 export const NAME_MAX = 24
 export const STRENGTH_MIN = 0
