@@ -14,6 +14,8 @@ import {
   ATTRACTOR_TYPE_STYLES, attractorTypeStyle,
   // R15.20 — reorder helpers (parallels cameraViews.moveView family)
   moveAttractorByIndex, moveAttractorUp, moveAttractorDown,
+  // R16.18 — bulk jump-to-position helper + input parser
+  moveAttractorTo1BasedPosition, parsePositionInput,
 } from './namedAttractors.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -382,4 +384,121 @@ eq(sanitizeName('x'.repeat(100)).length, NAME_MAX, 'long name truncated')
   }
 }
 
-console.log(`PASS: namedAttractors — types/clamps, normalize (full/defaults/enabled:false/rejection), id mint, defaultAttractor, save/load (round-trip + corrupted + missing storage), add/remove (+ cap), update (patch + bad-type + bad-id), toggle, move (+ clamp), R14.05 type styles (4 distinct accents + bundle completeness + fallback + opacity hierarchy) + R15.20 reorder (moveAttractorByIndex/Up/Down + ref-equal-on-no-op + boundary + missing-id + null/empty defensive)`)
+console.log(`PASS: namedAttractors — types/clamps, normalize (full/defaults/enabled:false/rejection), id mint, defaultAttractor, save/load (round-trip + corrupted + missing storage), add/remove (+ cap), update (patch + bad-type + bad-id), toggle, move (+ clamp), R14.05 type styles (4 distinct accents + bundle completeness + fallback + opacity hierarchy) + R15.20 reorder (moveAttractorByIndex/Up/Down + ref-equal-on-no-op + boundary + missing-id + null/empty defensive) + R16.18 jump-to-position (moveAttractorTo1BasedPosition + clamp + ref-equal + parsePositionInput)`)
+
+// --- R16.18: moveAttractorTo1BasedPosition + parsePositionInput ---
+// Build a small list of 5 attractors with stable ids.
+{
+  const list = ['attr-1', 'attr-2', 'attr-3', 'attr-4', 'attr-5'].map((id, i) =>
+    normalizeAttractor({ id, type: 'attractor', name: `A${i + 1}`, strength: 1, position: [0, 0, 0], radius: 10, enabled: true }),
+  )
+
+  // Happy path: jump attr-1 (idx 0) to position 4 (idx 3).
+  {
+    const next = moveAttractorTo1BasedPosition(list, 'attr-1', 4)
+    if (next === list) fail('jump 1→4 should return a fresh array')
+    deepEq(next.map(a => a.id), ['attr-2', 'attr-3', 'attr-4', 'attr-1', 'attr-5'], 'jump 1→4: ids in expected order')
+  }
+
+  // Jump down: attr-5 (idx 4) to position 1 (idx 0).
+  {
+    const next = moveAttractorTo1BasedPosition(list, 'attr-5', 1)
+    if (next === list) fail('jump 5→1 should return a fresh array')
+    deepEq(next.map(a => a.id), ['attr-5', 'attr-1', 'attr-2', 'attr-3', 'attr-4'], 'jump 5→1: ids in expected order')
+  }
+
+  // Clamp: position > length jumps to the bottom.
+  {
+    const next = moveAttractorTo1BasedPosition(list, 'attr-2', 99)
+    deepEq(next.map(a => a.id), ['attr-1', 'attr-3', 'attr-4', 'attr-5', 'attr-2'], 'jump 2→99: clamps to end')
+  }
+
+  // Clamp: position < 1 jumps to the top.
+  {
+    const next = moveAttractorTo1BasedPosition(list, 'attr-3', -10)
+    deepEq(next.map(a => a.id), ['attr-3', 'attr-1', 'attr-2', 'attr-4', 'attr-5'], 'jump 3→-10: clamps to top')
+  }
+
+  // Position 0 also clamps to top (NOT a no-op — 0 is below the
+  // valid range so it pins to position 1).
+  {
+    const next = moveAttractorTo1BasedPosition(list, 'attr-3', 0)
+    deepEq(next.map(a => a.id), ['attr-3', 'attr-1', 'attr-2', 'attr-4', 'attr-5'], 'jump 3→0: clamps to top')
+  }
+
+  // No-op: target position === current → input ref (ref-equal-on-no-op).
+  {
+    const same = moveAttractorTo1BasedPosition(list, 'attr-3', 3)
+    eq(same, list, 'jump 3→3: input ref (no-op)')
+  }
+
+  // Missing id → input ref.
+  {
+    const same = moveAttractorTo1BasedPosition(list, 'attr-nope', 2)
+    eq(same, list, 'jump missing-id → input ref')
+  }
+
+  // Non-finite position → input ref (NaN, Infinity, strings via Number).
+  {
+    eq(moveAttractorTo1BasedPosition(list, 'attr-1', NaN),       list, 'NaN position → input ref')
+    eq(moveAttractorTo1BasedPosition(list, 'attr-1', Infinity),  list, 'Infinity position → input ref')
+    eq(moveAttractorTo1BasedPosition(list, 'attr-1', -Infinity), list, '-Infinity position → input ref')
+  }
+
+  // Float position rounds (UX: half = round-half-to-even or away;
+  // we use Math.round which rounds half-up — pin both behaviours).
+  {
+    const next = moveAttractorTo1BasedPosition(list, 'attr-1', 3.4)
+    deepEq(next.map(a => a.id), ['attr-2', 'attr-3', 'attr-1', 'attr-4', 'attr-5'], '3.4 rounds to 3')
+  }
+  {
+    const next = moveAttractorTo1BasedPosition(list, 'attr-1', 3.6)
+    deepEq(next.map(a => a.id), ['attr-2', 'attr-3', 'attr-4', 'attr-1', 'attr-5'], '3.6 rounds to 4')
+  }
+
+  // Non-array list defensive.
+  eq(moveAttractorTo1BasedPosition(null,        'attr-1', 2), null,        'null list → null')
+  eq(moveAttractorTo1BasedPosition(undefined,   'attr-1', 2), undefined,   'undefined list → undefined')
+  eq(moveAttractorTo1BasedPosition('not-array', 'attr-1', 2), 'not-array', 'string list → input ref')
+
+  // Empty list: nothing to move.
+  {
+    const empty = []
+    eq(moveAttractorTo1BasedPosition(empty, 'attr-x', 1), empty, 'empty list → input ref')
+  }
+
+  // Single-element list: jumping it to position 1 is a no-op (already
+  // at the only valid index).
+  {
+    const single = [list[0]]
+    eq(moveAttractorTo1BasedPosition(single, 'attr-1', 1), single, 'single-element list → input ref')
+    eq(moveAttractorTo1BasedPosition(single, 'attr-1', 99), single, 'single-element list w/ clamp → input ref')
+  }
+
+  // Original list not mutated by any successful move.
+  deepEq(list.map(a => a.id), ['attr-1', 'attr-2', 'attr-3', 'attr-4', 'attr-5'], 'original list never mutated')
+}
+
+// parsePositionInput — handles the gnarly UX edges so the JSX stays
+// declarative.
+{
+  // Happy
+  eq(parsePositionInput('1'),    1,  'parse "1"')
+  eq(parsePositionInput('99'),   99, 'parse "99"')
+  eq(parsePositionInput(' 42 '), 42, 'parse trims whitespace')
+  eq(parsePositionInput('3.4'),  3,  'parse rounds 3.4 to 3')
+  eq(parsePositionInput('3.6'),  4,  'parse rounds 3.6 to 4')
+  eq(parsePositionInput(7),      7,  'parse number passthrough')
+
+  // Reject — return null
+  eq(parsePositionInput(''),         null, 'parse empty string → null')
+  eq(parsePositionInput('   '),      null, 'parse whitespace-only → null')
+  eq(parsePositionInput('abc'),      null, 'parse non-numeric → null')
+  eq(parsePositionInput('0'),        null, 'parse 0 → null (positions are 1-based)')
+  eq(parsePositionInput('-3'),       null, 'parse negative → null')
+  eq(parsePositionInput(null),       null, 'parse null → null')
+  eq(parsePositionInput(undefined),  null, 'parse undefined → null')
+  eq(parsePositionInput(NaN),        null, 'parse NaN → null')
+  eq(parsePositionInput(Infinity),   null, 'parse Infinity → null')
+  eq(parsePositionInput(-Infinity),  null, 'parse -Infinity → null')
+}

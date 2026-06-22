@@ -19,6 +19,8 @@ import {
   // R15.20 — list-order reorder helpers
   moveAttractorUp as moveNamedAttractorUpHelper,
   moveAttractorDown as moveNamedAttractorDownHelper,
+  // R16.18 — bulk jump-to-position helper
+  moveAttractorTo1BasedPosition as moveNamedAttractorTo1BasedPositionHelper,
 } from './lib/namedAttractors'
 import { clampHueReactiveStrength as clampBgGradientStrength, normalizeReactiveCurve as normalizeBgGradientCurve } from './lib/bgGradient'
 
@@ -196,6 +198,14 @@ export const useStore = create((set, get) => {
   },
   moveNamedAttractorDown: (id) => {
     const next = moveNamedAttractorDownHelper(get().namedAttractors, id)
+    if (next === get().namedAttractors) return
+    saveNamedAttractors(next)
+    set({ namedAttractors: next })
+  },
+  // R16.18 — jump to an arbitrary 1-based position in one call.
+  // Wraps the same ref-equal-on-no-op contract as the up/down helpers.
+  moveNamedAttractorToPosition: (id, position1Based) => {
+    const next = moveNamedAttractorTo1BasedPositionHelper(get().namedAttractors, id, position1Based)
     if (next === get().namedAttractors) return
     saveNamedAttractors(next)
     set({ namedAttractors: next })

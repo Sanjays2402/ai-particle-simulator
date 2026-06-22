@@ -302,3 +302,49 @@ export function moveAttractorDown(list, id) {
   if (idx < 0 || idx >= list.length - 1) return list  // missing OR at bottom
   return moveAttractorByIndex(list, idx, idx + 1)
 }
+
+// R16.18 — bulk reorder: jump an attractor to an arbitrary 1-based
+// position in one call instead of clicking up/down N times.
+// Wraps moveAttractorByIndex with the 1-based UX conversion + a
+// generous clamp so the row's inline number input can pass user
+// keystrokes through directly.
+//
+// Defensive contract (matches the rest of the reorder family):
+//   - missing id → input list ref unchanged
+//   - non-finite / non-integer position → input list ref unchanged
+//     (use moveAttractorTo1BasedPosition for the explicit version)
+//   - out-of-range positions are CLAMPED to [1, list.length] so a
+//     user typing 99 in a 5-attractor list jumps the row to the end,
+//     not throws. This matches the typical "jump to end" intent.
+//   - no-op (already at the target index) → input list ref unchanged
+//     for cheap reference-equality skip in zustand
+export function moveAttractorTo1BasedPosition(list, id, position1Based) {
+  if (!Array.isArray(list)) return list
+  const idx = list.findIndex(a => a && a.id === id)
+  if (idx < 0) return list
+  if (!Number.isFinite(position1Based)) return list
+  // Round + clamp to [1, length] so any UI sanitisation gap doesn't
+  // crash the splice. Math.round handles both string→number coercion
+  // (if a caller forgot Number()) and floats from drag sliders.
+  const rounded = Math.round(position1Based)
+  const n = list.length
+  const clamped1 = Math.max(1, Math.min(n, rounded))
+  const targetIdx = clamped1 - 1
+  if (targetIdx === idx) return list
+  return moveAttractorByIndex(list, idx, targetIdx)
+}
+
+// R16.18 — pure helper for the inline numeric input's parse step.
+// Returns the parsed 1-based integer position OR null if the input
+// is unusable (empty, NaN, ≤ 0). Keeps the UI's parse logic in one
+// place so the test file can pin the behaviour without React.
+export function parsePositionInput(raw) {
+  if (raw == null) return null
+  const trimmed = String(raw).trim()
+  if (!trimmed) return null
+  const n = Number(trimmed)
+  if (!Number.isFinite(n)) return null
+  const rounded = Math.round(n)
+  if (rounded <= 0) return null
+  return rounded
+}

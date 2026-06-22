@@ -32,7 +32,7 @@ import {
   mergeImport as mergeCrossfadeOverridesImport,
   summarizeImportImpact as summarizeCrossfadeOverridesImpact,
 } from '../lib/crossfadeOverridesIO'
-import { ATTRACTOR_TYPES, MAX_ATTRACTORS, attractorTypeStyle } from '../lib/namedAttractors'
+import { ATTRACTOR_TYPES, MAX_ATTRACTORS, attractorTypeStyle, parsePositionInput } from '../lib/namedAttractors'
 import { showToast } from './Toast'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
@@ -2801,6 +2801,7 @@ function NamedAttractorsBlock() {
   const toggle = useStore(s => s.toggleNamedAttractor)
   const moveUp = useStore(s => s.moveNamedAttractorUp)
   const moveDown = useStore(s => s.moveNamedAttractorDown)
+  const moveToPosition = useStore(s => s.moveNamedAttractorToPosition)
   const placingId = useStore(s => s.placingAttractorId)
   const setPlacing = useStore(s => s.setPlacingAttractorId)
   const atCap = list.length >= MAX_ATTRACTORS
@@ -2844,6 +2845,7 @@ function NamedAttractorsBlock() {
           onPlace={() => setPlacing(placingId === a.id ? null : a.id)}
           onMoveUp={idx > 0 ? () => moveUp(a.id) : null}
           onMoveDown={idx < list.length - 1 ? () => moveDown(a.id) : null}
+          onJumpToPosition={(pos1Based) => moveToPosition(a.id, pos1Based)}
         />
       ))}
     </div>
@@ -2853,12 +2855,32 @@ function NamedAttractorsBlock() {
 function NamedAttractorRow({
   index, total, attractor, isPlacing,
   onRename, onTypeChange, onStrengthChange, onRadiusChange,
-  onToggle, onRemove, onPlace, onMoveUp, onMoveDown,
+  onToggle, onRemove, onPlace, onMoveUp, onMoveDown, onJumpToPosition,
 }) {
   const [editing, setEditing] = useState(false)
   const [draftName, setDraftName] = useState(attractor.name)
+  // R16.18 — inline numeric jump-to-position input on the #N badge.
+  // Click the badge → edit mode; type a 1-based position; Enter/blur
+  // commits, Esc cancels. Hidden behind `total > 1 && onJumpToPosition`
+  // so a single-attractor list doesn't show a useless control.
+  const [editingPos, setEditingPos] = useState(false)
+  const [draftPos, setDraftPos] = useState(String(index + 1))
   // Sync draft on external rename.
   useEffect(() => { setDraftName(attractor.name) }, [attractor.name])
+  // Keep the draft synced to the live index when not actively editing
+  // — otherwise a reorder elsewhere (e.g. a chevron click) would leave
+  // the input showing the OLD position number.
+  useEffect(() => { if (!editingPos) setDraftPos(String(index + 1)) }, [index, editingPos])
+
+  const commitPos = () => {
+    const parsed = parsePositionInput(draftPos)
+    if (parsed != null && onJumpToPosition) onJumpToPosition(parsed)
+    setEditingPos(false)
+  }
+  const cancelPos = () => {
+    setDraftPos(String(index + 1))
+    setEditingPos(false)
+  }
 
   const TYPE_LABELS = {
     attractor: 'Attract',
@@ -2888,15 +2910,57 @@ function NamedAttractorRow({
     }}>
       {/* Header: name + enabled toggle + remove */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-        <span style={{
-          fontSize: 9, fontWeight: 700, letterSpacing: '0.12em',
-          color: attractor.enabled ? typeStyle.fg : '#6a6a80',
-          textTransform: 'uppercase',
-          background: attractor.enabled ? typeStyle.bgSoft : 'rgba(255,255,255,0.04)',
-          padding: '1px 5px', borderRadius: 4,
-          fontFamily: 'Geist Mono, JetBrains Mono, monospace',
-          border: attractor.enabled ? `1px solid ${typeStyle.borderFaint}` : '1px solid transparent',
-        }} title={`Type: ${TYPE_LABELS[attractor.type] || attractor.type} (${typeStyle.label})`}>#{index + 1}</span>
+        {editingPos && total > 1 && onJumpToPosition ? (
+          // R16.18 — inline jump-to-position input. Replaces the #N
+          // badge while editing; sized to match the badge so the row
+          // layout stays stable. Enter commits, Escape cancels, blur
+          // commits (the lib helper clamps out-of-range positions).
+          <input
+            type="number"
+            value={draftPos}
+            min={1}
+            max={total}
+            autoFocus
+            onChange={(e) => setDraftPos(e.target.value)}
+            onBlur={commitPos}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); commitPos() }
+              else if (e.key === 'Escape') { e.preventDefault(); cancelPos() }
+            }}
+            onClick={(e) => e.stopPropagation()}
+            title={`Type 1-${total} and press Enter to jump (out-of-range clamps to ends)`}
+            style={{
+              width: 32, padding: '1px 3px', borderRadius: 4,
+              background: 'rgba(99,102,241,0.18)',
+              border: '1px solid rgba(99,102,241,0.45)',
+              color: '#dbeafe',
+              fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+              fontSize: 10, fontWeight: 700,
+              textAlign: 'center',
+              outline: 'none',
+              MozAppearance: 'textfield',
+            }}
+          />
+        ) : (
+          <span
+            onClick={(total > 1 && onJumpToPosition) ? () => { setDraftPos(String(index + 1)); setEditingPos(true) } : undefined}
+            style={{
+              fontSize: 9, fontWeight: 700, letterSpacing: '0.12em',
+              color: attractor.enabled ? typeStyle.fg : '#6a6a80',
+              textTransform: 'uppercase',
+              background: attractor.enabled ? typeStyle.bgSoft : 'rgba(255,255,255,0.04)',
+              padding: '1px 5px', borderRadius: 4,
+              fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+              border: attractor.enabled ? `1px solid ${typeStyle.borderFaint}` : '1px solid transparent',
+              cursor: (total > 1 && onJumpToPosition) ? 'pointer' : 'default',
+              userSelect: 'none',
+            }}
+            title={(total > 1 && onJumpToPosition)
+              ? `Type: ${TYPE_LABELS[attractor.type] || attractor.type} (${typeStyle.label}) — click to jump this row to a numbered position`
+              : `Type: ${TYPE_LABELS[attractor.type] || attractor.type} (${typeStyle.label})`}>
+            #{index + 1}
+          </span>
+        )}
         {editing ? (
           <input
             type="text"
