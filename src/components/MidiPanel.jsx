@@ -11,8 +11,15 @@ import {
   buildUserPresetFromMap, addUserPreset, removeUserPreset,
   MAX_USER_PRESETS,
 } from '../lib/midiPresets'
+import {
+  // R14.17 — single-bundle JSON export/import
+  downloadUserBundleFile,
+  parseImport as parseUserBundleImport,
+  isAtBundleCap,
+} from '../lib/midiUserBundleIO'
 import { attractorTypeStyle } from '../lib/namedAttractors'
-import { Music4, X, CheckCircle2, AlertCircle, Zap, Save, Trash2 } from 'lucide-react'
+import { Music4, X, CheckCircle2, AlertCircle, Zap, Save, Trash2, Download, Upload } from 'lucide-react'
+import { showToast } from './Toast'
 
 // Floating Web MIDI control panel. Opens from the LeftSidebar's
 // "MIDI Controller" button. Connects to navigator.requestMIDIAccess,
@@ -174,6 +181,69 @@ export default function MidiPanel({ open, onClose }) {
     saveUserPresets(next)
   }
 
+  // R14.17 — download one user bundle as a portable JSON file. The
+  // filename is auto-slugified from the bundle name + dated. We use
+  // the showToast pattern the rest of the app uses for non-blocking
+  // feedback rather than the existing window.confirm style in this
+  // panel — exports succeed silently 99% of the time and a toast
+  // lines up better with that.
+  const exportUserBundle = (bundle) => {
+    if (!bundle) return
+    const filename = downloadUserBundleFile(bundle)
+    if (filename) {
+      const count = Object.keys(bundle.map || {}).length
+      showToast(`Exported "${bundle.name}" (${count} binding${count === 1 ? '' : 's'}) → ${filename}`)
+    } else {
+      showToast(`Export failed for "${bundle.name}"`)
+    }
+  }
+
+  // R14.17 — import a user bundle from a JSON file. Opens a hidden
+  // file picker, parses + sanitizes, then appends via addUserPreset
+  // (which mints a fresh id + FIFO-drops the oldest at cap). Refuses
+  // when the user is already AT the cap so they don't lose a bundle
+  // silently to the FIFO drop — the UI surfaces this state at the
+  // button level too.
+  const importUserBundle = () => {
+    if (typeof document === 'undefined') return
+    if (isAtBundleCap(userPresets)) {
+      showToast(`At bundle cap (${MAX_USER_PRESETS}) — delete one first`)
+      return
+    }
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'application/json,.json'
+    input.onchange = () => {
+      const file = input.files && input.files[0]
+      if (!file) return
+      const reader = new FileReader()
+      reader.onload = () => {
+        const raw = typeof reader.result === 'string' ? reader.result : ''
+        const parsed = parseUserBundleImport(raw)
+        if (!parsed.ok) {
+          showToast(`Import failed: ${parsed.error}`)
+          return
+        }
+        // buildUserPresetFromMap mints a fresh id + adds vendor +
+        // createdAt — exactly what we need for a freshly imported
+        // bundle. Pass the existing list so the id-mint avoids
+        // collisions with anything already saved.
+        const built = buildUserPresetFromMap(parsed.bundle.name, parsed.bundle.map, userPresets)
+        if (!built) {
+          showToast('Import failed: bundle had no valid bindings')
+          return
+        }
+        const next = addUserPreset(userPresets, built)
+        setUserPresets(next)
+        saveUserPresets(next)
+        const count = Object.keys(built.map).length
+        showToast(`Imported "${built.name}" (${count} binding${count === 1 ? '' : 's'})`)
+      }
+      reader.readAsText(file)
+    }
+    input.click()
+  }
+
   // Try to auto-detect a likely preset from the connected inputs.
   // Returns the preset id of the FIRST match, or null. Surface only —
   // we don't auto-apply, the user has to opt in.
@@ -242,13 +312,15 @@ export default function MidiPanel({ open, onClose }) {
         <StatusBanner status={status} message={errorMsg} inputs={inputs} lastCC={lastCC} />
 
         {/* Controller presets — pre-baked CC→action maps for common hardware
-            + R13.05 user-authored bundles */}
+            + R13.05 user-authored bundles + R14.17 single-bundle JSON IO */}
         <PresetBar
           presets={MIDI_PRESETS}
           userPresets={userPresets}
           detectedId={detectedPresetId}
           onApply={applyPreset}
           onDeleteUser={deleteUserBundle}
+          onExportUser={exportUserBundle}
+          onImportUser={importUserBundle}
           savingBundle={savingBundle}
           onStartSave={() => { setSavingBundle(true); setBundleName('') }}
           onCancelSave={() => { setSavingBundle(false); setBundleName('') }}
@@ -532,6 +604,7 @@ function Banner({ color, icon, children }) {
 // inline form to capture the current binding map as a new bundle.
 function PresetBar({
   presets, userPresets = [], detectedId, onApply, onDeleteUser,
+  onExportUser, onImportUser,
   savingBundle, onStartSave, onCancelSave, onCommitBundle,
   bundleName, onBundleNameChange, liveBindingCount,
 }) {
@@ -654,6 +727,21 @@ function PresetBar({
                       {Object.keys(p.map).length}
                     </span>
                   </button>
+                  {/* R14.17 — per-bundle Export. Tucked between the
+                      apply chip + the trash so the destructive button
+                      stays the rightmost (least-fat-fingerable) action. */}
+                  {onExportUser && (
+                    <button onClick={() => onExportUser(p)} title={`Download "${p.name}" as JSON`}
+                      style={{
+                        padding: '0 6px', fontSize: 11, cursor: 'pointer',
+                        background: 'rgba(99,102,241,0.08)', color: '#a5b4fc',
+                        border: 'none',
+                        borderRight: '1px solid rgba(99,102,241,0.18)',
+                        display: 'inline-flex', alignItems: 'center',
+                      }}>
+                      <Download size={10} />
+                    </button>
+                  )}
                   <button onClick={() => onDeleteUser(p.id)} title="Delete this bundle"
                     style={{
                       padding: '0 6px', fontSize: 11, cursor: 'pointer',
@@ -717,25 +805,54 @@ function PresetBar({
       )}
       {/* "+ Save current" button — always visible (when not editing)
           so users discover the feature without having to know it
-          exists. Disabled at cap so we don't quietly lose entries. */}
+          exists. Disabled at cap so we don't quietly lose entries.
+          R14.17 — pairs with "Import bundle" so a fresh install
+          can pick up a friend's bundle file without first having
+          to save one of their own (otherwise the whole "Your
+          Bundles" section never appears). */}
       {!savingBundle && (
-        <button onClick={onStartSave}
-          disabled={atCap}
-          title={atCap
-            ? `At cap (${MAX_USER_PRESETS}) — delete one first`
-            : 'Save the current bindings as a reusable bundle'}
-          style={{
-            marginTop: userPresets.length > 0 ? 8 : 6,
-            padding: '5px 9px', borderRadius: 6, fontSize: 11, fontWeight: 550,
-            cursor: atCap ? 'not-allowed' : 'pointer',
-            background: atCap ? 'rgba(255,255,255,0.03)' : 'rgba(236,72,153,0.08)',
-            color: atCap ? '#5a5a70' : '#fbcfe8',
-            border: atCap ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(236,72,153,0.25)',
-            display: 'inline-flex', alignItems: 'center', gap: 5, fontFamily: 'inherit',
-          }}>
-          <Save size={10} strokeWidth={2.4} />
-          {atCap ? `Bundle cap reached (${MAX_USER_PRESETS})` : 'Save current as bundle'}
-        </button>
+        <div style={{
+          marginTop: userPresets.length > 0 ? 8 : 6,
+          display: 'flex', gap: 6, flexWrap: 'wrap',
+        }}>
+          <button onClick={onStartSave}
+            disabled={atCap}
+            title={atCap
+              ? `At cap (${MAX_USER_PRESETS}) — delete one first`
+              : 'Save the current bindings as a reusable bundle'}
+            style={{
+              padding: '5px 9px', borderRadius: 6, fontSize: 11, fontWeight: 550,
+              cursor: atCap ? 'not-allowed' : 'pointer',
+              background: atCap ? 'rgba(255,255,255,0.03)' : 'rgba(236,72,153,0.08)',
+              color: atCap ? '#5a5a70' : '#fbcfe8',
+              border: atCap ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(236,72,153,0.25)',
+              display: 'inline-flex', alignItems: 'center', gap: 5, fontFamily: 'inherit',
+            }}>
+            <Save size={10} strokeWidth={2.4} />
+            {atCap ? `Bundle cap reached (${MAX_USER_PRESETS})` : 'Save current as bundle'}
+          </button>
+          {/* R14.17 — import a bundle from a JSON file. Same cap-disable
+              behaviour so the import doesn't silently FIFO-drop an
+              existing bundle the user might still want. */}
+          {onImportUser && (
+            <button onClick={onImportUser}
+              disabled={atCap}
+              title={atCap
+                ? `At cap (${MAX_USER_PRESETS}) — delete one first`
+                : 'Import a bundle JSON file (from another machine or a collaborator)'}
+              style={{
+                padding: '5px 9px', borderRadius: 6, fontSize: 11, fontWeight: 550,
+                cursor: atCap ? 'not-allowed' : 'pointer',
+                background: atCap ? 'rgba(255,255,255,0.03)' : 'rgba(99,102,241,0.10)',
+                color: atCap ? '#5a5a70' : '#c7d2fe',
+                border: atCap ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(99,102,241,0.25)',
+                display: 'inline-flex', alignItems: 'center', gap: 5, fontFamily: 'inherit',
+              }}>
+              <Upload size={10} strokeWidth={2.4} />
+              Import bundle
+            </button>
+          )}
+        </div>
       )}
     </div>
   )
