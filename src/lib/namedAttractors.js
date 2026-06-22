@@ -366,6 +366,40 @@ export function moveAttractorTo1BasedPosition(list, id, position1Based) {
   return moveAttractorByIndex(list, idx, targetIdx)
 }
 
+// R19.19 — gap-drop helper. The drag-and-drop reorder shipped in
+// R18.19 only accepts drops ON rows (target = the row's slot). This
+// graduates the gesture: the LeftSidebar now renders thin gap-drop
+// zones BETWEEN rows so a user can drop EXACTLY into a target slot
+// (insert semantics) rather than swap with a specific row. The
+// math:
+//
+//   - gapIdx == 0           → insert above row 0 (new position 0)
+//   - gapIdx == i           → insert between row i-1 and row i
+//   - gapIdx == list.length → insert below the last row (move to end)
+//
+// `from` is the dragged row's current 0-based index. moveAttractorBy-
+// Index removes the row first then re-inserts at the target index,
+// so when `from < gapIdx` every index above `from` shifts down by
+// one after the remove — the insertion index becomes gapIdx - 1.
+// When `from >= gapIdx` no shift happens, so insertion = gapIdx.
+//
+// Returns the destination 0-based index OR null when the gesture
+// is a no-op (the dragged row would land in its current slot —
+// either gap above OR gap below itself).
+//
+// Pure / null-safe so the UI's gap-drop handler can stay tidy.
+export function dropIndexForGap(from, gapIdx, listLength) {
+  if (!Number.isFinite(from) || !Number.isFinite(gapIdx) || !Number.isFinite(listLength)) return null
+  if (listLength <= 0) return null
+  if (from < 0 || from >= listLength) return null
+  if (gapIdx < 0 || gapIdx > listLength) return null
+  // No-op cases: dropping the row into its own slot.
+  // - gapIdx === from     → "insert above myself" → still at `from`
+  // - gapIdx === from + 1 → "insert below myself" → still at `from`
+  if (gapIdx === from || gapIdx === from + 1) return null
+  return from < gapIdx ? gapIdx - 1 : gapIdx
+}
+
 // R16.18 — pure helper for the inline numeric input's parse step.
 // Returns the parsed 1-based integer position OR null if the input
 // is unusable (empty, NaN, ≤ 0). Keeps the UI's parse logic in one

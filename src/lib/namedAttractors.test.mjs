@@ -18,6 +18,8 @@ import {
   moveAttractorTo1BasedPosition, parsePositionInput,
   // R17.17 — bulk-delete by id collection
   removeAttractors,
+  // R19.19 — gap-drop helper for insert-here semantics
+  dropIndexForGap,
 } from './namedAttractors.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -598,3 +600,125 @@ console.log(`PASS: namedAttractors — types/clamps, normalize (full/defaults/en
     deepEq(list, before, 'input list not mutated')
   }
 }
+
+// --- R19.19: dropIndexForGap — gap-drop insert-here semantics ---
+//
+// Helper that maps "user dropped row N into gap G" → destination 0-based
+// index for moveAttractorByIndex. The math accounts for moveAttractorBy-
+// Index's remove-then-insert ordering: dropping a row that's ABOVE its
+// target gap means every index above the original `from` shifts down
+// after the remove, so the insertion index needs to be gapIdx - 1.
+
+// Visualising a 5-item list [a, b, c, d, e]:
+//   gap 0 | a | gap 1 | b | gap 2 | c | gap 3 | d | gap 4 | e | gap 5
+{
+  const N = 5
+
+  // Dropping `b` (idx 1) into gap 4 should land at idx 3 (between c and d).
+  // After remove: [a, c, d, e] (length 4)
+  // After insert at idx 3: [a, c, d, b, e]
+  eq(dropIndexForGap(1, 4, N), 3, 'move-down: insert at gapIdx - 1 due to shift')
+
+  // Dropping `d` (idx 3) into gap 1 should land at idx 1 (between a and b).
+  // After remove: [a, b, c, e] (length 4)
+  // After insert at idx 1: [a, d, b, c, e]
+  eq(dropIndexForGap(3, 1, N), 1, 'move-up: insert at gapIdx (no shift since from > gap)')
+
+  // Dropping `a` (idx 0) into gap 5 (end) should land at idx 4 (last slot).
+  // After remove: [b, c, d, e] (length 4)
+  // After insert at idx 4: [b, c, d, e, a]
+  eq(dropIndexForGap(0, 5, N), 4, 'move-to-end: gapIdx 5 → insert at 4 after remove')
+
+  // Dropping `e` (idx 4) into gap 0 (top) should land at idx 0.
+  // After remove: [a, b, c, d] (length 4)
+  // After insert at idx 0: [e, a, b, c, d]
+  eq(dropIndexForGap(4, 0, N), 0, 'move-to-top: gapIdx 0 → insert at 0')
+}
+
+// No-op cases: dropping a row into its own slot returns null.
+{
+  const N = 5
+  // Dropping `b` (idx 1) into the gap directly above itself (gap 1)
+  // would land at the same position — true no-op.
+  eq(dropIndexForGap(1, 1, N), null, 'gap above self → null (no-op)')
+  // Dropping `b` (idx 1) into the gap directly below itself (gap 2)
+  // would also land at the same position.
+  eq(dropIndexForGap(1, 2, N), null, 'gap below self → null (no-op)')
+  // First row dropping into gap 0 (above) or gap 1 (below) → no-op.
+  eq(dropIndexForGap(0, 0, N), null, 'top row + gap 0 → null')
+  eq(dropIndexForGap(0, 1, N), null, 'top row + gap 1 → null')
+  // Last row dropping into gap N-1 (above) or gap N (below) → no-op.
+  eq(dropIndexForGap(4, 4, N), null, 'bottom row + gap N-1 → null')
+  eq(dropIndexForGap(4, 5, N), null, 'bottom row + gap N → null')
+}
+
+// Adjacent neighbour swaps land in the expected slot.
+{
+  const N = 5
+  // `b` (idx 1) → gap 3 (between c and d): no shift? from=1 < gap=3,
+  // so insert at gap-1 = 2 (between b's original neighbour c and d).
+  // After remove: [a, c, d, e]; insert at 2: [a, c, b, d, e].
+  eq(dropIndexForGap(1, 3, N), 2, 'b → gap 3 lands between c and d')
+  // `c` (idx 2) → gap 1 (between a and b): from=2 >= gap=1, no shift,
+  // insert at 1. After remove: [a, b, d, e]; insert at 1: [a, c, b, d, e].
+  eq(dropIndexForGap(2, 1, N), 1, 'c → gap 1 lands between a and b')
+}
+
+// Defensive: out-of-range inputs return null without crashing.
+{
+  const N = 5
+  eq(dropIndexForGap(-1, 2, N), null, 'negative from → null')
+  eq(dropIndexForGap(99, 2, N), null, 'from out of range → null')
+  eq(dropIndexForGap(2, -1, N), null, 'negative gapIdx → null')
+  eq(dropIndexForGap(2, 99, N), null, 'gapIdx out of range → null')
+  eq(dropIndexForGap(NaN, 2, N), null, 'NaN from → null')
+  eq(dropIndexForGap(2, NaN, N), null, 'NaN gapIdx → null')
+  eq(dropIndexForGap(2, 2, NaN), null, 'NaN length → null')
+  eq(dropIndexForGap(2, 2, 0), null, 'zero-length list → null')
+  eq(dropIndexForGap(2, 2, -3), null, 'negative length → null')
+}
+
+// Single-item list: every gesture is a no-op (no other slot to land in).
+{
+  const N = 1
+  eq(dropIndexForGap(0, 0, N), null, 'single item + gap 0 → null')
+  eq(dropIndexForGap(0, 1, N), null, 'single item + gap 1 → null')
+}
+
+// Full sweep invariant: every NON-no-op result lands at a valid 0-based
+// index < listLength when fed through moveAttractorByIndex. Use a real
+// list + moveAttractorByIndex to verify the post-state matches the
+// expected order.
+{
+  const list = [
+    { id: 'attr-1', type: 'attractor', name: 'A', strength: 1, position: [0,0,0], radius: 10, enabled: true },
+    { id: 'attr-2', type: 'attractor', name: 'B', strength: 1, position: [0,0,0], radius: 10, enabled: true },
+    { id: 'attr-3', type: 'attractor', name: 'C', strength: 1, position: [0,0,0], radius: 10, enabled: true },
+    { id: 'attr-4', type: 'attractor', name: 'D', strength: 1, position: [0,0,0], radius: 10, enabled: true },
+    { id: 'attr-5', type: 'attractor', name: 'E', strength: 1, position: [0,0,0], radius: 10, enabled: true },
+  ]
+  const N = list.length
+
+  // Dropping `B` (idx 1) into gap 4 → expected order [A, C, D, B, E].
+  const r1 = moveAttractorByIndex(list, 1, dropIndexForGap(1, 4, N))
+  eq(r1[0].id, 'attr-1', 'sweep B→gap4: A still first')
+  eq(r1[1].id, 'attr-3', 'sweep B→gap4: C second')
+  eq(r1[2].id, 'attr-4', 'sweep B→gap4: D third')
+  eq(r1[3].id, 'attr-2', 'sweep B→gap4: B fourth')
+  eq(r1[4].id, 'attr-5', 'sweep B→gap4: E last')
+
+  // Dropping `D` (idx 3) into gap 1 → expected order [A, D, B, C, E].
+  const r2 = moveAttractorByIndex(list, 3, dropIndexForGap(3, 1, N))
+  eq(r2[0].id, 'attr-1', 'sweep D→gap1: A first')
+  eq(r2[1].id, 'attr-4', 'sweep D→gap1: D second')
+  eq(r2[2].id, 'attr-2', 'sweep D→gap1: B third')
+  eq(r2[3].id, 'attr-3', 'sweep D→gap1: C fourth')
+  eq(r2[4].id, 'attr-5', 'sweep D→gap1: E last')
+
+  // Dropping `A` (idx 0) into gap 5 (end) → expected order [B, C, D, E, A].
+  const r3 = moveAttractorByIndex(list, 0, dropIndexForGap(0, 5, N))
+  eq(r3[4].id, 'attr-1', 'sweep A→end: A last')
+  eq(r3[0].id, 'attr-2', 'sweep A→end: B first')
+}
+
+console.log('PASS: namedAttractors R19.19 dropIndexForGap — gap-drop insert-here semantics, no-op cases, defensive, sweep invariant')

@@ -32,7 +32,7 @@ import {
   mergeImport as mergeCrossfadeOverridesImport,
   summarizeImportImpact as summarizeCrossfadeOverridesImpact,
 } from '../lib/crossfadeOverridesIO'
-import { ATTRACTOR_TYPES, MAX_ATTRACTORS, attractorTypeStyle, parsePositionInput } from '../lib/namedAttractors'
+import { ATTRACTOR_TYPES, MAX_ATTRACTORS, attractorTypeStyle, parsePositionInput, dropIndexForGap } from '../lib/namedAttractors'
 import { showToast } from './Toast'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
@@ -3041,6 +3041,18 @@ function NamedAttractorsBlock() {
   // RightSidebar.jsx R17.07).
   const [draggingIdx, setDraggingIdx] = useState(null)
   const [dragOverIdx, setDragOverIdx] = useState(null)
+  // R19.19 — gap-drop state. When the user drags a row over the
+  // empty space BETWEEN two rows (or above the first row, or
+  // below the last), gapOverIdx records which gap is being hovered:
+  //   - gapOverIdx = 0 → above row 0 (insert at position 0)
+  //   - gapOverIdx = i → between row i-1 and row i (insert at position i)
+  //   - gapOverIdx = list.length → below the last row (insert at end)
+  // The gap is intent-distinct from a row drop: gap-drop = "insert
+  // here", row-drop = "swap with this position". Both call
+  // moveToPosition(id, targetIdx + 1) under the hood since position
+  // semantics fold "insert at N" and "swap with N" into the same
+  // 1-based index.
+  const [gapOverIdx, setGapOverIdx] = useState(null)
   const onDragStart = (idx) => (e) => {
     setDraggingIdx(idx)
     try { e.dataTransfer.setData('text/plain', String(idx)) } catch { /* */ }
@@ -3052,6 +3064,9 @@ function NamedAttractorsBlock() {
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
     if (dragOverIdx !== idx) setDragOverIdx(idx)
+    // Entering a row clears any gap hover — they're mutually exclusive
+    // intents so the visual indicators don't double up.
+    if (gapOverIdx !== null) setGapOverIdx(null)
   }
   const onDragLeave = (idx) => () => {
     // Clear the highlight only if we're leaving the SAME row that's
@@ -3065,6 +3080,7 @@ function NamedAttractorsBlock() {
     const from = draggingIdx
     setDraggingIdx(null)
     setDragOverIdx(null)
+    setGapOverIdx(null)
     if (from === null || from === undefined) return
     if (from === idx) return  // self-drop is a no-op
     // moveAttractorByIndex is the same primitive R15.20's
@@ -3076,6 +3092,36 @@ function NamedAttractorsBlock() {
   const onDragEnd = () => {
     setDraggingIdx(null)
     setDragOverIdx(null)
+    setGapOverIdx(null)
+  }
+  // R19.19 — gap-zone drag handlers. Same dataTransfer.dropEffect
+  // dance as the row handler, but with index-into-the-LIST (where
+  // to splice the dragged row in) rather than index-of-the-target-
+  // ROW. The gap clears any row hover so the visual indicator
+  // doesn't double up.
+  const onGapDragOver = (gapIdx) => (e) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (gapOverIdx !== gapIdx) setGapOverIdx(gapIdx)
+    if (dragOverIdx !== null) setDragOverIdx(null)
+  }
+  const onGapDragLeave = (gapIdx) => () => {
+    setGapOverIdx(prev => (prev === gapIdx ? null : prev))
+  }
+  const onGapDrop = (gapIdx) => (e) => {
+    e.preventDefault()
+    const from = draggingIdx
+    setDraggingIdx(null)
+    setDragOverIdx(null)
+    setGapOverIdx(null)
+    if (from === null || from === undefined) return
+    // R19.19 — dropIndexForGap encapsulates the splice-bookkeeping
+    // math + the no-op cases (dropping into own slot — either gap
+    // above or gap below the dragged row). Returns null on no-op
+    // so the store call below short-circuits cleanly.
+    const insertIdx = dropIndexForGap(from, gapIdx, list.length)
+    if (insertIdx === null) return
+    moveToPosition(list[from].id, insertIdx + 1)
   }
 
   return (
@@ -3166,6 +3212,8 @@ function NamedAttractorsBlock() {
           hasSelection={validSelectedIds.size > 0}
           isBeingDragged={draggingIdx === idx}
           isDropTarget={dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx}
+          gapAboveActive={list.length > 1 && draggingIdx !== null && gapOverIdx === idx
+            && draggingIdx !== idx && draggingIdx !== idx - 1}
           onShiftClickSelect={() => toggleSelect(a.id)}
           onRename={(name) => update(a.id, { name })}
           onTypeChange={(type) => update(a.id, { type })}
@@ -3182,8 +3230,34 @@ function NamedAttractorsBlock() {
           onDragLeave={list.length > 1 ? onDragLeave(idx) : null}
           onDrop={list.length > 1 ? onDrop(idx) : null}
           onDragEnd={list.length > 1 ? onDragEnd : null}
+          onGapDragOver={list.length > 1 ? onGapDragOver(idx) : null}
+          onGapDragLeave={list.length > 1 ? onGapDragLeave(idx) : null}
+          onGapDrop={list.length > 1 ? onGapDrop(idx) : null}
         />
       ))}
+      {/* R19.19 — trailing gap below the last row so dropping past
+          the last attractor inserts at the end. Only renders during
+          an active drag so the layout stays compact at rest. */}
+      {list.length > 1 && draggingIdx !== null && (
+        <div
+          onDragOver={onGapDragOver(list.length)}
+          onDragLeave={onGapDragLeave(list.length)}
+          onDrop={onGapDrop(list.length)}
+          style={{
+            height: gapOverIdx === list.length ? 32 : 10,
+            marginTop: 2,
+            borderRadius: 5,
+            background: gapOverIdx === list.length
+              ? 'linear-gradient(90deg, rgba(99,102,241,0.18), rgba(168,85,247,0.12))'
+              : 'transparent',
+            border: gapOverIdx === list.length
+              ? '1px dashed rgba(99,102,241,0.55)'
+              : '1px dashed transparent',
+            transition: 'height 0.12s ease-out, background 0.12s ease-out, border-color 0.12s ease-out',
+          }}
+          title="Drop here to move to end of list"
+        />
+      )}
     </div>
   )
 }
@@ -3192,6 +3266,11 @@ function NamedAttractorRow({
   index, total, attractor, isPlacing,
   isSelected, hasSelection, onShiftClickSelect,
   isBeingDragged, isDropTarget,
+  // R19.19 — gap-above-this-row drop zone state + handlers. When
+  // gapAboveActive is true the gap renders an indigo dashed strip
+  // ~22px tall so a row drag can drop precisely into the slot
+  // between this row and the previous one.
+  gapAboveActive, onGapDragOver, onGapDragLeave, onGapDrop,
   onRename, onTypeChange, onStrengthChange, onRadiusChange,
   onToggle, onRemove, onPlace, onMoveUp, onMoveDown, onJumpToPosition,
   onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd,
@@ -3248,6 +3327,37 @@ function NamedAttractorRow({
   }
 
   return (
+    <>
+      {/* R19.19 — gap-above-this-row drop zone. Renders inert at 6px
+          tall by default (visually invisible thin spacer between rows)
+          but expands to ~22px with an indigo dashed strip when a drag
+          is active AND this gap is the hovered target. The expand-on-
+          hover gives the user a much larger landing target than a
+          1px line would while keeping the at-rest layout tidy. */}
+      {onGapDragOver && (
+        <div
+          onDragOver={onGapDragOver}
+          onDragLeave={onGapDragLeave}
+          onDrop={onGapDrop}
+          style={{
+            height: gapAboveActive ? 22 : 6,
+            margin: '-2px 0',
+            borderRadius: 5,
+            background: gapAboveActive
+              ? 'linear-gradient(90deg, rgba(99,102,241,0.18), rgba(168,85,247,0.12))'
+              : 'transparent',
+            border: gapAboveActive
+              ? '1px dashed rgba(99,102,241,0.55)'
+              : '1px dashed transparent',
+            transition: 'height 0.12s ease-out, background 0.12s ease-out, border-color 0.12s ease-out',
+            // The gap needs to fire drag events even when not hovered
+            // (otherwise the user has to land in the strip exactly,
+            // which is impossible at 6px). pointerEvents stay on at
+            // all times; the visual indicator only changes.
+          }}
+          title={`Drop here to insert at position ${index + 1}`}
+        />
+      )}
     <div
       onMouseDown={onRowMouseDown}
       draggable={!!onDragStart && !editing && !editingPos}
@@ -3562,5 +3672,6 @@ function NamedAttractorRow({
         </span>
       </div>
     </div>
+    </>
   )
 }
