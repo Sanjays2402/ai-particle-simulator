@@ -12,6 +12,10 @@ import {
   addUserPreset, removeUserPreset, isUserPresetId,
   // R14.18 — rename in place
   renameUserPreset,
+  // R16.19 — per-bundle colour tag
+  USER_PRESET_COLORS, DEFAULT_USER_PRESET_COLOR,
+  isValidUserPresetColor, sanitizeUserPresetColor,
+  userPresetColorStyle, setUserPresetColor,
 } from './midiPresets.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -352,4 +356,135 @@ for (const p of MIDI_PRESETS) {
   delete globalThis.localStorage
 }
 
-console.log(`PASS: midiPresets — ${MIDI_PRESETS.length} shipped + user bundle editor (build/add/remove/load/save, cap ${MAX_USER_PRESETS}) + R14.18 rename (success/blank-rejects/missing-id/non-array-defensive/truncation/custom-desc-preserved/multi-entry-targeted/save-load-roundtrip)`)
+console.log(`PASS: midiPresets — ${MIDI_PRESETS.length} shipped + user bundle editor (build/add/remove/load/save, cap ${MAX_USER_PRESETS}) + R14.18 rename (success/blank-rejects/missing-id/non-array-defensive/truncation/custom-desc-preserved/multi-entry-targeted/save-load-roundtrip) + R16.19 colour tag (${USER_PRESET_COLORS.length} colours, default ${DEFAULT_USER_PRESET_COLOR})`)
+
+// --- R16.19: per-bundle colour tag ---
+
+// Palette roster
+eq(USER_PRESET_COLORS.length, 8, '8 colour tags shipped')
+ok(USER_PRESET_COLORS.includes(DEFAULT_USER_PRESET_COLOR), 'default is in the roster')
+eq(USER_PRESET_COLORS[0], DEFAULT_USER_PRESET_COLOR, 'default at index 0 (so older bundles upgrade silently)')
+
+// isValidUserPresetColor — defensive
+for (const c of USER_PRESET_COLORS) {
+  ok(isValidUserPresetColor(c), `${c} is valid`)
+}
+ok(!isValidUserPresetColor('rainbow'), 'unknown name rejected')
+ok(!isValidUserPresetColor(''), 'empty string rejected')
+ok(!isValidUserPresetColor(null), 'null rejected')
+ok(!isValidUserPresetColor(undefined), 'undefined rejected')
+ok(!isValidUserPresetColor(123), 'number rejected')
+ok(!isValidUserPresetColor('PINK'), 'case-sensitive — uppercase rejected')
+
+// sanitizeUserPresetColor — unknown → default
+eq(sanitizeUserPresetColor('cyan'),    'cyan',                       'known cyan passes through')
+eq(sanitizeUserPresetColor('rainbow'), DEFAULT_USER_PRESET_COLOR,    'unknown → default')
+eq(sanitizeUserPresetColor(null),      DEFAULT_USER_PRESET_COLOR,    'null → default')
+eq(sanitizeUserPresetColor(),          DEFAULT_USER_PRESET_COLOR,    'undefined → default')
+eq(sanitizeUserPresetColor(''),        DEFAULT_USER_PRESET_COLOR,    'empty string → default')
+
+// userPresetColorStyle — every colour returns a complete bundle
+for (const c of USER_PRESET_COLORS) {
+  const s = userPresetColorStyle(c)
+  ok(typeof s.accent    === 'string' && s.accent.startsWith('#'),  `${c}: accent hex set`)
+  ok(typeof s.accentRgb === 'string' && s.accentRgb.includes(','), `${c}: accentRgb r,g,b set`)
+  ok(typeof s.border      === 'string', `${c}: border string set`)
+  ok(typeof s.borderSoft  === 'string', `${c}: borderSoft set`)
+  ok(typeof s.borderFaint === 'string', `${c}: borderFaint set`)
+  ok(typeof s.bg          === 'string', `${c}: bg set`)
+  ok(typeof s.bgSoft      === 'string', `${c}: bgSoft set`)
+  ok(typeof s.fg          === 'string', `${c}: fg set`)
+  ok(typeof s.fgMuted     === 'string', `${c}: fgMuted set`)
+  ok(typeof s.glow        === 'string', `${c}: glow set`)
+}
+// Unknown / null defensive — fall back to default's style.
+{
+  const def = userPresetColorStyle(DEFAULT_USER_PRESET_COLOR)
+  const oops = userPresetColorStyle('rainbow')
+  eq(oops.accent, def.accent, 'unknown colour style returns default bundle')
+  const nullS = userPresetColorStyle(null)
+  eq(nullS.accent, def.accent, 'null colour style returns default bundle')
+}
+
+// Every colour produces a UNIQUE accent — no visual aliasing.
+{
+  const accents = new Set(USER_PRESET_COLORS.map(c => userPresetColorStyle(c).accent))
+  eq(accents.size, USER_PRESET_COLORS.length, 'all 8 accents are unique')
+}
+
+// buildUserPresetFromMap sets the default colour on a fresh bundle.
+{
+  const built = buildUserPresetFromMap('test', { '21': 'speed' }, [])
+  ok(built && typeof built === 'object', 'build returned object')
+  eq(built.color, DEFAULT_USER_PRESET_COLOR, 'newly-built bundle uses the default colour')
+}
+
+// setUserPresetColor — success / no-op / defensive
+{
+  const a = { id: 'user-1', name: 'A', map: { '21': 'speed' }, vendor: 'Custom', description: 'x', color: 'pink', createdAt: 1 }
+  const b = { id: 'user-2', name: 'B', map: { '22': 'glow' },  vendor: 'Custom', description: 'y', color: 'pink', createdAt: 2 }
+  const list = [a, b]
+
+  // Happy: change a's colour to cyan.
+  const next = setUserPresetColor(list, 'user-1', 'cyan')
+  if (next === list) fail('setUserPresetColor: changing colour must return a NEW array ref')
+  eq(next.length, 2, 'list length preserved')
+  eq(next[0].color, 'cyan', 'colour applied to targeted entry')
+  eq(next[0].name,  'A',    'name preserved')
+  eq(next[0].map['21'], 'speed', 'map preserved')
+  eq(next[1].color, 'pink', 'other entry untouched')
+  // Original untouched.
+  eq(list[0].color, 'pink', 'original entry not mutated')
+
+  // No-op: same colour returns input ref.
+  eq(setUserPresetColor(list, 'user-1', 'pink'), list, 'same colour → input ref (no-op)')
+
+  // No-op: missing id returns input ref.
+  eq(setUserPresetColor(list, 'user-99', 'cyan'), list, 'missing id → input ref')
+
+  // No-op: invalid colour returns input ref.
+  eq(setUserPresetColor(list, 'user-1', 'rainbow'), list, 'invalid colour → input ref')
+  eq(setUserPresetColor(list, 'user-1', ''),         list, 'empty colour → input ref')
+  eq(setUserPresetColor(list, 'user-1', null),       list, 'null colour → input ref')
+
+  // Defensive: bad list.
+  eq(setUserPresetColor(null,      'user-1', 'cyan'), null,      'null list → null')
+  eq(setUserPresetColor(undefined, 'user-1', 'cyan'), undefined, 'undefined list → undefined')
+  eq(setUserPresetColor('string',  'user-1', 'cyan'), 'string',  'non-array → input ref')
+
+  // Defensive: bad id.
+  eq(setUserPresetColor(list, '',   'cyan'), list, 'empty id → input ref')
+  eq(setUserPresetColor(list, null, 'cyan'), list, 'null id → input ref')
+}
+
+// load/save round-trip preserves the colour field (full envelope path).
+{
+  const store = new Map()
+  globalThis.localStorage = {
+    getItem: k => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => { store.set(k, String(v)) },
+    removeItem: k => { store.delete(k) },
+    clear: () => store.clear(),
+  }
+  const list = [
+    { id: 'user-1', name: 'A', map: { '21': 'speed' }, vendor: 'Custom', description: 'x', color: 'cyan',    createdAt: 1 },
+    { id: 'user-2', name: 'B', map: { '22': 'glow'  }, vendor: 'Custom', description: 'y', color: 'emerald', createdAt: 2 },
+    { id: 'user-3', name: 'C', map: { '23': 'speed' }, vendor: 'Custom', description: 'z' /* no color */,    createdAt: 3 },
+  ]
+  saveUserPresets(list)
+  const loaded = loadUserPresets()
+  eq(loaded.length, 3, 'loaded all three')
+  eq(loaded[0].color, 'cyan',                       'cyan colour round-tripped')
+  eq(loaded[1].color, 'emerald',                    'emerald colour round-tripped')
+  eq(loaded[2].color, DEFAULT_USER_PRESET_COLOR,    'missing colour → default (legacy upgrade)')
+
+  // Corrupt colour in storage should also upgrade to default.
+  store.set(STORAGE_KEY_USER_PRESETS, JSON.stringify({
+    v: 1, items: [{ id: 'user-1', name: 'bad', map: { '21': 'speed' }, color: 'rainbow' }],
+  }))
+  const loadedBad = loadUserPresets()
+  eq(loadedBad.length, 1,                              'bad colour didn\'t reject the bundle')
+  eq(loadedBad[0].color, DEFAULT_USER_PRESET_COLOR,   'bad colour → default on load')
+
+  delete globalThis.localStorage
+}

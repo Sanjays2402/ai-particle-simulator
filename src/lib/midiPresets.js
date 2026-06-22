@@ -151,6 +151,79 @@ export const STORAGE_KEY_USER_PRESETS = 'particle-midi-user-presets-v1'
 export const MAX_USER_PRESETS = 8
 const USER_PRESET_PREFIX = 'user-'
 
+// R16.19 — per-bundle COLOR tag. Users can choose a colour for each
+// user-authored bundle's chip; gives visual sort beyond just the name
+// when 8 bundles share the chip bar. The palette intentionally
+// matches accents already used elsewhere in the app (pink/violet/
+// indigo/cyan/emerald/amber/rose/slate) so the chips look at home in
+// the existing UI language. 'pink' is the default — matches the
+// existing shipped user-bundle chip accent in PresetBar so adopting
+// the colour tag costs nothing for a saved-but-unchanged bundle.
+export const USER_PRESET_COLORS = ['pink', 'violet', 'indigo', 'cyan', 'emerald', 'amber', 'rose', 'slate']
+export const DEFAULT_USER_PRESET_COLOR = 'pink'
+
+export const USER_PRESET_COLOR_STYLES = {
+  pink:    { accent: '#ec4899', accentRgb: '236,72,153' },
+  violet:  { accent: '#a855f7', accentRgb: '168,85,247' },
+  indigo:  { accent: '#6366f1', accentRgb: '99,102,241' },
+  cyan:    { accent: '#06b6d4', accentRgb: '6,182,212' },
+  emerald: { accent: '#10b981', accentRgb: '16,185,129' },
+  amber:   { accent: '#f59e0b', accentRgb: '245,158,11' },
+  rose:    { accent: '#f43f5e', accentRgb: '244,63,94' },
+  slate:   { accent: '#64748b', accentRgb: '100,116,139' },
+}
+
+// True when `c` is a recognised colour tag (case-sensitive lowercase).
+// Defensive sanitizer for any persisted-but-out-of-roster value.
+export function isValidUserPresetColor(c) {
+  return typeof c === 'string' && USER_PRESET_COLORS.includes(c)
+}
+
+// Sanitiser used by load/save — unknown → default so legacy bundles
+// upgrade silently and a typo in the JSON doesn't break a chip.
+export function sanitizeUserPresetColor(c) {
+  return isValidUserPresetColor(c) ? c : DEFAULT_USER_PRESET_COLOR
+}
+
+// Pre-built CSS-ready style bundle for a colour tag. Matches the
+// shape of attractorTypeStyle in namedAttractors.js — same opacity
+// stops so the new colour chips drop into the existing design
+// language without adjusting alpha math at the callsite.
+export function userPresetColorStyle(color) {
+  const base = USER_PRESET_COLOR_STYLES[sanitizeUserPresetColor(color)]
+  const rgb = base.accentRgb
+  return {
+    accent:    base.accent,
+    accentRgb: rgb,
+    border:      `rgba(${rgb},0.45)`,
+    borderSoft:  `rgba(${rgb},0.30)`,
+    borderFaint: `rgba(${rgb},0.18)`,
+    bg:          `rgba(${rgb},0.16)`,
+    bgSoft:      `rgba(${rgb},0.08)`,
+    fg:          base.accent,
+    fgMuted:     `rgba(${rgb},0.75)`,
+    glow:        `0 0 12px rgba(${rgb},0.25)`,
+  }
+}
+
+// R16.19 — set a user bundle's colour tag in place by id. Returns
+// a NEW array (matching the rename/move family contract) OR the
+// input ref on no-op (already at this colour / missing id / invalid
+// colour). Caller persists via saveUserPresets.
+export function setUserPresetColor(list, id, color) {
+  if (!Array.isArray(list) || !id) return list
+  if (!isValidUserPresetColor(color)) return list
+  let changed = false
+  const next = list.map(p => {
+    if (!p || p.id !== id) return p
+    const current = sanitizeUserPresetColor(p.color)
+    if (current === color) return p
+    changed = true
+    return { ...p, color }
+  })
+  return changed ? next : list
+}
+
 // Load + sanitize the persisted user-preset list. Drops any entry
 // that fails the same validateMap gate as shipped bundles.
 export function loadUserPresets() {
@@ -175,6 +248,8 @@ export function loadUserPresets() {
         description: typeof item.description === 'string' ? item.description.slice(0, 80) : 'Custom bundle',
         vendor: 'Custom',
         map,
+        // R16.19 — colour tag for the chip; missing/invalid → DEFAULT.
+        color: sanitizeUserPresetColor(item.color),
         createdAt: typeof item.createdAt === 'number' ? item.createdAt : Date.now(),
       })
       if (out.length >= MAX_USER_PRESETS) break
@@ -198,6 +273,8 @@ export function saveUserPresets(list) {
           description: typeof p.description === 'string' ? p.description.slice(0, 80) : 'Custom bundle',
           vendor: 'Custom',
           map,
+          // R16.19 — colour tag; missing/invalid → DEFAULT.
+          color: sanitizeUserPresetColor(p.color),
           createdAt: typeof p.createdAt === 'number' ? p.createdAt : Date.now(),
         }
       })
@@ -257,6 +334,10 @@ export function buildUserPresetFromMap(name, currentMap, existing = [], nowMs = 
     description: `${Object.keys(cleanMap).length} binding${Object.keys(cleanMap).length === 1 ? '' : 's'} saved ${new Date(nowMs).toISOString().slice(0, 10)}`,
     vendor: 'Custom',
     map: cleanMap,
+    // R16.19 — start every new bundle on the default colour so a
+    // user who never visits the colour-tag picker still gets the
+    // same pink chips the original shipped behaviour painted.
+    color: DEFAULT_USER_PRESET_COLOR,
     createdAt: nowMs,
   }
 }

@@ -11,6 +11,8 @@ import {
   buildUserPresetFromMap, addUserPreset, removeUserPreset,
   // R14.18 — rename in place
   renameUserPreset,
+  // R16.19 — per-bundle colour tag
+  setUserPresetColor, userPresetColorStyle, USER_PRESET_COLORS, DEFAULT_USER_PRESET_COLOR,
   MAX_USER_PRESETS,
 } from '../lib/midiPresets'
 import {
@@ -193,6 +195,17 @@ export default function MidiPanel({ open, onClose }) {
   // ref actually changed.
   const renameUserBundle = (id, newName) => {
     const next = renameUserPreset(userPresets, id, newName)
+    if (next === userPresets) return false
+    setUserPresets(next)
+    saveUserPresets(next)
+    return true
+  }
+
+  // R16.19 — set the colour tag for a user bundle. Mirrors the
+  // rename handler shape (ref-equal-on-no-op skip), so re-clicking
+  // the active swatch is free.
+  const setUserBundleColor = (id, color) => {
+    const next = setUserPresetColor(userPresets, id, color)
     if (next === userPresets) return false
     setUserPresets(next)
     saveUserPresets(next)
@@ -419,6 +432,7 @@ export default function MidiPanel({ open, onClose }) {
           onImportUser={importUserBundle}
           onExportAllUsers={exportAllUserBundles}
           onImportAllUsers={importAllUserBundles}
+          onSetColorUser={setUserBundleColor}
           savingBundle={savingBundle}
           onStartSave={() => { setSavingBundle(true); setBundleName('') }}
           onCancelSave={() => { setSavingBundle(false); setBundleName('') }}
@@ -710,6 +724,8 @@ function PresetBar({
   onExportUser, onImportUser,
   // R15.14 — multi-bundle (all-in-one) IO
   onExportAllUsers, onImportAllUsers,
+  // R16.19 — per-bundle colour tag
+  onSetColorUser,
   savingBundle, onStartSave, onCancelSave, onCommitBundle,
   bundleName, onBundleNameChange, liveBindingCount,
 }) {
@@ -813,6 +829,7 @@ function PresetBar({
                   onDelete={() => onDeleteUser(p.id)}
                   onRename={onRenameUser ? (newName) => onRenameUser(p.id, newName) : null}
                   onExport={onExportUser ? () => onExportUser(p) : null}
+                  onSetColor={onSetColorUser ? (color) => onSetColorUser(p.id, color) : null}
                 />
               ))}
             </div>
@@ -971,9 +988,14 @@ function PresetBar({
 // NamedAttractorRow in LeftSidebar so the pattern is consistent
 // across the app). Enter saves; Escape cancels; blur saves with
 // fallback-to-cancel when the trimmed name is empty.
-function UserBundleChip({ preset, onApply, onDelete, onRename, onExport }) {
+function UserBundleChip({ preset, onApply, onDelete, onRename, onExport, onSetColor }) {
   const [editing, setEditing] = useState(false)
   const [draftName, setDraftName] = useState(preset.name)
+  // R16.19 — colour palette popover toggle. Local state because the
+  // popover is a tiny in-chip affordance; lifting to the parent for
+  // 8 chips would be 8 conditional renders for no benefit. Click the
+  // swatch to open; click outside (or pick a colour) to close.
+  const [colorOpen, setColorOpen] = useState(false)
   // (No useEffect needed to sync `draftName` ↔ `preset.name`: the
   // onDoubleClick handler re-initializes the draft from preset.name
   // every time editing starts, and the at-rest branch displays
@@ -981,6 +1003,10 @@ function UserBundleChip({ preset, onApply, onDelete, onRename, onExport }) {
   // "preset name changes externally while the input is open" which
   // is vanishingly rare — and dropping the effect keeps us under
   // React Compiler's `react-hooks/set-state-in-effect` purity rule.)
+  // R16.19 — per-bundle colour cue. Pre-built style bundle with all
+  // CSS-ready strings (border, bg, fg, glow) — drops into the chip's
+  // existing border/bg/fg slots without re-deriving alpha math.
+  const colorStyle = userPresetColorStyle(preset.color || DEFAULT_USER_PRESET_COLOR)
 
   const commitRename = () => {
     if (!onRename) { setEditing(false); return }
@@ -1052,9 +1078,10 @@ function UserBundleChip({ preset, onApply, onDelete, onRename, onExport }) {
 
   return (
     <div style={{
+      position: 'relative',
       display: 'inline-flex', alignItems: 'stretch',
-      borderRadius: 6, overflow: 'hidden',
-      border: '1px solid rgba(236,72,153,0.30)',
+      borderRadius: 6, overflow: 'visible',
+      border: `1px solid ${colorStyle.borderSoft}`,
     }}>
       <button
         onClick={(e) => onApply(e.shiftKey ? 'merge' : 'replace')}
@@ -1072,10 +1099,10 @@ function UserBundleChip({ preset, onApply, onDelete, onRename, onExport }) {
         title={`${preset.description} · ${Object.keys(preset.map).length} bindings. Shift-click to merge${onRename ? '. Double-click name to rename' : ''}.`}
         style={{
           padding: '5px 9px', fontSize: 11, cursor: 'pointer',
-          background: 'rgba(236,72,153,0.08)',
-          color: '#fbcfe8',
+          background: colorStyle.bgSoft,
+          color: colorStyle.fg,
           border: 'none',
-          borderRight: '1px solid rgba(236,72,153,0.20)',
+          borderRight: `1px solid ${colorStyle.borderFaint}`,
           display: 'inline-flex', alignItems: 'center', gap: 6,
           fontFamily: 'Geist, system-ui, sans-serif',
           userSelect: 'none', WebkitUserSelect: 'none',
@@ -1084,11 +1111,35 @@ function UserBundleChip({ preset, onApply, onDelete, onRename, onExport }) {
         {preset.name}
         <span style={{
           fontSize: 9, fontFamily: 'Geist Mono, monospace',
-          color: 'rgba(251,207,232,0.7)',
+          color: colorStyle.fgMuted,
         }}>
           {Object.keys(preset.map).length}
         </span>
       </button>
+      {/* R16.19 — colour swatch + popover picker. Tiny round dot in
+          the live accent; click toggles a row of 8 swatches that
+          re-tag the bundle in place. Only renders when onSetColor
+          is wired (parent opts in by passing the handler). */}
+      {onSetColor && (
+        <button
+          onClick={(e) => { e.stopPropagation(); setColorOpen(o => !o) }}
+          title={`Tag colour: ${preset.color || DEFAULT_USER_PRESET_COLOR}. Click to change.`}
+          style={{
+            padding: '0 5px', cursor: 'pointer',
+            background: colorStyle.bgSoft,
+            border: 'none',
+            borderRight: `1px solid ${colorStyle.borderFaint}`,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <span style={{
+            display: 'inline-block', width: 10, height: 10, borderRadius: '50%',
+            background: colorStyle.accent,
+            boxShadow: `0 0 6px rgba(${colorStyle.accentRgb},0.55)`,
+            border: '1px solid rgba(255,255,255,0.18)',
+          }} />
+        </button>
+      )}
       {/* R14.17 — per-bundle Export. Between apply + trash so the
           destructive trash stays the rightmost (least fat-fingerable)
           action. */}
@@ -1113,6 +1164,50 @@ function UserBundleChip({ preset, onApply, onDelete, onRename, onExport }) {
         }}>
         <Trash2 size={10} />
       </button>
+      {/* R16.19 — palette popover. Floats below the chip, dismisses
+          on outside click (handled via the document-level listener
+          below) and on swatch pick. Width sized to fit 8 swatches +
+          gaps in a single row so the popover never wraps. */}
+      {onSetColor && colorOpen && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: 'absolute', top: '100%', left: 0,
+            marginTop: 4, padding: 5,
+            display: 'inline-flex', gap: 5, zIndex: 30,
+            background: 'rgba(10,10,16,0.92)',
+            border: '1px solid rgba(255,255,255,0.10)',
+            borderRadius: 6,
+            boxShadow: '0 8px 28px rgba(0,0,0,0.45)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+          }}
+        >
+          {USER_PRESET_COLORS.map(c => {
+            const s = userPresetColorStyle(c)
+            const active = (preset.color || DEFAULT_USER_PRESET_COLOR) === c
+            return (
+              <button
+                key={c}
+                onClick={() => { onSetColor(c); setColorOpen(false) }}
+                title={c}
+                style={{
+                  width: 16, height: 16, borderRadius: '50%',
+                  background: s.accent,
+                  border: active
+                    ? '2px solid rgba(255,255,255,0.85)'
+                    : '1px solid rgba(255,255,255,0.20)',
+                  boxShadow: active ? `0 0 8px rgba(${s.accentRgb},0.75)` : 'none',
+                  cursor: 'pointer',
+                  padding: 0,
+                  transform: active ? 'scale(1.08)' : 'scale(1)',
+                  transition: 'transform 0.10s ease',
+                }}
+              />
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
