@@ -2790,13 +2790,17 @@ function MidiButton() {
 // with the legacy single field. Each row exposes type chip strip,
 // strength + radius sliders, enabled toggle, place-on-canvas, and
 // a remove button. Add appends a new attractor with defaults; the
-// list caps at MAX_ATTRACTORS.
+// list caps at MAX_ATTRACTORS. R15.20 — rows can also be reordered
+// up/down (the order drives MidiPanel grouping + future drag-handle
+// + scene-bookmark round-trip ordering).
 function NamedAttractorsBlock() {
   const list = useStore(s => s.namedAttractors)
   const add  = useStore(s => s.addNamedAttractor)
   const remove = useStore(s => s.removeNamedAttractor)
   const update = useStore(s => s.updateNamedAttractor)
   const toggle = useStore(s => s.toggleNamedAttractor)
+  const moveUp = useStore(s => s.moveNamedAttractorUp)
+  const moveDown = useStore(s => s.moveNamedAttractorDown)
   const placingId = useStore(s => s.placingAttractorId)
   const setPlacing = useStore(s => s.setPlacingAttractorId)
   const atCap = list.length >= MAX_ATTRACTORS
@@ -2828,6 +2832,7 @@ function NamedAttractorsBlock() {
         <NamedAttractorRow
           key={a.id}
           index={idx}
+          total={list.length}
           attractor={a}
           isPlacing={placingId === a.id}
           onRename={(name) => update(a.id, { name })}
@@ -2837,6 +2842,8 @@ function NamedAttractorsBlock() {
           onToggle={() => toggle(a.id)}
           onRemove={() => remove(a.id)}
           onPlace={() => setPlacing(placingId === a.id ? null : a.id)}
+          onMoveUp={idx > 0 ? () => moveUp(a.id) : null}
+          onMoveDown={idx < list.length - 1 ? () => moveDown(a.id) : null}
         />
       ))}
     </div>
@@ -2844,9 +2851,9 @@ function NamedAttractorsBlock() {
 }
 
 function NamedAttractorRow({
-  index, attractor, isPlacing,
+  index, total, attractor, isPlacing,
   onRename, onTypeChange, onStrengthChange, onRadiusChange,
-  onToggle, onRemove, onPlace,
+  onToggle, onRemove, onPlace, onMoveUp, onMoveDown,
 }) {
   const [editing, setEditing] = useState(false)
   const [draftName, setDraftName] = useState(attractor.name)
@@ -2931,6 +2938,59 @@ function NamedAttractorRow({
           }}>
           {attractor.enabled ? 'On' : 'Off'}
         </button>
+        {/* R15.20 — reorder controls. Only meaningful when there's
+            more than one attractor in the list; we render BOTH
+            arrows whenever total > 1 so the row's button column
+            stays the same width (disabled-but-clickable styling
+            mirrors the camera-path reorder controls). The handlers
+            are nulled by the parent at the boundaries so a wasted
+            store call can't happen. Glyphs are raw Unicode so we
+            don't pull lucide-react into LeftSidebar.jsx for one icon. */}
+        {total > 1 && (
+          <div style={{
+            display: 'inline-flex', flexDirection: 'column', gap: 1,
+            marginRight: 2,
+          }}>
+            <button
+              onClick={onMoveUp || undefined}
+              disabled={!onMoveUp}
+              title={onMoveUp ? 'Move up in list (also reorders MIDI panel groups)' : 'Already at top'}
+              style={{
+                width: 16, height: 11, display: 'inline-flex',
+                alignItems: 'center', justifyContent: 'center',
+                borderRadius: 3,
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.05)',
+                color: onMoveUp ? '#9a9ab0' : '#3a3a4a',
+                cursor: onMoveUp ? 'pointer' : 'default',
+                opacity: onMoveUp ? 1 : 0.45,
+                padding: 0, fontSize: 9, lineHeight: 1,
+                fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                fontWeight: 700,
+              }}>
+              {'\u25B2'}
+            </button>
+            <button
+              onClick={onMoveDown || undefined}
+              disabled={!onMoveDown}
+              title={onMoveDown ? 'Move down in list (also reorders MIDI panel groups)' : 'Already at bottom'}
+              style={{
+                width: 16, height: 11, display: 'inline-flex',
+                alignItems: 'center', justifyContent: 'center',
+                borderRadius: 3,
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.05)',
+                color: onMoveDown ? '#9a9ab0' : '#3a3a4a',
+                cursor: onMoveDown ? 'pointer' : 'default',
+                opacity: onMoveDown ? 1 : 0.45,
+                padding: 0, fontSize: 9, lineHeight: 1,
+                fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                fontWeight: 700,
+              }}>
+              {'\u25BC'}
+            </button>
+          </div>
+        )}
         <button
           onClick={onRemove}
           title="Remove this attractor"

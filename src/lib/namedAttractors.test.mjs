@@ -12,6 +12,8 @@ import {
   toggleAttractor, moveAttractor,
   // R14.05 — type-specific color cues
   ATTRACTOR_TYPE_STYLES, attractorTypeStyle,
+  // R15.20 — reorder helpers (parallels cameraViews.moveView family)
+  moveAttractorByIndex, moveAttractorUp, moveAttractorDown,
 } from './namedAttractors.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -297,4 +299,87 @@ eq(sanitizeName('x'.repeat(100)).length, NAME_MAX, 'long name truncated')
   ok(s.bgFaint.includes('0.03'),    'bgFaint at 0.03 alpha')
 }
 
-console.log(`PASS: namedAttractors — types/clamps, normalize (full/defaults/enabled:false/rejection), id mint, defaultAttractor, save/load (round-trip + corrupted + missing storage), add/remove (+ cap), update (patch + bad-type + bad-id), toggle, move (+ clamp), R14.05 type styles (4 distinct accents + bundle completeness + fallback + opacity hierarchy)`)
+// --- R15.20 reorder helpers (parallel to cameraViews.moveView family) ---
+{
+  const A = { id: 'attr-1', name: 'A', type: 'attractor', strength: 1, radius: 10, position: [0,0,0], enabled: true }
+  const B = { id: 'attr-2', name: 'B', type: 'repulsor',  strength: 1, radius: 10, position: [0,0,0], enabled: true }
+  const C = { id: 'attr-3', name: 'C', type: 'vortex',    strength: 1, radius: 10, position: [0,0,0], enabled: true }
+  const list = [A, B, C]
+  // moveAttractorByIndex — happy path
+  {
+    const r = moveAttractorByIndex(list, 0, 2)
+    eq(r.map(a => a.id).join(','), 'attr-2,attr-3,attr-1', 'move first → last')
+    // Original list is NOT mutated.
+    eq(list.map(a => a.id).join(','), 'attr-1,attr-2,attr-3', 'source list not mutated')
+  }
+  {
+    const r = moveAttractorByIndex(list, 2, 0)
+    eq(r.map(a => a.id).join(','), 'attr-3,attr-1,attr-2', 'move last → first')
+  }
+  {
+    const r = moveAttractorByIndex(list, 1, 1)
+    eq(r, list, 'same idx → input ref (no-op)')
+  }
+  {
+    const r = moveAttractorByIndex(list, 5, 0)
+    eq(r, list, 'fromIdx out-of-range → input ref')
+    const r2 = moveAttractorByIndex(list, 0, 99)
+    eq(r2, list, 'toIdx out-of-range → input ref')
+    const r3 = moveAttractorByIndex(list, -1, 0)
+    eq(r3, list, 'negative fromIdx → input ref')
+    const r4 = moveAttractorByIndex(list, 0, NaN)
+    eq(r4, list, 'NaN idx → input ref')
+  }
+  eq(moveAttractorByIndex(null, 0, 1), null, 'null list → null')
+  eq(moveAttractorByIndex('garbage', 0, 1), 'garbage', 'non-array → passthrough')
+}
+{
+  const A = { id: 'attr-1', name: 'A', type: 'attractor', strength: 1, radius: 10, position: [0,0,0], enabled: true }
+  const B = { id: 'attr-2', name: 'B', type: 'repulsor',  strength: 1, radius: 10, position: [0,0,0], enabled: true }
+  const C = { id: 'attr-3', name: 'C', type: 'vortex',    strength: 1, radius: 10, position: [0,0,0], enabled: true }
+  const list = [A, B, C]
+  // moveAttractorUp by id
+  {
+    const r = moveAttractorUp(list, 'attr-2')
+    eq(r.map(a => a.id).join(','), 'attr-2,attr-1,attr-3', 'B moves up past A')
+    eq(list.map(a => a.id).join(','), 'attr-1,attr-2,attr-3', 'source untouched')
+  }
+  {
+    const r = moveAttractorUp(list, 'attr-1')
+    eq(r, list, 'already top → input ref (no-op)')
+  }
+  {
+    const r = moveAttractorUp(list, 'missing-id')
+    eq(r, list, 'missing id → input ref (no-op)')
+  }
+  // moveAttractorDown by id
+  {
+    const r = moveAttractorDown(list, 'attr-2')
+    eq(r.map(a => a.id).join(','), 'attr-1,attr-3,attr-2', 'B moves down past C')
+  }
+  {
+    const r = moveAttractorDown(list, 'attr-3')
+    eq(r, list, 'already bottom → input ref (no-op)')
+  }
+  {
+    const r = moveAttractorDown(list, 'missing-id')
+    eq(r, list, 'missing id → input ref (no-op)')
+  }
+  // Defensive
+  eq(moveAttractorUp(null, 'attr-1'),    null,  'null list up → null')
+  eq(moveAttractorDown(null, 'attr-1'),  null,  'null list down → null')
+  // Empty list cases - returns input ref (which is [])
+  {
+    const empty = []
+    eq(moveAttractorUp(empty,   'whatever'), empty, 'empty list up → empty ref')
+    eq(moveAttractorDown(empty, 'whatever'), empty, 'empty list down → empty ref')
+  }
+  // Single-element list — both directions are no-ops.
+  {
+    const single = [A]
+    eq(moveAttractorUp(single,   'attr-1'), single, 'single-elt up → input ref')
+    eq(moveAttractorDown(single, 'attr-1'), single, 'single-elt down → input ref')
+  }
+}
+
+console.log(`PASS: namedAttractors — types/clamps, normalize (full/defaults/enabled:false/rejection), id mint, defaultAttractor, save/load (round-trip + corrupted + missing storage), add/remove (+ cap), update (patch + bad-type + bad-id), toggle, move (+ clamp), R14.05 type styles (4 distinct accents + bundle completeness + fallback + opacity hierarchy) + R15.20 reorder (moveAttractorByIndex/Up/Down + ref-equal-on-no-op + boundary + missing-id + null/empty defensive)`)

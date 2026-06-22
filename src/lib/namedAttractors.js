@@ -262,3 +262,43 @@ export function toggleAttractor(list, id) {
 export function moveAttractor(list, id, position) {
   return updateAttractor(list, id, { position: sanitizePosition(position) })
 }
+
+// R15.20 — reorder helpers. The MidiPanel groups per-attractor MIDI
+// rows in array order (parallel to the LeftSidebar list), so changing
+// the array order also reorders the MIDI grouping. Returns a fresh
+// array — never mutates the input — so React state updates stay clean.
+// Out-of-range or no-op moves return the input REFERENCE unchanged so
+// callers can compare by reference to skip a redundant save.
+//
+// Mirrors the cameraViews.moveView / moveViewUp / moveViewDown API
+// shape, but indexed by id (not position) because the caller has the
+// id from the row already and dragging a row's "up" button is the
+// intuitive UX (vs "swap items 3 and 4").
+export function moveAttractorByIndex(list, fromIdx, toIdx) {
+  if (!Array.isArray(list)) return list
+  const n = list.length
+  if (!Number.isFinite(fromIdx) || !Number.isFinite(toIdx)) return list
+  if (fromIdx < 0 || fromIdx >= n) return list
+  if (toIdx < 0   || toIdx >= n) return list
+  if (fromIdx === toIdx) return list
+  const next = list.slice()
+  const [picked] = next.splice(fromIdx, 1)
+  next.splice(toIdx, 0, picked)
+  return next
+}
+
+// Find an attractor's index by id, then move it up one slot. Returns
+// the input list ref on no-op (id missing OR already at the top).
+export function moveAttractorUp(list, id) {
+  if (!Array.isArray(list)) return list
+  const idx = list.findIndex(a => a && a.id === id)
+  if (idx <= 0) return list  // -1 (missing) OR 0 (already top)
+  return moveAttractorByIndex(list, idx, idx - 1)
+}
+
+export function moveAttractorDown(list, id) {
+  if (!Array.isArray(list)) return list
+  const idx = list.findIndex(a => a && a.id === id)
+  if (idx < 0 || idx >= list.length - 1) return list  // missing OR at bottom
+  return moveAttractorByIndex(list, idx, idx + 1)
+}

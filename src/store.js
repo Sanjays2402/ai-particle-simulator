@@ -16,6 +16,9 @@ import {
   updateAttractor as updateNamedAttractorHelper,
   toggleAttractor as toggleNamedAttractorHelper,
   moveAttractor as moveNamedAttractorHelper,
+  // R15.20 — list-order reorder helpers
+  moveAttractorUp as moveNamedAttractorUpHelper,
+  moveAttractorDown as moveNamedAttractorDownHelper,
 } from './lib/namedAttractors'
 import { clampHueReactiveStrength as clampBgGradientStrength, normalizeReactiveCurve as normalizeBgGradientCurve } from './lib/bgGradient'
 
@@ -178,6 +181,21 @@ export const useStore = create((set, get) => {
   },
   moveNamedAttractor: (id, position) => {
     const next = moveNamedAttractorHelper(get().namedAttractors, id, position)
+    if (next === get().namedAttractors) return
+    saveNamedAttractors(next)
+    set({ namedAttractors: next })
+  },
+  // R15.20 — reorder helpers. Returns the helpers' ref-equal-on-no-op
+  // sentinel through, so a click on "Move up" at the top is a noop
+  // without a state churn.
+  moveNamedAttractorUp: (id) => {
+    const next = moveNamedAttractorUpHelper(get().namedAttractors, id)
+    if (next === get().namedAttractors) return
+    saveNamedAttractors(next)
+    set({ namedAttractors: next })
+  },
+  moveNamedAttractorDown: (id) => {
+    const next = moveNamedAttractorDownHelper(get().namedAttractors, id)
     if (next === get().namedAttractors) return
     saveNamedAttractors(next)
     set({ namedAttractors: next })
