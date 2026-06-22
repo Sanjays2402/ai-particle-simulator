@@ -79,6 +79,11 @@ Existing capabilities (do not re-ship):
 - MIDI per-attractor routing now supports STRENGTH + RADIUS + X + Y + Z (was strength-only); each field gets its own row grouped under the attractor's name in the MIDI panel; x/y/z setter reads the LIVE position triple at apply-time so concurrent axis sweeps don't undo each other; parseAttractorActionId now validates the field too so stale action ids become silent no-ops.
 - Keymap import: live diff PREVIEW panel before committing (replaces the old window.confirm flow); shows which bindings will change with fromCode → toCode chips; replace mode flags resets with an amber RESET tag; merge/replace toggle recomputes the diff in-place; Apply gated on willChange > 0; new summarizeImportImpact() helper in keymapIO.js with stable ACTIONS-order diffs.
 - MIDI user-authored controller preset bundle EDITOR: save the current binding map as a named bundle (vendor='Custom'), see your bundles in a second row of the chip bar (pink-keyed to distinguish from shipped), apply with the same merge/replace gesture, delete inline; capped at 8 with FIFO-drop-oldest; load/save round-trip sanitizes corrupt rows; "+ Save current as bundle" button with inline name input.
+- Named attractors carry type-specific colour cues throughout the UI (R14.05): each type has a distinct accent — attractor=indigo, repulsor=red, vortex=violet, turbulence=amber. Live in `ATTRACTOR_TYPE_STYLES` + `attractorTypeStyle(type)` in namedAttractors.js (full CSS-ready bundle: border at 0.45/0.30/0.18 alpha, bg at 0.14/0.06/0.03, fg=accent hex, glow). NamedAttractorRow row border + #index badge wear the type accent; type chip grid uses each type's own colour as its active state. MidiPanel per-attractor group header pulls the LIVE attractor + paints its border + small coloured dot + monospace type-name suffix; stale groups (deleted attractor still has bindings) fall back to the previous violet "missing" tone.
+- Wind override import: live PREVIEW panel before committing (R14.15), parallels the keymap import preview from R13.04. Stages the parsed envelope + filename, shows a diff list (one row per slot, ordered by WIND_PRESETS_DEFAULT) with live vs incoming `intensity/azimuth°` chips + add/overwrite/skip action badges (emerald/amber/muted); mode toggle (Merge/Replace) recomputes the diff in-place; impact line is mode-aware; Apply gated on willWrite > 0 in merge mode.
+- Crossfade override import: live PREVIEW panel before committing (R14.16), direct parallel to R14.15. Same staging pattern, same action badges; live cell shows the shipped default in italics when no live override exists so users see what their incoming value will displace; pink-violet panel matches the existing Crossfade chip colours.
+- MIDI user bundle EXPORT / IMPORT as portable JSON file (R14.17). New module `midiUserBundleIO.js` (kind=`ai-particle-simulator/midi-user-bundle`, v1, 16 KB cap); per-bundle Download (indigo) button tucked between the apply chip + trash on each "Your Bundles" chip row; "+ Import bundle" button (Upload icon, indigo) paired with "+ Save current as bundle" below the bar so a fresh install can pick up a friend's bundle without first having to save one of their own. id/vendor/createdAt are stripped on round-trip so two machines exporting + re-importing can't collide on numbered ids; importer mints fresh. Cap-gated to prevent silent FIFO drops.
+- MIDI user bundle RENAME in place (R14.18). Double-click the bundle chip's name to enter edit mode; Enter saves, Escape cancels, blur saves with blank-fallback-to-cancel. Auto-sizes input width to draft length (min 90px), shares the maxLength=32 cap with the save form. New `renameUserPreset(list, id, newName)` helper in midiPresets.js with ref-equal-on-no-op contract (blank-after-trim / missing-id / identical-name / non-array all return the same list ref); auto-generated description templates are rewritten in-place to match the new name's date, hand-edited custom descriptions are preserved.
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -219,29 +224,46 @@ OG snapshot endpoint) still deferred — static Vite app, no backend
 runtime available. Substituted R13.14, R13.15, R13.18 from the future
 queue to keep the batch at 5 great slices instead of padding.
 
-### Batch 14 — next 5 (refilled)
-- [ ] R14.01 Echo / trail FBO that survives EffectComposer (carried over — render pipeline refactor, dedicated batch)
-- [ ] R14.02 Named attractor 3D drag handle (carried over — needs r3f gizmo handles, dedicated batch)
-- [ ] R14.03 OpenGraph snapshot endpoint (server-rendered card for share URLs) — needs backend [carried over]
-- [ ] R14.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [was R13.06]
-- [ ] R14.05 Named attractor type-specific color cues in the UI (vortex purple, repulsor red, etc.) [was R13.07]
+### Batch 14 — attractor type cues + wind/crossfade preview + MIDI bundle IO + rename  (SHIPPED)
+- [x] **R14.05** Named attractor type-specific color cues in the UI — ad78605
+- [x] **R14.15** Wind override import preview panel (parallels keymap R13.04) — 2c41ba3
+- [x] **R14.16** Crossfade override import preview panel (parallels R14.15) — f0d615f
+- [x] **R14.17** MIDI user bundle export/import as a single JSON file — ada7e2e
+- [x] **R14.18** MIDI user bundle rename in-place (double-click name) — 35b0968
+
+Note: R14.01 (Echo / trail FBO) and R14.02 (Named attractor 3D drag
+handle) deferred yet again — both need their own dedicated render-
+pipeline / r3f-gizmo batches. R14.03 (server-rendered OG endpoint)
+still deferred — static Vite app, no backend runtime available.
+R14.04 (multi-error gutter overlay in preset editor) deferred to a
+future batch — graduates from R13.06 and needs careful design of
+gutter overlay rendering vs. the existing single-error line marker.
+Substituted R14.05 + R14.15 + R14.16 + R14.17 + R14.18 from the
+future queue to keep the batch at 5 great slices instead of padding.
+
+### Batch 15 — next 5 (refilled)
+- [ ] R15.01 Echo / trail FBO that survives EffectComposer (carried over — render pipeline refactor, dedicated batch)
+- [ ] R15.02 Named attractor 3D drag handle (carried over — needs r3f gizmo handles, dedicated batch)
+- [ ] R15.03 OpenGraph snapshot endpoint (server-rendered card for share URLs) — needs backend [carried over]
+- [ ] R15.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [was R14.04]
+- [ ] R15.05 Audio-reactive bg curve chips → custom curve editor for power users (visual spline / 3-knot bezier) [was R14.12]
 
 ### Future queue (refill when batch closes)
-- [ ] R14.06 Carousel: bulk "rebuild all stale thumbs" action in the filter button menu [was R13.08]
-- [ ] R14.07 Spectrum peak-holds: per-bar fade-out tail (last 200ms still painted at low alpha) for an even more cinematic look [was R13.09]
-- [ ] R14.08 Theme pack preview: drag a JSON onto the sidebar to preview without the file picker [was R13.10]
-- [ ] R14.09 Camera path: drag-and-drop reorder (graduates from arrow-button slice R10.03) [was R13.11]
-- [ ] R14.10 Snapshot grid: long-press a tile to multi-select for bulk delete [was R13.12]
-- [ ] R14.11 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view [was R13.13]
-- [ ] R14.12 Audio-reactive bg curve chips → add a custom curve editor for power users (visual spline / 3-knot bezier) [was R13.16]
-- [ ] R14.13 Smash bias: user-editable per-chip ranges (open the bias as JSON, tweak, re-save) [was R13.17]
-- [ ] R14.14 Lightbox WASD pan: hold to repeat (auto-repeat on key-held for smoother sweeps) [was R13.19]
-- [ ] R14.15 Wind override import: preview panel (diff against current overrides) before committing [was R13.20]
-- [ ] R14.16 Crossfade override import: preview panel (diff against current overrides) — parallel to keymap R13.04 + wind R13.20
-- [ ] R14.17 MIDI user bundle: export/import a single bundle as a JSON file (share between machines)
-- [ ] R14.18 MIDI user bundle: rename in-place (currently delete + re-save is the only path)
-- [ ] R14.19 Minimap: hover a saved-view dot for ~1s shows a thumbnail preview (canvas2D sample of the scene from that camera)
-- [ ] R14.20 Per-attractor MIDI: route CC to ENABLED toggle (button-style with hysteresis around 0.5)
+- [ ] R15.06 Carousel: bulk "rebuild all stale thumbs" action in the filter button menu [was R14.06]
+- [ ] R15.07 Spectrum peak-holds: per-bar fade-out tail (last 200ms still painted at low alpha) for an even more cinematic look [was R14.07]
+- [ ] R15.08 Theme pack preview: drag a JSON onto the sidebar to preview without the file picker [was R14.08]
+- [ ] R15.09 Camera path: drag-and-drop reorder (graduates from arrow-button slice R10.03) [was R14.09]
+- [ ] R15.10 Snapshot grid: long-press a tile to multi-select for bulk delete [was R14.10]
+- [ ] R15.11 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view [was R14.11]
+- [ ] R15.12 Smash bias: user-editable per-chip ranges (open the bias as JSON, tweak, re-save) [was R14.13]
+- [ ] R15.13 Lightbox WASD pan: hold to repeat (auto-repeat on key-held for smoother sweeps) [was R14.14]
+- [ ] R15.14 MIDI user bundle: export ALL bundles in a single multi-bundle JSON file (current R14.17 ships single-bundle only)
+- [ ] R15.15 MIDI user bundle: drag-and-drop a bundle JSON onto the MidiPanel to import (skip the file picker)
+- [ ] R15.16 Per-attractor MIDI: route CC to ENABLED toggle (button-style with hysteresis around 0.5) [was R14.20]
+- [ ] R15.17 Minimap: hover a saved-view dot for ~1s shows a thumbnail preview (canvas2D sample of the scene from that camera) [was R14.19]
+- [ ] R15.18 Wind chip overrides: per-chip live "what slot is this CC bound to" badge if the chip's seconds is bound to a CC (cross-reference between MIDI map + wind chips)
+- [ ] R15.19 Crossfade chip overrides: same MIDI cross-reference badge as R15.18
+- [ ] R15.20 Named attractor: drag a row up/down to reorder (parallels camera path reorder; affects MidiPanel group order too)
 
 ## TICK LOG
 - 2026-06-19 23:41 PT — Bootstrap + Batch 1 (5/5).
@@ -446,3 +468,47 @@ queue to keep the batch at 5 great slices instead of padding.
   regression, midiPresets with the full user-bundle CRUD +
   round-trip + corrupt-row sanitization + extended preset
   lookup w/ userPresets arg · ~110 fresh asserts this batch).
+- 2026-06-21 19:24 PT — Batch 14 (5/5).
+  Commits: ad78605 (R14.05 named attractor type-specific colour cues
+  across LeftSidebar + MidiPanel — ATTRACTOR_TYPE_STYLES +
+  attractorTypeStyle helper bundle, NamedAttractorRow border/badge/
+  chips per type, MidiPanel group header dot + monospace type suffix
+  + stale-fallback), 2c41ba3 (R14.15 wind override import preview
+  panel — WindOverrideIO refactored to stage parse + render
+  WindOverridesImportPreview using summarizeImportImpact already
+  exported, add/overwrite/skip badges, mode-aware impact line),
+  f0d615f (R14.16 crossfade override import preview panel — direct
+  parallel of R14.15 with pink-violet palette + italics shipped-
+  default in live cell when no override exists), ada7e2e (R14.17
+  MIDI user bundle export/import as a single JSON file — new
+  midiUserBundleIO.js module + 8 lib functions + per-bundle
+  Download chip + "+ Import bundle" button, isAtBundleCap helper
+  prevents silent FIFO drops), 35b0968 (R14.18 MIDI user bundle
+  rename in-place via double-click — new renameUserPreset helper
+  with ref-equal-on-no-op contract, new UserBundleChip leaf with
+  editing state machine + Enter/Escape/blur handlers).
+  R14.01 (Echo / trail FBO) and R14.02 (3D drag handle) deferred
+  yet again — both need their own dedicated render-pipeline /
+  r3f-gizmo batches. R14.03 (server-rendered OG endpoint) still
+  deferred — no backend runtime. R14.04 (multi-error gutter
+  overlay) deferred — graduates from R13.06 and needs careful
+  gutter overlay design. Substituted R14.15, R14.16, R14.17,
+  R14.18 from the future queue to keep the batch at 5 great
+  slices instead of padding.
+  Gates: lint 23 errors / 3 warnings — exactly matches baseline
+  (zero new errors in any of the 6 modified .js/.jsx files +
+  1 new .js file + 1 new .test.mjs file; transient
+  react-hooks/set-state-in-effect from a defensive useEffect in
+  UserBundleChip caught during the gate and resolved by dropping
+  the effect — the onDoubleClick handler already re-initializes
+  draftName so the sync was redundant). Build: 965 ms green
+  (1.69 MB bundle, gzip 506 KB — +2 KB for midiUserBundleIO +
+  2 lucide icons + UserBundleChip leaf). Unit tests: 39/39 files
+  pass (added midiUserBundleIO with envelope/bare-bundle/sanitize/
+  serialize/slugify/parseImport/cap-helper coverage; extended
+  midiPresets with renameUserPreset success/blank-reject/missing-
+  id/non-array-defensive/truncation/custom-desc-preserved/multi-
+  entry-targeted/save-load-roundtrip; extended namedAttractors
+  with R14.05 type styles — 4 distinct accents, full bundle
+  completeness for every type, fallback for unknown/null/undefined,
+  opacity hierarchy walk · ~140 fresh asserts this batch).
