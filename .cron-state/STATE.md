@@ -113,6 +113,11 @@ Existing capabilities (do not re-ship):
 - Per-preset thumb metadata badge on hover (R19.13). Hover any preset tile in the carousel to see a tiny metadata badge in the bottom-left corner: "120×80 · render · 3h" (dimensions, source, age). Source-tagged colour (live=green, render=indigo) shows at a glance which capture path minted the thumb. Tooltip carries full ISO-localised timestamp + source explanation. New lib helpers in presetThumbnails.js: `thumbMetadataKey(id)` parallel storage-key shape (preset-thumb-meta-<id>); `recordThumbMetadata(id, opts, storage)` writes JSON-encoded {capturedAt, width, height, source}; `readThumbMetadata(id, storage)` reads + sanitises (returns null on missing/corrupt/missing-capturedAt); `clearThumbMetadata(id, storage)` matches clearThumbnail's contract; `summarizeThumbAge(metadata, now=Date.now())` returns compact "now"/"12s"/"4m"/"3h"/"2d"/"3w"/"2y" (future timestamps clamp to "now" so we never report negative ages). captureThumbnailToStorage + capturePresetThumbnail (live path) both record metadata; clearThumbnail + clearAllThumbnails cascade-wipe metadata so stale badges don't outlive their thumbs.
 - MIDI user bundle drag-and-drop accepts multiple .json files at once (R19.20). Graduates R18.09's first-file-only convention with the multi-file gesture R18.18 brought to theme packs. Drop N .json files at once and the panel COMBINES them into one impact summary before the confirm fires. Per-file failures (corrupt JSON, wrong-kind envelope, non-.json extension) are counted + toasted but don't block valid bundles in the same drop — partial success preserved. New pure helper `combineDroppedBundles(reads)` in midiUserBundleIO.js takes per-file FileReader results { raw, error?, name? } and returns { bundles, parseFails, totalFilesRead } using the same parseImportMulti → parseImport precedence as the single-file drop; pure / no DOM so the combine logic is regression-pinned without polyfilling FileReader. PresetBar drop handler accepts onDropFiles alongside onDropFile (multi-file is preferred when present, single-file is the fallback for older callsites). Drop banner gains "(multi-file ok)" hint.
 - Named attractor drag-reorder accepts drops on row gaps for insert-here (R19.19). Graduates R18.19's drop-on-row gesture with drop-on-GAP zones so users can insert an attractor EXACTLY into a target slot (insert semantics) instead of only swapping with a specific row's position. Thin gap zones appear between every pair of rows (and above the first / below the last). At rest: 6px tall + transparent (invisible spacer doesn't disturb the resting layout); during drag: stays 6px until hovered then expands to 22px with indigo dashed strip + soft gradient. Trailing gap below the last row only renders during an active drag. New pure helper `dropIndexForGap(from, gapIdx, listLength)` in namedAttractors.js encapsulates the splice-bookkeeping math (from < gapIdx: insert at gapIdx - 1 due to remove-then-insert shift; from >= gapIdx: insert at gapIdx; no-op when gap above/below self). Defensive: non-finite/negative/out-of-range inputs return null. NamedAttractorRow wraps in a fragment with leading gap div; the trailing-gap div lives at the block level.
+- Spectrum peak-hold trail per-bar frequency-coloured tint (R20.13). Optional warm→cool hue ramp for the trail layer keyed to barIndex (low bars red-orange / bass; high bars blue-violet / treble) so the trail reads as a distinct frequency map on top of the bar fills (which keep their existing 250°→170° local ramp). Off by default — preserves the R15.07/R16.17/R19.12 trail-inherits-bar-hue look. UI: new `tint` chip in the WaveformOverlay header (alongside the curve chip), gradient background previews the warm→cool ramp visually. New pure lib helpers in waveform.js: `TRAIL_HUE_START=20`, `TRAIL_HUE_END=260`, `TRAIL_HUE_DEFAULT=210` constants + `peakTrailHueForBarIndex(barIndex, totalBars)` projector with full defensive contract (NaN/Infinity on either arg → DEFAULT; totalBars≤0 → DEFAULT; totalBars===1 → midpoint; out-of-range clamps to [0,totalBars-1]; float barIndex floors to int). Store: `spectrumPeakTrailTint` boolean persisted to `spectrum-peak-trail-tint-v1` (default false). WaveformOverlay's trail painter uses `peakTrailTint ? peakTrailHueForBarIndex(i, bars.length) : hueWrapped` — single-line guard, zero perf cost when off.
+- Per-attractor MIDI TYPE row: proximity bar meter (R20.16). Graduates R19.16's invisible distanceToEdge01 projector with a scannable meter: a tiny 26×4 horizontal bar fills left→right showing how close the live CC value sits to the nearest TYPE flip boundary. Three-tier colour intent: red (prox<0.001, in dead-band), amber (0.001..0.40, in shoulder), type accent (≥0.40, safe). Meter sits inside the existing band tag (next to "2/4 vortex" + ·hold suffix) so the cue stays grouped with the band label. New `proximityToBoundary01` field on describeTypeBand: pure projector using the SAME band-width + hysteresis math as pickAttractorTypeForCC, edge-band semantics (v=0 / v=1 clamp to 1 — not real flip boundaries), single-type roster always reads 1 (no boundaries). Linear ramp from 0 (dead-band edge) to 1 (mid-band). 80ms width transition + 120ms colour transition for smooth visual updates.
+- Smash bias chips support per-chip JSON overrides — edit + persist + reset (R20.07). Graduates R12.04's three hard-coded bias chips with a JSON editor: users tweak any chip's counts/speed/glow/attract/chances/forceTypes and the edits persist per-chip across sessions via parallel storage keys (`smash-bias-overrides-<id>`). Chip identity (id/label/hint) stays immutable so the UI is unchanged — only the generator's behaviour shifts. New lib in randomScene.js: `SCENE_BIAS_RANGE_FIELDS` (4) + `SCENE_BIAS_CHANCE_FIELDS` (10) + `SCENE_BIAS_OVERRIDE_FIELDS` (union + forceTypes); `sanitizeBiasOverride(raw)` defensive projector (non-array ranges / wrong-length / negative / min>max / NaN / ±Infinity all drop the field silently; chances clamp to [0,1]; forceTypes empty/unknown drop, null member valid; unknown top-level keys silently dropped); `loadBiasOverride` / `saveBiasOverride` / `resetBiasOverride` / `hasBiasOverride` storage-aware (empty save WIPES entry — clean reset path); `resolveSceneBias(id, opts)` merges shipped default with persisted override, returns SAME REFERENCE on no-op. generateRandomScene plumbed through resolveSceneBias so overrides flow automatically; new opts.biasOverride lets tests inject without touching storage. UI: cyan dot in chip corner shows when override is active, right-click opens the JSON editor, "Edit bias JSON" link below the chip rail for discoverability. Editor popover: 10-row textarea seeded with live override OR shipped defaults (sans identity triple), Apply runs through sanitizer + rejects when sanitisation drops every key (no silent wipe), Reset clears the override.
+- Carousel per-preset thumb metadata badge opens rich detail panel on click (R20.19). Graduates R19.13's hover-only badge into a clickable affordance: clicking surfaces a 240-320px detail panel above the tile with the full ISO time + relative age, source classifier with hint, exact resolution, optional particle count (when present), render time (ms or s), and approximate byte size — all in a tight monospace 2-col grid. Badge keeps its hover-only fade-in but is now a button with an active state (highlighted indigo when its detail is open). Click toggles open/close; Esc closes; outside-click closes; bulk-clear closes. New lib helpers in presetThumbnails.js: `formatByteSize(bytes)` (B/KB/MB with 1-decimal under 10, rounded above; defensive non-finite→null); `formatThumbDetails(metadata, now)` (pure projector returning `[{ key, label, value, hint? }, ...]` ready for paint-only React render). recordThumbMetadata + readThumbMetadata extended with three OPTIONAL rich fields: `particleCount`, `captureMs`, `byteSize` — each independently validated so a corrupt single field can't reject the whole entry; missing fields skip their UI row (no "unknown" rendering). Source row carries a hint string explaining the capture path (live vs render).
+- MIDI user bundle per-bundle keyboard shortcut (R20.11). Graduates the chip-click apply gesture with a hotkey path: assign any modifier+key combo (shift+1 / alt+f5 / meta+ctrl+a / etc.) to a user bundle and it applies anywhere in the app without opening the MIDI panel. Click the new hotkey badge between the colour swatch + export button to enter capture mode (amber outline + "press…" text); next valid keydown sets the binding. Escape cancels; right-click clears. New lib roster + helpers in midiPresets.js: `VALID_HOTKEY_KEYS` set (26 letters + 10 digits + F1..F12 + 4 arrows + 9 control keys + small punctuation allowlist); `hotkeyFromEvent(event)` projects a DOM keyboard event to a canonical token (modifier-only skipped, Unidentified returns null, modifiers ordered meta/ctrl/alt/shift); `sanitizeHotkey(raw)` validates + canonicalises string input (whitespace tolerated, case-insensitive, modifier reorder); `setUserPresetHotkey(list, id, hotkey)` ref-equal-on-no-op contract with three semantics — null/'' clears; valid assigns + un-binds the same hotkey from any OTHER bundle (1-binding-per-hotkey invariant); invalid silently refuses; `findUserPresetByHotkey(list, hotkey)` canonical-normalised lookup. load/save thread sanitizeHotkey both directions so a corrupt persisted value (e.g. 'shift+bogus') drops the hotkey field without rejecting the whole bundle. UI: global keydown listener in MidiPanel resolves the event signature via findUserPresetByHotkey + applies via applyPresetToMap('replace'); skips events from text inputs / textareas / contentEditable so a user typing a binding name doesn't trigger their hotkey.
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -341,29 +346,45 @@ r3f-gizmo / backend runtime), R19.04 + R19.05 each need their own
 focused batch. Substituted R19.12, R19.13, R19.16, R19.19, R19.20
 from the future queue to keep the batch at 5 great slices.
 
-### Batch 20 — next 5 (refilled)
-- [ ] R20.01 Echo / trail FBO that survives EffectComposer [carried — render pipeline refactor, dedicated batch]
-- [ ] R20.02 Named attractor 3D drag handle (r3f gizmo) [carried — dedicated batch]
-- [ ] R20.03 OpenGraph snapshot endpoint (server-rendered share card) [carried — needs backend]
-- [ ] R20.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [carried]
-- [ ] R20.05 Audio-reactive bg curve chips → custom curve editor for power users (visual spline / 3-knot bezier) [carried]
+### Batch 20 — peak trail tint + TYPE proximity + bias overrides + thumb detail + bundle hotkey  (SHIPPED)
+- [x] **R20.13** Spectrum peak trail per-bar colour tint based on frequency (low warm, high cool)  — 70c5bf9
+- [x] **R20.16** Per-attractor MIDI TYPE row proximity bar meter (graduates R19.16's distanceToEdge01)  — 9e6b16f
+- [x] **R20.07** Smash bias user-editable per-chip JSON overrides (graduates R12.04)  — ffe722a
+- [x] **R20.19** Carousel thumb metadata badge opens rich detail panel on click (graduates R19.13)  — 3b1692e
+- [x] **R20.11** MIDI user bundle per-bundle keyboard shortcut binding (graduates R14.18)  — af6e896
+  (+ 2c6f8a6 lint-gate cleanup: bindings/setBindings naming + dedup eslint-disable directives)
+
+Note: R20.01 (Echo / trail FBO) / R20.02 (3D drag handle) / R20.03
+(server-rendered OG endpoint) / R20.04 (multi-error gutter overlay)
+/ R20.05 (custom audio-reactive curve editor) all deferred AGAIN —
+first three are dedicated infrastructure batches (render-pipeline /
+r3f-gizmo / backend runtime), R20.04 + R20.05 each need their own
+focused batch. Substituted R20.07, R20.11, R20.13, R20.16, R20.19
+from the future queue to keep the batch at 5 great slices.
+
+### Batch 21 — next 5 (refilled)
+- [ ] R21.01 Echo / trail FBO that survives EffectComposer [carried — render pipeline refactor, dedicated batch]
+- [ ] R21.02 Named attractor 3D drag handle (r3f gizmo) [carried — dedicated batch]
+- [ ] R21.03 OpenGraph snapshot endpoint (server-rendered share card) [carried — needs backend]
+- [ ] R21.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [carried]
+- [ ] R21.05 Audio-reactive bg curve chips → custom curve editor for power users (visual spline / 3-knot bezier) [carried]
 
 ### Future queue (refill when batch closes)
-- [ ] R20.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view [was R19.06]
-- [ ] R20.07 Smash bias: user-editable per-chip ranges (open the bias as JSON, tweak, re-save) [was R19.07]
-- [ ] R20.08 Minimap: hover a saved-view dot for ~1s shows a thumbnail preview (canvas2D sample of the scene from that camera) [was R19.08]
-- [ ] R20.09 Wind chip overrides: per-chip live "what slot is this CC bound to" badge if the chip's seconds is bound to a CC (cross-reference between MIDI map + wind chips) [was R19.09]
-- [ ] R20.10 Crossfade chip overrides: same MIDI cross-reference badge as R20.09 [was R19.10]
-- [ ] R20.11 MIDI user bundle: per-bundle keyboard shortcut binding (assign a hotkey to apply each bundle without opening the panel) [was R19.11]
-- [ ] R20.12 Camera path: drag-and-drop reorder ALSO works on touch (R17.07 is desktop-only — touch users need a long-press-to-drag gesture) [was R19.14]
-- [ ] R20.13 Spectrum peak trail: per-bar colour tint based on frequency (low bars warm, high bars cool — graduates from R15.07 trail) [was R19.15]
-- [ ] R20.14 Snapshot grid: bulk download all selected as a zip (graduates R18.06 selection mode) [was R19.17]
-- [ ] R20.15 Theme pack drag-drop: progress indicator when N > 10 files (current parallel Promise.all is fast but visible delay on big drops) [was R19.18 — graduates R18.18]
-- [ ] R20.16 Per-attractor MIDI TYPE tooltip: also show a small bar-graph proximity meter on the row showing distance to next/previous boundary (graduates R19.16's distanceToEdge01 projector)
-- [ ] R20.17 MIDI bundle drag-drop: per-file progress indicator for very large drops (parallels R20.15 themes; graduates R19.20)
-- [ ] R20.18 Spectrum peak trail params: persist per-bar OVERRIDES so a user can tune only the bass bars' curve while leaving the rest at default (graduates R19.12 to per-bar granularity)
-- [ ] R20.19 Carousel thumb metadata badge: click the badge to surface a richer panel (compile time, render time, controls captured at save, scene resolution if live)
-- [ ] R20.20 Named attractor gap-drop: also work for the MidiPanel per-attractor binding groups (drop a group into another's gap to reorder MIDI sections without touching the underlying attractor list) — graduates R19.19
+- [ ] R21.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view [was R20.06]
+- [ ] R21.08 Minimap: hover a saved-view dot for ~1s shows a thumbnail preview (canvas2D sample of the scene from that camera) [was R20.08]
+- [ ] R21.09 Wind chip overrides: per-chip live "what slot is this CC bound to" badge if the chip's seconds is bound to a CC (cross-reference between MIDI map + wind chips) [was R20.09]
+- [ ] R21.10 Crossfade chip overrides: same MIDI cross-reference badge as R21.09 [was R20.10]
+- [ ] R21.12 Camera path: drag-and-drop reorder ALSO works on touch (R17.07 is desktop-only — touch users need a long-press-to-drag gesture) [was R20.12]
+- [ ] R21.14 Snapshot grid: bulk download all selected as a zip (graduates R18.06 selection mode) [was R20.14]
+- [ ] R21.15 Theme pack drag-drop: progress indicator when N > 10 files (current parallel Promise.all is fast but visible delay on big drops) [was R20.15]
+- [ ] R21.17 MIDI bundle drag-drop: per-file progress indicator for very large drops (parallels R21.15 themes; graduates R19.20) [was R20.17]
+- [ ] R21.18 Spectrum peak trail params: persist per-bar OVERRIDES so a user can tune only the bass bars' curve while leaving the rest at default (graduates R19.12 to per-bar granularity) [was R20.18]
+- [ ] R21.20 Named attractor gap-drop: also work for the MidiPanel per-attractor binding groups (drop a group into another's gap to reorder MIDI sections without touching the underlying attractor list) — graduates R19.19 [was R20.20]
+- [ ] R21.21 Spectrum peak trail tint: alternate hue palettes (rainbow / cool-only / warm-only / mono) — graduates R20.13 with a curated chip rail beyond the default warm→cool ramp
+- [ ] R21.22 Per-attractor MIDI proximity meter: also surface on STRENGTH/RADIUS rows to show how close the live CC is to the slider's clamp edges (graduates R20.16's projector pattern to non-band fields)
+- [ ] R21.23 Smash bias overrides: export/import the override map as JSON (parallels wind/crossfade override IO) — graduates R20.07
+- [ ] R21.24 Thumb detail panel: "Rebuild" + "Clear thumb" action buttons inside the panel (currently has to use the hover-only ↻ button on the tile) — graduates R20.19
+- [ ] R21.25 MIDI user bundle hotkey: hotkey-conflict warning toast when the user re-binds the same hotkey across bundles (currently silent "stripped from previous" semantic) — graduates R20.11
 
 ## TICK LOG
 - 2026-06-19 23:41 PT — Bootstrap + Batch 1 (5/5).
@@ -928,3 +949,90 @@ from the future queue to keep the batch at 5 great slices.
   moves + defensive (NaN/negative/out-of-range/zero-length) +
   single-item-always-noop + full sweep invariant against
   moveAttractorByIndex · ~235 fresh asserts this batch).
+- 2026-06-22 16:30 PT — Batch 20 (5/5).
+  Commits: 70c5bf9 (R20.13 spectrum peak trail per-bar frequency tint —
+  TRAIL_HUE_START=20 / TRAIL_HUE_END=260 / TRAIL_HUE_DEFAULT=210 +
+  peakTrailHueForBarIndex projector with full defensive contract;
+  store spectrumPeakTrailTint boolean persisted to
+  `spectrum-peak-trail-tint-v1`; WaveformOverlay tint chip with
+  gradient-background preview; trail painter single-line branch),
+  9e6b16f (R20.16 per-attractor MIDI TYPE row proximity bar meter —
+  proximityToBoundary01 field on describeTypeBand with edge-band
+  semantics + single-type roster handling + 3-tier safe/warn/danger
+  colour intent; 26×4 fill bar inside the band tag with 80ms width
+  + 120ms colour transitions),
+  ffe722a (R20.07 smash bias per-chip JSON overrides — SCENE_BIAS_
+  RANGE_FIELDS=4 + SCENE_BIAS_CHANCE_FIELDS=10 schema rosters;
+  sanitizeBiasOverride defensive against every shape; load/save/
+  reset/has helpers with empty-save-wipes-entry semantic;
+  resolveSceneBias ref-equal-on-no-op; generateRandomScene plumbed
+  through; UI cyan-dot edited-indicator + right-click-to-edit +
+  10-row textarea popover with sanitize-on-apply error surface),
+  3b1692e (R20.19 carousel thumb metadata badge → rich detail panel
+  on click — formatByteSize + formatThumbDetails projector; record/
+  read extended with optional particleCount + captureMs + byteSize;
+  badge becomes button with active state; 240-320px detail panel
+  above tile with 2-col monospace grid; Esc + outside-click + bulk-
+  clear close handlers),
+  af6e896 (R20.11 per-bundle MIDI keyboard shortcut — VALID_HOTKEY_
+  KEYS roster (26+10+12+4+9+12 = 73 keys); hotkeyFromEvent +
+  sanitizeHotkey canonical-form projectors; setUserPresetHotkey
+  1-binding-per-hotkey invariant + ref-equal-on-no-op contract;
+  findUserPresetByHotkey canonical lookup; load/save thread
+  sanitizeHotkey both directions with silent-drop-on-corrupt
+  semantic; UserBundleChip hotkey badge with capture-mode amber
+  outline; global keydown listener in MidiPanel applies via
+  applyPresetToMap('replace') with text-input-skip guard),
+  2c6f8a6 (lint-gate cleanup: MidiPanel keydown listener
+  bindings/setBindings naming fix + sanitizeHotkey import dedup;
+  RightSidebar dedup of two unused-vars eslint-disable directives
+  by switching to explicit Object.keys filter).
+  R20.01-R20.05 all deferred AGAIN — first three are dedicated
+  infrastructure batches (render-pipeline / r3f-gizmo / backend
+  runtime), R20.04 + R20.05 each need their own focused batch.
+  Substituted R20.07, R20.11, R20.13, R20.16, R20.19 from the
+  future queue.
+  Gates: lint 23 errors / 3 warnings — exactly matches baseline
+  (4 new errors + 3 new warnings surfaced mid-batch and were all
+  resolved in the 2c6f8a6 cleanup commit; final gate is clean).
+  Build: 1.08 s green (1.77 MB bundle, gzip 525 KB — +4 KB vs
+  Batch 19 for the four new pure helpers + the UI wires).
+  Unit tests: 39/39 files pass (extended waveform with ~22 R20.13
+  asserts pinning TRAIL_HUE_START/END/DEFAULT constants + endpoint
+  anchors + mid-bar midpoint lerp + monotonicity across 32 bars +
+  defensive contract (NaN/±Infinity/negative/non-finite on both
+  args) + out-of-range clamp behaviour + float-floors-to-int +
+  determinism; extended midiMap with ~30 R20.16 asserts pinning
+  proximity dead-centre=1.0 + on-boundary=0.0 + in-dead-band=0.0 +
+  halfway=0.5 + monotonicity rising/falling sweep across band 1
+  with peak≥0.99 + edge-band v=0/v=1 clamp to 1 + single-type
+  always=1 + [0,1] range invariant across 100 samples + custom
+  hysteresis flow-through; extended randomScene with ~75 R20.07
+  asserts pinning schema rosters (4 range / 10 chance) + sanitize
+  defensive against non-array/wrong-length/negative/min>max/NaN/
+  Infinity/out-of-range chances/empty-forceTypes/unknown-member +
+  unknown-keys-dropped + null/undefined/string/number-defensive +
+  load/save round-trip + empty-save-wipes-entry + reset wrapper +
+  unknown-bias-id + corrupt-JSON/schema returns empty + resolve
+  ref-equal-on-no-op + override flow-through across 50 seeds with
+  custom counts/speedRange enforced; extended presetThumbnails
+  with ~40 R20.19 asserts pinning formatByteSize boundary table
+  (0B/512B/1KB/2KB/10KB/1MB/5MB/50MB sub-10 decimal vs round) +
+  defensive on null/NaN/negative/Infinity/string + formatThumb
+  Details defensive null/empty + 3-base-row minimal + 6-row rich +
+  ms vs s render-time switch + partial rich fields skip-when-missing
+  + source-hint differs live vs render + roundtrip particleCount/
+  captureMs/byteSize + defensive drop on negative/NaN/string rich
+  values; extended midiPresets with ~60 R20.11 asserts pinning
+  sanitizeHotkey canonical pass-through + modifier reorder (4-way)
+  + case normalisation + whitespace tolerance + defensive empty/
+  null/undefined/number/modifier-only/trailing-plus/unknown-key/
+  unknown-modifier + hotkeyFromEvent shift+1/multi-mod/ArrowUp
+  normalisation/space/F4/modifier-only-null/Unidentified-null/
+  defensive null/missing-key/non-string-key + setUserPresetHotkey
+  assignment-new-array/no-op-ref-equal/clear-via-null/clear-via-
+  empty/conflict-strips-other/missing-id-skip/null-list/invalid-
+  refuse + findUserPresetByHotkey happy/unbound-null/canonical-
+  match-across-reorder/defensive + load/save round-trip including
+  corrupt-hotkey-silent-drop · ~225 fresh asserts this batch).
+
