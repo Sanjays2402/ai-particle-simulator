@@ -84,6 +84,11 @@ Existing capabilities (do not re-ship):
 - Crossfade override import: live PREVIEW panel before committing (R14.16), direct parallel to R14.15. Same staging pattern, same action badges; live cell shows the shipped default in italics when no live override exists so users see what their incoming value will displace; pink-violet panel matches the existing Crossfade chip colours.
 - MIDI user bundle EXPORT / IMPORT as portable JSON file (R14.17). New module `midiUserBundleIO.js` (kind=`ai-particle-simulator/midi-user-bundle`, v1, 16 KB cap); per-bundle Download (indigo) button tucked between the apply chip + trash on each "Your Bundles" chip row; "+ Import bundle" button (Upload icon, indigo) paired with "+ Save current as bundle" below the bar so a fresh install can pick up a friend's bundle without first having to save one of their own. id/vendor/createdAt are stripped on round-trip so two machines exporting + re-importing can't collide on numbered ids; importer mints fresh. Cap-gated to prevent silent FIFO drops.
 - MIDI user bundle RENAME in place (R14.18). Double-click the bundle chip's name to enter edit mode; Enter saves, Escape cancels, blur saves with blank-fallback-to-cancel. Auto-sizes input width to draft length (min 90px), shares the maxLength=32 cap with the save form. New `renameUserPreset(list, id, newName)` helper in midiPresets.js with ref-equal-on-no-op contract (blank-after-trim / missing-id / identical-name / non-array all return the same list ref); auto-generated description templates are rewritten in-place to match the new name's date, hand-edited custom descriptions are preserved.
+- Spectrum peak-hold fade-out tail (R15.07) — per-bar ring buffer keeps the last ~200ms (12 frames @ 60Hz) of peak heights and replays them at a falling alpha so transients leave a cinematic afterimage instead of vanishing in one frame. Lives on the same `pk` toggle as the peak lines; trail samples below the live bar (filter argument) or at the floor are skipped so we don't paint inside the bar or at y=0. Alpha lerps PEAK_TRAIL_ALPHA_MIN (0.04, oldest) → MAX (0.55, newest).
+- Lightbox WASD/hjkl pan: hold-to-repeat (R15.13). The R12.19 single-tap step now repeats at a deterministic 60ms beat after a 180ms initial delay so holding W produces a smooth upward sweep instead of one nudge. Diagonals (W+A etc.) normalise to unit length so corner sweeps don't run √2× faster than axis-aligned moves. New `aggregateHeldPan(heldKeysSet, keyClassifier=classifyPanKey)` helper in pinchZoom.js (null-on-cancel/empty/all-unknown, opposing pairs like W+S cancel to null, classifier is injectable for future remap). Cleanup tears down both timers + clears the held set on unmount / blur / scale-back-to-idle.
+- MIDI export/import ALL user bundles in one multi-bundle JSON file (R15.14). Sibling envelope to R14.17 (kind=`ai-particle-simulator/midi-user-bundles` plural, 64 KB cap) carries an array of bundles. "Export all (N)" + "Import all" buttons (cyan) appear in the Your Bundles row next to "Save current" / "Import bundle". Importer runs every incoming bundle through the same pickIOFields sanitiser as the single-bundle path (corrupt rows dropped without rejecting the whole file). Replace-by-name strategy on import: case-insensitive + trimmed name match removes the existing entry first so re-importing doesn't stack duplicates. summarizeImportImpactMulti() projects {willAdd, willReplace, willDrop} so the confirm prompt warns about FIFO drops at MAX_USER_PRESETS=8 before any data loss. Bare-array shorthand accepted for hand-rolled files.
+- Per-attractor MIDI: route CC to ENABLED toggle (R15.16). Adds `enabled` as a 6th routing field per attractor (was 5: strength/radius/x/y/z). Schmitt-trigger semantics with dead-band [HYSTERESIS_OFF=0.45, HYSTERESIS_ON=0.55] prevent on/off chatter when a continuous knob jitters near 0.5: ON when v01 rises above 0.55 from below, OFF when v01 falls below 0.45 from above, hold previous state inside the band. NaN / non-finite input never flips state. Pure `applyEnabledHysteresis(wasEnabled, v01)` helper in midiMap.js drives the setter; the resolved action reads the LIVE attractor's enabled flag at apply-time and only writes when the hysteresis decision actually differs (no churn on dead-band sweeps). Panel renders the row with an "on/off" range label + tooltip explaining the threshold behaviour.
+- Named attractor drag-row up/down reorder (R15.20). Parallels R10.03 camera-path reorder. New `moveAttractorByIndex` / `moveAttractorUp` / `moveAttractorDown` helpers in namedAttractors.js (ref-equal-on-no-op contract: missing-id / already-at-boundary / out-of-range / null-list all return the input ref unchanged so the store skips a redundant save). Up/down chevron buttons (Unicode ▲▼ glyphs to avoid pulling lucide-react into LeftSidebar for one icon) render between the On/Off toggle and the remove ×, stay in the layout at boundaries so the button column width doesn't jump. The reorder propagates THROUGH the MidiPanel grouping (R13.18 + R15.16) because per-attractor MIDI rows are emitted in list order — dragging a row reorders its MIDI section header without any extra wiring.
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -241,29 +246,38 @@ gutter overlay rendering vs. the existing single-error line marker.
 Substituted R14.05 + R14.15 + R14.16 + R14.17 + R14.18 from the
 future queue to keep the batch at 5 great slices instead of padding.
 
-### Batch 15 — next 5 (refilled)
-- [ ] R15.01 Echo / trail FBO that survives EffectComposer (carried over — render pipeline refactor, dedicated batch)
-- [ ] R15.02 Named attractor 3D drag handle (carried over — needs r3f gizmo handles, dedicated batch)
-- [ ] R15.03 OpenGraph snapshot endpoint (server-rendered card for share URLs) — needs backend [carried over]
-- [ ] R15.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [was R14.04]
-- [ ] R15.05 Audio-reactive bg curve chips → custom curve editor for power users (visual spline / 3-knot bezier) [was R14.12]
+### Batch 15 — peak trail + lightbox hold + multi-bundle IO + enabled hysteresis + attractor reorder  (SHIPPED)
+- [x] **R15.07** Spectrum peak-holds fade-out tail (last ~200ms at falling alpha) — 865792f
+- [x] **R15.13** Lightbox WASD/hjkl pan auto-repeats while the key is held — 1a0bf1d
+- [x] **R15.14** MIDI user bundle: export ALL bundles in a single multi-bundle JSON file — 9d8158b
+- [x] **R15.16** Per-attractor MIDI: route CC to ENABLED toggle (Schmitt-trigger hysteresis) — e05ccbe
+- [x] **R15.20** Named attractor: drag row up/down to reorder (parallels camera path R10.03) — bdc10db
+
+Note: R15.01 (Echo / trail FBO), R15.02 (3D drag handle), R15.03 (server-rendered OG endpoint), R15.04 (multi-error gutter overlay), R15.05 (custom audio-reactive curve editor) all deferred — first three are dedicated infrastructure batches (render-pipeline / r3f-gizmo / backend runtime), R15.04 + R15.05 are each their own focused batch. Substituted R15.07, R15.13, R15.14, R15.16, R15.20 from the future queue to keep the batch at 5 great slices instead of padding.
+
+### Batch 16 — next 5 (refilled)
+- [ ] R16.01 Echo / trail FBO that survives EffectComposer (carried over — render pipeline refactor, dedicated batch)
+- [ ] R16.02 Named attractor 3D drag handle (carried over — needs r3f gizmo handles, dedicated batch)
+- [ ] R16.03 OpenGraph snapshot endpoint (server-rendered card for share URLs) — needs backend [carried over]
+- [ ] R16.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [carried from R15.04]
+- [ ] R16.05 Audio-reactive bg curve chips → custom curve editor for power users (visual spline / 3-knot bezier) [carried from R15.05]
 
 ### Future queue (refill when batch closes)
-- [ ] R15.06 Carousel: bulk "rebuild all stale thumbs" action in the filter button menu [was R14.06]
-- [ ] R15.07 Spectrum peak-holds: per-bar fade-out tail (last 200ms still painted at low alpha) for an even more cinematic look [was R14.07]
-- [ ] R15.08 Theme pack preview: drag a JSON onto the sidebar to preview without the file picker [was R14.08]
-- [ ] R15.09 Camera path: drag-and-drop reorder (graduates from arrow-button slice R10.03) [was R14.09]
-- [ ] R15.10 Snapshot grid: long-press a tile to multi-select for bulk delete [was R14.10]
-- [ ] R15.11 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view [was R14.11]
-- [ ] R15.12 Smash bias: user-editable per-chip ranges (open the bias as JSON, tweak, re-save) [was R14.13]
-- [ ] R15.13 Lightbox WASD pan: hold to repeat (auto-repeat on key-held for smoother sweeps) [was R14.14]
-- [ ] R15.14 MIDI user bundle: export ALL bundles in a single multi-bundle JSON file (current R14.17 ships single-bundle only)
-- [ ] R15.15 MIDI user bundle: drag-and-drop a bundle JSON onto the MidiPanel to import (skip the file picker)
-- [ ] R15.16 Per-attractor MIDI: route CC to ENABLED toggle (button-style with hysteresis around 0.5) [was R14.20]
-- [ ] R15.17 Minimap: hover a saved-view dot for ~1s shows a thumbnail preview (canvas2D sample of the scene from that camera) [was R14.19]
-- [ ] R15.18 Wind chip overrides: per-chip live "what slot is this CC bound to" badge if the chip's seconds is bound to a CC (cross-reference between MIDI map + wind chips)
-- [ ] R15.19 Crossfade chip overrides: same MIDI cross-reference badge as R15.18
-- [ ] R15.20 Named attractor: drag a row up/down to reorder (parallels camera path reorder; affects MidiPanel group order too)
+- [ ] R16.06 Carousel: bulk "rebuild all stale thumbs" action in the filter button menu [was R15.06]
+- [ ] R16.07 Theme pack preview: drag a JSON onto the sidebar to preview without the file picker [was R15.08]
+- [ ] R16.08 Camera path: drag-and-drop reorder (graduates from arrow-button slice R10.03) [was R15.09]
+- [ ] R16.09 Snapshot grid: long-press a tile to multi-select for bulk delete [was R15.10]
+- [ ] R16.10 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view [was R15.11]
+- [ ] R16.11 Smash bias: user-editable per-chip ranges (open the bias as JSON, tweak, re-save) [was R15.12]
+- [ ] R16.12 MIDI user bundle: drag-and-drop a bundle JSON onto the MidiPanel to import (skip the file picker) [was R15.15]
+- [ ] R16.13 Minimap: hover a saved-view dot for ~1s shows a thumbnail preview (canvas2D sample of the scene from that camera) [was R15.17]
+- [ ] R16.14 Wind chip overrides: per-chip live "what slot is this CC bound to" badge if the chip's seconds is bound to a CC (cross-reference between MIDI map + wind chips) [was R15.18]
+- [ ] R16.15 Crossfade chip overrides: same MIDI cross-reference badge as R16.14 [was R15.19]
+- [ ] R16.16 Per-attractor MIDI: route CC to RADIUS via inverse curve (e.g. log-spaced) so small knob movements at low radii are still useful
+- [ ] R16.17 Spectrum peak trail: per-bar fade-out curve preset (linear/exp/log) to taste-shape the afterimage [graduates from R15.07]
+- [ ] R16.18 Named attractor: bulk-reorder via numeric position input (jump from 9 → 2 without clicking up 7 times) [graduates from R15.20]
+- [ ] R16.19 MIDI user bundle: per-bundle COLOR tag (the chip background) — visual sort beyond just name
+- [ ] R16.20 Lightbox WASD pan: acceleration curve (start slow, ramp up if held > 1s) for finer control near the centre
 
 ## TICK LOG
 - 2026-06-19 23:41 PT — Bootstrap + Batch 1 (5/5).
@@ -512,3 +526,63 @@ future queue to keep the batch at 5 great slices instead of padding.
   with R14.05 type styles — 4 distinct accents, full bundle
   completeness for every type, fallback for unknown/null/undefined,
   opacity hierarchy walk · ~140 fresh asserts this batch).
+- 2026-06-21 22:26 PT — Batch 15 (5/5).
+  Commits: 865792f (R15.07 spectrum peak-hold fade trail — per-bar
+  Float32Array ring buffer + tickPeakHolds shifts + readPeakTrail
+  with current-bar filter + alpha lerp + resetPeakHolds zeroes
+  trail), 1a0bf1d (R15.13 lightbox WASD/hjkl pan auto-repeat —
+  60ms repeat after 180ms delay + new aggregateHeldPan helper in
+  pinchZoom.js with diagonal-normalise + opposing-pair-cancel +
+  injectable classifier + blur/unmount cleanup), 9d8158b (R15.14
+  multi-bundle MIDI export/import — new EXPORT_KIND_MULTI envelope
+  with 64 KB cap + buildExportPayloadMulti/serializeMulti/
+  makeFilenameMulti/parseImportMulti + summarizeImportImpactMulti
+  for FIFO-drop projection + UI "Export all (N)" / "Import all"
+  cyan buttons), e05ccbe (R15.16 per-attractor MIDI enabled with
+  Schmitt-trigger hysteresis — ATTRACTOR_FIELDS grew from 5 to 6,
+  HYSTERESIS_ON=0.55 / HYSTERESIS_OFF=0.45, applyEnabledHysteresis
+  pure helper holds previous state in dead-band + never flips on
+  NaN, resolveActionForId reads LIVE attractor enabled flag at
+  apply-time + writes only on decision change), bdc10db (R15.20
+  named attractor drag-row up/down reorder — moveAttractorByIndex/
+  Up/Down helpers in namedAttractors.js with ref-equal-on-no-op
+  contract + store actions + LeftSidebar chevron column with
+  Unicode ▲▼ glyphs, parallels camera-path R10.03 visually +
+  semantically), 6cf966a (lint-gate cleanup for R15.13 — captured
+  heldKeysRef.current into a local for the effect cleanup function
+  to silence react-hooks/exhaustive-deps warning).
+  R15.01 (Echo / trail FBO), R15.02 (3D drag handle), R15.03
+  (server-rendered OG endpoint), R15.04 (multi-error gutter
+  overlay), R15.05 (custom audio-reactive curve editor) all
+  deferred — first three are dedicated infrastructure batches
+  (render-pipeline / r3f-gizmo / backend runtime), R15.04 + R15.05
+  each need their own focused batch. Substituted R15.07 + R15.13 +
+  R15.14 + R15.16 + R15.20 from the future queue to keep the
+  batch at 5 great slices instead of padding.
+  Gates: lint 23 errors / 3 warnings — exactly matches baseline
+  (zero new errors in any of the 9 modified .js/.jsx files +
+  1 new module path + 4 modified .test.mjs files; one transient
+  react-hooks/exhaustive-deps warning caught at the gate from
+  reading heldKeysRef.current in SnapshotGallery cleanup,
+  resolved with a local-capture refactor as 6cf966a).
+  Build: 912 ms green (1.72 MB bundle, gzip 511 KB — +5 KB for
+  PEAK_TRAIL ring buffer + multi-bundle IO + Schmitt-trigger
+  helper + 4 reorder helpers + Unicode chevron column + cyan
+  Export-all/Import-all chips). Unit tests: 39/39 files pass
+  (extended waveform with ~80 R15.07 asserts covering trail
+  allocation/shift semantics/readPeakTrail oldest→newest order/
+  alpha bounds/current-bar filter/defensive null cases/reset
+  zeroes trail; extended pinchZoom with ~25 R15.13 asserts
+  covering aggregateHeldPan single/diagonal-normalise/cancel-
+  pair/garbage/custom-classifier; extended midiUserBundleIO with
+  ~50 R15.14 asserts covering multi envelope/serialize/parse/
+  bare-array/per-bundle-sanitize/all rejection cases/summarize-
+  impact FIFO projection; extended midiMap with ~60 R15.16
+  asserts covering applyEnabledHysteresis full Schmitt-trigger
+  contract incl. boundary correctness + dead-band hold sweep +
+  NaN safety + full-cycle exactly-2-flips invariant + enabled
+  routing through resolveActionForId; extended namedAttractors
+  with ~35 R15.20 asserts covering moveAttractorByIndex/Up/Down
+  ref-equal-on-no-op contract + boundary + missing-id + null/
+  empty defensive · ~250 fresh asserts this batch). Per-attractor
+  MIDI row count scales from 5N to 6N with the new enabled field.
