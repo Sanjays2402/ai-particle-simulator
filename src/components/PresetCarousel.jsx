@@ -7,6 +7,8 @@ import {
   readThumbMetadata, summarizeThumbAge,
   // R20.19 — rich-detail formatter for the click-to-expand panel
   formatThumbDetails,
+  // R21.24 — Clear action inside the detail panel
+  clearThumbnail,
 } from '../lib/presetThumbnails'
 
 export default function PresetCarousel() {
@@ -458,6 +460,89 @@ export default function PresetCarousel() {
                       ))}
                     </div>
                   )}
+                  {/* R21.24 — Rebuild / Clear action buttons scoped to
+                      this tile. Currently the hover-only rebuild button
+                      on the tile is the ONLY way to trigger a per-tile
+                      rebuild; surfacing the action inside the panel
+                      means the user can rebuild WITHOUT first having to
+                      close the detail panel and hover the tile. Clear
+                      is brand new — previously the only way to wipe a
+                      single thumb without rebuilding it was to use the
+                      bulk "Rebuild all" path (which wipes everything).
+                      Both actions auto-close the panel afterwards so
+                      the user sees the resulting visual update on the
+                      tile instead of staring at an empty/stale panel. */}
+                  <div style={{
+                    display: 'flex', gap: 6, marginTop: 8, paddingTop: 8,
+                    borderTop: '1px solid rgba(255,255,255,0.06)',
+                  }}>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        // Re-use the same rebuild path the hover button
+                        // uses (setBusyId + setTimeout + recaptureThumbnail
+                        // + particle:thumbnail-ready event). Closing the
+                        // panel BEFORE the rebuild runs means the user
+                        // sees the new thumb arrive instead of an
+                        // already-stale rich panel.
+                        setDetailId(null)
+                        rebuildThumb(p)
+                      }}
+                      title="Re-render this preset's thumbnail using the live capture path. The new thumb replaces the cached one and the badge metadata updates."
+                      style={{
+                        flex: 1,
+                        padding: '5px 8px', borderRadius: 5,
+                        fontSize: 10, fontWeight: 600,
+                        letterSpacing: '0.06em', textTransform: 'uppercase',
+                        background: 'rgba(99,102,241,0.14)',
+                        color: '#c7d2fe',
+                        border: '1px solid rgba(99,102,241,0.32)',
+                        cursor: 'pointer',
+                        fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                        display: 'inline-flex', alignItems: 'center',
+                        justifyContent: 'center', gap: 4,
+                      }}>
+                      <span style={{ fontSize: 12 }}>{'\u21bb'}</span> Rebuild
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        // clearThumbnail handles localStorage + metadata
+                        // side-store via the cascade. Drop the in-memory
+                        // map entries so the placeholder emoji tile shows
+                        // immediately without waiting for a refresh event.
+                        const wiped = clearThumbnail(p.id)
+                        if (wiped) {
+                          setThumbs(prev => {
+                            const { [p.id]: _gone, ...rest } = prev
+                            return rest
+                          })
+                          setMeta(prev => {
+                            const { [p.id]: _gone, ...rest } = prev
+                            return rest
+                          })
+                        }
+                        setDetailId(null)
+                      }}
+                      title="Delete this preset's cached thumbnail + metadata. The placeholder emoji returns until the prerenderer or live capture path generates a fresh thumb."
+                      style={{
+                        flex: 1,
+                        padding: '5px 8px', borderRadius: 5,
+                        fontSize: 10, fontWeight: 600,
+                        letterSpacing: '0.06em', textTransform: 'uppercase',
+                        background: 'rgba(239,68,68,0.10)',
+                        color: '#fca5a5',
+                        border: '1px solid rgba(239,68,68,0.30)',
+                        cursor: 'pointer',
+                        fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                        display: 'inline-flex', alignItems: 'center',
+                        justifyContent: 'center', gap: 4,
+                      }}>
+                      <span style={{ fontSize: 12 }}>{'\u00d7'}</span> Clear
+                    </button>
+                  </div>
                   <div style={{
                     marginTop: 8, paddingTop: 6,
                     borderTop: '1px solid rgba(255,255,255,0.06)',
