@@ -250,18 +250,52 @@ export default function MidiPanel({ open, onClose }) {
   // R21.25 — detect that silent strip BEFORE the setter runs so the
   // UI can warn the user with a toast. Self-rebinds (the no-op path)
   // and clears (null/'') skip the warning since nothing is stolen.
+  // R22.30 — toast also carries an UNDO action chip: click Undo to
+  // restore the displaced binding to the original bundle in one tap.
+  // The undo re-runs setUserPresetHotkey with (conflict.id, hotkey)
+  // which re-binds the hotkey to the OLD bundle and, by the same
+  // 1-binding-per-hotkey invariant, silently strips it from the NEW
+  // bundle — exact symmetric inverse of what the user just did.
+  // We pass a SNAPSHOT of the pre-write list to detect+setter so a
+  // second click (or another change landing between) can't compound
+  // the undo against the wrong state.
   const setUserBundleHotkey = (id, hotkey) => {
-    const conflict = detectHotkeyConflict(userPresets, id, hotkey)
-    const next = setUserPresetHotkey(userPresets, id, hotkey)
-    if (next === userPresets) return false
+    const beforeList = userPresets
+    const conflict = detectHotkeyConflict(beforeList, id, hotkey)
+    const next = setUserPresetHotkey(beforeList, id, hotkey)
+    if (next === beforeList) return false
     setUserPresets(next)
     saveUserPresets(next)
     if (conflict) {
       const targetBundle = next.find(p => p.id === id)
       const targetColor = userPresetColorStyle(targetBundle?.color || DEFAULT_USER_PRESET_COLOR)
+      // R22.30 — undo action. Re-binds the just-stolen hotkey to the
+      // OLD bundle by calling the same setter — the lib invariant
+      // (1 hotkey -> 1 bundle) handles the symmetric strip from the
+      // new bundle. We re-read the LIVE userPresets via the setter's
+      // functional update so concurrent edits between toast-show and
+      // toast-click don't roll back to a stale snapshot.
+      const undoAction = {
+        label: 'Undo',
+        onClick: () => {
+          setUserPresets(prev => {
+            const undone = setUserPresetHotkey(prev, conflict.id, hotkey)
+            if (undone === prev) return prev
+            saveUserPresets(undone)
+            const restored = undone.find(p => p.id === conflict.id)
+            const restoredColor = userPresetColorStyle(restored?.color || DEFAULT_USER_PRESET_COLOR)
+            showToast(
+              `Hotkey \u201c${hotkey}\u201d restored \u2192 \u201c${conflict.name}\u201d`,
+              <AlertCircle size={10} color={restoredColor.accent} strokeWidth={2.4} />,
+            )
+            return undone
+          })
+        },
+      }
       showToast(
         `Hotkey \u201c${hotkey}\u201d stolen from \u201c${conflict.name}\u201d \u2192 \u201c${targetBundle?.name || 'bundle'}\u201d`,
         <AlertCircle size={10} color={targetColor.accent} strokeWidth={2.4} />,
+        undoAction,
       )
     }
     return true
