@@ -219,6 +219,19 @@ export default function MidiPanel({ open, onClose }) {
   // Save-bundle form open/closed + draft name.
   const [savingBundle, setSavingBundle] = useState(false)
   const [bundleName, setBundleName] = useState('')
+  // R25.20 — MidiPanel binding-group drag-and-drop reorder. Grab a
+  // group header by its grab handle and drop on another header to
+  // reorder the underlying namedAttractors list. Each group header is
+  // tagged with its INDEX inside the live attractor list (NOT the
+  // group iteration order, which can differ for stale/orphan groups
+  // — see `attractorRows` grouping below). Stale groups (attractor
+  // deleted but bindings persisted) are NOT draggable because they
+  // don't map to a live list entry. Pure wire on the lib's
+  // moveAttractorByIndex helper which is already pinned in tests
+  // (R15.20 / R18.19 / R17.07 all use it).
+  const [draggingGroupIdx, setDraggingGroupIdx] = useState(null)
+  const [dragOverGroupIdx, setDragOverGroupIdx] = useState(null)
+  const moveNamedAttractorByIndex = useStore(s => s.moveNamedAttractorByIndex)
   // Subscribe to the live attractor list so per-attractor MIDI rows
   // appear/disappear and re-label in real time as the user adds,
   // renames, or deletes attractors. attractorActions() is pure data
@@ -1015,20 +1028,96 @@ export default function MidiPanel({ open, onClose }) {
                     ? attractorTypeStyle(liveAttr.type)
                     : attractorTypeStyle('attractor')
                   const isStale = !liveAttr
+                  // R25.20 — resolve the group's index in the live
+                  // namedAttractors list for the DnD handlers. Stale
+                  // groups (no live entry) are -1 → not draggable.
+                  const liveIdx = liveAttr
+                    ? (namedAttractors || []).indexOf(liveAttr)
+                    : -1
+                  const draggable = liveIdx >= 0 && (namedAttractors || []).length > 1
+                  const isBeingDragged = draggable && draggingGroupIdx === liveIdx
+                  const isDropTarget    = draggable && dragOverGroupIdx === liveIdx
+                                          && draggingGroupIdx != null && draggingGroupIdx !== liveIdx
                   return (
-                    <div key={group.attractorId} style={{
-                      border: `1px solid ${isStale ? 'rgba(168,85,247,0.18)' : groupStyle.borderFaint}`,
-                      borderRadius: 8,
-                      padding: '6px 8px',
-                      marginBottom: 6,
-                      background: isStale ? 'rgba(168,85,247,0.03)' : groupStyle.bgFaint,
-                    }}>
+                    <div key={group.attractorId}
+                      onDragOver={draggable ? (e) => {
+                        // Allow drop only when a group drag is in progress
+                        // and we're not the SAME group being dragged.
+                        if (draggingGroupIdx == null || draggingGroupIdx === liveIdx) return
+                        e.preventDefault()
+                        if (dragOverGroupIdx !== liveIdx) setDragOverGroupIdx(liveIdx)
+                      } : undefined}
+                      onDragLeave={draggable ? () => {
+                        // Only clear if we're leaving the SAME group
+                        // we're highlighting (sibling-enter-before-leave
+                        // guard mirrors R17.07 / R18.19).
+                        if (dragOverGroupIdx === liveIdx) setDragOverGroupIdx(null)
+                      } : undefined}
+                      onDrop={draggable ? (e) => {
+                        e.preventDefault()
+                        const from = draggingGroupIdx
+                        const to = liveIdx
+                        setDraggingGroupIdx(null)
+                        setDragOverGroupIdx(null)
+                        if (from == null || from === to) return
+                        moveNamedAttractorByIndex(from, to)
+                      } : undefined}
+                      style={{
+                        border: isDropTarget
+                          ? '1px solid rgba(168,85,247,0.65)'
+                          : `1px solid ${isStale ? 'rgba(168,85,247,0.18)' : groupStyle.borderFaint}`,
+                        borderRadius: 8,
+                        padding: '6px 8px',
+                        marginBottom: 6,
+                        background: isDropTarget
+                          ? 'rgba(168,85,247,0.12)'
+                          : isStale ? 'rgba(168,85,247,0.03)' : groupStyle.bgFaint,
+                        opacity: isBeingDragged ? 0.55 : 1,
+                        transition: 'background 0.12s ease-out, border-color 0.12s ease-out, opacity 0.12s ease-out',
+                        position: 'relative',
+                      }}>
                       <div style={{
                         fontSize: 11, fontWeight: 600,
                         color: isStale ? '#e9d5ff' : groupStyle.fg,
                         marginBottom: 4, padding: '2px 0',
                         display: 'inline-flex', alignItems: 'center', gap: 6,
                       }}>
+                        {/* R25.20 — drag handle. Renders only when this
+                            group is draggable (live attractor + >1 in
+                            list). Grab + drop transfers via HTML5 native
+                            DnD on the handle ONLY — not the whole header
+                            — so clicking on the group name doesn't start
+                            a drag. */}
+                        {draggable && (
+                          <span
+                            draggable
+                            onDragStart={(e) => {
+                              setDraggingGroupIdx(liveIdx)
+                              // Required for Firefox to actually fire the
+                              // drag (it ignores dragstart when dataTransfer
+                              // hasn't been set).
+                              try {
+                                e.dataTransfer.effectAllowed = 'move'
+                                e.dataTransfer.setData('text/plain', String(liveIdx))
+                              } catch { /* unavailable in some testing envs */ }
+                            }}
+                            onDragEnd={() => {
+                              setDraggingGroupIdx(null)
+                              setDragOverGroupIdx(null)
+                            }}
+                            title="Drag to reorder this attractor's binding group"
+                            style={{
+                              cursor: 'grab',
+                              color: isStale ? '#a78bfa' : groupStyle.fgMuted,
+                              fontSize: 12, lineHeight: 1,
+                              userSelect: 'none',
+                              WebkitUserSelect: 'none',
+                              padding: '0 2px',
+                              fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                              fontWeight: 700,
+                            }}
+                          >{'\u2807'}</span>
+                        )}
                         {/* Tiny dot — same colour, just a denser cue
                             so the header is scannable even at narrow
                             widths where the border isn't obvious. */}
@@ -1046,6 +1135,20 @@ export default function MidiPanel({ open, onClose }) {
                             textTransform: 'uppercase', letterSpacing: '0.06em',
                             fontWeight: 500,
                           }}>{liveAttr.type === 'turbulence' ? 'turb' : liveAttr.type}</span>
+                        )}
+                        {/* R25.20 — show the live position index as a
+                            monospace badge next to the type. Cue for
+                            "where am I in the list now?" after a drag. */}
+                        {draggable && (
+                          <span style={{
+                            fontSize: 8.5, fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                            color: '#5a5a70', letterSpacing: '0.04em',
+                            padding: '0 4px', borderRadius: 3,
+                            background: 'rgba(255,255,255,0.03)',
+                            border: '1px solid rgba(255,255,255,0.05)',
+                            fontWeight: 600,
+                            marginLeft: 2,
+                          }}>#{liveIdx + 1}</span>
                         )}
                       </div>
                       {group.rows.map(a => {

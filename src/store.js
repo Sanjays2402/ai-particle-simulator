@@ -27,6 +27,8 @@ import {
   // R15.20 — list-order reorder helpers
   moveAttractorUp as moveNamedAttractorUpHelper,
   moveAttractorDown as moveNamedAttractorDownHelper,
+  // R25.20 — index-based reorder for MidiPanel binding-group DnD
+  moveAttractorByIndex as moveNamedAttractorByIndexHelper,
   // R16.18 — bulk jump-to-position helper
   moveAttractorTo1BasedPosition as moveNamedAttractorTo1BasedPositionHelper,
   // R17.17 — bulk-delete helper (shift-click multi-select)
@@ -226,6 +228,16 @@ export const useStore = create((set, get) => {
   // Wraps the same ref-equal-on-no-op contract as the up/down helpers.
   moveNamedAttractorToPosition: (id, position1Based) => {
     const next = moveNamedAttractorTo1BasedPositionHelper(get().namedAttractors, id, position1Based)
+    if (next === get().namedAttractors) return
+    saveNamedAttractors(next)
+    set({ namedAttractors: next })
+  },
+  // R25.20 — index-to-index reorder. Powers the MidiPanel binding-group
+  // drag-and-drop where the user grabs ONE group header and drops it on
+  // another to swap places. Wraps the lib helper's same ref-equal-on-
+  // no-op contract so a no-op drop (drag to same slot) skips state work.
+  moveNamedAttractorByIndex: (fromIdx, toIdx) => {
+    const next = moveNamedAttractorByIndexHelper(get().namedAttractors, fromIdx, toIdx)
     if (next === get().namedAttractors) return
     saveNamedAttractors(next)
     set({ namedAttractors: next })
