@@ -624,6 +624,151 @@ export function summarizeNoteFilter(presets, rawQuery, storage) {
   return { matching, totalWithNotes }
 }
 
+//
+// R24.37 — graduates the substring-only matcher with an optional regex
+// mode for power users. Substring stays the default; regex is opt-in
+// via the new `mode` arg ('substring' | 'regex'). The regex path uses
+// a SAFE compile contract: invalid patterns (e.g. an unclosed bracket
+// while the user is still typing) return null from compileNoteRegex
+// so the matcher silently no-ops instead of crashing the carousel
+// every keystroke. Case-insensitive by default to mirror substring's
+// behaviour — users typing "demo" should match "Demo" and "DEMO" in
+// either mode without thinking about the flags.
+
+export const NOTE_FILTER_MODE_SUBSTRING = 'substring'
+export const NOTE_FILTER_MODE_REGEX = 'regex'
+export const NOTE_FILTER_MODES = [NOTE_FILTER_MODE_SUBSTRING, NOTE_FILTER_MODE_REGEX]
+
+// True if `mode` is one of the supported note-filter modes. Used by
+// the UI to validate persisted values before paint and by the
+// matcher to fall back to substring on bad input.
+export function isValidNoteFilterMode(mode) {
+  return mode === NOTE_FILTER_MODE_SUBSTRING || mode === NOTE_FILTER_MODE_REGEX
+}
+
+// Safe regex compiler: returns a RegExp or null. Always case-
+// insensitive ('i' flag) so the behaviour aligns with substring's
+// case-insensitive contract. Returns null on:
+//   - non-string / empty query (no point compiling — caller short-
+//     circuits empty queries anyway)
+//   - invalid pattern (the user is mid-typing "[abc" and the bracket
+//     isn't closed yet — we don't want to throw on every keystroke)
+//   - pattern length > 256 (ReDoS guard — pathologically nested
+//     quantifiers can still pin the CPU; this isn't a full ReDoS
+//     defence but it caps the worst case at something interactive)
+// Pure / no DOM so the compiler is regression-pinned in tests.
+export function compileNoteRegex(rawQuery) {
+  if (typeof rawQuery !== 'string') return null
+  const trimmed = rawQuery.trim()
+  if (!trimmed) return null
+  if (trimmed.length > 256) return null
+  try {
+    return new RegExp(trimmed, 'i')
+  } catch { return null }
+}
+
+// Does a single note string match the query under the supplied mode?
+// Mode defaults to 'substring' for backwards compatibility with every
+// caller that pre-dates R24.37. Behaviour at the `mode` ABI:
+//   - 'substring': identical to noteMatchesQuery (lowercase trim
+//     substring) so the chip's substring path never regresses
+//   - 'regex': compileNoteRegex(rawQuery).test(note)
+//             - empty/whitespace query -> matches every non-empty note
+//               (so the matcher behaves like substring's empty-query
+//               branch — composable with list filters)
+//             - invalid pattern -> no match (we DON'T fall back to
+//               substring; UX-wise an invalid regex is "off" until the
+//               user fixes it, surfaced via isValidQueryForMode below)
+//             - non-string note -> no match (defensive)
+// Pure / no DOM.
+export function noteMatchesQueryWithMode(note, rawQuery, mode = NOTE_FILTER_MODE_SUBSTRING) {
+  if (typeof note !== 'string' || !note) return false
+  const safeMode = isValidNoteFilterMode(mode) ? mode : NOTE_FILTER_MODE_SUBSTRING
+  if (safeMode === NOTE_FILTER_MODE_REGEX) {
+    const query = typeof rawQuery === 'string' ? rawQuery.trim() : ''
+    if (!query) return true   // empty query matches everything (composable)
+    const re = compileNoteRegex(rawQuery)
+    if (!re) return false
+    try { return re.test(note) } catch { return false }
+  }
+  // Substring path — delegate to the existing matcher.
+  return noteMatchesQuery(note, rawQuery)
+}
+
+// Predicate: would `rawQuery` produce a USABLE match in `mode`? Used
+// by the UI to colour the chip / surface an inline warning when the
+// user types an invalid regex (mismatched bracket etc.) so they know
+// the chip went silent on purpose, not by ghost.
+//   - substring: empty/whitespace queries are "usable" (no-op semantic)
+//   - regex: empty query is usable; non-empty must compile.
+export function isValidQueryForMode(rawQuery, mode = NOTE_FILTER_MODE_SUBSTRING) {
+  const safeMode = isValidNoteFilterMode(mode) ? mode : NOTE_FILTER_MODE_SUBSTRING
+  if (typeof rawQuery !== 'string') return true   // null/undefined treated as empty
+  const trimmed = rawQuery.trim()
+  if (!trimmed) return true
+  if (safeMode === NOTE_FILTER_MODE_REGEX) return compileNoteRegex(rawQuery) !== null
+  return true   // substring always usable
+}
+
+// Project a preset list down to the subset whose stored thumb note
+// matches the query under the supplied mode. Wraps presetsMatchingNote
+// for substring mode (returns input array unchanged on empty query,
+// preserving the no-op contract) and runs the regex path otherwise.
+// Defensive contract — empty/null query returns input array unchanged
+// regardless of mode; invalid regex returns [] (matcher silently
+// drops every tile until the query becomes valid again).
+export function presetsMatchingNoteWithMode(presets, rawQuery, mode = NOTE_FILTER_MODE_SUBSTRING, storage) {
+  if (!Array.isArray(presets)) return []
+  const safeMode = isValidNoteFilterMode(mode) ? mode : NOTE_FILTER_MODE_SUBSTRING
+  if (safeMode === NOTE_FILTER_MODE_SUBSTRING) {
+    return presetsMatchingNote(presets, rawQuery, storage)
+  }
+  // Regex path
+  const query = typeof rawQuery === 'string' ? rawQuery.trim() : ''
+  if (!query) return presets   // no-op semantics — empty query = full list
+  const re = compileNoteRegex(rawQuery)
+  if (!re) return []           // invalid pattern -> empty subset
+  const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null)
+  if (!store) return []
+  const out = []
+  for (const p of presets) {
+    if (!p || typeof p.id !== 'string' || !p.id) continue
+    const md = readThumbMetadata(p.id, store)
+    if (!md || typeof md.note !== 'string' || !md.note) continue
+    try { if (re.test(md.note)) out.push(p) } catch { /* per-preset safety */ }
+  }
+  return out
+}
+
+// Mode-aware count summary for the filter UI. Mirrors summarizeNoteFilter
+// but routes through compileNoteRegex when mode === 'regex'.
+export function summarizeNoteFilterWithMode(presets, rawQuery, mode = NOTE_FILTER_MODE_SUBSTRING, storage) {
+  if (!Array.isArray(presets)) return { matching: 0, totalWithNotes: 0 }
+  const safeMode = isValidNoteFilterMode(mode) ? mode : NOTE_FILTER_MODE_SUBSTRING
+  if (safeMode === NOTE_FILTER_MODE_SUBSTRING) {
+    return summarizeNoteFilter(presets, rawQuery, storage)
+  }
+  const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null)
+  if (!store) return { matching: 0, totalWithNotes: 0 }
+  const query = typeof rawQuery === 'string' ? rawQuery.trim() : ''
+  const re = query ? compileNoteRegex(rawQuery) : null
+  // Invalid regex with a non-empty query: still count tagged tiles
+  // (totalWithNotes is independent of the query) but matching = 0.
+  let matching = 0
+  let totalWithNotes = 0
+  for (const p of presets) {
+    if (!p || typeof p.id !== 'string' || !p.id) continue
+    const md = readThumbMetadata(p.id, store)
+    if (!md || typeof md.note !== 'string' || !md.note) continue
+    totalWithNotes++
+    if (!query) { matching++; continue }   // empty query = match all
+    if (re) {
+      try { if (re.test(md.note)) matching++ } catch { /* per-preset */ }
+    }
+  }
+  return { matching, totalWithNotes }
+}
+
 // Wipe the cached thumbnail for one preset id. Returns true if the
 // entry existed and was removed; false if there was nothing to remove
 // (or storage isn't available). Used by the carousel's "rebuild this

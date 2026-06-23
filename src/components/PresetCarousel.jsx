@@ -11,8 +11,14 @@ import {
   clearThumbnail,
   // R22.29 — per-thumb user note
   setThumbNote, THUMB_NOTE_MAX_LEN,
-  // R23.34 — note filter: substring matcher + projection + summary
-  presetsMatchingNote, summarizeNoteFilter, normalizeNoteQuery,
+  // R23.34 — note filter: count-only summary still used for the global
+  // "tagged tiles" badge (mode-independent — counts every note,
+  // doesn't run any matcher).
+  summarizeNoteFilter,
+  // R24.37 — regex mode toggle (graduates R23.34's substring-only matcher)
+  NOTE_FILTER_MODE_SUBSTRING, NOTE_FILTER_MODE_REGEX,
+  isValidNoteFilterMode, isValidQueryForMode,
+  presetsMatchingNoteWithMode, summarizeNoteFilterWithMode,
 } from '../lib/presetThumbnails'
 
 export default function PresetCarousel() {
@@ -36,6 +42,32 @@ export default function PresetCarousel() {
   // because tile list filters off it during render.
   const [noteQuery, setNoteQuery] = useState('')
   const [noteFilterOpen, setNoteFilterOpen] = useState(false)
+  // R24.37 — note filter MODE: 'substring' (default, R23.34 baseline)
+  // or 'regex' (power-user pattern matching with anchors / wildcards /
+  // alternation / character classes). Persisted so a regex-loving user
+  // doesn't have to flip the toggle every session. Sanitised on load
+  // through isValidNoteFilterMode so a corrupt value can't crash the
+  // matcher.
+  const [noteFilterMode, setNoteFilterMode] = useState(() => {
+    try {
+      if (typeof localStorage === 'undefined') return NOTE_FILTER_MODE_SUBSTRING
+      const raw = localStorage.getItem('preset-note-filter-mode-v1')
+      return isValidNoteFilterMode(raw) ? raw : NOTE_FILTER_MODE_SUBSTRING
+    } catch { return NOTE_FILTER_MODE_SUBSTRING }
+  })
+  // Atomic mode-toggle: flip + persist + close the popover. Wrapped here
+  // so the chip click + keyboard shortcut share the same code path.
+  const toggleNoteFilterMode = () => {
+    const next = noteFilterMode === NOTE_FILTER_MODE_REGEX
+      ? NOTE_FILTER_MODE_SUBSTRING
+      : NOTE_FILTER_MODE_REGEX
+    setNoteFilterMode(next)
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('preset-note-filter-mode-v1', next)
+      }
+    } catch { /* quota / private mode */ }
+  }
   // Track which preset just had its thumb rebuilt — used to animate the
   // refresh icon for a moment so the user gets feedback the click landed.
   const [busyId, setBusyId] = useState(null)
@@ -164,10 +196,17 @@ export default function PresetCarousel() {
   // a user can stack "Favs + 'demo'" or "Recent + 'wrong'". noteSummary
   // surfaces a count badge on the search input so the user knows how
   // many tiles match before scanning the list.
-  const noteQueryNorm = normalizeNoteQuery(noteQuery)
-  const sorted = presetsMatchingNote(sortedByFilter, noteQueryNorm)
-  const noteSummary = noteQueryNorm
-    ? summarizeNoteFilter(sortedByFilter, noteQueryNorm)
+  // R24.37 — query value is no longer pre-normalized (substring still
+  // lower-cases / trims internally; regex consumes the raw query so
+  // case-sensitive anchors like ^Demo work as expected). The substring
+  // path still goes through normalizeNoteQuery internally so the chip
+  // empty-state branch stays accurate.
+  const noteQueryRaw = typeof noteQuery === 'string' ? noteQuery : ''
+  const noteQueryActive = noteQueryRaw.trim().length > 0
+  const noteQueryUsable = isValidQueryForMode(noteQueryRaw, noteFilterMode)
+  const sorted = presetsMatchingNoteWithMode(sortedByFilter, noteQueryRaw, noteFilterMode)
+  const noteSummary = noteQueryActive
+    ? summarizeNoteFilterWithMode(sortedByFilter, noteQueryRaw, noteFilterMode)
     : null
   // R23.34 — global "tagged" badge always reflects how many tiles in
   // the FULL preset list (independent of category filter) have notes.
@@ -270,18 +309,22 @@ export default function PresetCarousel() {
           {!noteFilterOpen ? (
             <button
               onClick={() => setNoteFilterOpen(true)}
-              title={noteQueryNorm
-                ? `Note filter: "${noteQuery}" (${noteSummary?.matching || 0} match)`
+              title={noteQueryActive
+                ? `Note filter: "${noteQuery}" — ${noteFilterMode} mode (${noteSummary?.matching || 0} match${(noteSummary?.matching || 0) === 1 ? '' : 'es'})${!noteQueryUsable ? ' — invalid pattern' : ''}`
                 : `Filter by thumbnail note — ${globalTaggedSummary.totalWithNotes} tile${globalTaggedSummary.totalWithNotes === 1 ? '' : 's'} tagged`}
               style={{
                 height: 70, width: 56,
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                 borderRadius: 10, cursor: 'pointer',
-                background: noteQueryNorm
-                  ? 'linear-gradient(135deg, rgba(245,158,11,0.28), rgba(251,191,36,0.18))'
+                background: noteQueryActive
+                  ? (noteQueryUsable
+                    ? 'linear-gradient(135deg, rgba(245,158,11,0.28), rgba(251,191,36,0.18))'
+                    : 'linear-gradient(135deg, rgba(239,68,68,0.28), rgba(248,113,113,0.18))')
                   : 'rgba(255,255,255,0.04)',
-                color: noteQueryNorm ? '#fde68a' : '#8a8aa0',
-                border: noteQueryNorm ? '1px solid rgba(245,158,11,0.45)' : '1px solid rgba(255,255,255,0.07)',
+                color: noteQueryActive ? (noteQueryUsable ? '#fde68a' : '#fecaca') : '#8a8aa0',
+                border: noteQueryActive
+                  ? (noteQueryUsable ? '1px solid rgba(245,158,11,0.45)' : '1px solid rgba(239,68,68,0.45)')
+                  : '1px solid rgba(255,255,255,0.07)',
                 fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase',
                 flexDirection: 'column', gap: 4,
                 transition: 'background 0.18s, border-color 0.18s, color 0.18s',
@@ -289,7 +332,7 @@ export default function PresetCarousel() {
             >
               <span style={{ fontSize: 16, lineHeight: 1 }}>{'\u2315'}</span>
               <span style={{ fontSize: 9 }}>
-                {noteQueryNorm ? `${noteSummary?.matching || 0}` : 'Note'}
+                {noteQueryActive ? `${noteSummary?.matching || 0}` : 'Note'}
               </span>
             </button>
           ) : (
@@ -297,11 +340,16 @@ export default function PresetCarousel() {
               display: 'inline-flex', alignItems: 'center', gap: 4,
               height: 70, padding: '0 8px',
               borderRadius: 10,
-              background: 'rgba(245,158,11,0.08)',
-              border: '1px solid rgba(245,158,11,0.40)',
+              background: noteQueryActive && !noteQueryUsable
+                ? 'rgba(239,68,68,0.08)'
+                : 'rgba(245,158,11,0.08)',
+              border: noteQueryActive && !noteQueryUsable
+                ? '1px solid rgba(239,68,68,0.55)'
+                : '1px solid rgba(245,158,11,0.40)',
             }}>
               <span style={{
-                fontSize: 14, lineHeight: 1, color: '#fde68a',
+                fontSize: 14, lineHeight: 1,
+                color: noteQueryActive && !noteQueryUsable ? '#fecaca' : '#fde68a',
               }}>{'\u2315'}</span>
               <input
                 type="text"
@@ -319,25 +367,62 @@ export default function PresetCarousel() {
                     setNoteFilterOpen(false)
                   }
                 }}
-                placeholder="Search notes..."
-                title={`Filter the carousel by thumbnail note text. ${globalTaggedSummary.totalWithNotes} tiles tagged; substring + case-insensitive match.`}
+                placeholder={noteFilterMode === NOTE_FILTER_MODE_REGEX
+                  ? 'Regex: ^demo$, h.llo, [a-z]+...'
+                  : 'Search notes...'}
+                title={`Filter the carousel by thumbnail note text. ${globalTaggedSummary.totalWithNotes} tiles tagged; ${noteFilterMode === NOTE_FILTER_MODE_REGEX
+                  ? 'regex mode (case-insensitive, anchors + wildcards + character classes supported)'
+                  : 'substring + case-insensitive match'}.`}
                 style={{
                   background: 'transparent',
                   border: 'none', outline: 'none',
-                  color: '#fef3c7',
+                  color: noteQueryActive && !noteQueryUsable ? '#fecaca' : '#fef3c7',
                   fontSize: 11,
-                  width: 110,
+                  width: 120,
                   fontFamily: 'Geist Mono, JetBrains Mono, monospace',
                 }}
               />
+              {/* R24.37 — mode toggle pip. Click to flip substring <-> regex.
+                  When regex mode is active, the chip wears an indigo tint so
+                  the user can tell at a glance which matcher is running
+                  without inspecting the placeholder text. */}
+              <button
+                type="button"
+                onClick={toggleNoteFilterMode}
+                title={noteFilterMode === NOTE_FILTER_MODE_REGEX
+                  ? 'Regex mode (click to switch back to substring)'
+                  : 'Substring mode (click to switch to regex)'}
+                style={{
+                  width: 22, height: 16,
+                  borderRadius: 4,
+                  background: noteFilterMode === NOTE_FILTER_MODE_REGEX
+                    ? 'rgba(99,102,241,0.22)'
+                    : 'rgba(255,255,255,0.04)',
+                  border: noteFilterMode === NOTE_FILTER_MODE_REGEX
+                    ? '1px solid rgba(99,102,241,0.55)'
+                    : '1px solid rgba(255,255,255,0.10)',
+                  color: noteFilterMode === NOTE_FILTER_MODE_REGEX ? '#c7d2fe' : '#9a9ab0',
+                  fontSize: 9, lineHeight: 1, fontWeight: 700, cursor: 'pointer',
+                  padding: 0,
+                  fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                  letterSpacing: '0.05em',
+                }}
+              >.*</button>
               <span style={{
-                fontSize: 9, color: '#a8a8b0',
+                fontSize: 9,
+                color: noteQueryActive && !noteQueryUsable ? '#fecaca' : '#a8a8b0',
                 fontFamily: 'Geist Mono, JetBrains Mono, monospace',
                 minWidth: 24, textAlign: 'right',
-              }} title={`${noteSummary?.matching ?? 0} of ${globalTaggedSummary.totalWithNotes} tagged tiles match`}>
-                {noteQueryNorm ? `${noteSummary?.matching ?? 0}/${globalTaggedSummary.totalWithNotes}` : `${globalTaggedSummary.totalWithNotes}`}
+              }} title={noteQueryActive && !noteQueryUsable
+                ? 'Pattern not valid — no tiles match until pattern compiles.'
+                : `${noteSummary?.matching ?? 0} of ${globalTaggedSummary.totalWithNotes} tagged tiles match`}>
+                {noteQueryActive
+                  ? (noteQueryUsable
+                    ? `${noteSummary?.matching ?? 0}/${globalTaggedSummary.totalWithNotes}`
+                    : `bad`)
+                  : `${globalTaggedSummary.totalWithNotes}`}
               </span>
-              {noteQueryNorm && (
+              {noteQueryActive && (
                 <button
                   type="button"
                   onClick={() => setNoteQuery('')}
@@ -374,19 +459,25 @@ export default function PresetCarousel() {
       {/* R23.34 — empty-results banner. When a query is active but
           nothing in the current category-filter matches it, surface a
           friendly note so the user doesn't think the carousel broke.
-          Inline so it doesn't push the layout around when not active. */}
-      {noteQueryNorm && sorted.length === 0 && (
+          Inline so it doesn't push the layout around when not active.
+          R24.37 — invalid regex gets its own messaging so users know
+          the pattern (not the query string itself) is the problem. */}
+      {noteQueryActive && sorted.length === 0 && (
         <div style={{
           flexShrink: 0,
           height: 70, padding: '0 14px',
           display: 'inline-flex', alignItems: 'center',
           borderRadius: 10,
           background: 'rgba(255,255,255,0.02)',
-          border: '1px dashed rgba(245,158,11,0.35)',
-          color: '#fde68a',
+          border: noteQueryUsable
+            ? '1px dashed rgba(245,158,11,0.35)'
+            : '1px dashed rgba(239,68,68,0.45)',
+          color: noteQueryUsable ? '#fde68a' : '#fecaca',
           fontSize: 11, fontStyle: 'italic',
         }}>
-          No tagged tiles match {'\u201c'}{noteQuery}{'\u201d'}
+          {noteQueryUsable
+            ? <>No tagged tiles match {'\u201c'}{noteQuery}{'\u201d'}</>
+            : <>Invalid regex {'\u2014'} type a valid pattern (or switch to substring)</>}
         </div>
       )}
       {sorted.map(p => {

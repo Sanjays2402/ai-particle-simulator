@@ -13,6 +13,11 @@ import {
   THUMB_NOTE_MAX_LEN, setThumbNote,
   // R23.34 — note filtering: substring matcher, projection, summary
   normalizeNoteQuery, noteMatchesQuery, presetsMatchingNote, summarizeNoteFilter,
+  // R24.37 — note filter regex mode toggle
+  NOTE_FILTER_MODE_SUBSTRING, NOTE_FILTER_MODE_REGEX, NOTE_FILTER_MODES,
+  isValidNoteFilterMode, compileNoteRegex,
+  noteMatchesQueryWithMode, isValidQueryForMode,
+  presetsMatchingNoteWithMode, summarizeNoteFilterWithMode,
   THUMB_WIDTH, THUMB_HEIGHT,
 } from './presetThumbnails.js'
 
@@ -964,3 +969,188 @@ eq(noteMatchesQuery({}, 'demo'), false,           'object note → no match')
 }
 
 console.log('PASS: presetsMatchingNote + summarizeNoteFilter + noteMatchesQuery + normalizeNoteQuery (R23.34, ~60 asserts)')
+
+// --- R24.37: note filter regex mode ------------------------------------
+
+// Sanity: modes exposed + isValidNoteFilterMode predicate.
+eq(NOTE_FILTER_MODE_SUBSTRING, 'substring',  'substring mode constant')
+eq(NOTE_FILTER_MODE_REGEX,     'regex',      'regex mode constant')
+eq(NOTE_FILTER_MODES.length, 2, 'NOTE_FILTER_MODES has 2 entries')
+eq(NOTE_FILTER_MODES[0], 'substring', 'NOTE_FILTER_MODES[0] = substring')
+eq(NOTE_FILTER_MODES[1], 'regex',     'NOTE_FILTER_MODES[1] = regex')
+eq(isValidNoteFilterMode('substring'), true,  'substring is valid')
+eq(isValidNoteFilterMode('regex'),     true,  'regex is valid')
+eq(isValidNoteFilterMode('nope'),      false, 'unknown mode is invalid')
+eq(isValidNoteFilterMode(null),        false, 'null is invalid')
+eq(isValidNoteFilterMode(undefined),   false, 'undefined is invalid')
+eq(isValidNoteFilterMode(42),          false, 'number is invalid')
+
+// --- compileNoteRegex ---
+{
+  const re = compileNoteRegex('demo')
+  truthy(re instanceof RegExp,            'valid pattern -> RegExp')
+  eq(re.flags, 'i',                   'always case-insensitive')
+  truthy(re.test('demo'),                 'matches the original')
+  truthy(re.test('DEMO'),                 'case-insensitive match')
+}
+{
+  // Anchors + alternation + character class — real regex syntax.
+  const re = compileNoteRegex('^demo|test$')
+  truthy(re instanceof RegExp,            'alternation compiles')
+  truthy(re.test('demo shot'),            'leading anchor matches')
+  truthy(re.test('one test'),             'trailing anchor matches')
+  truthy(!re.test('no demo here yes'),    'no anchor match -> false')
+}
+{
+  // Empty / whitespace / non-string -> null.
+  eq(compileNoteRegex(''),        null, 'empty -> null')
+  eq(compileNoteRegex('   '),     null, 'whitespace -> null')
+  eq(compileNoteRegex(null),      null, 'null -> null')
+  eq(compileNoteRegex(undefined), null, 'undefined -> null')
+  eq(compileNoteRegex(42),        null, 'number -> null')
+  eq(compileNoteRegex({}),        null, 'object -> null')
+}
+{
+  // Invalid patterns -> null (no throw).
+  eq(compileNoteRegex('['),       null, 'unclosed bracket -> null')
+  eq(compileNoteRegex('(?<'),     null, 'malformed lookbehind -> null')
+  eq(compileNoteRegex('\\'),      null, 'trailing backslash -> null')
+  eq(compileNoteRegex('*'),       null, 'leading quantifier -> null')
+}
+{
+  // Length cap (256 chars) — pathological ReDoS guard.
+  const long = 'a'.repeat(257)
+  eq(compileNoteRegex(long), null, 'pattern over 256 chars -> null')
+  const ok256 = 'a'.repeat(256)
+  truthy(compileNoteRegex(ok256) instanceof RegExp, 'exactly 256 chars compiles')
+}
+
+// --- noteMatchesQueryWithMode ---
+// Substring mode delegates to noteMatchesQuery — sanity-checked here.
+{
+  eq(noteMatchesQueryWithMode('good demo', 'demo', 'substring'), true,
+    'substring: substring match')
+  eq(noteMatchesQueryWithMode('good demo', 'DEMO', 'substring'), true,
+    'substring: case-insensitive')
+  eq(noteMatchesQueryWithMode('good demo', 'absent', 'substring'), false,
+    'substring: non-match')
+  // Empty query: matches non-empty note (composable contract).
+  eq(noteMatchesQueryWithMode('anything', '', 'substring'),    true, 'substring: empty matches')
+  eq(noteMatchesQueryWithMode('anything', null, 'substring'),  true, 'substring: null matches')
+}
+// Regex mode.
+{
+  // Plain literal matches like substring.
+  eq(noteMatchesQueryWithMode('good demo', 'demo', 'regex'), true,
+    'regex: literal match')
+  // Pattern-feature paths only available in regex mode.
+  eq(noteMatchesQueryWithMode('demo shot', '^demo', 'regex'), true,
+    'regex: leading anchor matches')
+  eq(noteMatchesQueryWithMode('not demo', '^demo', 'regex'), false,
+    'regex: leading anchor non-match (substring would match!)')
+  eq(noteMatchesQueryWithMode('demo|test', 'demo\\|', 'regex'), true,
+    'regex: escaped alternation literal')
+  eq(noteMatchesQueryWithMode('hello world', 'h.llo', 'regex'), true,
+    'regex: wildcard match')
+  // Case-insensitive in regex mode.
+  eq(noteMatchesQueryWithMode('HELLO', 'hello', 'regex'), true,
+    'regex: case-insensitive')
+  // Invalid pattern -> no match (NOT a substring fallback).
+  eq(noteMatchesQueryWithMode('demo [abc', '[', 'regex'), false,
+    'regex: invalid pattern -> no match (no substring fallback)')
+  // Empty query: matches every non-empty note (composable, mirrors substring).
+  eq(noteMatchesQueryWithMode('anything', '', 'regex'),    true, 'regex: empty matches')
+  eq(noteMatchesQueryWithMode('anything', null, 'regex'),  true, 'regex: null matches')
+  // Non-string note -> no match in either mode.
+  eq(noteMatchesQueryWithMode(null,      'demo', 'regex'),     false, 'regex: null note')
+  eq(noteMatchesQueryWithMode(undefined, 'demo', 'regex'),     false, 'regex: undef note')
+  eq(noteMatchesQueryWithMode(42,        'demo', 'regex'),     false, 'regex: number note')
+}
+// Mode arg defaults to substring (back-compat).
+{
+  eq(noteMatchesQueryWithMode('good demo', 'demo'), true, 'default mode is substring')
+}
+// Unknown mode falls back to substring.
+{
+  eq(noteMatchesQueryWithMode('good demo', 'demo', 'bogus'), true,
+    'unknown mode -> substring fallback')
+}
+
+// --- isValidQueryForMode ---
+{
+  // Substring mode: every query is "usable".
+  eq(isValidQueryForMode('demo',       'substring'), true,  'substring: literal usable')
+  eq(isValidQueryForMode('[abc',       'substring'), true,  'substring: any string usable')
+  eq(isValidQueryForMode('',           'substring'), true,  'substring: empty usable (no-op)')
+  eq(isValidQueryForMode('   ',        'substring'), true,  'substring: whitespace usable')
+  eq(isValidQueryForMode(null,         'substring'), true,  'substring: null usable')
+  // Regex mode: empty usable, otherwise must compile.
+  eq(isValidQueryForMode('demo',       'regex'),     true,  'regex: literal usable')
+  eq(isValidQueryForMode('h.llo',      'regex'),     true,  'regex: pattern usable')
+  eq(isValidQueryForMode('^demo$',     'regex'),     true,  'regex: anchors usable')
+  eq(isValidQueryForMode('[abc',       'regex'),     false, 'regex: unclosed bracket NOT usable')
+  eq(isValidQueryForMode('(?<',        'regex'),     false, 'regex: malformed lookbehind NOT usable')
+  eq(isValidQueryForMode('',           'regex'),     true,  'regex: empty usable (no-op)')
+  eq(isValidQueryForMode('   ',        'regex'),     true,  'regex: whitespace usable')
+  eq(isValidQueryForMode(null,         'regex'),     true,  'regex: null usable')
+  eq(isValidQueryForMode(undefined,    'regex'),     true,  'regex: undefined usable')
+  // Default mode = substring.
+  eq(isValidQueryForMode('[abc'), true, 'default mode = substring (always usable)')
+  // Unknown mode falls back to substring.
+  eq(isValidQueryForMode('[abc', 'bogus'), true, 'unknown mode -> substring')
+}
+
+// --- presetsMatchingNoteWithMode ---
+{
+  const s = makeNoteFilterShim()
+  recordThumbMetadata('a', { note: 'good demo shot' }, s)
+  recordThumbMetadata('b', { note: 'demo and more' }, s)
+  recordThumbMetadata('c', { note: 'unrelated tag' }, s)
+  recordThumbMetadata('d', {}, s)   // no note
+  const presets = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }, { id: 'e' }]
+  // Substring path delegates to presetsMatchingNote.
+  const subResults = presetsMatchingNoteWithMode(presets, 'demo', 'substring', s)
+  eq(subResults.length, 2, 'substring mode finds 2')
+  // Regex path: anchor lets us find only LEADING "demo".
+  const regResults = presetsMatchingNoteWithMode(presets, '^demo', 'regex', s)
+  eq(regResults.length, 1, 'regex ^demo -> only b')
+  eq(regResults[0].id, 'b', 'regex ^demo matches b')
+  // Empty query under regex mode -> input array unchanged (no-op semantic).
+  const empty = presetsMatchingNoteWithMode(presets, '', 'regex', s)
+  eq(empty, presets, 'regex+empty -> input ref unchanged')
+  // Invalid regex -> empty subset.
+  const invalid = presetsMatchingNoteWithMode(presets, '[', 'regex', s)
+  eq(invalid.length, 0, 'invalid regex -> empty []')
+  // Defensive: null presets.
+  eq(presetsMatchingNoteWithMode(null, 'demo', 'regex', s).length, 0, 'null presets -> []')
+  // Default mode = substring.
+  eq(presetsMatchingNoteWithMode(presets, 'demo').length || 0 > 0
+     || presetsMatchingNoteWithMode(presets, 'demo', undefined, s).length, 2,
+    'default mode delegates to substring')
+}
+
+// --- summarizeNoteFilterWithMode ---
+{
+  const s = makeNoteFilterShim()
+  recordThumbMetadata('a', { note: 'good demo shot' }, s)
+  recordThumbMetadata('b', { note: 'demo here too' }, s)
+  recordThumbMetadata('c', { note: 'unrelated' }, s)
+  const presets = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
+  // Empty query -> matches all tagged.
+  const all = summarizeNoteFilterWithMode(presets, '', 'regex', s)
+  eq(all.matching, 3,        'regex+empty: matches every tagged tile')
+  eq(all.totalWithNotes, 3,  'regex+empty: totalWithNotes counted')
+  // Regex match.
+  const reg = summarizeNoteFilterWithMode(presets, '^demo', 'regex', s)
+  eq(reg.matching, 1,        'regex ^demo matches 1')
+  eq(reg.totalWithNotes, 3,  'totalWithNotes unaffected by query')
+  // Invalid regex -> 0 matching but totalWithNotes still accurate.
+  const bad = summarizeNoteFilterWithMode(presets, '[', 'regex', s)
+  eq(bad.matching, 0,        'invalid regex -> 0 matching')
+  eq(bad.totalWithNotes, 3,  'invalid regex still counts totalWithNotes')
+  // Substring path delegates to summarizeNoteFilter.
+  const sub = summarizeNoteFilterWithMode(presets, 'demo', 'substring', s)
+  eq(sub.matching, 2, 'substring mode still counts substring matches')
+}
+
+console.log('PASS: noteMatchesQueryWithMode + presetsMatchingNoteWithMode + summarizeNoteFilterWithMode + compileNoteRegex (R24.37, regex mode toggle, ~70 asserts)')
