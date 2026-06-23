@@ -3,8 +3,10 @@ import { useStore } from '../store'
 import {
   ACTIONS, loadMidiMap, saveMidiMap, setBinding, clearAllBindings,
   decodeMidiMessage, applyCC, attractorActions,
-  // R19.16 — pure projector for "current band" tooltip on TYPE rows
-  describeTypeBand, ccToNormalized,
+  // R19.16 — pure projector for "current band" tooltip on TYPE rows.
+  // R21.22 — describeClampProximity graduates R20.16's per-band meter
+  // to continuous fields (strength/radius/x/y/z/radiusLog).
+  describeTypeBand, describeClampProximity, ccToNormalized,
 } from '../lib/midiMap'
 import { ATTRACTOR_TYPES } from '../lib/namedAttractors'
 import {
@@ -788,6 +790,24 @@ export default function MidiPanel({ open, onClose }) {
                             typeBand = describeTypeBand(ccToNormalized(liveCcValue), ATTRACTOR_TYPES)
                           }
                         }
+                        // R21.22 — for STRENGTH / RADIUS / RADIUS·log /
+                        // X / Y / Z rows (continuous fields), project the
+                        // live CC value through clampProximity so the user
+                        // sees how close the knob sits to the slider's
+                        // edges. ENABLED rows skip (it's already a 1-bit
+                        // toggle so a meter would be redundant); TYPE rows
+                        // skip (R20.16 already drew the boundary meter).
+                        let clampProx = null
+                        const isContinuousField = a.field === 'strength'
+                          || a.field === 'radius'  || a.field === 'radiusLog'
+                          || a.field === 'x'       || a.field === 'y'
+                          || a.field === 'z'
+                        if (isContinuousField && cc !== null) {
+                          const liveCcValue = lastCCByNumber[Number(cc)]
+                          if (Number.isFinite(liveCcValue)) {
+                            clampProx = describeClampProximity(ccToNormalized(liveCcValue))
+                          }
+                        }
                         return (
                           <div key={a.id} style={{
                             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -884,6 +904,72 @@ export default function MidiPanel({ open, onClose }) {
                                         height: '100%',
                                         // Fill goes from LEFT — wide fill = safe;
                                         // narrow fill = boundary-close.
+                                        width: `${Math.max(0, Math.min(100, prox * 100))}%`,
+                                        background: proxFillColor,
+                                        transition: 'width 80ms linear, background 120ms linear',
+                                      }} />
+                                    </span>
+                                  </span>
+                                )
+                              })()}
+                              {/* R21.22 — clamp-proximity meter for
+                                  continuous fields. Tiny 26x4 bar inside a
+                                  monospace tag showing how close the live
+                                  CC is to either clamp edge of the
+                                  slider. Three-tier intent matches the
+                                  R20.16 TYPE-row meter: red at the rail,
+                                  amber in the shoulder, green when safe.
+                                  Only renders when a CC is bound AND at
+                                  least one message has been seen on it. */}
+                              {clampProx && (() => {
+                                const prox = clampProx.proximityToBoundary01
+                                const atRail = clampProx.atLow || clampProx.atHigh
+                                const proxFillColor = atRail
+                                  ? 'rgba(239,68,68,0.85)'   // red — at clamp
+                                  : prox < 0.25
+                                    ? 'rgba(251,191,36,0.80)' // amber — close
+                                    : 'rgba(134,239,172,0.85)' // green — safe headroom
+                                const proxTextColor = atRail
+                                  ? '#fca5a5'
+                                  : prox < 0.25
+                                    ? '#fbbf24'
+                                    : '#86efac'
+                                const proxBorderColor = atRail
+                                  ? 'rgba(239,68,68,0.40)'
+                                  : prox < 0.25
+                                    ? 'rgba(251,191,36,0.32)'
+                                    : 'rgba(34,197,94,0.32)'
+                                const proxBgColor = atRail
+                                  ? 'rgba(239,68,68,0.10)'
+                                  : prox < 0.25
+                                    ? 'rgba(245,158,11,0.08)'
+                                    : 'rgba(34,197,94,0.08)'
+                                const pct = Math.round(clampProx.v01 * 100)
+                                return (
+                                  <span title={`Knob at ${pct}% of [${a.min}..${a.max}]. ${atRail ? 'AT THE RAIL — twisting further does nothing.' : prox < 0.25 ? 'Close to clamp — limited headroom in this direction.' : 'Safe — plenty of room either way.'} Proximity: ${(prox * 100).toFixed(0)}% from nearest clamp.`}
+                                    style={{
+                                      padding: '1px 5px', borderRadius: 4,
+                                      fontSize: 9, fontWeight: 600, letterSpacing: '0.04em',
+                                      background: proxBgColor,
+                                      color: proxTextColor,
+                                      border: `1px solid ${proxBorderColor}`,
+                                      fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                                      textTransform: 'uppercase',
+                                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                                    }}>
+                                    <span>{pct}%</span>
+                                    {/* Proximity bar — fill scales from 0 (at clamp) to 100% (centred). */}
+                                    <span style={{
+                                      display: 'inline-block',
+                                      width: 26, height: 4,
+                                      borderRadius: 2,
+                                      background: 'rgba(0,0,0,0.45)',
+                                      border: `1px solid ${proxBorderColor}`,
+                                      overflow: 'hidden',
+                                    }}>
+                                      <span style={{
+                                        display: 'block',
+                                        height: '100%',
                                         width: `${Math.max(0, Math.min(100, prox * 100))}%`,
                                         background: proxFillColor,
                                         transition: 'width 80ms linear, background 120ms linear',

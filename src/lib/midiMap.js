@@ -444,6 +444,61 @@ export function pickAttractorTypeForCC(previousType, v01, types = ATTRACTOR_TYPE
 //     The normalisation is over the band's HALF-WIDTH minus
 //     hysteresis (the value's "safe zone" inside the band), so a
 //     full sweep through one band paints a 0 → 1 → 0 ramp.
+// --- R21.22: clamp-proximity projector for non-band continuous fields ---
+// Graduates R20.16's TYPE-row proximity meter to STRENGTH / RADIUS /
+// X/Y/Z / RADIUS·log rows. The semantic differs by field shape:
+//
+//   TYPE  (R20.16)   — proximity to nearest FLIP BOUNDARY inside a band.
+//   continuous       — proximity to nearest CLAMP EDGE of the slider.
+//
+// For a continuous field, the safe zone is the middle of the slider's
+// [0, 1] sweep. A knob parked at v01=0.5 reads MAX SAFE (far from both
+// clamps); a knob at v01=0 or v01=1 reads MIN SAFE (the knob is "at
+// the rail" — twisting further does nothing). Power users moving a
+// knob during a live set can tell at a glance whether they have
+// headroom in either direction.
+//
+// Returns a number in [0, 1] where 1 == centred (max headroom both
+// ways), 0 == sitting at one of the clamps. Non-finite input
+// resolves to 1 (treat unknown CC as max-safe so the meter doesn't
+// scream RED on first paint before any messages have been seen —
+// matches R20.16's R19.16 lastCCByNumber gate semantics).
+//
+// The function is a pure projector — no clamping side effects, no
+// allocations, deterministic per v01.
+export function clampProximity01(v01) {
+  if (!Number.isFinite(v01)) return 1
+  const v = v01 < 0 ? 0 : v01 > 1 ? 1 : v01
+  // Distance to nearest clamp edge. v=0.5 → 0.5 (max); v=0 or v=1 → 0.
+  const d = Math.min(v, 1 - v)
+  // Normalise so 0.5 → 1.0 and 0/1 → 0.0.
+  return d * 2
+}
+
+// Describe the proximity for a continuous field as a structured object
+// matching describeTypeBand's shape (so the UI's renderer can branch
+// on field type but reuse the same component for proximity painting).
+// Returns:
+//   - kind: 'clamp' (distinguishes from R20.16's 'band' kind)
+//   - proximityToBoundary01: result of clampProximity01(v01)
+//   - v01:  the (possibly clamped-into-range) input — useful for
+//           "knob at 87%" tooltips
+//   - atLow / atHigh: convenience booleans for "knob is AT the rail"
+//                     so the UI can colour the meter red specifically.
+// Returns null on non-finite input so the caller can short-circuit
+// the render (matches describeTypeBand's null-on-bad-input contract).
+export function describeClampProximity(v01) {
+  if (!Number.isFinite(v01)) return null
+  const v = v01 < 0 ? 0 : v01 > 1 ? 1 : v01
+  return {
+    kind: 'clamp',
+    v01: v,
+    proximityToBoundary01: clampProximity01(v),
+    atLow:  v <= 0.001,
+    atHigh: v >= 0.999,
+  }
+}
+
 export function describeTypeBand(v01, types = ATTRACTOR_TYPES, hysteresis = TYPE_BAND_HYSTERESIS) {
   const list = Array.isArray(types) ? types.filter(t => typeof t === 'string' && t.length > 0) : []
   if (list.length === 0) return null

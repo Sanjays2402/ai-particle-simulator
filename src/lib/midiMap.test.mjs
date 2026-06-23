@@ -19,6 +19,8 @@ import {
   ATTRACTOR_FIELD_TYPE, TYPE_BAND_HYSTERESIS, pickAttractorTypeForCC,
   // R19.16 — projector for the TYPE row tooltip's "current band" tag
   describeTypeBand,
+  // R21.22 — clamp-proximity projector for continuous (non-band) fields
+  clampProximity01, describeClampProximity,
 } from './midiMap.js'
 import { STRENGTH_MAX, RADIUS_MIN, RADIUS_MAX, POSITION_MIN, POSITION_MAX, ATTRACTOR_TYPES } from './namedAttractors.js'
 
@@ -1046,4 +1048,127 @@ for (let v = 0; v <= 1; v += 0.01) {
   // boundary) reads a proportional safe distance.
   const r = describeTypeBand(0.245, TYPES_R1916, 0)
   ok(r.proximityToBoundary01 > 0, 'h=0: value off-boundary reads non-zero proximity')
+}
+
+// --- R21.22: clamp-proximity projector for continuous fields ---------
+
+// clampProximity01 — endpoint behaviour: 0 at edges, 1 at centre.
+near(clampProximity01(0),    0,   'v=0 → proximity 0 (at low clamp)', 1e-9)
+near(clampProximity01(1),    0,   'v=1 → proximity 0 (at high clamp)', 1e-9)
+near(clampProximity01(0.5),  1.0, 'v=0.5 → proximity 1.0 (centred)', 1e-9)
+
+// Symmetric — proximity at v and 1-v match (mirror around 0.5).
+{
+  for (const v of [0.1, 0.2, 0.3, 0.4]) {
+    near(clampProximity01(v), clampProximity01(1 - v),
+      `symmetric: proximity(${v}) === proximity(${1-v})`, 1e-9)
+  }
+}
+
+// Quarter-points produce the expected 50% safe reading.
+near(clampProximity01(0.25), 0.5, 'v=0.25 → proximity 0.5 (halfway from low clamp)', 1e-9)
+near(clampProximity01(0.75), 0.5, 'v=0.75 → proximity 0.5 (halfway from high clamp)', 1e-9)
+
+// Out-of-range input clamps before projection.
+near(clampProximity01(-1),    0, 'v=-1 (below range) clamps to 0', 1e-9)
+near(clampProximity01(100),   0, 'v=100 (above range) clamps to 0', 1e-9)
+near(clampProximity01(-0.5),  0, 'v=-0.5 clamps to 0', 1e-9)
+near(clampProximity01(1.5),   0, 'v=1.5 clamps to 0', 1e-9)
+
+// Defensive contract — non-finite resolves to 1 (max-safe; first-paint
+// before any CC seen reads as green, not red).
+near(clampProximity01(NaN),       1, 'NaN → 1 (max-safe fallback)', 1e-9)
+near(clampProximity01(Infinity),  1, '+Infinity → 1 (max-safe fallback)', 1e-9)
+near(clampProximity01(-Infinity), 1, '-Infinity → 1 (max-safe fallback)', 1e-9)
+
+// Range invariant — proximity ∈ [0, 1] for any v01.
+for (let v = -0.5; v <= 1.5; v += 0.05) {
+  const p = clampProximity01(v)
+  ok(p >= 0 && p <= 1, `proximity in [0,1] at v=${v.toFixed(2)}: got ${p}`)
+}
+
+// Monotonicity — proximity ASCENDS from v=0 → v=0.5, DESCENDS from
+// v=0.5 → v=1. (Symmetric inverted-V shape.)
+{
+  let prev = -Infinity
+  for (let v = 0; v <= 0.5; v += 0.05) {
+    const p = clampProximity01(v)
+    ok(p >= prev - 1e-9, `ascending at v=${v.toFixed(2)}: ${p} >= ${prev}`)
+    prev = p
+  }
+  prev = +Infinity
+  for (let v = 0.5; v <= 1; v += 0.05) {
+    const p = clampProximity01(v)
+    ok(p <= prev + 1e-9, `descending at v=${v.toFixed(2)}: ${p} <= ${prev}`)
+    prev = p
+  }
+}
+
+// describeClampProximity — structured shape, matches describeTypeBand's
+// null-on-bad-input contract.
+{
+  const r = describeClampProximity(0.5)
+  ok(r && typeof r === 'object', 'returns an object on valid input')
+  eq(r.kind, 'clamp', 'kind = clamp (distinguishes from R20.16 band)')
+  near(r.v01, 0.5, 'v01 preserved on valid input', 1e-9)
+  near(r.proximityToBoundary01, 1.0, 'centred → proximity 1.0', 1e-9)
+  eq(r.atLow,  false, 'atLow false at centre')
+  eq(r.atHigh, false, 'atHigh false at centre')
+}
+
+// atLow flag fires only at the low end (v <= 0.001).
+{
+  eq(describeClampProximity(0).atLow,       true,  'v=0 → atLow true')
+  eq(describeClampProximity(0.001).atLow,   true,  'v=0.001 → atLow true (boundary)')
+  eq(describeClampProximity(0.002).atLow,   false, 'v=0.002 → atLow false (just off)')
+  eq(describeClampProximity(0.05).atLow,    false, 'v=0.05 → atLow false')
+  eq(describeClampProximity(0.5).atLow,     false, 'v=0.5 → atLow false')
+  eq(describeClampProximity(1).atLow,       false, 'v=1 → atLow false (the OTHER rail)')
+}
+
+// atHigh flag fires only at the high end (v >= 0.999).
+{
+  eq(describeClampProximity(1).atHigh,       true,  'v=1 → atHigh true')
+  eq(describeClampProximity(0.999).atHigh,   true,  'v=0.999 → atHigh true (boundary)')
+  eq(describeClampProximity(0.998).atHigh,   false, 'v=0.998 → atHigh false (just off)')
+  eq(describeClampProximity(0.5).atHigh,     false, 'v=0.5 → atHigh false')
+  eq(describeClampProximity(0).atHigh,       false, 'v=0 → atHigh false (the OTHER rail)')
+}
+
+// Out-of-range input is clamped IN the returned v01 (matches the
+// generator-side clamp so .v01 is always a safe number to display).
+{
+  const lo = describeClampProximity(-5)
+  near(lo.v01, 0, 'v=-5 clamps to v01=0 in returned object', 1e-9)
+  eq(lo.atLow, true, 'v=-5 → atLow true after clamp')
+
+  const hi = describeClampProximity(99)
+  near(hi.v01, 1, 'v=99 clamps to v01=1 in returned object', 1e-9)
+  eq(hi.atHigh, true, 'v=99 → atHigh true after clamp')
+}
+
+// Defensive — non-finite returns null (null-on-bad-input contract).
+eq(describeClampProximity(NaN),       null, 'NaN → null')
+eq(describeClampProximity(Infinity),  null, '+Infinity → null')
+eq(describeClampProximity(-Infinity), null, '-Infinity → null')
+eq(describeClampProximity(undefined), null, 'undefined → null')
+eq(describeClampProximity(null),      null, 'null → null')
+eq(describeClampProximity('half'),    null, 'string → null')
+
+// proximityToBoundary01 inside the structured result matches the pure helper.
+{
+  for (const v of [0, 0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9, 1]) {
+    const r = describeClampProximity(v)
+    near(r.proximityToBoundary01, clampProximity01(v),
+      `describe.proximityToBoundary01 === clampProximity01 at v=${v}`, 1e-9)
+  }
+}
+
+// Pure — deterministic across calls.
+{
+  const a = describeClampProximity(0.31)
+  const b = describeClampProximity(0.31)
+  eq(a.v01, b.v01, 'pure: same v01 across calls')
+  eq(a.proximityToBoundary01, b.proximityToBoundary01,
+    'pure: same proximityToBoundary01 across calls')
 }
