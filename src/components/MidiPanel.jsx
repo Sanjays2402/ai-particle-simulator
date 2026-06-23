@@ -11,6 +11,9 @@ import {
   classifyClampProximity,
   sanitizeClampWarnThreshold, isClampWarnThresholdAtDefault,
   CLAMP_WARN_THRESHOLD_DEFAULT, CLAMP_WARN_THRESHOLD_MIN, CLAMP_WARN_THRESHOLD_MAX,
+  // R23.32 — per-field clamp warn threshold overrides
+  resolveClampWarnThreshold, setClampWarnFieldOverride,
+  sanitizeClampWarnOverrides, hasClampWarnFieldOverride,
 } from '../lib/midiMap'
 import { ATTRACTOR_TYPES } from '../lib/namedAttractors'
 import {
@@ -79,6 +82,12 @@ export default function MidiPanel({ open, onClose }) {
   // across sessions. The popover surfaces via a long-press on any
   // continuous-field clamp meter — discoverable without an extra
   // global panel, scoped to the place where the threshold matters.
+  // R23.32 — adds per-field OVERRIDES on top of the global setting.
+  // The popover gains a row of per-field chips so power users can
+  // tighten STRENGTH (where rail = silent attractor) and loosen
+  // X/Y/Z (where rail = at canvas edge, often intentional).
+  // Persisted to a parallel localStorage key so the global ↔ per-field
+  // chain stays clear.
   const [clampWarnThreshold, setClampWarnThresholdState] = useState(() => {
     try {
       const raw = typeof localStorage !== 'undefined'
@@ -88,6 +97,19 @@ export default function MidiPanel({ open, onClose }) {
       const parsed = parseFloat(raw)
       return sanitizeClampWarnThreshold(parsed)
     } catch { return CLAMP_WARN_THRESHOLD_DEFAULT }
+  })
+  // R23.32 — per-field overrides map. Default empty (every field uses
+  // global). load + sanitize on init so a corrupt persisted JSON can't
+  // crash the panel.
+  const [clampWarnOverrides, setClampWarnOverridesState] = useState(() => {
+    try {
+      const raw = typeof localStorage !== 'undefined'
+        ? localStorage.getItem('midi-clamp-warn-overrides-v1')
+        : null
+      if (raw === null) return {}
+      const parsed = JSON.parse(raw)
+      return sanitizeClampWarnOverrides(parsed)
+    } catch { return {} }
   })
   const setClampWarnThreshold = (raw) => {
     const next = sanitizeClampWarnThreshold(raw)
@@ -106,9 +128,29 @@ export default function MidiPanel({ open, onClose }) {
       }
     } catch { /* quota / private mode */ }
   }
-  // Popover open state — null when closed, otherwise the attractor-row
-  // action id whose meter was long-pressed (so the popover anchors
-  // visually near that meter without us having to track DOM positions).
+  // R23.32 — set a per-field override. Pass `value`=null to clear.
+  // Re-uses lib's setClampWarnFieldOverride which handles the ref-
+  // equal-on-no-op contract + sanitisation + clear semantics.
+  const setClampWarnFieldOverrideUI = (field, value) => {
+    const next = setClampWarnFieldOverride(clampWarnOverrides, field, value)
+    if (next === clampWarnOverrides) return  // no-op
+    setClampWarnOverridesState(next)
+    try {
+      if (typeof localStorage !== 'undefined') {
+        if (Object.keys(next).length === 0) {
+          localStorage.removeItem('midi-clamp-warn-overrides-v1')
+        } else {
+          localStorage.setItem('midi-clamp-warn-overrides-v1', JSON.stringify(next))
+        }
+      }
+    } catch { /* quota / private mode */ }
+  }
+  // Popover open state — null when closed, otherwise an object
+  // { attractorId, field } describing which meter was long-pressed.
+  // R23.32 — was previously just `a.id` (attractor scope); now carries
+  // the field too so the popover knows whose per-field override to
+  // edit. attractorId stays in the key so a stale row can't keep the
+  // popover open after a delete (just like R22.27).
   const [clampThresholdPopoverFor, setClampThresholdPopoverFor] = useState(null)
   const [learnFor, setLearnFor] = useState(null) // actionId waiting for next CC
   // R13.05 — user-authored bundle list. Persisted separately from the
@@ -1055,10 +1097,16 @@ export default function MidiPanel({ open, onClose }) {
                                 const atRail = clampProx.atLow || clampProx.atHigh
                                 // R22.27 — three-tier classifier uses
                                 // the user-tunable threshold instead of
-                                // R21.22's hard-coded 0.25. Sanitized in
-                                // the state setter so this value is
-                                // always in-bounds.
-                                const tier = classifyClampProximity(prox, atRail, clampWarnThreshold)
+                                // R21.22's hard-coded 0.25.
+                                // R23.32 — threshold resolution walks
+                                // per-field override → global → DEFAULT
+                                // via resolveClampWarnThreshold so the
+                                // meter respects per-field tightening
+                                // / loosening when present.
+                                const effectiveThreshold = resolveClampWarnThreshold(
+                                  a.field, clampWarnThreshold, clampWarnOverrides,
+                                )
+                                const tier = classifyClampProximity(prox, atRail, effectiveThreshold)
                                 const proxFillColor =
                                   tier === 'danger' ? 'rgba(239,68,68,0.85)' :  // red — at clamp
                                   tier === 'warn'   ? 'rgba(251,191,36,0.80)' : // amber — close
@@ -1079,10 +1127,19 @@ export default function MidiPanel({ open, onClose }) {
                                 // R22.27 — small "edited" dot when the
                                 // threshold is non-default, so the user
                                 // knows the meter is reading on their
-                                // custom scale.
-                                const edited = !isClampWarnThresholdAtDefault(clampWarnThreshold)
+                                // custom scale. R23.32 — also flags
+                                // when the FIELD has its own override
+                                // (distinct from a global edit) so
+                                // users can tell which meters are on
+                                // the per-field track.
+                                const editedGlobal = !isClampWarnThresholdAtDefault(clampWarnThreshold)
+                                const editedField = hasClampWarnFieldOverride(a.field, clampWarnThreshold, clampWarnOverrides)
+                                const edited = editedGlobal || editedField
+                                const isOpenForMe = clampThresholdPopoverFor
+                                  && clampThresholdPopoverFor.attractorId === a.id
+                                  && clampThresholdPopoverFor.field === a.field
                                 return (
-                                  <span title={`Knob at ${pct}% of [${a.min}..${a.max}]. ${tier === 'danger' ? 'AT THE RAIL — twisting further does nothing.' : tier === 'warn' ? 'Close to clamp — limited headroom in this direction.' : 'Safe — plenty of room either way.'} Proximity: ${(prox * 100).toFixed(0)}% from nearest clamp. Long-press to tweak the warn threshold (currently ${Math.round(clampWarnThreshold * 100)}%${edited ? '' : ', default'}).`}
+                                  <span title={`Knob at ${pct}% of [${a.min}..${a.max}]. ${tier === 'danger' ? 'AT THE RAIL — twisting further does nothing.' : tier === 'warn' ? 'Close to clamp — limited headroom in this direction.' : 'Safe — plenty of room either way.'} Proximity: ${(prox * 100).toFixed(0)}% from nearest clamp. Long-press to tweak the warn threshold (currently ${Math.round(effectiveThreshold * 100)}%${editedField ? ', per-field override' : editedGlobal ? ', global override' : ', default'}).`}
                                     onPointerDown={(e) => {
                                       // R22.27 — long-press (≥400ms) to
                                       // open the threshold-tweak popover.
@@ -1091,7 +1148,11 @@ export default function MidiPanel({ open, onClose }) {
                                       // multi-touch bail.
                                       if (e.button != null && e.button !== 0) return
                                       const tmrId = setTimeout(() => {
-                                        setClampThresholdPopoverFor(a.id)
+                                        // R23.32 — popover scope is
+                                        // (attractor, field) so the
+                                        // per-field controls know whose
+                                        // override to edit.
+                                        setClampThresholdPopoverFor({ attractorId: a.id, field: a.field })
                                         e.currentTarget.__pressFired = true
                                       }, 400)
                                       e.currentTarget.__pressTimer = tmrId
@@ -1158,17 +1219,27 @@ export default function MidiPanel({ open, onClose }) {
                                     </span>
                                     {/* R22.27 — popover for tweaking the
                                         warn threshold. Anchored to THIS
-                                        meter (we filter by a.id) so it
-                                        appears where the user pressed.
-                                        position: absolute lifts it above
-                                        the table layout; pointerEvents
-                                        on the backdrop captures click-
-                                        outside to close. */}
-                                    {clampThresholdPopoverFor === a.id && (
+                                        meter (we filter by attractorId +
+                                        field) so it appears where the
+                                        user pressed. position: absolute
+                                        lifts it above the table layout;
+                                        pointerEvents on the backdrop
+                                        captures click-outside to close.
+                                        R23.32 — popover now carries
+                                        per-field props so the chip can
+                                        target either GLOBAL (R22.27
+                                        baseline) or this specific
+                                        field's override. */}
+                                    {isOpenForMe && (
                                       <ClampThresholdPopover
-                                        value={clampWarnThreshold}
-                                        onChange={setClampWarnThreshold}
-                                        onReset={resetClampWarnThreshold}
+                                        field={a.field}
+                                        fieldLabel={a.label}
+                                        globalValue={clampWarnThreshold}
+                                        onChangeGlobal={setClampWarnThreshold}
+                                        onResetGlobal={resetClampWarnThreshold}
+                                        fieldOverrideValue={clampWarnOverrides[a.field]}
+                                        onChangeField={(v) => setClampWarnFieldOverrideUI(a.field, v)}
+                                        onClearField={() => setClampWarnFieldOverrideUI(a.field, null)}
                                         onClose={() => setClampThresholdPopoverFor(null)}
                                       />
                                     )}
@@ -1918,12 +1989,38 @@ function UserBundleChip({ preset, onApply, onDelete, onRename, onExport, onSetCo
 // Click-outside closes it (handled by the backdrop's onClick); reset
 // button restores the shipped default. Slider step is 0.01 to match
 // the sanitize precision (we don't want sub-percent noise).
-function ClampThresholdPopover({ value, onChange, onReset, onClose }) {
-  const pct = Math.round(value * 100)
+//
+// R23.32 — graduates the single-slider design with a per-FIELD
+// override row. Header row shows the FIELD label so the user knows
+// the popover is scoped to (this attractor, this field). Two modes:
+//   - GLOBAL slider (top, cyan): adjusts the R22.27 global threshold
+//     applied to every meter without a per-field override.
+//   - PER-FIELD slider (bottom, indigo): adjusts THIS field's
+//     override; takes priority over the global slider when set.
+//     Indigo "Use global" button clears the override.
+// Both sliders are independently editable; tooltips explain the
+// priority order. Header pip shows which value drives the LIVE meter.
+function ClampThresholdPopover({
+  field, fieldLabel,
+  globalValue, onChangeGlobal, onResetGlobal,
+  fieldOverrideValue, onChangeField, onClearField,
+  onClose,
+}) {
   const minPct = Math.round(CLAMP_WARN_THRESHOLD_MIN * 100)
   const maxPct = Math.round(CLAMP_WARN_THRESHOLD_MAX * 100)
   const defPct = Math.round(CLAMP_WARN_THRESHOLD_DEFAULT * 100)
-  const atDefault = isClampWarnThresholdAtDefault(value)
+  const globalPct = Math.round(globalValue * 100)
+  const globalAtDefault = isClampWarnThresholdAtDefault(globalValue)
+  const hasFieldOverride = Number.isFinite(fieldOverrideValue)
+  // R23.32 — slider value for the per-field row. When no override is
+  // set, seed the slider at the GLOBAL value so the user can adjust
+  // from a sensible starting point instead of jumping to MIN.
+  const fieldPct = hasFieldOverride
+    ? Math.round(sanitizeClampWarnThreshold(fieldOverrideValue) * 100)
+    : globalPct
+  // Effective value driving the live meter — used for the header pip
+  // colour so the user knows which slider is "active" right now.
+  const effectivePct = hasFieldOverride ? fieldPct : globalPct
   // Escape key closes — paired with onClose so the user has a
   // keyboard-only path (the popover is small enough that mouse-out
   // would be too fiddly; explicit dismissal is friendlier).
@@ -1948,7 +2045,8 @@ function ClampThresholdPopover({ value, onChange, onReset, onClose }) {
       />
       {/* Popover surface — anchored to the meter via the parent's
           position:relative. Width chosen so the slider has enough
-          travel to feel responsive (~180px). */}
+          travel to feel responsive (~180px). R23.32 — widened to
+          fit the per-field row underneath the global row. */}
       <span
         onClick={(e) => e.stopPropagation()}
         onPointerDown={(e) => e.stopPropagation()}
@@ -1956,11 +2054,13 @@ function ClampThresholdPopover({ value, onChange, onReset, onClose }) {
           position: 'absolute',
           top: 'calc(100% + 6px)',
           left: 0,
-          minWidth: 220, maxWidth: 280,
+          minWidth: 260, maxWidth: 320,
           padding: '10px 12px',
           borderRadius: 7,
           background: 'rgba(15,15,25,0.96)',
-          border: '1px solid rgba(34,211,238,0.35)',
+          border: hasFieldOverride
+            ? '1px solid rgba(99,102,241,0.45)'
+            : '1px solid rgba(34,211,238,0.35)',
           boxShadow: '0 6px 22px rgba(0,0,0,0.5)',
           zIndex: 101,
           color: '#e8e8f0',
@@ -1972,74 +2072,179 @@ function ClampThresholdPopover({ value, onChange, onReset, onClose }) {
           display: 'block',
         }}
       >
+        {/* R23.32 — scope header. Tells the user which attractor field
+            this popover is scoped to so the per-field row makes sense. */}
         <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          marginBottom: 6, gap: 8,
+          marginBottom: 8, paddingBottom: 6,
+          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
         }}>
           <span style={{
-            fontSize: 10.5, fontWeight: 700, letterSpacing: '0.06em',
+            fontSize: 9.5, fontWeight: 700, letterSpacing: '0.10em',
+            color: '#9a9ab0', textTransform: 'uppercase',
+            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+          }}>{fieldLabel || field}</span>
+          <span style={{
+            fontSize: 9, color: hasFieldOverride ? '#a5b4fc' : '#67e8f9',
+            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+            fontWeight: 700,
+          }} title={hasFieldOverride
+            ? `This field is on its own override (${effectivePct}%); the global slider doesn't affect it.`
+            : `No per-field override; this meter uses the GLOBAL threshold (${globalPct}%).`}>
+            {'\u00b7'} {effectivePct}% {'\u00b7'}
+          </span>
+        </div>
+
+        {/* GLOBAL slider — R22.27 baseline. */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          marginBottom: 4, gap: 8,
+        }}>
+          <span style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
             color: '#67e8f9', textTransform: 'uppercase',
             fontFamily: 'Geist Mono, JetBrains Mono, monospace',
-          }}>Warn threshold</span>
+          }}>Global</span>
           <span style={{
-            fontSize: 10.5, fontWeight: 700,
-            color: atDefault ? '#9a9ab0' : '#67e8f9',
+            fontSize: 10, fontWeight: 700,
+            color: globalAtDefault ? '#9a9ab0' : '#67e8f9',
             fontFamily: 'Geist Mono, JetBrains Mono, monospace',
-          }}>{pct}%</span>
+          }}>{globalPct}%</span>
         </div>
         <input
           type="range"
           min={minPct}
           max={maxPct}
           step={1}
-          value={pct}
-          onChange={(e) => onChange(Number(e.target.value) / 100)}
+          value={globalPct}
+          onChange={(e) => onChangeGlobal(Number(e.target.value) / 100)}
+          title={hasFieldOverride
+            ? `Sets the GLOBAL threshold (used by meters WITHOUT a per-field override). This field has its own override; the slider below takes priority.`
+            : `Sets the threshold applied to every continuous-field meter without a per-field override. ${globalPct}%.`}
           style={{
             width: '100%',
             accentColor: '#22d3ee',
             cursor: 'pointer',
+            opacity: hasFieldOverride ? 0.55 : 1,
           }}
         />
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          marginTop: 4, fontSize: 9,
-          color: '#7a7a90',
+          marginTop: 2, marginBottom: 8, fontSize: 8.5,
+          color: '#5a5a70',
           fontFamily: 'Geist Mono, JetBrains Mono, monospace',
         }}>
           <span>{minPct}%</span>
           <span>{maxPct}%</span>
         </div>
+
+        {/* PER-FIELD slider — R23.32 graduates the global-only popover. */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          marginBottom: 4, gap: 8,
+        }}>
+          <span style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
+            color: hasFieldOverride ? '#a5b4fc' : '#7a7a90', textTransform: 'uppercase',
+            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+          }} title={hasFieldOverride
+            ? `Per-field override active — this slider drives the live meter for ${fieldLabel}.`
+            : `No override set. Drag to attach a per-field override; the meter for ${fieldLabel} will read on this scale instead of the global one.`}>
+            This field
+            {hasFieldOverride && (
+              <span style={{
+                marginLeft: 4, fontSize: 8.5, color: '#a5b4fc',
+              }}>{'\u2022'} active</span>
+            )}
+          </span>
+          <span style={{
+            fontSize: 10, fontWeight: 700,
+            color: hasFieldOverride ? '#a5b4fc' : '#7a7a90',
+            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+          }}>{fieldPct}%</span>
+        </div>
+        <input
+          type="range"
+          min={minPct}
+          max={maxPct}
+          step={1}
+          value={fieldPct}
+          onChange={(e) => onChangeField(Number(e.target.value) / 100)}
+          title={hasFieldOverride
+            ? `Per-field override for ${fieldLabel}. Currently ${fieldPct}%; the global threshold is ${globalPct}%.`
+            : `Drag to attach a per-field override for ${fieldLabel}. Once set, this slider takes priority over the global threshold for THIS field only.`}
+          style={{
+            width: '100%',
+            accentColor: '#a5b4fc',
+            cursor: 'pointer',
+          }}
+        />
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          marginTop: 2, fontSize: 8.5,
+          color: '#5a5a70',
+          fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+        }}>
+          <span>{minPct}%</span>
+          <span>{maxPct}%</span>
+        </div>
+
         <div style={{
           marginTop: 8, fontSize: 9.5, lineHeight: 1.45, color: '#a8a8b8',
         }}>
-          When the knob's proximity to its nearest clamp drops below
-          this threshold, the meter turns amber. Lower = stricter
-          (more values flagged); higher = looser. The danger tier
-          (knob AT the rail) is always on.
+          The per-field slider takes priority. Set STRENGTH tighter
+          (rail = silent attractor) and X/Y/Z looser (rail = canvas
+          edge, often intentional).
         </div>
         <div style={{
           display: 'flex', justifyContent: 'flex-end', gap: 6,
           marginTop: 10, paddingTop: 6,
           borderTop: '1px solid rgba(255,255,255,0.06)',
         }}>
+          {/* R23.32 — "Use global" clears this field's override so it
+              falls back to the global threshold. Disabled when no
+              override is set (nothing to clear). */}
           <button
-            onClick={() => { onReset(); onClose() }}
-            disabled={atDefault}
-            title={atDefault ? 'Already at the shipped default' : `Reset to ${defPct}%`}
+            onClick={() => { onClearField() }}
+            disabled={!hasFieldOverride}
+            title={hasFieldOverride
+              ? `Clear this field's override; ${fieldLabel} will read on the global threshold (${globalPct}%) again.`
+              : 'No per-field override to clear'}
             style={{
               padding: '3px 9px', borderRadius: 4,
-              fontSize: 10, fontWeight: 600, letterSpacing: '0.06em',
-              background: atDefault ? 'rgba(255,255,255,0.04)' : 'rgba(239,68,68,0.10)',
-              color: atDefault ? '#5a5a70' : '#fca5a5',
-              border: atDefault
-                ? '1px solid rgba(255,255,255,0.05)'
-                : '1px solid rgba(239,68,68,0.30)',
-              cursor: atDefault ? 'not-allowed' : 'pointer',
+              fontSize: 9.5, fontWeight: 600, letterSpacing: '0.04em',
+              background: hasFieldOverride ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.04)',
+              color: hasFieldOverride ? '#c7d2fe' : '#5a5a70',
+              border: hasFieldOverride
+                ? '1px solid rgba(99,102,241,0.32)'
+                : '1px solid rgba(255,255,255,0.05)',
+              cursor: hasFieldOverride ? 'pointer' : 'not-allowed',
               textTransform: 'uppercase',
               fontFamily: 'Geist Mono, JetBrains Mono, monospace',
-              opacity: atDefault ? 0.55 : 1,
+              opacity: hasFieldOverride ? 1 : 0.55,
             }}
-          >Reset</button>
+          >Use global</button>
+          {/* R22.27 — Reset GLOBAL to shipped default. Disabled when
+              already at default. R23.32 — relabelled "Reset global" so
+              the user knows which slider it targets. */}
+          <button
+            onClick={() => { onResetGlobal() }}
+            disabled={globalAtDefault}
+            title={globalAtDefault ? 'Already at the shipped default' : `Reset GLOBAL to ${defPct}% (this field's override stays as-is)`}
+            style={{
+              padding: '3px 9px', borderRadius: 4,
+              fontSize: 9.5, fontWeight: 600, letterSpacing: '0.04em',
+              background: globalAtDefault ? 'rgba(255,255,255,0.04)' : 'rgba(239,68,68,0.10)',
+              color: globalAtDefault ? '#5a5a70' : '#fca5a5',
+              border: globalAtDefault
+                ? '1px solid rgba(255,255,255,0.05)'
+                : '1px solid rgba(239,68,68,0.30)',
+              cursor: globalAtDefault ? 'not-allowed' : 'pointer',
+              textTransform: 'uppercase',
+              fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+              opacity: globalAtDefault ? 0.55 : 1,
+            }}
+          >Reset global</button>
           <button
             onClick={onClose}
             style={{

@@ -555,6 +555,133 @@ export function isClampWarnThresholdAtDefault(raw) {
   return sanitizeClampWarnThreshold(raw) === CLAMP_WARN_THRESHOLD_DEFAULT
 }
 
+// R23.32 — per-field clamp warn threshold overrides.
+//
+// R22.27 shipped ONE global threshold that applied to every meter on
+// every attractor's every field. Power users wanted finer control:
+//   - STRENGTH: rail = silent attractor (force=0). Should be STRICT —
+//     hitting the rail is structural, not intentional.
+//   - X / Y / Z: rail = attractor at canvas edge. Often intentional
+//     (corner-placed turbulence, edge vortex). Should be LOOSE.
+//   - RADIUS / RADIUS·log: middle ground.
+//
+// The override storage is keyed by field name (one of ATTRACTOR_FIELDS
+// minus 'enabled' and 'type' which are binary/categorical and don't
+// use the clamp meter). Missing per-field override → falls back to
+// the global threshold. Missing global → falls back to DEFAULT.
+//
+// This composes with R22.27's existing single-threshold setter: that
+// setter writes to the GLOBAL slot. The per-field setter writes to
+// the named field slot. Both can coexist; resolveClampWarnThreshold
+// (below) is the read-side resolver that walks the chain.
+//
+// Why the per-field map lives at the lib layer: keeps the resolution
+// chain (per-field → global → default) pure + testable. The React
+// state holds the global; localStorage holds both global + the
+// per-field map. UI surfaces both in the same long-press popover so
+// the discoverability + edit path stays scoped to one place.
+
+// Fields that DO use a clamp meter (continuous knob values). enabled
+// + type don't — both render their own bespoke meters (R20.16 type
+// band, R15.16 hysteresis toggle).
+export const CLAMP_THRESHOLD_FIELDS = [
+  'strength',
+  'radius',
+  'radiusLog',
+  'x', 'y', 'z',
+]
+const CLAMP_THRESHOLD_FIELD_SET = new Set(CLAMP_THRESHOLD_FIELDS)
+
+// Defensive — strip unknown field keys + sanitize per-field values
+// through sanitizeClampWarnThreshold so a hand-edited / corrupt
+// localStorage entry can't land an out-of-range threshold.
+export function sanitizeClampWarnOverrides(raw) {
+  const out = {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
+  for (const field of CLAMP_THRESHOLD_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(raw, field)) continue
+    const v = raw[field]
+    if (!Number.isFinite(v)) continue
+    // Drop entries that don't differ from the global — keeps the
+    // persisted map minimal so a "reset all to global" round-trip
+    // doesn't leave junk overrides behind. Note we DON'T compare
+    // against the GLOBAL here (we don't have it); we just sanitize
+    // into the valid range. Caller can then prune entries that
+    // duplicate the global if desired.
+    out[field] = sanitizeClampWarnThreshold(v)
+  }
+  return out
+}
+
+// Resolve the effective threshold for a specific field:
+//   1. per-field override (if present + valid)
+//   2. global threshold (the R22.27 single slot)
+//   3. shipped default
+// Pure read-side projector — never mutates either input.
+//
+// `field` may be any string; unknown fields fall through to global.
+// Defensive: non-finite global → DEFAULT. Non-object overrides → fall
+// through to global. Per-field value re-sanitized at lookup time so
+// any in-place edit to the override map outside the setter can't
+// land an out-of-range threshold.
+export function resolveClampWarnThreshold(field, globalThreshold, overrides) {
+  if (overrides && typeof overrides === 'object' && !Array.isArray(overrides)
+      && typeof field === 'string'
+      && Object.prototype.hasOwnProperty.call(overrides, field)) {
+    const raw = overrides[field]
+    if (Number.isFinite(raw)) return sanitizeClampWarnThreshold(raw)
+  }
+  return sanitizeClampWarnThreshold(globalThreshold)
+}
+
+// Setter: returns a new overrides map with `field` set to the
+// sanitized value. Ref-equal-on-no-op contract: same-value re-set
+// returns the input ref. Pass null/undefined as the value to CLEAR
+// the per-field override (and fall back to global on the next read).
+// Defensive: invalid field → input ref unchanged. Non-object overrides
+// → start from empty.
+export function setClampWarnFieldOverride(overrides, field, value) {
+  const baseOverrides = (overrides && typeof overrides === 'object' && !Array.isArray(overrides))
+    ? overrides
+    : {}
+  if (typeof field !== 'string' || !CLAMP_THRESHOLD_FIELD_SET.has(field)) return overrides
+  // Clear path.
+  if (value === null || value === undefined) {
+    if (!Object.prototype.hasOwnProperty.call(baseOverrides, field)) return overrides
+    const next = { ...baseOverrides }
+    delete next[field]
+    return next
+  }
+  if (!Number.isFinite(value)) return overrides
+  const sanitized = sanitizeClampWarnThreshold(value)
+  if (baseOverrides[field] === sanitized) return overrides  // no-op
+  return { ...baseOverrides, [field]: sanitized }
+}
+
+// Wipe every per-field override (caller should also reset the global
+// via the existing R22.27 setter if they want a true full reset).
+// Ref-equal-on-no-op: returns the input ref when already empty.
+export function clearAllClampWarnOverrides(overrides) {
+  if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) return overrides
+  if (Object.keys(overrides).length === 0) return overrides
+  return {}
+}
+
+// Has the given field got a per-field override that DIFFERS from the
+// global? Used by the UI to render a "field overridden" pip on the
+// per-field row of the threshold popover (distinct from R22.27's
+// "global edited" pip on the meter itself).
+export function hasClampWarnFieldOverride(field, globalThreshold, overrides) {
+  if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) return false
+  if (typeof field !== 'string') return false
+  if (!Object.prototype.hasOwnProperty.call(overrides, field)) return false
+  const fieldVal = overrides[field]
+  if (!Number.isFinite(fieldVal)) return false
+  const sanitizedField = sanitizeClampWarnThreshold(fieldVal)
+  const sanitizedGlobal = sanitizeClampWarnThreshold(globalThreshold)
+  return sanitizedField !== sanitizedGlobal
+}
+
 export function describeTypeBand(v01, types = ATTRACTOR_TYPES, hysteresis = TYPE_BAND_HYSTERESIS) {
   const list = Array.isArray(types) ? types.filter(t => typeof t === 'string' && t.length > 0) : []
   if (list.length === 0) return null

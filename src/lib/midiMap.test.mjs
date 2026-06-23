@@ -24,6 +24,11 @@ import {
   // R22.27 — user-tunable warning threshold for the clamp meter
   classifyClampProximity, sanitizeClampWarnThreshold, isClampWarnThresholdAtDefault,
   CLAMP_WARN_THRESHOLD_DEFAULT, CLAMP_WARN_THRESHOLD_MIN, CLAMP_WARN_THRESHOLD_MAX,
+  // R23.32 — per-field clamp warn threshold overrides
+  CLAMP_THRESHOLD_FIELDS,
+  sanitizeClampWarnOverrides, resolveClampWarnThreshold,
+  setClampWarnFieldOverride, clearAllClampWarnOverrides,
+  hasClampWarnFieldOverride,
 } from './midiMap.js'
 import { STRENGTH_MAX, RADIUS_MIN, RADIUS_MAX, POSITION_MIN, POSITION_MAX, ATTRACTOR_TYPES } from './namedAttractors.js'
 
@@ -31,6 +36,9 @@ function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
 function eq(a, b, m) { if (a !== b) fail(`${m} — got ${JSON.stringify(a)} expected ${JSON.stringify(b)}`) }
 function near(a, b, m, tol = 1e-9) { if (Math.abs(a - b) > tol) fail(`${m} — got ${a} expected ~${b}`) }
 function ok(c, m) { if (!c) fail(m) }
+// R23.32 — deep equality for the per-field overrides tests. Stringify-
+// based so we can do { strength: 0.10 } vs { strength: 0.10 } comparisons.
+function deepEq(a, b, m) { if (JSON.stringify(a) !== JSON.stringify(b)) fail(`${m} — got ${JSON.stringify(a)} expected ${JSON.stringify(b)}`) }
 
 function installLocalStorage() {
   const map = new Map()
@@ -1344,3 +1352,294 @@ eq(describeClampProximity('half'),    null, 'string → null')
 }
 
 console.log('PASS: classifyClampProximity + sanitizeClampWarnThreshold + isClampWarnThresholdAtDefault (R22.27, ~60 asserts)')
+
+// --- R23.32: per-field clamp warn threshold overrides -----------------
+
+// Field roster — six continuous knob fields (enabled + type excluded
+// since they don't use the clamp meter).
+eq(CLAMP_THRESHOLD_FIELDS.length, 6, 'CLAMP_THRESHOLD_FIELDS covers 6 continuous knob fields')
+for (const expected of ['strength', 'radius', 'radiusLog', 'x', 'y', 'z']) {
+  ok(CLAMP_THRESHOLD_FIELDS.includes(expected), `field roster includes ${expected}`)
+}
+ok(!CLAMP_THRESHOLD_FIELDS.includes('enabled'), 'enabled excluded — binary toggle')
+ok(!CLAMP_THRESHOLD_FIELDS.includes('type'),    'type excluded — categorical band')
+
+// --- sanitizeClampWarnOverrides ---
+
+// Empty/nullish inputs → empty map.
+deepEq(sanitizeClampWarnOverrides({}),         {}, 'empty obj → empty')
+deepEq(sanitizeClampWarnOverrides(null),       {}, 'null → empty')
+deepEq(sanitizeClampWarnOverrides(undefined),  {}, 'undefined → empty')
+deepEq(sanitizeClampWarnOverrides('not-obj'),  {}, 'string → empty')
+deepEq(sanitizeClampWarnOverrides(42),         {}, 'number → empty')
+deepEq(sanitizeClampWarnOverrides([]),         {}, 'array → empty')
+
+// Known field passes through sanitized.
+deepEq(sanitizeClampWarnOverrides({ strength: 0.40 }), { strength: 0.40 },
+  'known field passes through')
+
+// Each known field is independently kept.
+{
+  const o = sanitizeClampWarnOverrides({ strength: 0.10, radius: 0.40, x: 0.25 })
+  eq(o.strength, 0.10, 'strength kept')
+  eq(o.radius,   0.40, 'radius kept')
+  eq(o.x,        0.25, 'x kept')
+}
+
+// Unknown fields silently dropped.
+{
+  const o = sanitizeClampWarnOverrides({ strength: 0.10, bogusField: 0.20 })
+  ok('strength' in o,      'strength kept')
+  ok(!('bogusField' in o), 'unknown field dropped')
+}
+
+// Per-field values clamped into [MIN, MAX].
+{
+  const o = sanitizeClampWarnOverrides({ strength: -1, radius: 1, x: 100 })
+  eq(o.strength, CLAMP_WARN_THRESHOLD_MIN, 'below MIN clamped to MIN')
+  eq(o.radius,   CLAMP_WARN_THRESHOLD_MAX, 'above MAX clamped to MAX')
+  eq(o.x,        CLAMP_WARN_THRESHOLD_MAX, 'way above MAX clamped to MAX')
+}
+
+// Non-finite per-field values dropped (not coerced).
+{
+  const o = sanitizeClampWarnOverrides({ strength: NaN, radius: 'half', y: null })
+  ok(!('strength' in o), 'NaN field dropped')
+  ok(!('radius' in o),   'string field dropped')
+  ok(!('y' in o),        'null field dropped')
+}
+
+// --- resolveClampWarnThreshold ---
+
+// Per-field override wins when present.
+eq(resolveClampWarnThreshold('strength', 0.30, { strength: 0.10 }), 0.10,
+  'per-field override wins over global')
+
+// Fallback to global when per-field missing.
+eq(resolveClampWarnThreshold('strength', 0.30, { radius: 0.10 }), 0.30,
+  'missing per-field → global')
+
+// Fallback to global when overrides object is empty.
+eq(resolveClampWarnThreshold('strength', 0.30, {}), 0.30,
+  'empty overrides → global')
+
+// Fallback to global when overrides is missing entirely.
+eq(resolveClampWarnThreshold('strength', 0.30, null), 0.30,
+  'null overrides → global')
+eq(resolveClampWarnThreshold('strength', 0.30, undefined), 0.30,
+  'undefined overrides → global')
+
+// Fallback to DEFAULT when neither per-field nor global is finite.
+eq(resolveClampWarnThreshold('strength', NaN, {}),           CLAMP_WARN_THRESHOLD_DEFAULT,
+  'NaN global + no override → DEFAULT')
+eq(resolveClampWarnThreshold('strength', undefined, null),   CLAMP_WARN_THRESHOLD_DEFAULT,
+  'undefined global + null overrides → DEFAULT')
+
+// Per-field NaN — falls through to global (lookup-time defense).
+eq(resolveClampWarnThreshold('strength', 0.30, { strength: NaN }), 0.30,
+  'NaN per-field → fall through to global')
+
+// Per-field value re-sanitized at lookup (handles in-place edits
+// outside the setter).
+eq(resolveClampWarnThreshold('strength', 0.30, { strength: -1 }), CLAMP_WARN_THRESHOLD_MIN,
+  'per-field value clamped to MIN at lookup')
+eq(resolveClampWarnThreshold('strength', 0.30, { strength: 100 }), CLAMP_WARN_THRESHOLD_MAX,
+  'per-field value clamped to MAX at lookup')
+
+// Unknown field name on the read path — if it's in the override map
+// it WILL be returned (the read path doesn't whitelist; only the
+// setter enforces field validity, so a sanitized map only ever
+// contains known fields. A hand-edited file could land an unknown
+// field; the resolver honours it. Caller can re-sanitize first if
+// they want strict whitelist semantics).
+eq(resolveClampWarnThreshold('bogusField', 0.30, { bogusField: 0.10 }), 0.10,
+  'unknown field with override → returns override (no whitelist on read)')
+eq(resolveClampWarnThreshold('bogusField', 0.30, {}), 0.30,
+  'unknown field WITHOUT override → falls through to global')
+
+// Non-string field → falls through.
+eq(resolveClampWarnThreshold(null, 0.30, {}), 0.30,                'null field → global')
+eq(resolveClampWarnThreshold(undefined, 0.30, {}), 0.30,           'undefined field → global')
+eq(resolveClampWarnThreshold(42, 0.30, {}), 0.30,                  'number field → global')
+
+// Non-object overrides → falls through.
+eq(resolveClampWarnThreshold('strength', 0.30, []), 0.30,          'array overrides → global')
+eq(resolveClampWarnThreshold('strength', 0.30, 'not-obj'), 0.30,   'string overrides → global')
+
+// --- setClampWarnFieldOverride ---
+
+// Happy path — set a per-field override.
+{
+  const overrides = {}
+  const next = setClampWarnFieldOverride(overrides, 'strength', 0.10)
+  eq(next.strength, 0.10, 'strength set to 0.10')
+  ok(next !== overrides,  'returns new ref on actual write')
+}
+
+// Ref-equal on no-op (same value re-set).
+{
+  const overrides = { strength: 0.10 }
+  const next = setClampWarnFieldOverride(overrides, 'strength', 0.10)
+  ok(next === overrides, 'same-value set → input ref (no-op)')
+}
+
+// Value sanitized into [MIN, MAX].
+{
+  const o = setClampWarnFieldOverride({}, 'strength', -1)
+  eq(o.strength, CLAMP_WARN_THRESHOLD_MIN, 'below MIN clamped to MIN')
+}
+{
+  const o = setClampWarnFieldOverride({}, 'strength', 100)
+  eq(o.strength, CLAMP_WARN_THRESHOLD_MAX, 'above MAX clamped to MAX')
+}
+
+// Clear path — null/undefined removes the field.
+{
+  const overrides = { strength: 0.10, radius: 0.40 }
+  const next = setClampWarnFieldOverride(overrides, 'strength', null)
+  ok(!('strength' in next), 'null → strength removed')
+  eq(next.radius, 0.40,     'other fields preserved')
+  ok(next !== overrides,    'returns new ref on actual clear')
+}
+{
+  const overrides = { strength: 0.10 }
+  const next = setClampWarnFieldOverride(overrides, 'strength', undefined)
+  ok(!('strength' in next), 'undefined → strength removed')
+}
+
+// Clear-already-absent → ref-equal no-op.
+{
+  const overrides = { radius: 0.40 }
+  const next = setClampWarnFieldOverride(overrides, 'strength', null)
+  ok(next === overrides, 'clear-when-absent → input ref (no-op)')
+}
+
+// Invalid field name → input ref unchanged.
+{
+  const overrides = { strength: 0.10 }
+  const next = setClampWarnFieldOverride(overrides, 'bogusField', 0.30)
+  ok(next === overrides, 'invalid field → input ref unchanged')
+}
+{
+  const overrides = { strength: 0.10 }
+  ok(setClampWarnFieldOverride(overrides, null, 0.30)      === overrides, 'null field → input ref')
+  ok(setClampWarnFieldOverride(overrides, undefined, 0.30) === overrides, 'undefined field → input ref')
+  ok(setClampWarnFieldOverride(overrides, 42, 0.30)        === overrides, 'number field → input ref')
+}
+
+// Non-finite value → input ref unchanged (defensive).
+{
+  const overrides = { strength: 0.10 }
+  ok(setClampWarnFieldOverride(overrides, 'strength', NaN)       === overrides, 'NaN value → input ref')
+  ok(setClampWarnFieldOverride(overrides, 'strength', Infinity)  === overrides, '+Infinity value → input ref')
+  ok(setClampWarnFieldOverride(overrides, 'strength', 'half')    === overrides, 'string value → input ref')
+}
+
+// Non-object overrides → setter starts from empty.
+{
+  const next = setClampWarnFieldOverride(null, 'strength', 0.10)
+  eq(next.strength, 0.10, 'null overrides → starts from empty + sets')
+  // For the no-op contract on invalid input: a write WITH valid value
+  // produces a NEW object (not the input ref) because base was nullish.
+  ok(next !== null, 'non-object overrides + write → returns new map')
+}
+
+// Set multiple fields independently.
+{
+  let overrides = {}
+  overrides = setClampWarnFieldOverride(overrides, 'strength', 0.10)
+  overrides = setClampWarnFieldOverride(overrides, 'radius', 0.40)
+  overrides = setClampWarnFieldOverride(overrides, 'x', 0.25)
+  eq(overrides.strength, 0.10, 'strength preserved across writes')
+  eq(overrides.radius,   0.40, 'radius preserved across writes')
+  eq(overrides.x,        0.25, 'x preserved across writes')
+  eq(Object.keys(overrides).length, 3, 'three independent fields written')
+}
+
+// --- clearAllClampWarnOverrides ---
+
+// Empty → ref-equal no-op.
+{
+  const overrides = {}
+  ok(clearAllClampWarnOverrides(overrides) === overrides, 'empty → input ref (no-op)')
+}
+
+// Populated → empty map.
+{
+  const overrides = { strength: 0.10, radius: 0.40 }
+  const next = clearAllClampWarnOverrides(overrides)
+  deepEq(next, {},   'cleared map is empty')
+  ok(next !== overrides, 'returns new ref on actual clear')
+}
+
+// Nullish input → input ref.
+ok(clearAllClampWarnOverrides(null) === null,           'null input → input ref')
+ok(clearAllClampWarnOverrides(undefined) === undefined, 'undefined input → input ref')
+
+// --- hasClampWarnFieldOverride ---
+
+// Per-field differs from global → true.
+ok(hasClampWarnFieldOverride('strength', 0.30, { strength: 0.10 }),
+  'per-field 0.10 vs global 0.30 → has override')
+
+// Per-field equals global → false (the override duplicates the global,
+// so there's no effective difference to flag in the UI).
+eq(hasClampWarnFieldOverride('strength', 0.30, { strength: 0.30 }), false,
+  'per-field == global → no effective override')
+
+// Missing per-field → false.
+eq(hasClampWarnFieldOverride('strength', 0.30, {}),                 false, 'empty overrides → false')
+eq(hasClampWarnFieldOverride('strength', 0.30, { radius: 0.10 }),   false, 'different field set → false')
+
+// Non-finite per-field → false (falls through to global at resolve
+// time so the override has no effect → no UI pip).
+eq(hasClampWarnFieldOverride('strength', 0.30, { strength: NaN }), false, 'NaN per-field → false')
+
+// Defensive: bad inputs return false.
+eq(hasClampWarnFieldOverride('strength', 0.30, null),        false, 'null overrides → false')
+eq(hasClampWarnFieldOverride('strength', 0.30, []),          false, 'array overrides → false')
+eq(hasClampWarnFieldOverride(null,       0.30, { x: 0.1 }),  false, 'null field → false')
+
+// Sanitization invariance — a per-field value clamped to MIN that
+// matches the global-clamped-to-MIN is NOT flagged as overridden.
+eq(hasClampWarnFieldOverride('strength', -1, { strength: -2 }), false,
+  'both clamp to MIN → not flagged as overridden')
+
+// --- integration: setter + resolver round-trip ---
+{
+  let overrides = {}
+  overrides = setClampWarnFieldOverride(overrides, 'strength', 0.10)
+  overrides = setClampWarnFieldOverride(overrides, 'x', 0.40)
+  // strength: per-field
+  eq(resolveClampWarnThreshold('strength', 0.30, overrides), 0.10,
+    'integration: strength resolves to per-field 0.10')
+  // x: per-field
+  eq(resolveClampWarnThreshold('x', 0.30, overrides), 0.40,
+    'integration: x resolves to per-field 0.40')
+  // radius: no per-field → falls back to global
+  eq(resolveClampWarnThreshold('radius', 0.30, overrides), 0.30,
+    'integration: radius resolves to global 0.30')
+  // y: no per-field → falls back to global
+  eq(resolveClampWarnThreshold('y', 0.30, overrides), 0.30,
+    'integration: y resolves to global 0.30')
+}
+
+// classifyClampProximity composes with resolveClampWarnThreshold (the
+// UI's actual usage pattern).
+{
+  const overrides = { strength: 0.10, x: 0.40 }
+  const stricter = resolveClampWarnThreshold('strength', 0.30, overrides)  // 0.10
+  const looser   = resolveClampWarnThreshold('x',        0.30, overrides)  // 0.40
+  // v01 = 0.20 (proximity = 0.40 from clamp01 ≈ 1 - |2*0.20 - 1| = 0.40)
+  // With STRENGTH's 0.10 threshold: 0.40 >= 0.10 → safe
+  eq(classifyClampProximity(0.40, false, stricter), 'safe',
+    'composed: strength threshold (0.10) makes prox=0.40 safe')
+  // With X's 0.40 threshold: 0.40 >= 0.40 → safe (at boundary)
+  eq(classifyClampProximity(0.40, false, looser), 'safe',
+    'composed: x threshold (0.40) at-boundary → safe')
+  // prox=0.39 just under loose 0.40 → warn
+  eq(classifyClampProximity(0.39, false, looser), 'warn',
+    'composed: x threshold (0.40) just-under → warn')
+}
+
+console.log('PASS: per-field clamp warn threshold overrides (R23.32, ~70 asserts)')
