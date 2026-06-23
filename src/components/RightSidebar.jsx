@@ -14,7 +14,12 @@ import {
   mergeImport as mergeBiasOverridesImport,
   exportableBiasIds,
 } from '../lib/biasOverridesIO'
-import { loadCameraViews, saveCameraViews, appendView, moveView, moveViewUp, moveViewDown, removeView, CAMERA_VIEWS_MAX } from '../lib/cameraViews'
+import {
+  loadCameraViews, saveCameraViews, appendView, moveView, moveViewUp, moveViewDown,
+  removeView, CAMERA_VIEWS_MAX,
+  // R22.12 — touch-drag reorder hit-test (graduates R17.07 desktop-only DnD)
+  resolveTouchTargetIdx,
+} from '../lib/cameraViews'
 import {
   PATH_SECONDS_MIN, PATH_SECONDS_MAX, PATH_SECONDS_DEFAULT,
   PATH_MIN_WAYPOINTS, pathDuration, clampSeconds,
@@ -313,6 +318,131 @@ function CameraViews() {
     setDragOverIdx(null)
   }
 
+  // R22.12 — touch-drag reorder. Graduates R17.07's HTML5 native
+  // drag-and-drop (desktop-only — touch devices don't fire dragstart
+  // on touch). Touch users get a long-press-to-grab-then-drag gesture
+  // wired through pointer/touch events:
+  //   1. touchstart on a row: arm a 350ms timer + record starting Y.
+  //   2. touchmove before the timer fires: if the touch moved more
+  //      than LONG_PRESS_SLOP_PX (8) cancel the timer so a scroll
+  //      gesture stays a scroll.
+  //   3. Timer fires: enter drag mode (set draggingIdx, fire haptic
+  //      feedback if available, mark touch as captured so subsequent
+  //      moves don't scroll the panel).
+  //   4. touchmove after timer fires: use resolveTouchTargetIdx to
+  //      hit-test against per-row bounding rects to update dragOverIdx.
+  //   5. touchend: run moveView if the drop target differs from the
+  //      source idx (re-uses the R17.07 moveView primitive).
+  //
+  // rowRefs holds the live DOM nodes by row idx so the touchmove
+  // hit-test can read getBoundingClientRect on every frame without
+  // a re-render. Cleared on view-list change so deleted rows aren't
+  // hit-tested as ghosts.
+  const rowRefs = useRef(new Map())
+  const setRowRef = (idx) => (el) => {
+    if (el) rowRefs.current.set(idx, el)
+    else rowRefs.current.delete(idx)
+  }
+  // Touch drag state. We keep these in REFS (not state) because
+  // touchmove fires at ~60Hz and we don't want to re-render the
+  // whole panel on every frame. The visual drag state (`draggingIdx`,
+  // `dragOverIdx`) IS in React state so the rows know to highlight,
+  // but we only call setState when those values ACTUALLY change.
+  const touchStartYRef = useRef(0)
+  const touchTimerRef = useRef(0)
+  const touchActiveRef = useRef(false)
+  const TOUCH_LONG_PRESS_MS = 350
+  const TOUCH_LONG_PRESS_SLOP_PX = 8
+
+  const cancelTouchTimer = () => {
+    if (touchTimerRef.current) {
+      clearTimeout(touchTimerRef.current)
+      touchTimerRef.current = 0
+    }
+  }
+
+  const onTouchStart = (idx) => (e) => {
+    if (views.length <= 1) return  // nothing to reorder
+    // Multi-touch (e.g. pinch-to-zoom) — bail out so we don't fight
+    // browser gestures.
+    if (e.touches && e.touches.length > 1) {
+      cancelTouchTimer()
+      return
+    }
+    const t = e.touches?.[0]
+    if (!t) return
+    touchStartYRef.current = t.clientY
+    touchActiveRef.current = false
+    cancelTouchTimer()
+    touchTimerRef.current = setTimeout(() => {
+      touchTimerRef.current = 0
+      touchActiveRef.current = true
+      setDraggingIdx(idx)
+      // Haptic feedback when entering drag (Android vibration API).
+      // Silently skipped on iOS / desktop / browsers that gate it.
+      try { navigator.vibrate?.(10) } catch { /* unsupported */ }
+    }, TOUCH_LONG_PRESS_MS)
+  }
+
+  const onTouchMove = (idx) => (e) => {
+    const t = e.touches?.[0]
+    if (!t) return
+    // Pre-arm phase: cancel the timer if the user scrolled away.
+    if (!touchActiveRef.current) {
+      const dy = Math.abs(t.clientY - touchStartYRef.current)
+      if (dy > TOUCH_LONG_PRESS_SLOP_PX) cancelTouchTimer()
+      return
+    }
+    // Drag-active phase: prevent default to lock the scroll position
+    // while the user drags a row, then hit-test the new target idx.
+    // Wrapped in try in case the browser refuses passive override.
+    try { e.preventDefault() } catch { /* passive listener */ }
+    const ranges = []
+    for (let i = 0; i < views.length; i++) {
+      const el = rowRefs.current.get(i)
+      if (!el) { ranges.push(null); continue }
+      const r = el.getBoundingClientRect()
+      ranges.push({ top: r.top, bottom: r.bottom })
+    }
+    const target = resolveTouchTargetIdx(t.clientY, ranges)
+    if (target !== null && target !== idx /* ignore self */) {
+      setDragOverIdx(prev => (prev === target ? prev : target))
+    } else if (target === idx) {
+      // Over the row being dragged — clear hint so we don't paint
+      // a misleading "drop here" indicator on the source row itself.
+      setDragOverIdx(prev => (prev === null ? prev : null))
+    }
+  }
+
+  const onTouchEnd = () => {
+    cancelTouchTimer()
+    if (!touchActiveRef.current) {
+      // Was just a tap that never crossed the long-press threshold.
+      // Don't fire any reorder — the underlying restore-button click
+      // (if any) handles it.
+      return
+    }
+    touchActiveRef.current = false
+    const from = draggingIdx
+    const to = dragOverIdx
+    setDraggingIdx(null)
+    setDragOverIdx(null)
+    if (from === null || to === null || from === to) return
+    const next = moveView(views, from, to)
+    if (next === views) return
+    setViews(next)
+    saveCameraViews(next)
+  }
+
+  const onTouchCancel = () => {
+    cancelTouchTimer()
+    if (touchActiveRef.current) {
+      touchActiveRef.current = false
+      setDraggingIdx(null)
+      setDragOverIdx(null)
+    }
+  }
+
   // Keyboard quick-save on the active "saveView" binding (default V).
   // Routed through the keymap so the rebinding UI in Settings can
   // change which key triggers it. We re-bind whenever the views list
@@ -382,12 +512,17 @@ function CameraViews() {
             const isBeingDragged = draggingIdx === idx
             return (
             <div key={v.id}
+              ref={setRowRef(idx)}
               draggable={views.length > 1}
               onDragStart={onDragStart(idx)}
               onDragOver={onDragOver(idx)}
               onDragLeave={onDragLeave(idx)}
               onDrop={onDrop(idx)}
               onDragEnd={onDragEnd}
+              onTouchStart={onTouchStart(idx)}
+              onTouchMove={onTouchMove(idx)}
+              onTouchEnd={onTouchEnd}
+              onTouchCancel={onTouchCancel}
               style={{
               display: 'flex', alignItems: 'center', gap: 6,
               padding: '7px 9px', borderRadius: 7,
@@ -405,15 +540,22 @@ function CameraViews() {
               transition: 'all 0.15s ease-out',
               opacity: isBeingDragged ? 0.55 : 1,
               cursor: views.length > 1 ? 'grab' : 'default',
+              // R22.12 — let the touchmove handler decide when to
+              // preventDefault. `manipulation` removes the 300ms tap
+              // delay on mobile without disabling pan/scroll.
+              touchAction: 'manipulation',
+              WebkitUserSelect: isBeingDragged ? 'none' : undefined,
             }}
               onMouseEnter={e => { if (!isDropTarget && !isBeingDragged) { e.currentTarget.style.background = 'rgba(168,85,247,0.07)'; e.currentTarget.style.borderColor = 'rgba(168,85,247,0.25)' } }}
               onMouseLeave={e => { if (!isDropTarget && !isBeingDragged) { e.currentTarget.style.background = 'rgba(255,255,255,0.025)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)' } }}
             >
               {/* Play order index — also serves as the drop target label when
                   we eventually wire drag-and-drop. Monospace so the column
-                  stays aligned even with 10+ views. */}
+                  stays aligned even with 10+ views.
+                  R22.12 — tooltip mentions touch long-press alongside
+                  desktop drag/arrows. */}
               <span title={views.length > 1
-                ? `Path order ${idx + 1} — drag to reorder, or use the arrows`
+                ? `Path order ${idx + 1} \u2014 drag to reorder (long-press on touch), or use the arrows`
                 : `Path order ${idx + 1}`}
                 style={{
                   width: 16, textAlign: 'center',

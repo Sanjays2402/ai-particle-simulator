@@ -3,6 +3,8 @@
 // since cameraViews.js touches localStorage via the load/save fns).
 import {
   appendView, moveView, moveViewUp, moveViewDown, removeView, CAMERA_VIEWS_MAX,
+  // R22.12 — pure helper for touch-drag reorder (graduates R17.07 desktop-only)
+  resolveTouchTargetIdx,
 } from './cameraViews.js'
 
 function assertEq(actual, expected, msg) {
@@ -118,3 +120,114 @@ function assertEq(actual, expected, msg) {
 }
 
 console.log('PASS: cameraViews append/dedupe/cap + moveView reorder + removeView (boundaries, no-op ref, no-mutation)')
+
+// --- R22.12: resolveTouchTargetIdx — touch-drag hit-test ----------------
+{
+  // Helper: build a simple stack of evenly-sized rows.
+  const stack = (n, rowH = 40, startY = 100) => {
+    const out = []
+    for (let i = 0; i < n; i++) {
+      out.push({ top: startY + i * rowH, bottom: startY + (i + 1) * rowH })
+    }
+    return out
+  }
+  const rows = stack(5)  // y=[100,140), [140,180), [180,220), [220,260), [260,300)
+
+  // Happy paths — touch lands inside each row in turn.
+  assertEq(resolveTouchTargetIdx(120, rows), 0, 'touch inside row 0 → idx 0')
+  assertEq(resolveTouchTargetIdx(160, rows), 1, 'touch inside row 1 → idx 1')
+  assertEq(resolveTouchTargetIdx(200, rows), 2, 'touch inside row 2 → idx 2')
+  assertEq(resolveTouchTargetIdx(240, rows), 3, 'touch inside row 3 → idx 3')
+  assertEq(resolveTouchTargetIdx(280, rows), 4, 'touch inside row 4 → idx 4')
+
+  // Boundary semantics — half-open [top, bottom). Touch at exactly the
+  // BOTTOM edge of a row lands in the NEXT row (not the current row).
+  // This prevents two adjacent rows from both claiming the shared pixel.
+  assertEq(resolveTouchTargetIdx(140, rows), 1, 'y == row0.bottom (== row1.top) → row 1 (half-open)')
+  assertEq(resolveTouchTargetIdx(180, rows), 2, 'y == row1.bottom → row 2')
+  assertEq(resolveTouchTargetIdx(220, rows), 3, 'y == row2.bottom → row 3')
+
+  // Top edge is INCLUSIVE — y at exactly a row's top lands in that row.
+  assertEq(resolveTouchTargetIdx(100, rows), 0, 'y == row0.top → row 0 (closed lower bound)')
+
+  // Overflow above — touch above the first row clamps to row 0.
+  assertEq(resolveTouchTargetIdx(50, rows),  0, 'overflow above (y=50, top=100) → row 0')
+  assertEq(resolveTouchTargetIdx(0, rows),   0, 'overflow above (y=0) → row 0')
+  assertEq(resolveTouchTargetIdx(-100, rows), 0, 'overflow above (y=-100) → row 0')
+
+  // Overflow below — touch below the last row clamps to last idx.
+  assertEq(resolveTouchTargetIdx(300, rows), 4, 'y == last row bottom → row 4 (overflow snap)')
+  assertEq(resolveTouchTargetIdx(500, rows), 4, 'overflow below (y=500) → row 4')
+  assertEq(resolveTouchTargetIdx(10000, rows), 4, 'overflow far below → row 4')
+
+  // Defensive — non-finite y returns null.
+  assertEq(resolveTouchTargetIdx(NaN, rows), null, 'NaN y → null')
+  assertEq(resolveTouchTargetIdx(Infinity, rows), null, '+Infinity y → null')
+  assertEq(resolveTouchTargetIdx(-Infinity, rows), null, '-Infinity y → null')
+  assertEq(resolveTouchTargetIdx(undefined, rows), null, 'undefined y → null')
+  assertEq(resolveTouchTargetIdx(null, rows), null, 'null y → null')
+  assertEq(resolveTouchTargetIdx('150', rows), null, 'string y → null')
+
+  // Defensive — non-array / empty / nullish ranges returns null.
+  assertEq(resolveTouchTargetIdx(150, null), null, 'null ranges → null')
+  assertEq(resolveTouchTargetIdx(150, undefined), null, 'undefined ranges → null')
+  assertEq(resolveTouchTargetIdx(150, 'not-array'), null, 'string ranges → null')
+  assertEq(resolveTouchTargetIdx(150, []), null, 'empty ranges → null')
+
+  // Single-row list — every overflow goes to idx 0 (no other targets exist).
+  const oneRow = stack(1)
+  assertEq(resolveTouchTargetIdx(50, oneRow), 0, 'single row, overflow above → 0')
+  assertEq(resolveTouchTargetIdx(120, oneRow), 0, 'single row, in-range → 0')
+  assertEq(resolveTouchTargetIdx(500, oneRow), 0, 'single row, overflow below → 0')
+
+  // Corrupt rows in the middle skip without rejecting the gesture.
+  const partly = [
+    { top: 100, bottom: 140 },
+    null,                            // corrupt — skip
+    { top: 180, bottom: 220 },
+    { top: NaN, bottom: 260 },       // corrupt top — skip
+    { top: 260, bottom: 300 },
+  ]
+  assertEq(resolveTouchTargetIdx(120, partly), 0, 'partial-corrupt: row 0 still hits')
+  assertEq(resolveTouchTargetIdx(200, partly), 2, 'partial-corrupt: row 2 still hits (skipping null row 1)')
+  assertEq(resolveTouchTargetIdx(280, partly), 4, 'partial-corrupt: row 4 still hits (skipping NaN row 3)')
+  // A touch in the GAP between row 0 and row 2 (the deleted row 1 zone)
+  // — half-open interval at row 0 doesn't claim it (we hit row 0's
+  // bottom=140); next valid range starts at row 2 top=180. So 150 falls
+  // in the "between rows" zone. Should resolve to the row containing the
+  // nearest-strict-match, which is none — falls through to lastValid
+  // safety net but only because overflow guards already excluded it.
+  // For pragmatism: 150 is ABOVE row 2's top so does NOT overflow below;
+  // it's also ABOVE row 0's bottom (140) so it's not in row 0. The
+  // overflow-above guard checks against the FIRST valid row's top (100)
+  // so 150 > 100 is in-range. We scan: row 0 [100,140) — 150 not in;
+  // row 2 [180,220) — 150 not in; row 4 [260,300) — 150 not in. Falls
+  // through to `lastValid` (4). This is a reasonable fallback — gap-in-
+  // ranges is itself a layout glitch so any deterministic behaviour
+  // beats throwing.
+  assertEq(resolveTouchTargetIdx(150, partly), 4, 'in-gap-between-rows resolves to lastValid as safety net')
+
+  // All-corrupt range list → null.
+  const allCorrupt = [null, { top: NaN, bottom: 200 }, { top: 100, bottom: NaN }, undefined]
+  assertEq(resolveTouchTargetIdx(150, allCorrupt), null, 'all-corrupt ranges → null')
+
+  // Reverse-order touches across the stack — sanity-check that the
+  // function is deterministic regardless of call sequence (it's pure
+  // so this should be trivially true, but a regression of "first call
+  // caches" would be caught).
+  assertEq(resolveTouchTargetIdx(280, rows), 4, 'determinism check: reverse, row 4')
+  assertEq(resolveTouchTargetIdx(240, rows), 3, 'determinism check: reverse, row 3')
+  assertEq(resolveTouchTargetIdx(200, rows), 2, 'determinism check: reverse, row 2')
+  assertEq(resolveTouchTargetIdx(160, rows), 1, 'determinism check: reverse, row 1')
+  assertEq(resolveTouchTargetIdx(120, rows), 0, 'determinism check: reverse, row 0')
+
+  // Mutation guard — verify the helper never mutates its input ranges.
+  const safe = stack(3)
+  const snap = JSON.stringify(safe)
+  resolveTouchTargetIdx(120, safe)
+  resolveTouchTargetIdx(NaN, safe)
+  resolveTouchTargetIdx(-100, safe)
+  assertEq(JSON.stringify(safe), snap, 'resolveTouchTargetIdx does not mutate its input ranges')
+}
+
+console.log('PASS: resolveTouchTargetIdx — happy paths + boundary half-open + overflow + defensive (R22.12, ~35 asserts)')
