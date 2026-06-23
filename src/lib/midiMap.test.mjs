@@ -29,6 +29,14 @@ import {
   sanitizeClampWarnOverrides, resolveClampWarnThreshold,
   setClampWarnFieldOverride, clearAllClampWarnOverrides,
   hasClampWarnFieldOverride,
+  // R24.40 — per-(attractor, field) overrides (graduates R23.32)
+  sanitizeClampWarnAttractorOverrides,
+  resolveClampWarnThresholdFor,
+  setClampWarnAttractorFieldOverride,
+  clearAllClampWarnAttractorOverrides,
+  clearClampWarnAttractorOverrides,
+  hasClampWarnAttractorFieldOverride,
+  pruneClampWarnAttractorOverrides,
 } from './midiMap.js'
 import { STRENGTH_MAX, RADIUS_MIN, RADIUS_MAX, POSITION_MIN, POSITION_MAX, ATTRACTOR_TYPES } from './namedAttractors.js'
 
@@ -1643,3 +1651,341 @@ eq(hasClampWarnFieldOverride('strength', -1, { strength: -2 }), false,
 }
 
 console.log('PASS: per-field clamp warn threshold overrides (R23.32, ~70 asserts)')
+
+// --- R24.40: per-(attractor, field) clamp warn threshold overrides -----
+
+// sanitizeClampWarnAttractorOverrides — structural defence.
+{
+  deepEq(sanitizeClampWarnAttractorOverrides({}),         {}, 'empty obj → empty')
+  deepEq(sanitizeClampWarnAttractorOverrides(null),       {}, 'null → empty')
+  deepEq(sanitizeClampWarnAttractorOverrides(undefined),  {}, 'undefined → empty')
+  deepEq(sanitizeClampWarnAttractorOverrides('not-obj'),  {}, 'string → empty')
+  deepEq(sanitizeClampWarnAttractorOverrides([]),         {}, 'array → empty')
+  deepEq(sanitizeClampWarnAttractorOverrides(42),         {}, 'number → empty')
+}
+
+// Happy path — keeps valid attractor entries + sanitises per-field values.
+{
+  const raw = {
+    'attr-1': { strength: 0.10, radius: 0.40 },
+    'attr-2': { x: 0.25, y: 0.30 },
+  }
+  const out = sanitizeClampWarnAttractorOverrides(raw)
+  eq(out['attr-1'].strength, 0.10,  'attr-1 strength preserved')
+  eq(out['attr-1'].radius,   0.40,  'attr-1 radius preserved')
+  eq(out['attr-2'].x,        0.25,  'attr-2 x preserved')
+}
+
+// Unknown field keys within an attractor entry → dropped (mirrors R23.32).
+{
+  const out = sanitizeClampWarnAttractorOverrides({
+    'attr-1': { strength: 0.10, bogusField: 0.20 },
+  })
+  eq(out['attr-1'].strength, 0.10, 'known field kept')
+  ok(!('bogusField' in out['attr-1']), 'unknown field dropped')
+}
+
+// Out-of-range per-field values clamped (delegates to sanitizeClampWarnThreshold).
+{
+  const out = sanitizeClampWarnAttractorOverrides({
+    'attr-1': { strength: -1, radius: 100, x: NaN },
+  })
+  eq(out['attr-1'].strength, CLAMP_WARN_THRESHOLD_MIN, 'negative → MIN')
+  eq(out['attr-1'].radius,   CLAMP_WARN_THRESHOLD_MAX, '100 → MAX')
+  ok(!('x' in out['attr-1']), 'NaN field dropped (non-finite filter)')
+}
+
+// Non-string attractor ids → dropped silently.
+{
+  const out = sanitizeClampWarnAttractorOverrides({
+    'attr-1': { strength: 0.10 },
+    '':       { strength: 0.20 },   // empty id
+  })
+  ok('attr-1' in out, 'valid id kept')
+  ok(!('' in out),    'empty id dropped')
+}
+
+// Empty inner entries (after sanitization) dropped.
+{
+  const out = sanitizeClampWarnAttractorOverrides({
+    'attr-1': { strength: 0.10 },
+    'attr-2': {},                         // empty
+    'attr-3': { bogus: 0.20 },            // only-unknown-fields
+    'attr-4': { strength: NaN },          // only-non-finite
+  })
+  ok('attr-1' in out, 'non-empty kept')
+  ok(!('attr-2' in out), 'empty inner dropped')
+  ok(!('attr-3' in out), 'only-unknown-fields dropped')
+  ok(!('attr-4' in out), 'only-non-finite dropped')
+}
+
+// Non-object inner entry → attractor entry dropped.
+{
+  const out = sanitizeClampWarnAttractorOverrides({
+    'attr-1': 'not-obj',
+    'attr-2': null,
+    'attr-3': [],
+    'attr-4': { strength: 0.10 },
+  })
+  ok(!('attr-1' in out), 'string inner dropped')
+  ok(!('attr-2' in out), 'null inner dropped')
+  ok(!('attr-3' in out), 'array inner dropped')
+  ok('attr-4' in out,    'valid inner kept')
+}
+
+// --- resolveClampWarnThresholdFor — 4-tier resolver ---
+
+// Tier 1: per-(attractor, field) wins over per-field global.
+{
+  const fieldOverrides    = { strength: 0.20 }
+  const attractorOverrides = { 'attr-1': { strength: 0.10 } }
+  eq(resolveClampWarnThresholdFor('attr-1', 'strength', 0.30, fieldOverrides, attractorOverrides),
+    0.10, 'tier 1: per-attractor wins over per-field')
+}
+
+// Tier 2: per-field wins when attractor has no entry for the field.
+{
+  const fieldOverrides    = { strength: 0.20 }
+  const attractorOverrides = { 'attr-1': { radius: 0.10 } }   // no strength entry
+  eq(resolveClampWarnThresholdFor('attr-1', 'strength', 0.30, fieldOverrides, attractorOverrides),
+    0.20, 'tier 2: per-field wins when no attractor cell')
+}
+
+// Tier 3: global wins when no per-field + no per-attractor.
+{
+  eq(resolveClampWarnThresholdFor('attr-1', 'strength', 0.30, {}, {}),
+    0.30, 'tier 3: global wins on empty overrides')
+}
+
+// Tier 4: shipped default when no global + no per-field + no per-attractor.
+{
+  eq(resolveClampWarnThresholdFor('attr-1', 'strength', NaN, {}, {}),
+    CLAMP_WARN_THRESHOLD_DEFAULT, 'tier 4: shipped default on NaN global')
+}
+
+// Skip tier 1 when attractorId is omitted / null / undefined / empty.
+{
+  const fieldOverrides    = { strength: 0.20 }
+  const attractorOverrides = { 'attr-1': { strength: 0.10 } }
+  eq(resolveClampWarnThresholdFor(null,      'strength', 0.30, fieldOverrides, attractorOverrides),
+    0.20, 'null attractorId → skip tier 1')
+  eq(resolveClampWarnThresholdFor(undefined, 'strength', 0.30, fieldOverrides, attractorOverrides),
+    0.20, 'undefined attractorId → skip tier 1')
+  eq(resolveClampWarnThresholdFor('',        'strength', 0.30, fieldOverrides, attractorOverrides),
+    0.20, 'empty-string attractorId → skip tier 1')
+}
+
+// Non-string attractorId → tier 1 skipped.
+{
+  const fieldOverrides    = { strength: 0.20 }
+  const attractorOverrides = { 'attr-1': { strength: 0.10 } }
+  eq(resolveClampWarnThresholdFor(42, 'strength', 0.30, fieldOverrides, attractorOverrides),
+    0.20, 'non-string attractorId → skip tier 1')
+}
+
+// Invalid value at tier 1 → falls through to tier 2.
+{
+  const fieldOverrides    = { strength: 0.20 }
+  const attractorOverrides = { 'attr-1': { strength: NaN } }
+  eq(resolveClampWarnThresholdFor('attr-1', 'strength', 0.30, fieldOverrides, attractorOverrides),
+    0.20, 'non-finite tier 1 value → fall through to tier 2')
+}
+
+// Per-field re-sanitization at lookup time (tier 1 out-of-range still clamps).
+{
+  const attractorOverrides = { 'attr-1': { strength: 100 } }
+  eq(resolveClampWarnThresholdFor('attr-1', 'strength', 0.30, {}, attractorOverrides),
+    CLAMP_WARN_THRESHOLD_MAX, 'tier 1 out-of-range clamps to MAX')
+}
+
+// Non-object overrides → resolver falls through gracefully.
+{
+  eq(resolveClampWarnThresholdFor('attr-1', 'strength', 0.30, {}, null),
+    0.30, 'null attractorOverrides → fall through')
+  eq(resolveClampWarnThresholdFor('attr-1', 'strength', 0.30, {}, 'not-obj'),
+    0.30, 'string attractorOverrides → fall through')
+  eq(resolveClampWarnThresholdFor('attr-1', 'strength', 0.30, {}, []),
+    0.30, 'array attractorOverrides → fall through')
+}
+
+// --- setClampWarnAttractorFieldOverride — set / clear / no-op ---
+
+// Setting a NEW (attractor, field) cell.
+{
+  const next = setClampWarnAttractorFieldOverride({}, 'attr-1', 'strength', 0.10)
+  eq(next['attr-1'].strength, 0.10, 'set new cell')
+}
+
+// Setting same value → ref-equal no-op.
+{
+  const overrides = { 'attr-1': { strength: 0.10 } }
+  const next = setClampWarnAttractorFieldOverride(overrides, 'attr-1', 'strength', 0.10)
+  eq(next, overrides, 'same-value re-set → input ref')
+}
+
+// Setting a different value → new ref.
+{
+  const overrides = { 'attr-1': { strength: 0.10 } }
+  const next = setClampWarnAttractorFieldOverride(overrides, 'attr-1', 'strength', 0.20)
+  ok(next !== overrides, 'changed value → new ref')
+  eq(next['attr-1'].strength, 0.20, 'new value lands')
+}
+
+// Setting on an EXISTING attractor preserves its OTHER fields.
+{
+  const overrides = { 'attr-1': { strength: 0.10, radius: 0.40 } }
+  const next = setClampWarnAttractorFieldOverride(overrides, 'attr-1', 'x', 0.25)
+  eq(next['attr-1'].strength, 0.10, 'preserves strength')
+  eq(next['attr-1'].radius,   0.40, 'preserves radius')
+  eq(next['attr-1'].x,        0.25, 'sets x')
+}
+
+// Setting on attr-2 doesn't touch attr-1.
+{
+  const overrides = { 'attr-1': { strength: 0.10 } }
+  const next = setClampWarnAttractorFieldOverride(overrides, 'attr-2', 'strength', 0.30)
+  eq(next['attr-1'].strength, 0.10, 'attr-1 untouched')
+  eq(next['attr-2'].strength, 0.30, 'attr-2 set')
+}
+
+// Clearing one cell preserves others.
+{
+  const overrides = { 'attr-1': { strength: 0.10, radius: 0.40 } }
+  const next = setClampWarnAttractorFieldOverride(overrides, 'attr-1', 'strength', null)
+  ok(!('strength' in next['attr-1']), 'strength cleared')
+  eq(next['attr-1'].radius, 0.40,     'radius preserved')
+}
+
+// Clearing the LAST cell drops the attractor entry entirely.
+{
+  const overrides = { 'attr-1': { strength: 0.10 }, 'attr-2': { x: 0.25 } }
+  const next = setClampWarnAttractorFieldOverride(overrides, 'attr-1', 'strength', null)
+  ok(!('attr-1' in next), 'attr-1 dropped (was its last cell)')
+  ok('attr-2' in next,    'attr-2 preserved')
+}
+
+// Clearing a non-existent cell → ref-equal no-op.
+{
+  const overrides = { 'attr-1': { strength: 0.10 } }
+  const next = setClampWarnAttractorFieldOverride(overrides, 'attr-1', 'radius', null)
+  eq(next, overrides, 'clear non-existent → input ref')
+}
+
+// Invalid field / non-string attractor id / non-finite value → input ref.
+{
+  const overrides = { 'attr-1': { strength: 0.10 } }
+  eq(setClampWarnAttractorFieldOverride(overrides, 'attr-1', 'bogusField', 0.20), overrides,
+    'unknown field → input ref')
+  eq(setClampWarnAttractorFieldOverride(overrides, '', 'strength', 0.20), overrides,
+    'empty attractorId → input ref')
+  eq(setClampWarnAttractorFieldOverride(overrides, 42, 'strength', 0.20), overrides,
+    'non-string attractorId → input ref')
+  eq(setClampWarnAttractorFieldOverride(overrides, 'attr-1', 'strength', NaN), overrides,
+    'NaN value → input ref')
+  eq(setClampWarnAttractorFieldOverride(overrides, 'attr-1', 'strength', Infinity), overrides,
+    'Infinity value → input ref')
+}
+
+// --- clearAllClampWarnAttractorOverrides ---
+{
+  const overrides = { 'attr-1': { strength: 0.10 } }
+  const next = clearAllClampWarnAttractorOverrides(overrides)
+  deepEq(next, {}, 'wipes everything')
+}
+{
+  const empty = {}
+  eq(clearAllClampWarnAttractorOverrides(empty), empty, 'empty input → input ref (no-op)')
+  eq(clearAllClampWarnAttractorOverrides(null),     null,     'null → null')
+  eq(clearAllClampWarnAttractorOverrides('not-obj'),'not-obj','string → input ref')
+  const arr = []
+  eq(clearAllClampWarnAttractorOverrides(arr), arr,        'array → input ref (defensive)')
+}
+
+// --- clearClampWarnAttractorOverrides (per-attractor wipe) ---
+{
+  const overrides = { 'attr-1': { strength: 0.10 }, 'attr-2': { x: 0.25 } }
+  const next = clearClampWarnAttractorOverrides(overrides, 'attr-1')
+  ok(!('attr-1' in next), 'attr-1 wiped')
+  ok('attr-2' in next,    'attr-2 preserved')
+}
+{
+  // Non-existent attractor → ref-equal no-op.
+  const overrides = { 'attr-1': { strength: 0.10 } }
+  const next = clearClampWarnAttractorOverrides(overrides, 'attr-bogus')
+  eq(next, overrides, 'non-existent attractor → input ref')
+}
+{
+  // Defensive cases.
+  eq(clearClampWarnAttractorOverrides(null, 'attr-1'), null, 'null overrides → null')
+  const empty = {}
+  eq(clearClampWarnAttractorOverrides(empty, ''), empty, 'empty-string id → input ref')
+}
+
+// --- hasClampWarnAttractorFieldOverride ---
+{
+  // No overrides at all → false.
+  eq(hasClampWarnAttractorFieldOverride('attr-1', 'strength', 0.30, {}, {}), false,
+    'no overrides → false')
+  // Per-attractor matches per-field → false (no DIFF).
+  eq(hasClampWarnAttractorFieldOverride('attr-1', 'strength', 0.30,
+    { strength: 0.20 }, { 'attr-1': { strength: 0.20 } }), false,
+    'per-attractor === per-field → false')
+  // Per-attractor differs from per-field → true.
+  eq(hasClampWarnAttractorFieldOverride('attr-1', 'strength', 0.30,
+    { strength: 0.20 }, { 'attr-1': { strength: 0.10 } }), true,
+    'per-attractor !== per-field → true')
+  // Per-attractor differs from global (no per-field) → true.
+  eq(hasClampWarnAttractorFieldOverride('attr-1', 'strength', 0.30,
+    {}, { 'attr-1': { strength: 0.10 } }), true,
+    'per-attractor !== global → true')
+  // Wrong attractor / wrong field → false.
+  eq(hasClampWarnAttractorFieldOverride('attr-2', 'strength', 0.30,
+    {}, { 'attr-1': { strength: 0.10 } }), false,
+    'wrong attractor → false')
+  eq(hasClampWarnAttractorFieldOverride('attr-1', 'radius', 0.30,
+    {}, { 'attr-1': { strength: 0.10 } }), false,
+    'wrong field → false')
+  // Non-finite per-attractor value → false (treated as missing).
+  eq(hasClampWarnAttractorFieldOverride('attr-1', 'strength', 0.30,
+    {}, { 'attr-1': { strength: NaN } }), false,
+    'NaN per-attractor → false')
+}
+
+// --- pruneClampWarnAttractorOverrides ---
+{
+  const overrides = {
+    'attr-1': { strength: 0.10 },
+    'attr-2': { x: 0.25 },
+    'attr-3': { radius: 0.40 },
+  }
+  const next = pruneClampWarnAttractorOverrides(overrides, ['attr-1', 'attr-3'])
+  ok('attr-1' in next,    'attr-1 (live) kept')
+  ok(!('attr-2' in next), 'attr-2 (orphan) pruned')
+  ok('attr-3' in next,    'attr-3 (live) kept')
+}
+{
+  // No-op when every attractor is still live → input ref.
+  const overrides = { 'attr-1': { strength: 0.10 } }
+  const next = pruneClampWarnAttractorOverrides(overrides, ['attr-1', 'attr-other'])
+  eq(next, overrides, 'no orphans → input ref')
+}
+{
+  // Accept Set or iterable for liveAttractorIds.
+  const overrides = { 'attr-1': { strength: 0.10 }, 'attr-2': { x: 0.25 } }
+  const next = pruneClampWarnAttractorOverrides(overrides, new Set(['attr-1']))
+  ok('attr-1' in next,    'Set: attr-1 kept')
+  ok(!('attr-2' in next), 'Set: attr-2 pruned')
+}
+{
+  // Non-string entries in liveAttractorIds treated as missing.
+  const overrides = { 'attr-1': { strength: 0.10 } }
+  const next = pruneClampWarnAttractorOverrides(overrides, [null, undefined, 42, ''])
+  deepEq(next, {}, 'non-string live ids treated as missing')
+}
+{
+  // Defensive: non-object overrides → input ref.
+  eq(pruneClampWarnAttractorOverrides(null,      ['attr-1']), null,      'null → null')
+  eq(pruneClampWarnAttractorOverrides('not-obj', ['attr-1']), 'not-obj', 'string → string')
+}
+
+console.log('PASS: per-(attractor, field) clamp warn threshold overrides (R24.40, ~60 asserts)')

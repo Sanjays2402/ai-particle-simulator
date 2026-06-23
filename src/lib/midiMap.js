@@ -682,6 +682,177 @@ export function hasClampWarnFieldOverride(field, globalThreshold, overrides) {
   return sanitizedField !== sanitizedGlobal
 }
 
+// R24.40 — per-(attractor, field) overrides. Graduates R23.32's per-
+// field-only overrides with a 3rd tier so power users can tune one
+// specific attractor's STRENGTH meter strict while leaving every
+// OTHER attractor's STRENGTH on the per-field-global value. Example
+// use case: a critical "bass-thump" attractor with strict warning
+// (rail = silent attractor, bad) coexists with a decorative attractor
+// that often pegs the rail intentionally (rail = visible at edge,
+// fine).
+//
+// Persisted shape: `{ [attractorId]: { [field]: threshold } }`.
+// Sanitised per-attractor entries flow through the existing per-field
+// sanitizer so the storage round-trip is dimensionally identical to
+// R23.32 — just nested one level deeper. Unknown attractors aren't
+// dropped at sanitize time (we can't know the live attractor roster
+// from a pure helper); UI passes an `attractorIds` predicate later if
+// it wants to GC orphans.
+//
+// Resolution chain (new — supersedes R23.32):
+//   1. per-(attractor, field) override
+//   2. per-field global override        (R23.32 baseline)
+//   3. global threshold                  (R22.27 baseline)
+//   4. shipped default                   (CLAMP_WARN_THRESHOLD_DEFAULT)
+
+// Defensive — non-object / array / null all return empty. Unknown
+// FIELD keys within an attractor entry are dropped (mirrors R23.32);
+// the attractor id itself is preserved as long as it's a non-empty
+// string (we trust the live UI to GC orphans).
+export function sanitizeClampWarnAttractorOverrides(raw) {
+  const out = {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
+  for (const attractorId of Object.keys(raw)) {
+    if (typeof attractorId !== 'string' || !attractorId) continue
+    const inner = raw[attractorId]
+    if (!inner || typeof inner !== 'object' || Array.isArray(inner)) continue
+    const cleaned = {}
+    for (const field of CLAMP_THRESHOLD_FIELDS) {
+      if (!Object.prototype.hasOwnProperty.call(inner, field)) continue
+      const v = inner[field]
+      if (!Number.isFinite(v)) continue
+      cleaned[field] = sanitizeClampWarnThreshold(v)
+    }
+    if (Object.keys(cleaned).length > 0) out[attractorId] = cleaned
+  }
+  return out
+}
+
+// 4-tier resolver. Same defensive contract as
+// resolveClampWarnThreshold — any tier missing / invalid falls through
+// to the next tier; all tiers re-sanitize at lookup time so any in-
+// place edit to either map outside the setters can't land a bad value.
+//
+// `attractorId` is optional (null/undefined for non-attractor meters
+// or back-compat call sites). When omitted the resolver skips tier 1
+// and behaves exactly like resolveClampWarnThreshold (R23.32).
+export function resolveClampWarnThresholdFor(attractorId, field, globalThreshold, fieldOverrides, attractorOverrides) {
+  // Tier 1 — per-(attractor, field)
+  if (typeof attractorId === 'string' && attractorId
+      && attractorOverrides && typeof attractorOverrides === 'object' && !Array.isArray(attractorOverrides)
+      && typeof field === 'string'
+      && Object.prototype.hasOwnProperty.call(attractorOverrides, attractorId)) {
+    const inner = attractorOverrides[attractorId]
+    if (inner && typeof inner === 'object' && !Array.isArray(inner)
+        && Object.prototype.hasOwnProperty.call(inner, field)) {
+      const raw = inner[field]
+      if (Number.isFinite(raw)) return sanitizeClampWarnThreshold(raw)
+    }
+  }
+  // Tier 2 + 3 + 4 — delegate to the R23.32 resolver
+  return resolveClampWarnThreshold(field, globalThreshold, fieldOverrides)
+}
+
+// Setter: returns a new attractor-overrides map with the inner
+// `field` value updated for the given attractor. Pass `value`=null
+// or undefined to CLEAR that one cell (the attractor's other field
+// overrides stay intact). When the LAST cell for an attractor is
+// cleared, the attractor's entry is pruned entirely so the persisted
+// map stays minimal. Ref-equal-on-no-op contract: same-value re-set
+// returns input ref. Defensive: invalid field / non-string attractor
+// id → input ref unchanged.
+export function setClampWarnAttractorFieldOverride(attractorOverrides, attractorId, field, value) {
+  if (typeof attractorId !== 'string' || !attractorId) return attractorOverrides
+  if (typeof field !== 'string' || !CLAMP_THRESHOLD_FIELD_SET.has(field)) return attractorOverrides
+  const base = (attractorOverrides && typeof attractorOverrides === 'object' && !Array.isArray(attractorOverrides))
+    ? attractorOverrides
+    : {}
+  const innerExisting = (base[attractorId] && typeof base[attractorId] === 'object' && !Array.isArray(base[attractorId]))
+    ? base[attractorId]
+    : {}
+  // Clear path.
+  if (value === null || value === undefined) {
+    if (!Object.prototype.hasOwnProperty.call(innerExisting, field)) return attractorOverrides
+    const nextInner = { ...innerExisting }
+    delete nextInner[field]
+    const next = { ...base }
+    if (Object.keys(nextInner).length === 0) {
+      delete next[attractorId]
+    } else {
+      next[attractorId] = nextInner
+    }
+    return next
+  }
+  if (!Number.isFinite(value)) return attractorOverrides
+  const sanitized = sanitizeClampWarnThreshold(value)
+  if (innerExisting[field] === sanitized) return attractorOverrides   // no-op
+  return {
+    ...base,
+    [attractorId]: { ...innerExisting, [field]: sanitized },
+  }
+}
+
+// Wipe every per-attractor override (does NOT touch per-field-globals
+// or the global threshold). Ref-equal-on-no-op: returns input ref
+// when already empty / invalid.
+export function clearAllClampWarnAttractorOverrides(attractorOverrides) {
+  if (!attractorOverrides || typeof attractorOverrides !== 'object' || Array.isArray(attractorOverrides)) return attractorOverrides
+  if (Object.keys(attractorOverrides).length === 0) return attractorOverrides
+  return {}
+}
+
+// Wipe every per-field override for ONE attractor (preserves entries
+// for other attractors). Ref-equal-on-no-op: returns input ref when
+// the attractor has no entry to wipe.
+export function clearClampWarnAttractorOverrides(attractorOverrides, attractorId) {
+  if (!attractorOverrides || typeof attractorOverrides !== 'object' || Array.isArray(attractorOverrides)) return attractorOverrides
+  if (typeof attractorId !== 'string' || !attractorId) return attractorOverrides
+  if (!Object.prototype.hasOwnProperty.call(attractorOverrides, attractorId)) return attractorOverrides
+  const next = { ...attractorOverrides }
+  delete next[attractorId]
+  return next
+}
+
+// Has the given (attractor, field) got a per-attractor override that
+// DIFFERS from the effective field threshold (tier 2/3/4)? Used by
+// the UI to paint a per-attractor pip on the meter itself, distinct
+// from R23.32's per-field pip in the popover.
+export function hasClampWarnAttractorFieldOverride(attractorId, field, globalThreshold, fieldOverrides, attractorOverrides) {
+  if (!attractorOverrides || typeof attractorOverrides !== 'object' || Array.isArray(attractorOverrides)) return false
+  if (typeof attractorId !== 'string' || !attractorId) return false
+  if (typeof field !== 'string') return false
+  if (!Object.prototype.hasOwnProperty.call(attractorOverrides, attractorId)) return false
+  const inner = attractorOverrides[attractorId]
+  if (!inner || typeof inner !== 'object' || !Object.prototype.hasOwnProperty.call(inner, field)) return false
+  const raw = inner[field]
+  if (!Number.isFinite(raw)) return false
+  const sanitizedAttractor = sanitizeClampWarnThreshold(raw)
+  // Compare against whatever tier 2/3/4 would have produced.
+  const effective = resolveClampWarnThreshold(field, globalThreshold, fieldOverrides)
+  return sanitizedAttractor !== effective
+}
+
+// GC orphan entries — attractors that no longer exist in the live
+// scene. UI hooks this on attractor-list-changed so the persisted
+// map doesn't accumulate cruft when users delete attractors.
+// Ref-equal-on-no-op: returns input ref when nothing needs pruning.
+// `liveAttractorIds` is an Array | Set | iterable of strings; non-
+// string members are treated as missing.
+export function pruneClampWarnAttractorOverrides(attractorOverrides, liveAttractorIds) {
+  if (!attractorOverrides || typeof attractorOverrides !== 'object' || Array.isArray(attractorOverrides)) return attractorOverrides
+  const ids = liveAttractorIds instanceof Set
+    ? liveAttractorIds
+    : new Set(Array.from(liveAttractorIds || []).filter(x => typeof x === 'string' && x))
+  const next = {}
+  let dropped = 0
+  for (const aid of Object.keys(attractorOverrides)) {
+    if (ids.has(aid)) next[aid] = attractorOverrides[aid]
+    else dropped++
+  }
+  if (dropped === 0) return attractorOverrides   // ref-equal no-op
+  return next
+}
+
 export function describeTypeBand(v01, types = ATTRACTOR_TYPES, hysteresis = TYPE_BAND_HYSTERESIS) {
   const list = Array.isArray(types) ? types.filter(t => typeof t === 'string' && t.length > 0) : []
   if (list.length === 0) return null

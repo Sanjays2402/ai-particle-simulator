@@ -12,8 +12,14 @@ import {
   sanitizeClampWarnThreshold, isClampWarnThresholdAtDefault,
   CLAMP_WARN_THRESHOLD_DEFAULT, CLAMP_WARN_THRESHOLD_MIN, CLAMP_WARN_THRESHOLD_MAX,
   // R23.32 — per-field clamp warn threshold overrides
-  resolveClampWarnThreshold, setClampWarnFieldOverride,
+  setClampWarnFieldOverride,
   sanitizeClampWarnOverrides, hasClampWarnFieldOverride,
+  // R24.40 — per-(attractor, field) overrides (graduates R23.32)
+  resolveClampWarnThresholdFor,
+  setClampWarnAttractorFieldOverride,
+  sanitizeClampWarnAttractorOverrides,
+  hasClampWarnAttractorFieldOverride,
+  pruneClampWarnAttractorOverrides,
 } from '../lib/midiMap'
 import { ATTRACTOR_TYPES } from '../lib/namedAttractors'
 import {
@@ -113,6 +119,20 @@ export default function MidiPanel({ open, onClose }) {
       return sanitizeClampWarnOverrides(parsed)
     } catch { return {} }
   })
+  // R24.40 — per-(attractor, field) overrides map. Default empty.
+  // Persisted under its own storage key so R23.32's per-field map stays
+  // untouched. Sanitized on load so a corrupt persisted JSON can't
+  // crash the panel.
+  const [clampWarnAttractorOverrides, setClampWarnAttractorOverridesState] = useState(() => {
+    try {
+      const raw = typeof localStorage !== 'undefined'
+        ? localStorage.getItem('midi-clamp-warn-attractor-overrides-v1')
+        : null
+      if (raw === null) return {}
+      const parsed = JSON.parse(raw)
+      return sanitizeClampWarnAttractorOverrides(parsed)
+    } catch { return {} }
+  })
   const setClampWarnThreshold = (raw) => {
     const next = sanitizeClampWarnThreshold(raw)
     setClampWarnThresholdState(next)
@@ -147,6 +167,24 @@ export default function MidiPanel({ open, onClose }) {
       }
     } catch { /* quota / private mode */ }
   }
+  // R24.40 — set a per-(attractor, field) override. Pass `value`=null
+  // to clear THIS cell (preserves the attractor's other fields).
+  // Delegates to setClampWarnAttractorFieldOverride for the ref-equal-
+  // on-no-op contract + sanitization + empty-prune.
+  const setClampWarnAttractorFieldOverrideUI = (attractorId, field, value) => {
+    const next = setClampWarnAttractorFieldOverride(clampWarnAttractorOverrides, attractorId, field, value)
+    if (next === clampWarnAttractorOverrides) return  // no-op
+    setClampWarnAttractorOverridesState(next)
+    try {
+      if (typeof localStorage !== 'undefined') {
+        if (Object.keys(next).length === 0) {
+          localStorage.removeItem('midi-clamp-warn-attractor-overrides-v1')
+        } else {
+          localStorage.setItem('midi-clamp-warn-attractor-overrides-v1', JSON.stringify(next))
+        }
+      }
+    } catch { /* quota / private mode */ }
+  }
   // Popover open state — null when closed, otherwise an object
   // { attractorId, field } describing which meter was long-pressed.
   // R23.32 — was previously just `a.id` (attractor scope); now carries
@@ -167,6 +205,28 @@ export default function MidiPanel({ open, onClose }) {
   // (id + label + range), so this is cheap to re-derive each render.
   const namedAttractors = useStore(s => s.namedAttractors)
   const attractorRows = attractorActions({ namedAttractors })
+  // R24.40 — GC orphan per-attractor overrides when an attractor is
+  // deleted. Without this pass, persisted overrides accumulate cruft:
+  // delete attractor A, recreate B with attr-2 id, B inherits A's
+  // overrides. pruneClampWarnAttractorOverrides has a ref-equal-on-
+  // no-op contract so the common case (no orphans) skips state work.
+  useEffect(() => {
+    const liveIds = Array.isArray(namedAttractors)
+      ? namedAttractors.map(a => a && a.id).filter(Boolean)
+      : []
+    const pruned = pruneClampWarnAttractorOverrides(clampWarnAttractorOverrides, liveIds)
+    if (pruned === clampWarnAttractorOverrides) return  // no-op
+    setClampWarnAttractorOverridesState(pruned)
+    try {
+      if (typeof localStorage !== 'undefined') {
+        if (Object.keys(pruned).length === 0) {
+          localStorage.removeItem('midi-clamp-warn-attractor-overrides-v1')
+        } else {
+          localStorage.setItem('midi-clamp-warn-attractor-overrides-v1', JSON.stringify(pruned))
+        }
+      }
+    } catch { /* quota / private mode */ }
+  }, [namedAttractors, clampWarnAttractorOverrides])
   const accessRef = useRef(null)
   // refs so the message callback (registered once) sees latest state.
   const bindingsRef = useRef(bindings)
@@ -1126,8 +1186,17 @@ export default function MidiPanel({ open, onClose }) {
                                 // via resolveClampWarnThreshold so the
                                 // meter respects per-field tightening
                                 // / loosening when present.
-                                const effectiveThreshold = resolveClampWarnThreshold(
-                                  a.field, clampWarnThreshold, clampWarnOverrides,
+                                // R24.40 — graduates to the 4-tier
+                                // resolveClampWarnThresholdFor: per-
+                                // (attractor, field) overrides take
+                                // precedence over per-field-globals so
+                                // power users can pin one attractor's
+                                // STRENGTH meter strict while leaving
+                                // every other attractor's STRENGTH
+                                // meter on the per-field-global value.
+                                const effectiveThreshold = resolveClampWarnThresholdFor(
+                                  a.attractor && a.attractor.id, a.field,
+                                  clampWarnThreshold, clampWarnOverrides, clampWarnAttractorOverrides,
                                 )
                                 const tier = classifyClampProximity(prox, atRail, effectiveThreshold)
                                 const proxFillColor =
@@ -1155,14 +1224,22 @@ export default function MidiPanel({ open, onClose }) {
                                 // (distinct from a global edit) so
                                 // users can tell which meters are on
                                 // the per-field track.
+                                // R24.40 — per-attractor override
+                                // surfaces as an additional flag too;
+                                // tooltip below distinguishes which
+                                // tier is driving the live meter.
                                 const editedGlobal = !isClampWarnThresholdAtDefault(clampWarnThreshold)
                                 const editedField = hasClampWarnFieldOverride(a.field, clampWarnThreshold, clampWarnOverrides)
-                                const edited = editedGlobal || editedField
+                                const editedAttractor = hasClampWarnAttractorFieldOverride(
+                                  a.attractor && a.attractor.id, a.field,
+                                  clampWarnThreshold, clampWarnOverrides, clampWarnAttractorOverrides,
+                                )
+                                const edited = editedGlobal || editedField || editedAttractor
                                 const isOpenForMe = clampThresholdPopoverFor
                                   && clampThresholdPopoverFor.attractorId === a.id
                                   && clampThresholdPopoverFor.field === a.field
                                 return (
-                                  <span title={`Knob at ${pct}% of [${a.min}..${a.max}]. ${tier === 'danger' ? 'AT THE RAIL — twisting further does nothing.' : tier === 'warn' ? 'Close to clamp — limited headroom in this direction.' : 'Safe — plenty of room either way.'} Proximity: ${(prox * 100).toFixed(0)}% from nearest clamp. Long-press to tweak the warn threshold (currently ${Math.round(effectiveThreshold * 100)}%${editedField ? ', per-field override' : editedGlobal ? ', global override' : ', default'}).`}
+                                  <span title={`Knob at ${pct}% of [${a.min}..${a.max}]. ${tier === 'danger' ? 'AT THE RAIL — twisting further does nothing.' : tier === 'warn' ? 'Close to clamp — limited headroom in this direction.' : 'Safe — plenty of room either way.'} Proximity: ${(prox * 100).toFixed(0)}% from nearest clamp. Long-press to tweak the warn threshold (currently ${Math.round(effectiveThreshold * 100)}%${editedAttractor ? ', per-attractor override' : editedField ? ', per-field override' : editedGlobal ? ', global override' : ', default'}).`}
                                     onPointerDown={(e) => {
                                       // R22.27 — long-press (≥400ms) to
                                       // open the threshold-tweak popover.
@@ -1263,6 +1340,14 @@ export default function MidiPanel({ open, onClose }) {
                                         fieldOverrideValue={clampWarnOverrides[a.field]}
                                         onChangeField={(v) => setClampWarnFieldOverrideUI(a.field, v)}
                                         onClearField={() => setClampWarnFieldOverrideUI(a.field, null)}
+                                        attractorId={a.attractor && a.attractor.id}
+                                        attractorLabel={a.attractor && a.attractor.name}
+                                        attractorOverrideValue={
+                                          clampWarnAttractorOverrides[a.attractor && a.attractor.id]
+                                          && clampWarnAttractorOverrides[a.attractor && a.attractor.id][a.field]
+                                        }
+                                        onChangeAttractor={(v) => setClampWarnAttractorFieldOverrideUI(a.attractor && a.attractor.id, a.field, v)}
+                                        onClearAttractor={() => setClampWarnAttractorFieldOverrideUI(a.attractor && a.attractor.id, a.field, null)}
                                         onClose={() => setClampThresholdPopoverFor(null)}
                                       />
                                     )}
@@ -2027,6 +2112,13 @@ function ClampThresholdPopover({
   field, fieldLabel,
   globalValue, onChangeGlobal, onResetGlobal,
   fieldOverrideValue, onChangeField, onClearField,
+  // R24.40 — per-(attractor, field) override props. attractorId/Label
+  // identify the specific attractor whose meter was long-pressed;
+  // attractorOverrideValue is the current per-cell value (or undefined
+  // if none). onChangeAttractor / onClearAttractor target THIS cell
+  // only.
+  attractorId, attractorLabel,
+  attractorOverrideValue, onChangeAttractor, onClearAttractor,
   onClose,
 }) {
   const minPct = Math.round(CLAMP_WARN_THRESHOLD_MIN * 100)
@@ -2041,9 +2133,29 @@ function ClampThresholdPopover({
   const fieldPct = hasFieldOverride
     ? Math.round(sanitizeClampWarnThreshold(fieldOverrideValue) * 100)
     : globalPct
+  // R24.40 — per-attractor slider. Seed at the per-field value (the
+  // tier 2 fallback) so the user adjusts from whichever scale is
+  // currently driving the meter for this field.
+  const hasAttractorOverride = Number.isFinite(attractorOverrideValue)
+  const attractorPct = hasAttractorOverride
+    ? Math.round(sanitizeClampWarnThreshold(attractorOverrideValue) * 100)
+    : fieldPct
   // Effective value driving the live meter — used for the header pip
   // colour so the user knows which slider is "active" right now.
-  const effectivePct = hasFieldOverride ? fieldPct : globalPct
+  // Resolution mirrors resolveClampWarnThresholdFor (tier 1 → 2 → 3 → 4).
+  const effectivePct = hasAttractorOverride ? attractorPct
+                     : hasFieldOverride     ? fieldPct
+                                            : globalPct
+  // R24.40 — which TIER is driving the live meter? Drives the header
+  // pip colour + scope text so users see at a glance whether they're
+  // editing a per-attractor (violet), per-field (indigo), or global
+  // (cyan) value.
+  const activeTier = hasAttractorOverride ? 'attractor'
+                   : hasFieldOverride     ? 'field'
+                                          : 'global'
+  const activePipColor = activeTier === 'attractor' ? '#c4b5fd'
+                       : activeTier === 'field'     ? '#a5b4fc'
+                                                    : '#67e8f9'
   // Escape key closes — paired with onClose so the user has a
   // keyboard-only path (the popover is small enough that mouse-out
   // would be too fiddly; explicit dismissal is friendlier).
@@ -2052,6 +2164,10 @@ function ClampThresholdPopover({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+  // R24.40 — show the per-attractor row only when we have a live
+  // attractor id (every continuous attractor meter does, but the
+  // back-compat path passes null/undefined for non-attractor meters).
+  const showAttractorRow = typeof attractorId === 'string' && !!attractorId
   return (
     <>
       {/* Backdrop — captures click-outside so the popover dismisses
@@ -2069,7 +2185,9 @@ function ClampThresholdPopover({
       {/* Popover surface — anchored to the meter via the parent's
           position:relative. Width chosen so the slider has enough
           travel to feel responsive (~180px). R23.32 — widened to
-          fit the per-field row underneath the global row. */}
+          fit the per-field row underneath the global row.
+          R24.40 — widened again to fit the per-(attractor, field)
+          row below the per-field row. */}
       <span
         onClick={(e) => e.stopPropagation()}
         onPointerDown={(e) => e.stopPropagation()}
@@ -2077,13 +2195,15 @@ function ClampThresholdPopover({
           position: 'absolute',
           top: 'calc(100% + 6px)',
           left: 0,
-          minWidth: 260, maxWidth: 320,
+          minWidth: 280, maxWidth: 340,
           padding: '10px 12px',
           borderRadius: 7,
           background: 'rgba(15,15,25,0.96)',
-          border: hasFieldOverride
-            ? '1px solid rgba(99,102,241,0.45)'
-            : '1px solid rgba(34,211,238,0.35)',
+          border: hasAttractorOverride
+            ? '1px solid rgba(167,139,250,0.55)'   // violet — per-attractor active
+            : hasFieldOverride
+              ? '1px solid rgba(99,102,241,0.45)'  // indigo — per-field active
+              : '1px solid rgba(34,211,238,0.35)', // cyan — global active
           boxShadow: '0 6px 22px rgba(0,0,0,0.5)',
           zIndex: 101,
           color: '#e8e8f0',
@@ -2096,7 +2216,9 @@ function ClampThresholdPopover({
         }}
       >
         {/* R23.32 — scope header. Tells the user which attractor field
-            this popover is scoped to so the per-field row makes sense. */}
+            this popover is scoped to so the per-field row makes sense.
+            R24.40 — also surfaces the attractor name (when present)
+            so the per-attractor row is unambiguous. */}
         <div style={{
           marginBottom: 8, paddingBottom: 6,
           borderBottom: '1px solid rgba(255,255,255,0.06)',
@@ -2106,14 +2228,21 @@ function ClampThresholdPopover({
             fontSize: 9.5, fontWeight: 700, letterSpacing: '0.10em',
             color: '#9a9ab0', textTransform: 'uppercase',
             fontFamily: 'Geist Mono, JetBrains Mono, monospace',
-          }}>{fieldLabel || field}</span>
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            maxWidth: '60%',
+          }} title={attractorLabel ? `${attractorLabel} \u00b7 ${fieldLabel || field}` : (fieldLabel || field)}>
+            {fieldLabel || field}
+          </span>
           <span style={{
-            fontSize: 9, color: hasFieldOverride ? '#a5b4fc' : '#67e8f9',
+            fontSize: 9, color: activePipColor,
             fontFamily: 'Geist Mono, JetBrains Mono, monospace',
             fontWeight: 700,
-          }} title={hasFieldOverride
-            ? `This field is on its own override (${effectivePct}%); the global slider doesn't affect it.`
-            : `No per-field override; this meter uses the GLOBAL threshold (${globalPct}%).`}>
+          }} title={
+            activeTier === 'attractor'
+              ? `Per-attractor override on ${attractorLabel || attractorId} \u00b7 ${fieldLabel} (${effectivePct}%) drives this meter.`
+              : activeTier === 'field'
+                ? `Per-field override (${effectivePct}%) drives this meter; this attractor has no per-attractor override.`
+                : `Global threshold (${effectivePct}%) drives this meter; no per-field or per-attractor override.`}>
             {'\u00b7'} {effectivePct}% {'\u00b7'}
           </span>
         </div>
@@ -2141,14 +2270,16 @@ function ClampThresholdPopover({
           step={1}
           value={globalPct}
           onChange={(e) => onChangeGlobal(Number(e.target.value) / 100)}
-          title={hasFieldOverride
-            ? `Sets the GLOBAL threshold (used by meters WITHOUT a per-field override). This field has its own override; the slider below takes priority.`
-            : `Sets the threshold applied to every continuous-field meter without a per-field override. ${globalPct}%.`}
+          title={hasAttractorOverride
+            ? `Sets the GLOBAL threshold. This meter currently uses the PER-ATTRACTOR slider below; the global only affects meters without a per-field or per-attractor override.`
+            : hasFieldOverride
+              ? `Sets the GLOBAL threshold (used by meters WITHOUT a per-field override). This field has its own override; the slider below takes priority.`
+              : `Sets the threshold applied to every continuous-field meter without a per-field override. ${globalPct}%.`}
           style={{
             width: '100%',
             accentColor: '#22d3ee',
             cursor: 'pointer',
-            opacity: hasFieldOverride ? 0.55 : 1,
+            opacity: (hasFieldOverride || hasAttractorOverride) ? 0.55 : 1,
           }}
         />
         <div style={{
@@ -2171,8 +2302,8 @@ function ClampThresholdPopover({
             color: hasFieldOverride ? '#a5b4fc' : '#7a7a90', textTransform: 'uppercase',
             fontFamily: 'Geist Mono, JetBrains Mono, monospace',
           }} title={hasFieldOverride
-            ? `Per-field override active — this slider drives the live meter for ${fieldLabel}.`
-            : `No override set. Drag to attach a per-field override; the meter for ${fieldLabel} will read on this scale instead of the global one.`}>
+            ? `Per-field override active \u2014 this slider drives every ${fieldLabel} meter that doesn't have its own per-attractor override.`
+            : `No override set. Drag to attach a per-field override; every ${fieldLabel} meter without a per-attractor override will read on this scale.`}>
             This field
             {hasFieldOverride && (
               <span style={{
@@ -2193,13 +2324,16 @@ function ClampThresholdPopover({
           step={1}
           value={fieldPct}
           onChange={(e) => onChangeField(Number(e.target.value) / 100)}
-          title={hasFieldOverride
-            ? `Per-field override for ${fieldLabel}. Currently ${fieldPct}%; the global threshold is ${globalPct}%.`
-            : `Drag to attach a per-field override for ${fieldLabel}. Once set, this slider takes priority over the global threshold for THIS field only.`}
+          title={hasAttractorOverride
+            ? `Per-field override for ${fieldLabel} (${fieldPct}%). This meter currently uses the PER-ATTRACTOR slider below; the per-field slider only affects ${fieldLabel} meters on OTHER attractors that don't have their own override.`
+            : hasFieldOverride
+              ? `Per-field override for ${fieldLabel}. Currently ${fieldPct}%; the global threshold is ${globalPct}%.`
+              : `Drag to attach a per-field override for ${fieldLabel}. Once set, this slider takes priority over the global threshold for every ${fieldLabel} meter without its own per-attractor override.`}
           style={{
             width: '100%',
             accentColor: '#a5b4fc',
             cursor: 'pointer',
+            opacity: hasAttractorOverride ? 0.55 : 1,
           }}
         />
         <div style={{
@@ -2212,18 +2346,112 @@ function ClampThresholdPopover({
           <span>{maxPct}%</span>
         </div>
 
+        {/* R24.40 — PER-(attractor, field) slider. Only renders when we
+            have an attractor id (every named-attractor meter passes
+            one; back-compat call sites without one fall through to the
+            R23.32 2-slider layout). */}
+        {showAttractorRow && (
+          <>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              marginTop: 8, marginBottom: 4, gap: 8,
+            }}>
+              <span style={{
+                fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
+                color: hasAttractorOverride ? '#c4b5fd' : '#7a7a90', textTransform: 'uppercase',
+                fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                maxWidth: '70%',
+              }} title={hasAttractorOverride
+                ? `Per-attractor override active \u2014 this slider ONLY affects the ${fieldLabel} meter on ${attractorLabel || attractorId}.`
+                : `No override set. Drag to attach a per-attractor override for ${attractorLabel || attractorId}'s ${fieldLabel}; OTHER attractors' ${fieldLabel} meters stay on the per-field slider.`}>
+                This attractor
+                {attractorLabel && (
+                  <span style={{
+                    marginLeft: 4,
+                    fontSize: 8.5, fontWeight: 600,
+                    color: hasAttractorOverride ? '#c4b5fd' : '#5a5a70',
+                    textTransform: 'none', letterSpacing: 'normal',
+                  }}>({attractorLabel})</span>
+                )}
+                {hasAttractorOverride && (
+                  <span style={{
+                    marginLeft: 4, fontSize: 8.5, color: '#c4b5fd',
+                  }}>{'\u2022'} active</span>
+                )}
+              </span>
+              <span style={{
+                fontSize: 10, fontWeight: 700,
+                color: hasAttractorOverride ? '#c4b5fd' : '#7a7a90',
+                fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+              }}>{attractorPct}%</span>
+            </div>
+            <input
+              type="range"
+              min={minPct}
+              max={maxPct}
+              step={1}
+              value={attractorPct}
+              onChange={(e) => onChangeAttractor(Number(e.target.value) / 100)}
+              title={hasAttractorOverride
+                ? `Per-attractor override for ${attractorLabel || attractorId} \u00b7 ${fieldLabel}. Currently ${attractorPct}%; the per-field threshold is ${fieldPct}%.`
+                : `Drag to attach a per-attractor override for ${attractorLabel || attractorId}'s ${fieldLabel}. ONLY this attractor's ${fieldLabel} meter will read on this scale; every other attractor stays on the per-field slider.`}
+              style={{
+                width: '100%',
+                accentColor: '#a78bfa',
+                cursor: 'pointer',
+              }}
+            />
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              marginTop: 2, fontSize: 8.5,
+              color: '#5a5a70',
+              fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+            }}>
+              <span>{minPct}%</span>
+              <span>{maxPct}%</span>
+            </div>
+          </>
+        )}
+
         <div style={{
           marginTop: 8, fontSize: 9.5, lineHeight: 1.45, color: '#a8a8b8',
         }}>
-          The per-field slider takes priority. Set STRENGTH tighter
-          (rail = silent attractor) and X/Y/Z looser (rail = canvas
-          edge, often intentional).
+          Priority: <span style={{ color: '#c4b5fd', fontWeight: 700 }}>this attractor</span>
+          {' '}{'\u203a'}{' '}<span style={{ color: '#a5b4fc', fontWeight: 700 }}>this field</span>
+          {' '}{'\u203a'}{' '}<span style={{ color: '#67e8f9', fontWeight: 700 }}>global</span>.
+          Pin one attractor's STRENGTH strict (rail = silent attractor) without
+          touching every other attractor's STRENGTH meter.
         </div>
         <div style={{
-          display: 'flex', justifyContent: 'flex-end', gap: 6,
+          display: 'flex', justifyContent: 'flex-end', gap: 6, flexWrap: 'wrap',
           marginTop: 10, paddingTop: 6,
           borderTop: '1px solid rgba(255,255,255,0.06)',
         }}>
+          {/* R24.40 — clears THIS attractor's per-field override. Disabled
+              when no per-attractor override exists. */}
+          {showAttractorRow && (
+            <button
+              onClick={() => { onClearAttractor() }}
+              disabled={!hasAttractorOverride}
+              title={hasAttractorOverride
+                ? `Clear this attractor's override; ${attractorLabel || attractorId} \u00b7 ${fieldLabel} will fall back to the per-field threshold (${fieldPct}%).`
+                : 'No per-attractor override to clear'}
+              style={{
+                padding: '3px 9px', borderRadius: 4,
+                fontSize: 9.5, fontWeight: 600, letterSpacing: '0.04em',
+                background: hasAttractorOverride ? 'rgba(167,139,250,0.14)' : 'rgba(255,255,255,0.04)',
+                color: hasAttractorOverride ? '#ddd6fe' : '#5a5a70',
+                border: hasAttractorOverride
+                  ? '1px solid rgba(167,139,250,0.40)'
+                  : '1px solid rgba(255,255,255,0.05)',
+                cursor: hasAttractorOverride ? 'pointer' : 'not-allowed',
+                textTransform: 'uppercase',
+                fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                opacity: hasAttractorOverride ? 1 : 0.55,
+              }}
+            >Clear attr.</button>
+          )}
           {/* R23.32 — "Use global" clears this field's override so it
               falls back to the global threshold. Disabled when no
               override is set (nothing to clear). */}
@@ -2231,7 +2459,7 @@ function ClampThresholdPopover({
             onClick={() => { onClearField() }}
             disabled={!hasFieldOverride}
             title={hasFieldOverride
-              ? `Clear this field's override; ${fieldLabel} will read on the global threshold (${globalPct}%) again.`
+              ? `Clear this field's override; every ${fieldLabel} meter without its own per-attractor override will read on the global threshold (${globalPct}%) again.`
               : 'No per-field override to clear'}
             style={{
               padding: '3px 9px', borderRadius: 4,
@@ -2253,7 +2481,7 @@ function ClampThresholdPopover({
           <button
             onClick={() => { onResetGlobal() }}
             disabled={globalAtDefault}
-            title={globalAtDefault ? 'Already at the shipped default' : `Reset GLOBAL to ${defPct}% (this field's override stays as-is)`}
+            title={globalAtDefault ? 'Already at the shipped default' : `Reset GLOBAL to ${defPct}% (this field's and this attractor's overrides stay as-is)`}
             style={{
               padding: '3px 9px', borderRadius: 4,
               fontSize: 9.5, fontWeight: 600, letterSpacing: '0.04em',
