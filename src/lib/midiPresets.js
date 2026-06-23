@@ -387,6 +387,41 @@ export function detectHotkeyConflict(list, targetId, hotkey) {
   return null
 }
 
+// R23.35 — undo-chain toggle window. Graduates R22.30's single-shot
+// undo with a "click Undo again within N ms to flip back" gesture so
+// a user can flip-flop a hotkey assignment without going back to the
+// MIDI panel. The toggle preserves the chain: every restore-toast in
+// the cycle also carries an Undo action, valid for UNDO_CHAIN_MS
+// after the toast surfaces. After the window expires the toast still
+// renders the action chip but clicking it surfaces a "too late" hint
+// (UI taste — keeps the toast self-documenting about why it stopped
+// working) instead of silently doing nothing.
+//
+// The 1-second window is deliberate: long enough for an interrupted
+// flip-flop ("wait, was it on A or B?"), short enough that the toast
+// dismisses naturally before its action becomes a click-target the
+// user no longer associates with the original change.
+//
+// Pure helper — pinned in tests so the timing semantics never drift.
+// React lives in MidiPanel; this module owns the math.
+export const UNDO_CHAIN_MS = 1000
+
+// True when `nowMs - issuedAtMs` is inside the toggle window. Endpoint
+// invariants: a click AT the exact window edge counts as in-window
+// (≤ comparison, not <), so user-perceived rapid clicks don't lose
+// to the boundary. Defensive: non-finite issuedAtMs / nowMs → false
+// (a corrupt timestamp must NOT silently let an expired action fire).
+// Negative deltas (system clock jumped back) → false for the same
+// reason — a click "before" the issue time is suspicious.
+export function isWithinUndoWindow(issuedAtMs, nowMs, windowMs = UNDO_CHAIN_MS) {
+  if (!Number.isFinite(issuedAtMs)) return false
+  if (!Number.isFinite(nowMs)) return false
+  if (!Number.isFinite(windowMs) || windowMs < 0) return false
+  const delta = nowMs - issuedAtMs
+  if (delta < 0) return false
+  return delta <= windowMs
+}
+
 // Load + sanitize the persisted user-preset list. Drops any entry
 // that fails the same validateMap gate as shipped bundles.
 export function loadUserPresets() {

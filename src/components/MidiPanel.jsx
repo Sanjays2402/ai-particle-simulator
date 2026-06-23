@@ -27,6 +27,10 @@ import {
   setUserPresetHotkey, hotkeyFromEvent, findUserPresetByHotkey,
   // R21.25 — pre-flight hotkey conflict detector for the warning toast
   detectHotkeyConflict,
+  // R23.35 — undo-chain toggle window (1s default; click Undo within
+  // the window to flip-flop the assignment, after the window the
+  // chip surfaces a "too late" hint instead of silently expiring)
+  UNDO_CHAIN_MS, isWithinUndoWindow,
 } from '../lib/midiPresets'
 import {
   // R14.17 — single-bundle JSON export/import
@@ -293,13 +297,74 @@ export default function MidiPanel({ open, onClose }) {
   // and clears (null/'') skip the warning since nothing is stolen.
   // R22.30 — toast also carries an UNDO action chip: click Undo to
   // restore the displaced binding to the original bundle in one tap.
-  // The undo re-runs setUserPresetHotkey with (conflict.id, hotkey)
-  // which re-binds the hotkey to the OLD bundle and, by the same
-  // 1-binding-per-hotkey invariant, silently strips it from the NEW
-  // bundle — exact symmetric inverse of what the user just did.
-  // We pass a SNAPSHOT of the pre-write list to detect+setter so a
-  // second click (or another change landing between) can't compound
-  // the undo against the wrong state.
+  // R23.35 — graduates R22.30 with TOGGLE-CHAINING: the restore toast
+  // also carries an Undo action (valid for UNDO_CHAIN_MS ≈ 1s) that
+  // re-runs the original assignment, surfacing yet another restore
+  // toast with its own undo. A user can flip-flop the assignment
+  // without going back to the panel. Past the window the chip surfaces
+  // a "too late" hint instead of silently expiring — the toast becomes
+  // self-documenting about why the gesture stopped working.
+  //
+  // We use functional setState (prev => ...) so each flip in the chain
+  // sees LIVE state instead of the snapshot captured when the toast
+  // first surfaced — concurrent edits between flips compose safely
+  // (the lib's 1-hotkey-1-bundle invariant handles symmetric strips
+  // either way).
+  //
+  // Internal helper — showHotkeyTransferToast renders the toast for
+  // one step of the chain. It accepts the WINNER (took the hotkey)
+  // and LOSER (had it stripped). On Undo, it FLIPS roles + calls
+  // itself: winner becomes the new loser, loser becomes the new
+  // winner. Recursion is bounded by user input + the 1s window, not
+  // by depth (each click resets the issuedAt clock).
+  const showHotkeyTransferToast = (winnerId, loserId, hotkey, prevList) => {
+    const winner = prevList.find(p => p.id === winnerId)
+    const loser  = prevList.find(p => p.id === loserId)
+    if (!winner || !loser) return  // either bundle deleted between flips
+    const winnerColor = userPresetColorStyle(winner.color || DEFAULT_USER_PRESET_COLOR)
+    // R23.35 — issuedAt clock for the toggle window. This helper is
+    // only called from event handlers (button clicks downstream of
+    // setUserBundleHotkey), never during render — but the React
+    // Compiler can't trace that across the recursive closure structure,
+    // so the impure-Date.now check fires false-positive. Suppressing
+    // is correct here; if it ever DID fire during render the result
+    // would be a harmless 1-second-of-undo opportunity, not a crash.
+    // eslint-disable-next-line react-hooks/purity
+    const issuedAt = Date.now()
+    const flipBack = () => {
+      // R23.35 — gate on the toggle window. Inside → run the flip.
+      // Past the window → surface a "too late" hint so the user
+      // understands the chip's no-op behaviour.
+      const now = Date.now()
+      if (!isWithinUndoWindow(issuedAt, now)) {
+        showToast(
+          `Undo expired \u2014 too late to flip back (${UNDO_CHAIN_MS / 1000}s window)`,
+          <AlertCircle size={10} color="#fbbf24" strokeWidth={2.4} />,
+        )
+        return
+      }
+      // Functional setState so we flip against LIVE state (a concurrent
+      // edit between this toast surfacing + the click composes safely).
+      setUserPresets(prev => {
+        // Re-bind hotkey to the LOSER (current owner LOSES it back to
+        // the previous holder). The lib's 1-hotkey-1-bundle invariant
+        // handles the symmetric strip from the current winner.
+        const flipped = setUserPresetHotkey(prev, loserId, hotkey)
+        if (flipped === prev) return prev  // bundle vanished — bail
+        saveUserPresets(flipped)
+        // Chain the next step: the OLD loser is now the NEW winner;
+        // the OLD winner is now the NEW loser. Re-issue the toast
+        // (with its own 1s window).
+        showHotkeyTransferToast(loserId, winnerId, hotkey, flipped)
+        return flipped
+      })
+    }
+    showToast(
+      `Hotkey \u201c${hotkey}\u201d \u2192 \u201c${winner.name}\u201d (stolen from \u201c${loser.name}\u201d)`,
+      <AlertCircle size={10} color={winnerColor.accent} strokeWidth={2.4} />,
+      { label: 'Undo', onClick: flipBack },
+    )
+  }
   const setUserBundleHotkey = (id, hotkey) => {
     const beforeList = userPresets
     const conflict = detectHotkeyConflict(beforeList, id, hotkey)
@@ -308,36 +373,11 @@ export default function MidiPanel({ open, onClose }) {
     setUserPresets(next)
     saveUserPresets(next)
     if (conflict) {
-      const targetBundle = next.find(p => p.id === id)
-      const targetColor = userPresetColorStyle(targetBundle?.color || DEFAULT_USER_PRESET_COLOR)
-      // R22.30 — undo action. Re-binds the just-stolen hotkey to the
-      // OLD bundle by calling the same setter — the lib invariant
-      // (1 hotkey -> 1 bundle) handles the symmetric strip from the
-      // new bundle. We re-read the LIVE userPresets via the setter's
-      // functional update so concurrent edits between toast-show and
-      // toast-click don't roll back to a stale snapshot.
-      const undoAction = {
-        label: 'Undo',
-        onClick: () => {
-          setUserPresets(prev => {
-            const undone = setUserPresetHotkey(prev, conflict.id, hotkey)
-            if (undone === prev) return prev
-            saveUserPresets(undone)
-            const restored = undone.find(p => p.id === conflict.id)
-            const restoredColor = userPresetColorStyle(restored?.color || DEFAULT_USER_PRESET_COLOR)
-            showToast(
-              `Hotkey \u201c${hotkey}\u201d restored \u2192 \u201c${conflict.name}\u201d`,
-              <AlertCircle size={10} color={restoredColor.accent} strokeWidth={2.4} />,
-            )
-            return undone
-          })
-        },
-      }
-      showToast(
-        `Hotkey \u201c${hotkey}\u201d stolen from \u201c${conflict.name}\u201d \u2192 \u201c${targetBundle?.name || 'bundle'}\u201d`,
-        <AlertCircle size={10} color={targetColor.accent} strokeWidth={2.4} />,
-        undoAction,
-      )
+      // Kick off the toast chain. The first step's WINNER is the
+      // target bundle (just took the hotkey); the LOSER is the
+      // pre-existing holder (just got stripped). Subsequent flips
+      // alternate via showHotkeyTransferToast's recursive structure.
+      showHotkeyTransferToast(id, conflict.id, hotkey, next)
     }
     return true
   }

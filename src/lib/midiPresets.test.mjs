@@ -20,6 +20,8 @@ import {
   sanitizeHotkey, hotkeyFromEvent, setUserPresetHotkey, findUserPresetByHotkey,
   // R21.25 — pre-flight hotkey conflict detector for the warning toast
   detectHotkeyConflict,
+  // R23.35 — undo-chain toggle window (graduates R21.25 / R22.30)
+  UNDO_CHAIN_MS, isWithinUndoWindow,
 } from './midiPresets.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -757,4 +759,85 @@ for (const c of USER_PRESET_COLORS) {
   const after2 = next.find(p => p.id === 'user-2')
   ok(!('hotkey' in after1), 'integration: user-1 hotkey stripped after setter')
   eq(after2.hotkey, 'shift+1', 'integration: user-2 hotkey now set')
+}
+
+// --- R23.35: isWithinUndoWindow + UNDO_CHAIN_MS -----------------------
+
+// Constant invariant — 1000ms shipped default.
+eq(UNDO_CHAIN_MS, 1000, 'UNDO_CHAIN_MS shipped default = 1000')
+
+// Happy path — clicks inside the window are valid.
+{
+  const issued = 1_000_000
+  ok(isWithinUndoWindow(issued, issued),        'click at issue time → in-window')
+  ok(isWithinUndoWindow(issued, issued + 1),    'click 1ms after issue → in-window')
+  ok(isWithinUndoWindow(issued, issued + 500),  'click 500ms after issue → in-window')
+  ok(isWithinUndoWindow(issued, issued + 999),  'click 999ms after issue → in-window')
+}
+
+// Endpoint invariant — exactly at the window edge counts as in-window.
+{
+  const issued = 5_000_000
+  ok(isWithinUndoWindow(issued, issued + UNDO_CHAIN_MS),
+    'click at exact window edge → in-window (<=, not <)')
+}
+
+// Outside the window — click past the edge expires.
+{
+  const issued = 5_000_000
+  eq(isWithinUndoWindow(issued, issued + UNDO_CHAIN_MS + 1), false,
+    'click 1ms past window edge → out-of-window')
+  eq(isWithinUndoWindow(issued, issued + 2000), false,
+    'click 2s after issue → out-of-window')
+  eq(isWithinUndoWindow(issued, issued + 60_000), false,
+    'click 1 minute later → out-of-window')
+}
+
+// Negative delta (clock jumped back) → false. Defensive against a
+// system-clock change between the toast issue + the click — a click
+// "before" the issue time is suspicious so we refuse it.
+{
+  const issued = 5_000_000
+  eq(isWithinUndoWindow(issued, issued - 1), false,
+    'click 1ms before issue → out-of-window')
+  eq(isWithinUndoWindow(issued, 0), false,
+    'click at 0 vs issued > 0 → out-of-window')
+}
+
+// Non-finite issuedAtMs / nowMs → false (corrupt timestamps must NOT
+// silently let an expired action fire).
+{
+  eq(isWithinUndoWindow(NaN, 1000), false,         'NaN issued → false')
+  eq(isWithinUndoWindow(Infinity, 1000), false,    '+Infinity issued → false')
+  eq(isWithinUndoWindow(-Infinity, 1000), false,   '-Infinity issued → false')
+  eq(isWithinUndoWindow(1000, NaN), false,         'NaN now → false')
+  eq(isWithinUndoWindow(1000, Infinity), false,    '+Infinity now → false')
+  eq(isWithinUndoWindow(null, 1000), false,        'null issued → false')
+  eq(isWithinUndoWindow(1000, undefined), false,   'undefined now → false')
+  eq(isWithinUndoWindow('not-num', 1000), false,   'string issued → false')
+}
+
+// Custom window arg — caller can override the default for tests / power
+// users with their own gates. Same edge semantics apply.
+{
+  const issued = 1000
+  ok(isWithinUndoWindow(issued, issued + 500, 500),       'custom 500ms window: at edge → in')
+  eq(isWithinUndoWindow(issued, issued + 501, 500), false,'custom 500ms window: past edge → out')
+  ok(isWithinUndoWindow(issued, issued + 5000, 10000),    'custom 10s window: 5s → in')
+}
+
+// Non-finite / negative window → false (no implicit fallback to default;
+// caller's explicit-bad-input shouldn't quietly use a different rule).
+{
+  const issued = 1000
+  eq(isWithinUndoWindow(issued, issued, NaN), false,       'NaN window → false')
+  eq(isWithinUndoWindow(issued, issued, -1), false,        'negative window → false')
+  eq(isWithinUndoWindow(issued, issued, Infinity), false,  'Infinity window → false')
+}
+
+// Zero window — only an exactly-at-issue-time click counts.
+{
+  const issued = 1000
+  ok(isWithinUndoWindow(issued, issued, 0),        'zero window: at issue → in')
+  eq(isWithinUndoWindow(issued, issued + 1, 0), false, 'zero window: 1ms after → out')
 }
