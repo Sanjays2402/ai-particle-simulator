@@ -446,6 +446,22 @@ export function isWithinUndoWindow(issuedAtMs, nowMs, windowMs = UNDO_CHAIN_MS) 
 // Step 1 still returns null (no chain yet to indicate direction for).
 // Step 2 is the FIRST restore — direction reverses from initial → «.
 // Step 3 flips back again → ». And so on alternating.
+// R26.43 — direction-specific accent colours for the chain-counter
+// badge so the alternating direction is visible at a peripheral glance
+// (matches the « / » glyph alternation from R25.43).
+//   « (reverse, even step) → cyan   #67e8f9  (peeled-back / undo direction)
+//   » (forward, odd  step) → amber  #fbbf24  (re-applied / forward direction)
+// Step 1 (no badge) → null.
+// Pure helper exposed for tests so the colour mapping is regression-
+// pinned. Defensive: non-finite / < 2 / non-numeric → null.
+export const HOTKEY_CHAIN_COLOR_REVERSE = '#67e8f9'   // « cyan
+export const HOTKEY_CHAIN_COLOR_FORWARD = '#fbbf24'   // » amber
+export function directionColorForChainStep(chainStep) {
+  if (!Number.isFinite(chainStep) || chainStep < 2) return null
+  const step = Math.floor(chainStep)
+  return step % 2 === 0 ? HOTKEY_CHAIN_COLOR_REVERSE : HOTKEY_CHAIN_COLOR_FORWARD
+}
+
 export function formatHotkeyChainBadge(chainStep, windowMs = UNDO_CHAIN_MS) {
   if (!Number.isFinite(chainStep) || chainStep < 2) return null
   const step = Math.floor(chainStep)
@@ -460,10 +476,20 @@ export function formatHotkeyChainBadge(chainStep, windowMs = UNDO_CHAIN_MS) {
   // ALTERNATE as they keep clicking Undo, so the eye learns "this
   // flip went the OTHER way" without reading the count.
   const directionGlyph = directionGlyphForChainStep(step)
+  // R26.43 — direction-specific accent. Suggested via badge.color so
+  // showToast picks it up (overrides the per-bundle accent which used
+  // to be the badge colour). null returns absorb cleanly into the
+  // spread at the call site.
+  const directionColor = directionColorForChainStep(step)
   return {
     text:  `${directionGlyph}x${step}`,
     title: `Undo chain step ${step} ${directionGlyph} \u2014 you\u2019ve flipped this hotkey ${flipsSoFar} time${flipsSoFar === 1 ? '' : 's'}. Click Undo within ${winSec}s to flip back.`,
     direction: directionGlyph,
+    // R26.43 — colour suggestion. Caller may override (the existing
+    // R23.35 call site does — pre-R26.43 it always overrode with the
+    // winner-bundle's accent; post-R26.43 it CAN keep this directional
+    // colour by NOT spreading a colour over it).
+    color: directionColor,
   }
 }
 

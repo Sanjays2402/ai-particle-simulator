@@ -26,6 +26,8 @@ import {
   formatHotkeyChainBadge,
   // R25.43 — alternating direction glyph for chain step
   directionGlyphForChainStep,
+  // R26.43 — direction-coded badge accent colour
+  directionColorForChainStep, HOTKEY_CHAIN_COLOR_REVERSE, HOTKEY_CHAIN_COLOR_FORWARD,
 } from './midiPresets.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -992,3 +994,88 @@ console.log('PASS: formatHotkeyChainBadge — chain-counter badge formatter (R24
 }
 
 console.log('PASS: directionGlyphForChainStep — alternating direction indicator (R25.43, ~25 asserts)')
+
+// --- R26.43: directionColorForChainStep — direction-coded badge accent --
+
+// Step 1 (no badge) → null. Matches directionGlyphForChainStep + formatHotkeyChainBadge.
+{
+  eq(directionColorForChainStep(1), null, 'step 1 → no colour')
+  eq(directionColorForChainStep(0), null, 'step 0 → no colour')
+  eq(directionColorForChainStep(-1), null, 'negative → no colour')
+}
+
+// Alternation pairs with directionGlyphForChainStep:
+//   even step → « → cyan
+//   odd step (≥3) → » → amber
+{
+  eq(directionColorForChainStep(2),  HOTKEY_CHAIN_COLOR_REVERSE, 'step 2: cyan')
+  eq(directionColorForChainStep(3),  HOTKEY_CHAIN_COLOR_FORWARD, 'step 3: amber')
+  eq(directionColorForChainStep(4),  HOTKEY_CHAIN_COLOR_REVERSE, 'step 4: cyan')
+  eq(directionColorForChainStep(5),  HOTKEY_CHAIN_COLOR_FORWARD, 'step 5: amber')
+  eq(directionColorForChainStep(10), HOTKEY_CHAIN_COLOR_REVERSE, 'step 10: cyan')
+  eq(directionColorForChainStep(11), HOTKEY_CHAIN_COLOR_FORWARD, 'step 11: amber')
+}
+
+// Defensive: non-finite / non-numeric → null.
+{
+  eq(directionColorForChainStep(NaN),       null, 'NaN → null')
+  eq(directionColorForChainStep(Infinity),  null, 'Infinity → null')
+  eq(directionColorForChainStep('2'),       null, 'string → null')
+  eq(directionColorForChainStep(null),      null, 'null → null')
+  eq(directionColorForChainStep(undefined), null, 'undefined → null')
+}
+
+// Fractional step floors to int (matches formatHotkeyChainBadge + glyph helper).
+{
+  eq(directionColorForChainStep(2.9), HOTKEY_CHAIN_COLOR_REVERSE, '2.9 → 2 → cyan')
+  eq(directionColorForChainStep(3.1), HOTKEY_CHAIN_COLOR_FORWARD, '3.1 → 3 → amber')
+}
+
+// Full-sweep regression — across 20 consecutive steps the colour MUST
+// alternate every pair (mirrors the glyph alternation contract).
+{
+  const colors = []
+  for (let s = 2; s <= 20; s++) colors.push(directionColorForChainStep(s))
+  let transitions = 0
+  for (let i = 1; i < colors.length; i++) {
+    if (colors[i] !== colors[i - 1]) transitions++
+  }
+  eq(transitions, colors.length - 1, '19 consecutive steps must produce 18 transitions (perfect alternation)')
+}
+
+// Colours are distinct (sanity — cyan != amber).
+{
+  ok(HOTKEY_CHAIN_COLOR_REVERSE !== HOTKEY_CHAIN_COLOR_FORWARD, 'cyan and amber are distinct')
+  // Hex format sanity — both start with # and have 6 hex digits.
+  ok(/^#[0-9a-fA-F]{6}$/.test(HOTKEY_CHAIN_COLOR_REVERSE), 'cyan is a 6-digit hex colour')
+  ok(/^#[0-9a-fA-F]{6}$/.test(HOTKEY_CHAIN_COLOR_FORWARD), 'amber is a 6-digit hex colour')
+}
+
+// Integration: formatHotkeyChainBadge.color matches directionColorForChainStep.
+// Pre-R26.43 the badge had no .color field; post-R26.43 it carries the
+// direction colour so callers can drop their own colour override.
+{
+  const b2 = formatHotkeyChainBadge(2)
+  eq(b2.color, HOTKEY_CHAIN_COLOR_REVERSE, 'step 2 badge.color = cyan')
+  const b3 = formatHotkeyChainBadge(3)
+  eq(b3.color, HOTKEY_CHAIN_COLOR_FORWARD, 'step 3 badge.color = amber')
+  const b10 = formatHotkeyChainBadge(10)
+  eq(b10.color, HOTKEY_CHAIN_COLOR_REVERSE, 'step 10 badge.color = cyan (even)')
+  const b11 = formatHotkeyChainBadge(11)
+  eq(b11.color, HOTKEY_CHAIN_COLOR_FORWARD, 'step 11 badge.color = amber (odd)')
+}
+
+// Integration: colour alternates with glyph (« always cyan, » always amber).
+{
+  for (let s = 2; s <= 10; s++) {
+    const b = formatHotkeyChainBadge(s)
+    const glyph = directionGlyphForChainStep(s)
+    if (glyph === '\u00ab') {
+      eq(b.color, HOTKEY_CHAIN_COLOR_REVERSE, `step ${s}: « pairs with cyan`)
+    } else if (glyph === '\u00bb') {
+      eq(b.color, HOTKEY_CHAIN_COLOR_FORWARD, `step ${s}: » pairs with amber`)
+    }
+  }
+}
+
+console.log('PASS: directionColorForChainStep — direction-coded badge accent (R26.43, ~30 asserts)')

@@ -507,15 +507,17 @@ export default function MidiPanel({ open, onClose }) {
     }
     // R24.38 — chain-counter badge. Suppressed on step 1 (the user is
     // looking at the first warning — no chain to count yet). From step
-    // 2 onward, paint "x2", "x3", ... with the winner's accent colour
-    // so the badge visually ties to the bundle that just took the
-    // hotkey. The formatter (lib) returns null on step 1 / non-finite
-    // / < 1 input — that null becomes undefined here so showToast's
-    // truthy-on-text guard suppresses the badge cleanly.
+    // 2 onward, paint "x2", "x3", ... R26.43 — colour now comes from
+    // the formatter's `color` field (cyan « / amber ») so the direction
+    // is visible at peripheral glance, alternating as the user keeps
+    // clicking Undo. The winner-bundle accent (pre-R26.43 colour) is
+    // already conveyed via the toast's left icon — moving the badge
+    // colour to direction-coded carries more information per pixel.
+    // The formatter returns null on step 1 / non-finite / < 1 — that
+    // null becomes undefined here so showToast's truthy-on-text guard
+    // suppresses the badge cleanly.
     const formatted = formatHotkeyChainBadge(chainStep, UNDO_CHAIN_MS)
-    const badge = formatted
-      ? { ...formatted, color: winnerColor.accent }
-      : undefined
+    const badge = formatted || undefined
     showToast(
       `Hotkey \u201c${hotkey}\u201d \u2192 \u201c${winner.name}\u201d (stolen from \u201c${loser.name}\u201d)`,
       <AlertCircle size={10} color={winnerColor.accent} strokeWidth={2.4} />,
