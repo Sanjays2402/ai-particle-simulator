@@ -554,6 +554,81 @@ export function peakTrailHueForBarIndex(barIndex, totalBars) {
   return TRAIL_HUE_START + t * (TRAIL_HUE_END - TRAIL_HUE_START)
 }
 
+// --- R21.21: alternate hue PALETTES for the peak-hold trail tint -----
+// Graduates R20.13's single warm→cool ramp with a chip-cycled rail of
+// 5 curated palettes:
+//
+//   warmCool  — the R20.13 default (bass=red-orange, treble=blue-violet).
+//               Backwards-compatible: clients passing no palette get this.
+//   rainbow   — full hue sweep 0..360. Loud, but reads as a true spectrum.
+//   cool      — bass=indigo/violet (260°), treble=teal/cyan (180°). Stays
+//               in the cool half so the trail blends with twilight presets.
+//   warm      — bass=red (0°), treble=amber/yellow (50°). Stays warm so the
+//               trail reads as fire/embers regardless of bar count.
+//   mono      — small mid-grey hue band with tiny drift (200°±15°). Reads
+//               as desaturated against any bar palette, useful for users
+//               who want the trail as a brightness map only.
+//
+// Each palette is defined as `{ start, end }` hue degrees (`end < start`
+// is fine — the linear lerp handles direction). Out-of-roster names fall
+// back to warmCool so corrupt persisted values can never break paint.
+// All palettes anchor totalBars=1 → midpoint, matching R20.13.
+//
+// Defensive contract is identical to peakTrailHueForBarIndex (NaN/non-
+// finite/out-of-range guarded). Used by readPeakTrail callers + the
+// WaveformOverlay tint chip rail.
+export const PEAK_TRAIL_PALETTES = {
+  warmCool: { start: TRAIL_HUE_START, end: TRAIL_HUE_END, label: 'warm→cool' },
+  rainbow:  { start: 0,               end: 360,           label: 'rainbow'   },
+  cool:     { start: 260,             end: 180,           label: 'cool'      },
+  warm:     { start: 0,               end: 50,            label: 'warm'      },
+  mono:     { start: 215,             end: 195,           label: 'mono'      },
+}
+
+// Stable chip-cycle order — UI iterates this so a single chip click
+// walks the rail deterministically. warmCool stays first so the
+// default click target is the R20.13 ramp.
+export const PEAK_TRAIL_PALETTE_NAMES = ['warmCool', 'rainbow', 'cool', 'warm', 'mono']
+
+// True when `name` is a known palette token. Used by the persistence
+// path to drop corrupt persisted values without crashing on first paint.
+export function isValidTrailPalette(name) {
+  return typeof name === 'string' && Object.prototype.hasOwnProperty.call(PEAK_TRAIL_PALETTES, name)
+}
+
+// Step through the chip rail by one. Wraps from the last entry back
+// to the first. Unknown / corrupt input falls back to the first entry
+// so a click on a chip wearing a stale palette name produces a sane
+// outcome.
+export function nextTrailPalette(current) {
+  const idx = PEAK_TRAIL_PALETTE_NAMES.indexOf(current)
+  if (idx < 0) return PEAK_TRAIL_PALETTE_NAMES[0]
+  return PEAK_TRAIL_PALETTE_NAMES[(idx + 1) % PEAK_TRAIL_PALETTE_NAMES.length]
+}
+
+// Hue for a given bar under a named palette. Mirrors the defensive
+// contract of peakTrailHueForBarIndex so callers swap one for the
+// other with no extra guards. Unknown palette names fall back to
+// `warmCool` so a corrupt persisted value never crashes paint.
+//
+// Endpoint anchoring INVARIANT: bar 0 → palette.start, bar N-1 →
+// palette.end across every palette. Mid-bar at exactly halfway →
+// midpoint. totalBars === 1 → midpoint. Float barIndex floors to int.
+export function peakTrailHueForBarIndexPalette(barIndex, totalBars, paletteName) {
+  const palette = PEAK_TRAIL_PALETTES[paletteName] || PEAK_TRAIL_PALETTES.warmCool
+  if (!Number.isFinite(totalBars) || totalBars <= 0) return TRAIL_HUE_DEFAULT
+  if (!Number.isFinite(barIndex)) return TRAIL_HUE_DEFAULT
+  if (totalBars === 1) return (palette.start + palette.end) / 2
+  const intIdx = Math.floor(barIndex)
+  const safeIdx = intIdx < 0 ? 0 : intIdx >= totalBars ? totalBars - 1 : intIdx
+  const t = safeIdx / (totalBars - 1)
+  // Direct lerp on the hue scalar — `end < start` produces a descending
+  // sweep, `end > start` produces an ascending sweep. We don't wrap-
+  // route around the hue wheel (a rainbow can deliberately span the
+  // full 360° range and a wrap-routed lerp would collapse to no motion).
+  return palette.start + t * (palette.end - palette.start)
+}
+
 export function readPeakTrail(state, barIndex, current = 0, opts = {}) {
   if (!state || !state.trail || !state.peaks) return []
   const trailLen = state.trailLen || 0

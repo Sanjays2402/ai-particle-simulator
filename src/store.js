@@ -12,6 +12,8 @@ import {
   defaultPeakTrailCurveParams as defaultPeakTrailCurveParamsHelper,
   sanitizeCurveParams as sanitizeCurveParamsHelper,
   setCurveParam as setCurveParamHelper,
+  // R21.21 — palette validator for the trail tint chip rail
+  isValidTrailPalette as isValidTrailPaletteHelper,
 } from './lib/waveform'
 import { recordThumbMetadata as recordPresetThumbMeta } from './lib/presetThumbnails'
 import {
@@ -699,6 +701,26 @@ export const useStore = create((set, get) => {
     const next = !!v
     try { if (typeof localStorage !== 'undefined') localStorage.setItem('spectrum-peak-trail-tint-v1', next ? '1' : '0') } catch { /* */ }
     set({ spectrumPeakTrailTint: next })
+  },
+
+  // R21.21 — peak-hold trail palette. Graduates R20.13's single
+  // warm→cool ramp with a chip-cycled rail of 5 curated palettes.
+  // Only applied when `spectrumPeakTrailTint` is ON (the tint chip
+  // remains the gate, the palette chip only renders alongside it).
+  // Default 'warmCool' preserves the exact R20.13 visual so users
+  // who never touch the new chip see no behavioural change.
+  // Corrupt persisted values resolve to 'warmCool' on read via
+  // isValidTrailPalette.
+  spectrumPeakTrailPalette: (() => {
+    try {
+      const v = typeof localStorage !== 'undefined' ? localStorage.getItem('spectrum-peak-trail-palette-v1') : null
+      return isValidTrailPaletteHelper(v) ? v : 'warmCool'
+    } catch { return 'warmCool' }
+  })(),
+  setSpectrumPeakTrailPalette: (v) => {
+    const next = isValidTrailPaletteHelper(v) ? v : 'warmCool'
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem('spectrum-peak-trail-palette-v1', next) } catch { /* */ }
+    set({ spectrumPeakTrailPalette: next })
   },
 
   // R17.20 — lightbox WASD pan acceleration curve preset. Parallels

@@ -19,6 +19,9 @@ import {
   // R20.13 — per-bar frequency-coloured tint for the trail
   TRAIL_HUE_START, TRAIL_HUE_END, TRAIL_HUE_DEFAULT,
   peakTrailHueForBarIndex,
+  // R21.21 — alternate hue palettes (graduates R20.13)
+  PEAK_TRAIL_PALETTES, PEAK_TRAIL_PALETTE_NAMES,
+  isValidTrailPalette, nextTrailPalette, peakTrailHueForBarIndexPalette,
 } from './waveform.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -843,5 +846,191 @@ near(peakTrailHueForBarIndex(32, 32),  TRAIL_HUE_END,   'barIndex === totalBars 
   const a = peakTrailHueForBarIndex(10, 32)
   const b = peakTrailHueForBarIndex(10, 32)
   eq(a, b, 'pure: deterministic across calls')
+}
+
+// --- R21.21: alternate hue palettes for the peak-hold trail ----------
+
+// Schema roster — every named palette is present + has { start, end, label }.
+{
+  ok(typeof PEAK_TRAIL_PALETTES === 'object' && PEAK_TRAIL_PALETTES !== null,
+    'PEAK_TRAIL_PALETTES is an object roster')
+  for (const name of PEAK_TRAIL_PALETTE_NAMES) {
+    const p = PEAK_TRAIL_PALETTES[name]
+    ok(p && typeof p === 'object', `palette ${name} is an object`)
+    ok(Number.isFinite(p.start), `palette ${name} has finite .start`)
+    ok(Number.isFinite(p.end),   `palette ${name} has finite .end`)
+    ok(typeof p.label === 'string' && p.label.length > 0,
+      `palette ${name} has non-empty .label`)
+  }
+}
+
+// PEAK_TRAIL_PALETTE_NAMES has 5 stable entries in chip-cycle order.
+{
+  if (PEAK_TRAIL_PALETTE_NAMES.length !== 5) {
+    fail(`expected 5 palette names, got ${PEAK_TRAIL_PALETTE_NAMES.length}`)
+  }
+  eq(PEAK_TRAIL_PALETTE_NAMES[0], 'warmCool',
+    'warmCool is FIRST (preserves R20.13 default click target)')
+  // No duplicates.
+  const seen = new Set()
+  for (const n of PEAK_TRAIL_PALETTE_NAMES) {
+    ok(!seen.has(n), `no duplicate palette name (${n})`)
+    seen.add(n)
+  }
+}
+
+// warmCool palette matches the R20.13 constants — backwards-compat invariant.
+{
+  const wc = PEAK_TRAIL_PALETTES.warmCool
+  eq(wc.start, TRAIL_HUE_START, 'warmCool.start === TRAIL_HUE_START (R20.13 anchor)')
+  eq(wc.end,   TRAIL_HUE_END,   'warmCool.end === TRAIL_HUE_END (R20.13 anchor)')
+}
+
+// isValidTrailPalette — known names valid, junk rejected.
+{
+  for (const n of PEAK_TRAIL_PALETTE_NAMES) {
+    ok(isValidTrailPalette(n), `${n} is valid`)
+  }
+  ok(!isValidTrailPalette('bogus'),    'unknown name rejected')
+  ok(!isValidTrailPalette(''),         'empty string rejected')
+  ok(!isValidTrailPalette(null),       'null rejected')
+  ok(!isValidTrailPalette(undefined),  'undefined rejected')
+  ok(!isValidTrailPalette(42),         'number rejected')
+  ok(!isValidTrailPalette({}),         'object rejected')
+  // Defensive against prototype pollution / hasOwnProperty bypass.
+  ok(!isValidTrailPalette('toString'),    'toString (proto chain) rejected')
+  ok(!isValidTrailPalette('constructor'), 'constructor (proto chain) rejected')
+}
+
+// nextTrailPalette — walks the rail, wraps at the end, falls back to first.
+{
+  for (let i = 0; i < PEAK_TRAIL_PALETTE_NAMES.length; i++) {
+    const cur = PEAK_TRAIL_PALETTE_NAMES[i]
+    const want = PEAK_TRAIL_PALETTE_NAMES[(i + 1) % PEAK_TRAIL_PALETTE_NAMES.length]
+    eq(nextTrailPalette(cur), want, `cycle from ${cur} → ${want}`)
+  }
+  // Unknown / corrupt → first entry (safe restart point).
+  eq(nextTrailPalette('bogus'),    PEAK_TRAIL_PALETTE_NAMES[0], 'unknown current → first')
+  eq(nextTrailPalette(null),       PEAK_TRAIL_PALETTE_NAMES[0], 'null current → first')
+  eq(nextTrailPalette(undefined),  PEAK_TRAIL_PALETTE_NAMES[0], 'undefined current → first')
+  eq(nextTrailPalette(''),         PEAK_TRAIL_PALETTE_NAMES[0], 'empty current → first')
+}
+
+// nextTrailPalette is a closed loop — walking N steps returns to start.
+{
+  let cur = PEAK_TRAIL_PALETTE_NAMES[0]
+  for (let i = 0; i < PEAK_TRAIL_PALETTE_NAMES.length; i++) cur = nextTrailPalette(cur)
+  eq(cur, PEAK_TRAIL_PALETTE_NAMES[0], 'closed loop: N cycles returns to start')
+}
+
+// peakTrailHueForBarIndexPalette — endpoint anchoring invariant across
+// EVERY palette (bar 0 → palette.start, bar N-1 → palette.end).
+{
+  for (const name of PEAK_TRAIL_PALETTE_NAMES) {
+    const p = PEAK_TRAIL_PALETTES[name]
+    near(peakTrailHueForBarIndexPalette(0, 32, name),  p.start, `${name}: bar 0 → start`)
+    near(peakTrailHueForBarIndexPalette(31, 32, name), p.end,   `${name}: bar 31/32 → end`)
+  }
+}
+
+// Mid-bar lerps to midpoint hue across every palette.
+{
+  for (const name of PEAK_TRAIL_PALETTE_NAMES) {
+    const p = PEAK_TRAIL_PALETTES[name]
+    const mid = peakTrailHueForBarIndexPalette(15, 31, name)
+    near(mid, (p.start + p.end) / 2, `${name}: mid-bar = midpoint hue`)
+  }
+}
+
+// totalBars === 1 → midpoint across every palette.
+{
+  for (const name of PEAK_TRAIL_PALETTE_NAMES) {
+    const p = PEAK_TRAIL_PALETTES[name]
+    near(peakTrailHueForBarIndexPalette(0, 1, name), (p.start + p.end) / 2,
+      `${name}: totalBars=1 → midpoint`)
+  }
+}
+
+// Backwards-compat — palette-aware call with 'warmCool' matches the
+// R20.13 single-palette call for every bar. This is the invariant that
+// guarantees existing users see ZERO behavioural change after R21.21.
+{
+  for (let i = 0; i < 32; i++) {
+    const legacy = peakTrailHueForBarIndex(i, 32)
+    const palette = peakTrailHueForBarIndexPalette(i, 32, 'warmCool')
+    near(palette, legacy, `bar ${i}: warmCool palette matches R20.13 legacy`)
+  }
+}
+
+// Unknown palette name falls back to warmCool (matches legacy paint).
+{
+  for (let i = 0; i < 32; i++) {
+    const fallback = peakTrailHueForBarIndexPalette(i, 32, 'bogus')
+    const ref      = peakTrailHueForBarIndexPalette(i, 32, 'warmCool')
+    near(fallback, ref, `bar ${i}: unknown palette → warmCool fallback`)
+  }
+  near(peakTrailHueForBarIndexPalette(5, 32, null),      peakTrailHueForBarIndexPalette(5, 32, 'warmCool'), 'null palette → warmCool')
+  near(peakTrailHueForBarIndexPalette(5, 32, undefined), peakTrailHueForBarIndexPalette(5, 32, 'warmCool'), 'undefined palette → warmCool')
+  near(peakTrailHueForBarIndexPalette(5, 32, 42),        peakTrailHueForBarIndexPalette(5, 32, 'warmCool'), 'non-string palette → warmCool')
+}
+
+// Descending palette ('cool' goes 260 → 180) sweeps down monotonically.
+{
+  const palette = 'cool'
+  const p = PEAK_TRAIL_PALETTES.cool
+  ok(p.end < p.start, 'cool palette: end < start (descending)')
+  let prev = +Infinity
+  for (let i = 0; i < 32; i++) {
+    const h = peakTrailHueForBarIndexPalette(i, 32, palette)
+    ok(h <= prev + 1e-9, `cool: monotonic descent at i=${i}: ${h} <= ${prev}`)
+    prev = h
+  }
+}
+
+// Ascending palette ('rainbow') sweeps up monotonically across 0..360.
+{
+  const palette = 'rainbow'
+  const p = PEAK_TRAIL_PALETTES.rainbow
+  ok(p.end > p.start, 'rainbow palette: end > start (ascending)')
+  let prev = -Infinity
+  for (let i = 0; i < 32; i++) {
+    const h = peakTrailHueForBarIndexPalette(i, 32, palette)
+    ok(h >= prev - 1e-9, `rainbow: monotonic ascent at i=${i}: ${h} >= ${prev}`)
+    prev = h
+  }
+  // Rainbow spans the full 360 range across endpoints.
+  near(peakTrailHueForBarIndexPalette(0, 32, 'rainbow'),  0,   'rainbow bar 0 → 0°')
+  near(peakTrailHueForBarIndexPalette(31, 32, 'rainbow'), 360, 'rainbow last → 360°')
+}
+
+// mono palette stays in a narrow band (≤30° spread) — desaturated trail.
+{
+  const palette = 'mono'
+  const p = PEAK_TRAIL_PALETTES.mono
+  ok(Math.abs(p.end - p.start) <= 30,
+    `mono palette: ≤30° hue spread (got ${Math.abs(p.end - p.start)})`)
+}
+
+// Defensive contract — matches peakTrailHueForBarIndex's R20.13 shape.
+near(peakTrailHueForBarIndexPalette(NaN, 32, 'warmCool'),       TRAIL_HUE_DEFAULT, 'NaN barIndex → default')
+near(peakTrailHueForBarIndexPalette(Infinity, 32, 'warmCool'),  TRAIL_HUE_DEFAULT, '+Infinity barIndex → default')
+near(peakTrailHueForBarIndexPalette(-Infinity, 32, 'warmCool'), TRAIL_HUE_DEFAULT, '-Infinity barIndex → default')
+near(peakTrailHueForBarIndexPalette(5, 0, 'warmCool'),          TRAIL_HUE_DEFAULT, 'totalBars=0 → default')
+near(peakTrailHueForBarIndexPalette(5, -10, 'warmCool'),        TRAIL_HUE_DEFAULT, 'negative totalBars → default')
+near(peakTrailHueForBarIndexPalette(5, NaN, 'warmCool'),        TRAIL_HUE_DEFAULT, 'NaN totalBars → default')
+near(peakTrailHueForBarIndexPalette(5, Infinity, 'warmCool'),   TRAIL_HUE_DEFAULT, 'Infinity totalBars → default')
+
+// Out-of-range barIndex clamps before lerp (no extrapolation past endpoints).
+{
+  const p = PEAK_TRAIL_PALETTES.rainbow
+  near(peakTrailHueForBarIndexPalette(-5, 32, 'rainbow'),  p.start, 'rainbow: negative clamps to start')
+  near(peakTrailHueForBarIndexPalette(100, 32, 'rainbow'), p.end,   'rainbow: huge clamps to end')
+}
+
+// Float barIndex floors to int (parallels R20.13 invariant).
+{
+  const a = peakTrailHueForBarIndexPalette(15, 32, 'cool')
+  const b = peakTrailHueForBarIndexPalette(15.7, 32, 'cool')
+  near(b, a, 'cool: float barIndex floors to int (15.7 → 15)')
 }
 

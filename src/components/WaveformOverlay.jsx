@@ -7,8 +7,11 @@ import {
   readPeakTrail, nextTrailCurve,
   // R19.12 — per-curve tunable param schema (exp.exponent, log.base)
   PEAK_TRAIL_CURVE_PARAMS, isCurveParamsAtDefaults,
-  // R20.13 — per-bar frequency-coloured tint for the peak-hold trail
-  peakTrailHueForBarIndex,
+  // R21.21 — palette-aware tint variant + chip rail helpers (graduates
+  // R20.13's peakTrailHueForBarIndex; the older helper is still exported
+  // for backwards-compat but no longer used by the overlay paint path).
+  peakTrailHueForBarIndexPalette,
+  PEAK_TRAIL_PALETTES, nextTrailPalette,
 } from '../lib/waveform'
 
 // Audio waveform / oscilloscope overlay. Pinned to the canvas's
@@ -53,6 +56,12 @@ export default function WaveformOverlay() {
   // own hue and reads as a glow extension. Persisted across sessions.
   const peakTrailTint = useStore(s => s.spectrumPeakTrailTint)
   const setPeakTrailTint = useStore(s => s.setSpectrumPeakTrailTint)
+  // R21.21 — alternate hue palettes. Only used when the tint above is
+  // ON; the chip appears beside the tint chip when active so users
+  // discover the rail without an extra panel. Cycles warmCool →
+  // rainbow → cool → warm → mono → warmCool on click. Persisted.
+  const peakTrailPalette = useStore(s => s.spectrumPeakTrailPalette)
+  const setPeakTrailPalette = useStore(s => s.setSpectrumPeakTrailPalette)
   // Popover open state for the param editor — hidden by default to
   // keep the overlay tidy. Opens via long-press on the curve chip
   // OR via a dedicated `…` button (rendered only when params exist
@@ -208,8 +217,12 @@ export default function WaveformOverlay() {
           // hue ramp keyed to barIndex (separate from the bar's hue
           // above). When OFF, the trail inherits the bar's own hue so
           // it reads as a glow extension (R15.07 / R16.17 / R19.12 look).
+          // R21.21 — when tint is ON, the active PALETTE name selects
+          // the hue ramp shape (warmCool / rainbow / cool / warm / mono).
+          // Default 'warmCool' preserves the exact R20.13 look so an
+          // existing user with tint enabled sees no behavioural change.
           const trailHue = peakTrailTint
-            ? peakTrailHueForBarIndex(i, bars.length)
+            ? peakTrailHueForBarIndexPalette(i, bars.length, peakTrailPalette)
             : hueWrapped
           for (let k = 0; k < tail.length; k++) {
             const sample = tail[k]
@@ -227,7 +240,7 @@ export default function WaveformOverlay() {
     }
     rafRef.current = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(rafRef.current)
-  }, [active, mode, spectrumScale, peakHolds, peakCurve, peakCurveParams, peakTrailTint])
+  }, [active, mode, spectrumScale, peakHolds, peakCurve, peakCurveParams, peakTrailTint, peakTrailPalette])
 
   if (!active) return null
 
@@ -383,6 +396,41 @@ export default function WaveformOverlay() {
             backdropFilter: 'blur(4px)',
           }}>tint</button>
       )}
+      {/* R21.21 — palette chip rail (only renders when tint is ON since
+          the palette only affects the trail's tinted output). Clicking
+          cycles through warmCool → rainbow → cool → warm → mono. The
+          chip's background previews the palette via a horizontal
+          gradient sampled from PEAK_TRAIL_PALETTES so the user can
+          recognise which palette is active without expanding a menu. */}
+      {mode === 'frequency' && peakHolds && peakTrailTint && (() => {
+        const def = PEAK_TRAIL_PALETTES[peakTrailPalette] || PEAK_TRAIL_PALETTES.warmCool
+        // Build a 3-stop linear-gradient preview so the chip itself
+        // shows the palette's shape (start / mid / end). Mid stop helps
+        // the rainbow palette read as wider than warmCool at a glance.
+        const midHue = (def.start + def.end) / 2
+        const previewGradient = `linear-gradient(90deg, hsla(${def.start},80%,55%,0.32), hsla(${midHue},80%,55%,0.32), hsla(${def.end},80%,55%,0.32))`
+        return (
+          <button
+            type="button"
+            onClick={() => setPeakTrailPalette(nextTrailPalette(peakTrailPalette))}
+            title={`Trail palette: ${def.label}. Click to cycle (${Object.keys(PEAK_TRAIL_PALETTES).length} options: warm→cool, rainbow, cool, warm, mono).`}
+            style={{
+              position: 'absolute', top: 8, left: 188,
+              pointerEvents: 'auto',
+              padding: '2px 8px', borderRadius: 5,
+              fontSize: 9, fontWeight: 600, letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: '#f1f5f9',
+              background: previewGradient,
+              border: '1px solid rgba(255,255,255,0.22)',
+              fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+              cursor: 'pointer',
+              backdropFilter: 'blur(4px)',
+              // Tight chip — palette label is at most 7 chars (warm→cool)
+              minWidth: 46, textAlign: 'center',
+            }}>{def.label}</button>
+        )
+      })()}
       {/* R19.12 — params popover. Renders a single slider per param
           for the active curve. Hidden by default; opens via the curve
           chip's long-press handler (above). Reset button surfaces a
