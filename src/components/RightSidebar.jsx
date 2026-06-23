@@ -336,6 +336,21 @@ function CameraViews() {
   //   5. touchend: run moveView if the drop target differs from the
   //      source idx (re-uses the R17.07 moveView primitive).
   //
+  // R23.31 — touch handlers ALSO bind to the up/down chevron buttons
+  // so a thumb-targeted long-press on the (16×12px) chevron starts a
+  // drag instead of either missing the row entirely or firing the
+  // chevron's onClick. Without this, two complaints surface on touch:
+  //   - 16×12px is hard to reach with a thumb (the row itself is the
+  //     intended drag target).
+  //   - When the user DOES land a long-press on the chevron, releasing
+  //     fires a synthetic click → the chevron moves the view one step
+  //     beyond the user's intent.
+  // Fix: a `touchDragHandlers(idx)` factory returns the same five
+  // touch handlers spread onto both the row AND the chevron buttons.
+  // A `suppressNextClickRef` flag tracks whether drag mode was active
+  // when the touch ended; the chevron's onClick checks the flag and
+  // bails to avoid the synthetic click.
+  //
   // rowRefs holds the live DOM nodes by row idx so the touchmove
   // hit-test can read getBoundingClientRect on every frame without
   // a re-render. Cleared on view-list change so deleted rows aren't
@@ -353,6 +368,10 @@ function CameraViews() {
   const touchStartYRef = useRef(0)
   const touchTimerRef = useRef(0)
   const touchActiveRef = useRef(false)
+  // R23.31 — flag set on touchend AFTER drag mode fired, cleared on
+  // the next synthetic click. Chevron onClick checks this to suppress
+  // the click that would otherwise fire one move beyond the drag.
+  const suppressNextClickRef = useRef(false)
   const TOUCH_LONG_PRESS_MS = 350
   const TOUCH_LONG_PRESS_SLOP_PX = 8
 
@@ -425,6 +444,10 @@ function CameraViews() {
       return
     }
     touchActiveRef.current = false
+    // R23.31 — flag the next synthetic click for suppression so the
+    // chevron / row body's onClick handler doesn't run after a drag.
+    // Cleared by the click handler itself (one-shot).
+    suppressNextClickRef.current = true
     const from = draggingIdx
     const to = dragOverIdx
     setDraggingIdx(null)
@@ -443,6 +466,47 @@ function CameraViews() {
       setDraggingIdx(null)
       setDragOverIdx(null)
     }
+  }
+
+  // R23.31 — touch handler factory. `stopProp` is true when the
+  // caller is a CHILD of the row (chevron / restore-button); the
+  // chevron/button's onTouchStart will fire AND the row's onTouchStart
+  // would also fire by bubbling — both calls re-arm the timer and call
+  // cancelTouchTimer twice, which works correctly here (the first call
+  // arms, second cancels-then-arms; net effect is one armed timer),
+  // but stopPropagation is the cleaner contract: each surface owns its
+  // touch lifecycle.
+  const touchDragHandlers = (idx, { stopProp = true } = {}) => ({
+    onTouchStart: (e) => {
+      if (stopProp) e.stopPropagation()
+      onTouchStart(idx)(e)
+    },
+    onTouchMove: (e) => {
+      if (stopProp) e.stopPropagation()
+      onTouchMove(idx)(e)
+    },
+    onTouchEnd: (e) => {
+      if (stopProp) e.stopPropagation()
+      onTouchEnd(e)
+    },
+    onTouchCancel: (e) => {
+      if (stopProp) e.stopPropagation()
+      onTouchCancel(e)
+    },
+  })
+
+  // R23.31 — chevron click guard. Suppresses the synthetic click that
+  // fires on touchend AFTER a successful long-press drag (browsers
+  // emit a click on tap-release even if preventDefault ran on
+  // earlier touch events; this guard is the click-side counterpart).
+  // One-shot: clears the flag on first inspection. Returns true when
+  // the click should proceed, false when it should be swallowed.
+  const consumeClickIfSuppressed = () => {
+    if (suppressNextClickRef.current) {
+      suppressNextClickRef.current = false
+      return false
+    }
+    return true
   }
 
   // Keyboard quick-save on the active "saveView" binding (default V).
@@ -567,12 +631,19 @@ function CameraViews() {
                 }}>
                 {idx + 1}
               </span>
-              <button onClick={() => restore(v)}
+              <button onClick={() => {
+                if (!consumeClickIfSuppressed()) return
+                restore(v)
+              }}
                 title={`pos: [${v.pos.map(n => n.toFixed(1)).join(', ')}]`}
+                {...touchDragHandlers(idx)}
                 style={{
                   flex: 1, background: 'none', border: 'none', color: '#d8d8e0',
                   fontSize: 12, fontWeight: 500, textAlign: 'left', cursor: 'pointer',
                   padding: 0, display: 'inline-flex', alignItems: 'center', gap: 8,
+                  // R23.31 — manipulation removes 300ms tap delay without
+                  // disabling pan/scroll. Matches the row-level setting.
+                  touchAction: 'manipulation',
                 }}>
                 <Camera size={11} strokeWidth={2.2} color="#c084fc" />
                 {v.name}
@@ -582,12 +653,21 @@ function CameraViews() {
               </button>
               {/* Reorder controls — only meaningful when there's more than
                   one view (top can't go up; bottom can't go down). Disabled
-                  states stay clickable-but-faded so the column doesn't jump. */}
+                  states stay clickable-but-faded so the column doesn't jump.
+                  R23.31 — chevrons also wear touchDragHandlers so a thumb
+                  long-press on a chevron starts a drag (parallels the row
+                  body); short-press still triggers their onClick. The
+                  consumeClickIfSuppressed guard ensures a drag's
+                  synthetic-click doesn't accidentally fire moveUp/moveDown. */}
               {views.length > 1 && (
                 <div style={{ display: 'inline-flex', flexDirection: 'column', gap: 1 }}>
-                  <button onClick={() => moveUp(idx)}
+                  <button onClick={() => {
+                    if (!consumeClickIfSuppressed()) return
+                    moveUp(idx)
+                  }}
                     disabled={idx === 0}
-                    title={idx === 0 ? 'Already at top' : 'Move up in path order'}
+                    title={idx === 0 ? 'Already at top' : 'Move up in path order (long-press to drag on touch)'}
+                    {...touchDragHandlers(idx)}
                     style={{
                       width: 16, height: 12, display: 'inline-flex',
                       alignItems: 'center', justifyContent: 'center',
@@ -597,12 +677,17 @@ function CameraViews() {
                       cursor: idx === 0 ? 'default' : 'pointer',
                       opacity: idx === 0 ? 0.45 : 1,
                       padding: 0,
+                      touchAction: 'manipulation',
                     }}>
                     <ChevronUp size={9} strokeWidth={2.5} />
                   </button>
-                  <button onClick={() => moveDown(idx)}
+                  <button onClick={() => {
+                    if (!consumeClickIfSuppressed()) return
+                    moveDown(idx)
+                  }}
                     disabled={idx === views.length - 1}
-                    title={idx === views.length - 1 ? 'Already at bottom' : 'Move down in path order'}
+                    title={idx === views.length - 1 ? 'Already at bottom' : 'Move down in path order (long-press to drag on touch)'}
+                    {...touchDragHandlers(idx)}
                     style={{
                       width: 16, height: 12, display: 'inline-flex',
                       alignItems: 'center', justifyContent: 'center',
@@ -612,12 +697,16 @@ function CameraViews() {
                       cursor: idx === views.length - 1 ? 'default' : 'pointer',
                       opacity: idx === views.length - 1 ? 0.45 : 1,
                       padding: 0,
+                      touchAction: 'manipulation',
                     }}>
                     <ChevronDown size={9} strokeWidth={2.5} />
                   </button>
                 </div>
               )}
-              <button onClick={() => remove(v.id)} title="Delete"
+              <button onClick={() => {
+                if (!consumeClickIfSuppressed()) return
+                remove(v.id)
+              }} title="Delete"
                 style={{
                   width: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                   borderRadius: 5, background: 'rgba(255,255,255,0.04)',
