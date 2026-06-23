@@ -12,6 +12,7 @@ import {
   sanitizeBiasOverridesMap,
   buildExportPayload, serializeBiasOverrides, makeFilename,
   parseImport, mergeImport, summarizeImportImpact,
+  combineDroppedBiasFiles,
 } from './biasOverridesIO.js'
 import { SCENE_BIASES, SCENE_BIAS_RANGE_FIELDS, SCENE_BIAS_CHANCE_FIELDS } from './randomScene.js'
 
@@ -278,4 +279,139 @@ eq(makeFilename('2026-06-22T19:31:34.000Z'), 'particle-bias-2026-06-22.json',
 ok(SCENE_BIAS_RANGE_FIELDS.length  === 4,  'schema: 4 range fields')
 ok(SCENE_BIAS_CHANCE_FIELDS.length === 10, 'schema: 10 chance fields')
 
-console.log(`PASS: biasOverridesIO — envelope build/parse, merge/replace, summarize, defensive (${SCENE_BIASES.length} chip ids, ${SCENE_BIAS_RANGE_FIELDS.length} ranges + ${SCENE_BIAS_CHANCE_FIELDS.length} chances per chip)`)
+// --- R23.33: combineDroppedBiasFiles — multi-file drop combiner --------
+
+// Happy path — two valid files contribute different chips.
+{
+  const a = serializeBiasOverrides({ calm: { counts: [1000, 2000] } })
+  const b = serializeBiasOverrides({ wild: { counts: [50000, 60000] } })
+  const out = combineDroppedBiasFiles([
+    { raw: a, name: 'calm.json' },
+    { raw: b, name: 'wild.json' },
+  ])
+  eq(out.totalFilesRead, 2,           'both files counted')
+  eq(out.parseFails, 0,               'no parse fails')
+  ok('calm' in out.items,             'first file calm chip kept')
+  ok('wild' in out.items,             'second file wild chip kept')
+  eq(out.perFile.length, 2,           'perFile has 2 entries')
+  eq(out.perFile[0].ok, true,         'first perFile entry is ok')
+  eq(out.perFile[0].chipCount, 1,     'first perFile entry has chipCount=1')
+  eq(out.perFile[1].name, 'wild.json','second perFile entry has name')
+}
+
+// Cross-file conflict — last file wins (caller sorts alphabetically).
+{
+  const a = serializeBiasOverrides({ calm: { counts: [100, 200] } })
+  const b = serializeBiasOverrides({ calm: { counts: [9999, 99999] } })
+  const out = combineDroppedBiasFiles([
+    { raw: a, name: 'a.json' },
+    { raw: b, name: 'b.json' },
+  ])
+  deepEq(out.items.calm.counts, [9999, 99999], 'last file wins on conflict')
+  eq(out.parseFails, 0,                          'no parse fails')
+}
+
+// Partial success — one valid + one corrupt file.
+{
+  const good = serializeBiasOverrides({ surprise: { bgChance: 0.42 } })
+  const out = combineDroppedBiasFiles([
+    { raw: good,                 name: 'good.json' },
+    { raw: '{ not valid json',   name: 'bad.json' },
+  ])
+  eq(out.totalFilesRead, 2,                'both files attempted')
+  eq(out.parseFails, 1,                    'bad file counted as fail')
+  ok('surprise' in out.items,              'good file still landed')
+  eq(out.perFile[0].ok, true,              'good perFile entry ok')
+  eq(out.perFile[1].ok, false,             'bad perFile entry not ok')
+  ok(out.perFile[1].error,                 'bad perFile entry has error msg')
+}
+
+// Defensive: non-array input → empty result with no throw.
+{
+  const out = combineDroppedBiasFiles(null)
+  deepEq(out.items, {},        'null reads → empty items')
+  eq(out.parseFails, 0,        'null reads → 0 parseFails')
+  eq(out.totalFilesRead, 0,    'null reads → 0 totalFilesRead')
+  deepEq(out.perFile, [],      'null reads → empty perFile')
+}
+{
+  const out = combineDroppedBiasFiles('not-array')
+  deepEq(out.items, {},        'string reads → empty items')
+}
+
+// Empty array → empty result.
+{
+  const out = combineDroppedBiasFiles([])
+  deepEq(out.items, {},        'empty reads → empty items')
+  eq(out.totalFilesRead, 0,    'empty reads → 0 totalFilesRead')
+}
+
+// Reads with error field set are recorded as failures.
+{
+  const out = combineDroppedBiasFiles([
+    { raw: '', name: 'empty.json' },
+    { error: 'read failed', name: 'err.json' },
+  ])
+  eq(out.totalFilesRead, 2,            'both attempted')
+  eq(out.parseFails, 2,                'both counted as failures')
+  eq(out.perFile[0].ok, false,         'empty raw → failure')
+  eq(out.perFile[1].ok, false,         'pre-existing error → failure')
+}
+
+// Wrong-kind envelope counted as failure, doesn't taint other items.
+{
+  const good = serializeBiasOverrides({ calm: { counts: [100, 200] } })
+  const wrongKind = JSON.stringify({ kind: 'something/else', v: 1, items: { calm: {} } })
+  const out = combineDroppedBiasFiles([
+    { raw: good,      name: 'a.json' },
+    { raw: wrongKind, name: 'b.json' },
+  ])
+  eq(out.parseFails, 1,                'wrong-kind counted as fail')
+  ok('calm' in out.items,              'good file still landed')
+  ok(/wrong/i.test(out.perFile[1].error || ''), 'error mentions wrong')
+}
+
+// Skips non-object reads silently (without counting toward totalFilesRead).
+{
+  const good = serializeBiasOverrides({ calm: { counts: [100, 200] } })
+  const out = combineDroppedBiasFiles([
+    null,
+    undefined,
+    'not-a-read',
+    { raw: good, name: 'good.json' },
+  ])
+  eq(out.totalFilesRead, 1,            'only the well-formed read was counted')
+  ok('calm' in out.items,              'good file landed')
+}
+
+// Read without a name field → perFile entry uses "unnamed" placeholder.
+{
+  const good = serializeBiasOverrides({ calm: { counts: [100, 200] } })
+  const out = combineDroppedBiasFiles([{ raw: good }])
+  eq(out.perFile[0].name, 'unnamed',   'missing name → unnamed')
+  eq(out.perFile[0].ok, true,          'still counted as success')
+}
+
+// Each file's contribution flows through sanitizeBiasOverridesMap so
+// unknown chip ids get dropped.
+{
+  const tainted = JSON.stringify({
+    kind: EXPORT_KIND, v: EXPORT_VERSION,
+    items: { calm: { counts: [100, 200] }, bogusChip: { counts: [1, 2] } },
+  })
+  const out = combineDroppedBiasFiles([{ raw: tainted, name: 'tainted.json' }])
+  ok('calm' in out.items,             'known chip kept')
+  ok(!('bogusChip' in out.items),     'unknown chip dropped')
+  eq(out.perFile[0].chipCount, 1,     'chipCount reflects post-sanitize count')
+}
+
+// Purity — input array not mutated.
+{
+  const good = serializeBiasOverrides({ calm: { counts: [100, 200] } })
+  const input = [{ raw: good, name: 'a.json' }]
+  const frozen = JSON.stringify(input)
+  combineDroppedBiasFiles(input)
+  eq(JSON.stringify(input), frozen,    'input array unchanged')
+}
+
+console.log(`PASS: biasOverridesIO — envelope build/parse, merge/replace, summarize, defensive, multi-file combine (${SCENE_BIASES.length} chip ids, ${SCENE_BIAS_RANGE_FIELDS.length} ranges + ${SCENE_BIAS_CHANCE_FIELDS.length} chances per chip)`)

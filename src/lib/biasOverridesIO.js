@@ -192,6 +192,71 @@ export function summarizeImportImpact(existing, imported, mode = 'merge') {
   }
 }
 
+// R23.33 — multi-file drop combiner. Graduates R22.28's first-file-
+// only convention with the multi-file gesture R19.20 brought to MIDI
+// bundles + R18.18 brought to theme packs. Drop N .json files at once
+// and the panel COMBINES them into one impact summary before the
+// confirm fires.
+//
+// Per-file failures (corrupt JSON, wrong-kind envelope) are counted
+// but never abort the drop — partial success is preserved so a single
+// hand-rolled junk file in a 12-file gesture doesn't toast away all
+// the good ones. Cross-file duplicate chip ids are resolved last-
+// file-wins (filenames sorted alphabetically by the caller, so the
+// outcome is deterministic across machines).
+//
+// Pure / no DOM — caller is responsible for the FileReader stage so
+// this module stays test-pure (Node's `--test` runs in a sandbox
+// with no FileReader). The browser path lives in RightSidebar.jsx;
+// this helper exists so the combine logic is regression-pinned.
+//
+// Shape mirrors midiUserBundleIO.combineDroppedBundles for symmetry:
+//   reads = [{ raw, error?, name? }, ...]   // one per file attempt
+// Returns:
+//   {
+//     items,           // combined override map (sanitized)
+//     parseFails,      // count of files that yielded zero overrides
+//     totalFilesRead,  // count of files attempted
+//     perFile: [       // per-file breakdown so UI can show which file added what
+//       { name, ok: true,  chipCount: N }   // success
+//     | { name, ok: false, error: '...' }  // failure
+//     ],
+//   }
+//
+// `chipCount` reflects what the FILE contributed before cross-file
+// overwrites — useful for a per-file summary line in the toast/confirm.
+export function combineDroppedBiasFiles(reads) {
+  if (!Array.isArray(reads)) {
+    return { items: {}, parseFails: 0, totalFilesRead: 0, perFile: [] }
+  }
+  const items = {}
+  let parseFails = 0
+  let totalFilesRead = 0
+  const perFile = []
+  for (const r of reads) {
+    if (!r || typeof r !== 'object') continue
+    totalFilesRead++
+    const name = typeof r.name === 'string' && r.name ? r.name : 'unnamed'
+    if (r.error || typeof r.raw !== 'string' || !r.raw) {
+      parseFails++
+      perFile.push({ name, ok: false, error: r.error || 'empty / unreadable file' })
+      continue
+    }
+    const parsed = parseImport(r.raw)
+    if (!parsed.ok) {
+      parseFails++
+      perFile.push({ name, ok: false, error: parsed.error })
+      continue
+    }
+    const chipCount = Object.keys(parsed.items).length
+    perFile.push({ name, ok: true, chipCount })
+    // Last-file-wins on conflict. Caller sorts alphabetically by filename
+    // before calling so the resolution is deterministic.
+    Object.assign(items, parsed.items)
+  }
+  return { items, parseFails, totalFilesRead, perFile }
+}
+
 // Trigger a browser download of the JSON envelope. Returns the
 // filename used, or null when something went wrong (e.g. no document
 // available during SSR).

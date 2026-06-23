@@ -13,6 +13,8 @@ import {
   parseImport as parseBiasOverridesImport,
   mergeImport as mergeBiasOverridesImport,
   exportableBiasIds,
+  // R23.33 — multi-file drop combiner (parallels R19.20 midi bundles)
+  combineDroppedBiasFiles,
 } from '../lib/biasOverridesIO'
 import {
   loadCameraViews, saveCameraViews, appendView, moveView, moveViewUp, moveViewDown,
@@ -961,10 +963,16 @@ function SceneBookmarks() {
   // container (browsers fire enter/leave on every child element a drag
   // crosses; naive boolean would flicker at every chip boundary).
   // Filters by `dataTransfer.types.includes('Files')` so stray text-
-  // drags don't trigger the overlay. Only the FIRST .json file in a
-  // multi-file drop is read (bias overrides are tiny — a multi-file
-  // path would just import the latest file, no merge semantics across
-  // arbitrary files).
+  // drags don't trigger the overlay.
+  // R23.33 — multi-file drop now graduates the R22.28 first-file-only
+  // gesture to handle N .json files at once (parallels R19.20 MIDI
+  // bundles + R18.18 themes). Files are read in parallel via Promise.
+  // all, sorted by filename so the result is deterministic across
+  // machines, then combined via combineDroppedBiasFiles. Cross-file
+  // conflicts resolve last-file-wins (alphabetical). Single-file path
+  // still flows through the same combiner — chip count = 1 — so the
+  // unified pipeline behaves identically for a 1-file drop as the
+  // pre-R23.33 special-case did.
   const [biasDragDepth, setBiasDragDepth] = useState(0)
   const biasDragActive = biasDragDepth > 0
   const onBiasDragEnter = (e) => {
@@ -981,23 +989,79 @@ function SceneBookmarks() {
     if (!e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return
     setBiasDragDepth(d => Math.max(0, d - 1))
   }
+  // R23.33 — apply path for a COMBINED items map (the multi-file result
+  // from combineDroppedBiasFiles). Mirrors parseAndApplyBiasImport's
+  // confirm + merge + persist sequence but skips the per-file parse
+  // step (already done in the combiner). Behaviour is identical for a
+  // 1-file drop; only the toast wording differs.
+  const applyCombinedBiasItems = (items, perFile, parseFails) => {
+    if (Object.keys(items).length === 0) {
+      // Every file failed — surface the count so the user knows nothing
+      // landed (the combiner already records per-file errors).
+      showToast(`Bias import: ${parseFails} file${parseFails === 1 ? '' : 's'} had no valid overrides`)
+      return false
+    }
+    const existing = collectAllBiasOverrides()
+    const importCount = Object.keys(items).length
+    const conflictCount = Object.keys(items).filter(id => id in existing).length
+    const fileCount = perFile.filter(p => p.ok).length
+    const failNote = parseFails > 0
+      ? `\n\n(${parseFails} file${parseFails === 1 ? '' : 's'} skipped — couldn't parse)`
+      : ''
+    const fileNote = fileCount > 1 ? ` from ${fileCount} files` : ''
+    const mode = window.confirm(
+      `Import ${importCount} bias override${importCount === 1 ? '' : 's'}${fileNote}` +
+      (conflictCount > 0 ? ` (${conflictCount} overlap your current edits)?` : '?') +
+      `\n\nOK = Merge into your existing overrides (your current edits stay; only new chips added).\n` +
+      `Cancel = Replace your overrides with the imported set.` + failNote
+    ) ? 'merge' : 'replace'
+    const merge = mergeBiasOverridesImport(existing, items, mode)
+    for (const id of exportableBiasIds()) {
+      if (Object.prototype.hasOwnProperty.call(merge.items, id)) {
+        saveBiasOverride(id, merge.items[id])
+      } else if (mode === 'replace') {
+        resetBiasOverride(id)
+      }
+    }
+    setOverrideTick(t => t + 1)
+    const summary = mode === 'merge'
+      ? `Imported ${merge.added}, skipped ${merge.skipped}${fileCount > 1 ? ` (from ${fileCount} files)` : ''}`
+      : `Replaced — ${merge.added} chip${merge.added === 1 ? '' : 's'} now active${fileCount > 1 ? ` (from ${fileCount} files)` : ''}`
+    showToast(summary, <Upload size={10} color="#fff" strokeWidth={2.4} />)
+    return true
+  }
   const onBiasDrop = async (e) => {
     if (!e.dataTransfer) return
     e.preventDefault()
     setBiasDragDepth(0)
     const files = e.dataTransfer.files
     if (!files || files.length === 0) {
-      showToast('Drop a .json bias overrides file to import')
+      showToast('Drop one or more .json bias overrides files to import')
       return
     }
-    // First-file-only: bias overrides are 3 chips; combining N files
-    // would invite confusion about which file's values win per chip.
-    const file = files[0]
-    if (!/\.json$/i.test(file.name || '')) {
-      showToast(`Not a .json file: ${file.name || 'unnamed'}`)
+    // Filter to .json files first so a stray PDF / image in a multi-
+    // file drop doesn't blow up the parse pass. Sort alphabetically so
+    // cross-file conflicts (last-file-wins) resolve deterministically.
+    const jsonFiles = Array.from(files)
+      .filter(f => /\.json$/i.test(f.name || ''))
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+    const skipped = files.length - jsonFiles.length
+    if (jsonFiles.length === 0) {
+      showToast(`No .json files in drop (skipped ${skipped})`)
       return
     }
-    await parseAndApplyBiasImport(file)
+    // Read all files in parallel — partial failures don't block the
+    // batch (combiner counts them as parseFails).
+    const reads = await Promise.all(jsonFiles.map(async (f) => {
+      try {
+        const raw = await f.text()
+        return { raw, name: f.name }
+      } catch (err) {
+        return { error: err?.message || 'read failed', name: f.name }
+      }
+    }))
+    const combined = combineDroppedBiasFiles(reads)
+    applyCombinedBiasItems(combined.items, combined.perFile, combined.parseFails)
   }
 
   const save = (name) => {
@@ -1191,7 +1255,7 @@ function SceneBookmarks() {
             border: '1px solid rgba(99,102,241,0.4)',
             pointerEvents: 'none',
             zIndex: 5,
-          }}>Drop .json to import bias overrides</div>
+          }}>Drop .json to import bias overrides (multi-file ok)</div>
         )}
         <div style={{
           display: 'grid', gridTemplateColumns: `repeat(${SCENE_BIASES.length}, 1fr)`,
