@@ -838,6 +838,83 @@ export function countClampWarnAttractorOverridesFor(attractorOverrides, attracto
   return n
 }
 
+// R26.45 — count how many ATTRACTORS have a per-attractor override for
+// THIS field. Companion to countClampWarnAttractorOverridesFor (R25.45)
+// which counts per-FIELD overrides for ONE attractor; this projector
+// flips the axis: per-ATTRACTOR overrides for ONE field. Drives the
+// "Clear all (M) for THIS FIELD across every attractor" companion
+// button in the ClampThresholdPopover footer.
+//
+// Returns 0 when:
+//   - non-object / array / null overrides map
+//   - non-string field / not in CLAMP_THRESHOLD_FIELDS
+//   - no attractor has a per-attractor override for this field
+//   - malformed inner entries skipped silently
+//
+// Each ATTRACTOR ID is counted at most once (an attractor either has
+// or doesn't have an override for the given field). non-finite values
+// are NOT counted (parallel to countClampWarnAttractorOverridesFor's
+// semantic — the button label never overstates the wipe scope).
+export function countClampWarnFieldOverridesAcross(attractorOverrides, field) {
+  if (!attractorOverrides || typeof attractorOverrides !== 'object' || Array.isArray(attractorOverrides)) return 0
+  if (typeof field !== 'string' || !field) return 0
+  if (!CLAMP_THRESHOLD_FIELD_SET.has(field)) return 0
+  let n = 0
+  for (const attractorId of Object.keys(attractorOverrides)) {
+    const inner = attractorOverrides[attractorId]
+    if (!inner || typeof inner !== 'object' || Array.isArray(inner)) continue
+    if (!Object.prototype.hasOwnProperty.call(inner, field)) continue
+    if (!Number.isFinite(inner[field])) continue
+    n++
+  }
+  return n
+}
+
+// R26.45 — Strip ONE field from EVERY attractor's per-attractor
+// override map. Drops attractor entries that become empty after the
+// strip (parallel to setClampWarnAttractorFieldOverride's last-cell-
+// prune semantic — keeps the persisted map clean).
+//
+// Ref-equal-on-no-op: returns input ref when:
+//   - non-object / array / null overrides map
+//   - non-string / non-CLAMP_THRESHOLD_FIELDS field
+//   - no attractor has an override for this field (nothing to wipe)
+//
+// Useful for the "Clear all (M) for THIS FIELD across every attractor"
+// button when the user wants to reset (say) every STRENGTH meter back
+// to the per-field-global value without losing X/Y/Z per-attractor
+// tuning. Pure / no mutation.
+export function clearClampWarnFieldOverridesAcross(attractorOverrides, field) {
+  if (!attractorOverrides || typeof attractorOverrides !== 'object' || Array.isArray(attractorOverrides)) return attractorOverrides
+  if (typeof field !== 'string' || !field) return attractorOverrides
+  if (!CLAMP_THRESHOLD_FIELD_SET.has(field)) return attractorOverrides
+  // Fast-path: nothing to do.
+  if (countClampWarnFieldOverridesAcross(attractorOverrides, field) === 0) return attractorOverrides
+  const next = {}
+  for (const attractorId of Object.keys(attractorOverrides)) {
+    const inner = attractorOverrides[attractorId]
+    if (!inner || typeof inner !== 'object' || Array.isArray(inner)) {
+      // Preserve corrupt entries as-is so we don't accidentally drop
+      // attractor entries that were never ours to write (parallels
+      // sanitizeClampWarnAttractorOverrides which would drop them on
+      // load; here we only touch the specified field).
+      next[attractorId] = inner
+      continue
+    }
+    // Build a fresh inner WITHOUT the wiped field.
+    const innerNext = {}
+    let kept = 0
+    for (const k of Object.keys(inner)) {
+      if (k === field) continue
+      innerNext[k] = inner[k]
+      kept++
+    }
+    // Drop entirely empty attractor entries (last-cell-prune semantic).
+    if (kept > 0) next[attractorId] = innerNext
+  }
+  return next
+}
+
 // Has the given (attractor, field) got a per-attractor override that
 // DIFFERS from the effective field threshold (tier 2/3/4)? Used by
 // the UI to paint a per-attractor pip on the meter itself, distinct

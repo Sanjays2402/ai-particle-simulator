@@ -37,6 +37,8 @@ import {
   clearClampWarnAttractorOverrides,
   // R25.45 — bulk-clear count projector
   countClampWarnAttractorOverridesFor,
+  // R26.45 — bulk-clear THIS field across all attractors
+  countClampWarnFieldOverridesAcross, clearClampWarnFieldOverridesAcross,
   hasClampWarnAttractorFieldOverride,
   pruneClampWarnAttractorOverrides,
 } from './midiMap.js'
@@ -2080,3 +2082,189 @@ console.log('PASS: per-(attractor, field) clamp warn threshold overrides (R24.40
 }
 
 console.log('PASS: countClampWarnAttractorOverridesFor (R25.45, bulk-clear count, ~25 asserts)')
+
+// --- R26.45: countClampWarnFieldOverridesAcross + clearClampWarnFieldOverridesAcross ---
+// Companion to R25.45 with the AXIS TRANSPOSED: how many ATTRACTORS have
+// an override for ONE field. Drives the "Clear all (M) for THIS FIELD
+// across every attractor" companion button in the popover.
+
+// Happy path — counts attractors with a per-(attractor, field) override.
+{
+  const overrides = {
+    'attr-1': { strength: 0.10, radius: 0.30, x: 0.20 },
+    'attr-2': { strength: 0.15, y: 0.40 },
+    'attr-3': { x: 0.25, z: 0.35 },
+  }
+  eq(countClampWarnFieldOverridesAcross(overrides, 'strength'), 2, 'strength: attr-1+attr-2')
+  eq(countClampWarnFieldOverridesAcross(overrides, 'radius'),   1, 'radius: only attr-1')
+  eq(countClampWarnFieldOverridesAcross(overrides, 'x'),        2, 'x: attr-1+attr-3')
+  eq(countClampWarnFieldOverridesAcross(overrides, 'y'),        1, 'y: only attr-2')
+  eq(countClampWarnFieldOverridesAcross(overrides, 'z'),        1, 'z: only attr-3')
+  eq(countClampWarnFieldOverridesAcross(overrides, 'radiusLog'),0, 'radiusLog: none')
+}
+
+// Missing field key (not in CLAMP_THRESHOLD_FIELDS) → 0 (not a valid field).
+{
+  const overrides = { 'attr-1': { strength: 0.10 } }
+  eq(countClampWarnFieldOverridesAcross(overrides, 'enabled'),  0, 'enabled not in CLAMP_THRESHOLD_FIELDS')
+  eq(countClampWarnFieldOverridesAcross(overrides, 'type'),     0, 'type not in CLAMP_THRESHOLD_FIELDS')
+  eq(countClampWarnFieldOverridesAcross(overrides, 'gibberish'),0, 'unknown field → 0')
+}
+
+// Empty overrides → 0.
+{
+  eq(countClampWarnFieldOverridesAcross({}, 'strength'), 0, 'empty map → 0')
+}
+
+// Non-finite values not counted (parallels R25.45 contract).
+{
+  const overrides = {
+    'attr-1': { strength: 0.10 },
+    'attr-2': { strength: NaN },
+    'attr-3': { strength: Infinity },
+    'attr-4': { strength: 0.20 },
+    'attr-5': { strength: -Infinity },
+  }
+  eq(countClampWarnFieldOverridesAcross(overrides, 'strength'), 2, 'NaN/+Inf/-Inf skipped')
+}
+
+// Defensive: bad shape inputs → 0.
+{
+  eq(countClampWarnFieldOverridesAcross(null,      'strength'), 0, 'null → 0')
+  eq(countClampWarnFieldOverridesAcross(undefined, 'strength'), 0, 'undefined → 0')
+  eq(countClampWarnFieldOverridesAcross([],        'strength'), 0, 'array → 0')
+  eq(countClampWarnFieldOverridesAcross('str',     'strength'), 0, 'string → 0')
+  eq(countClampWarnFieldOverridesAcross(42,        'strength'), 0, 'number → 0')
+}
+
+// Defensive: bad field inputs → 0.
+{
+  const overrides = { 'attr-1': { strength: 0.10 } }
+  eq(countClampWarnFieldOverridesAcross(overrides, ''),        0, 'empty field → 0')
+  eq(countClampWarnFieldOverridesAcross(overrides, null),      0, 'null field → 0')
+  eq(countClampWarnFieldOverridesAcross(overrides, undefined), 0, 'undefined field → 0')
+  eq(countClampWarnFieldOverridesAcross(overrides, 42),        0, 'number field → 0')
+}
+
+// Defensive: malformed inner entries silently skipped.
+{
+  const overrides = {
+    'attr-1': null,
+    'attr-2': 'not an object',
+    'attr-3': [],
+    'attr-4': { strength: 0.10 },
+  }
+  eq(countClampWarnFieldOverridesAcross(overrides, 'strength'), 1, 'only attr-4 counted')
+}
+
+// Pure — doesn't mutate input.
+{
+  const overrides = { 'attr-1': { strength: 0.10 } }
+  const before = JSON.stringify(overrides)
+  countClampWarnFieldOverridesAcross(overrides, 'strength')
+  eq(JSON.stringify(overrides), before, 'overrides not mutated')
+}
+
+// clearClampWarnFieldOverridesAcross — happy: wipes the field on every
+// attractor, preserves other fields.
+{
+  const overrides = {
+    'attr-1': { strength: 0.10, radius: 0.30, x: 0.20 },
+    'attr-2': { strength: 0.15, y: 0.40 },
+    'attr-3': { x: 0.25, z: 0.35 },
+  }
+  const next = clearClampWarnFieldOverridesAcross(overrides, 'strength')
+  if (next === overrides) fail('expected new ref after wipe')
+  // strength wiped on attr-1 + attr-2, attr-3 untouched.
+  if (Object.prototype.hasOwnProperty.call(next['attr-1'], 'strength')) fail('attr-1 strength wiped')
+  if (Object.prototype.hasOwnProperty.call(next['attr-2'], 'strength')) fail('attr-2 strength wiped')
+  // Other fields preserved.
+  eq(next['attr-1'].radius, 0.30, 'attr-1 radius preserved')
+  eq(next['attr-1'].x,      0.20, 'attr-1 x preserved')
+  eq(next['attr-2'].y,      0.40, 'attr-2 y preserved')
+  eq(next['attr-3'].x,      0.25, 'attr-3 x preserved (no strength to begin with)')
+  eq(next['attr-3'].z,      0.35, 'attr-3 z preserved')
+}
+
+// Empty attractor entries dropped (last-cell-prune semantic).
+{
+  const overrides = {
+    'attr-1': { strength: 0.10 },                // ONLY strength → wiped → drop
+    'attr-2': { strength: 0.15, radius: 0.30 },  // has more → keep
+  }
+  const next = clearClampWarnFieldOverridesAcross(overrides, 'strength')
+  if (Object.prototype.hasOwnProperty.call(next, 'attr-1')) fail('attr-1 dropped (now empty)')
+  eq(next['attr-2'].radius, 0.30, 'attr-2 radius preserved')
+  if (Object.prototype.hasOwnProperty.call(next['attr-2'], 'strength')) fail('attr-2 strength wiped')
+}
+
+// Ref-equal-on-no-op: nothing to wipe.
+{
+  const overrides = { 'attr-1': { radius: 0.30 } }
+  const same = clearClampWarnFieldOverridesAcross(overrides, 'strength')
+  if (same !== overrides) fail('expected input ref when nothing to wipe')
+}
+
+// Ref-equal on bad inputs.
+{
+  if (clearClampWarnFieldOverridesAcross(null, 'strength') !== null) fail('null → null')
+  if (clearClampWarnFieldOverridesAcross(undefined, 'strength') !== undefined) fail('undefined → undefined')
+  const arr = []
+  if (clearClampWarnFieldOverridesAcross(arr, 'strength') !== arr) fail('array → input ref')
+  const overrides = { 'attr-1': { strength: 0.10 } }
+  if (clearClampWarnFieldOverridesAcross(overrides, '') !== overrides) fail('empty field → input ref')
+  if (clearClampWarnFieldOverridesAcross(overrides, null) !== overrides) fail('null field → input ref')
+  if (clearClampWarnFieldOverridesAcross(overrides, 42) !== overrides) fail('number field → input ref')
+  if (clearClampWarnFieldOverridesAcross(overrides, 'gibberish') !== overrides) fail('unknown field → input ref')
+  if (clearClampWarnFieldOverridesAcross(overrides, 'enabled') !== overrides) fail('enabled (not in CLAMP_THRESHOLD_FIELDS) → input ref')
+}
+
+// Pure — doesn't mutate input.
+{
+  const overrides = {
+    'attr-1': { strength: 0.10, radius: 0.30 },
+    'attr-2': { strength: 0.15 },
+  }
+  const before = JSON.stringify(overrides)
+  clearClampWarnFieldOverridesAcross(overrides, 'strength')
+  eq(JSON.stringify(overrides), before, 'overrides not mutated')
+}
+
+// Corrupt inner entries preserved as-is (don't accidentally drop entries
+// that we don't own; sanitize layer handles those on load).
+{
+  const overrides = {
+    'attr-1': { strength: 0.10 },     // wiped
+    'attr-2': 'corrupt-string',       // preserved
+    'attr-3': null,                   // preserved
+    'attr-4': { strength: 0.15 },     // wiped → empty → dropped
+  }
+  const next = clearClampWarnFieldOverridesAcross(overrides, 'strength')
+  if (next === overrides) fail('expected new ref')
+  // attr-1 wiped → empty → dropped (it only had strength to begin with)
+  if (Object.prototype.hasOwnProperty.call(next, 'attr-1')) fail('attr-1 dropped (now empty)')
+  // Corrupt entries preserved as-is.
+  eq(next['attr-2'], 'corrupt-string', 'corrupt string preserved')
+  eq(next['attr-3'], null,             'corrupt null preserved')
+  // attr-4 wiped → empty → dropped.
+  if (Object.prototype.hasOwnProperty.call(next, 'attr-4')) fail('attr-4 dropped (now empty)')
+}
+
+// Integration: count + clear consistent (count BEFORE = N → after clear, count = 0).
+{
+  const overrides = {
+    'attr-1': { strength: 0.10, radius: 0.30 },
+    'attr-2': { strength: 0.15 },
+    'attr-3': { strength: 0.20, x: 0.40 },
+  }
+  const before = countClampWarnFieldOverridesAcross(overrides, 'strength')
+  eq(before, 3, 'before: 3 attractors with strength override')
+  const next = clearClampWarnFieldOverridesAcross(overrides, 'strength')
+  const after = countClampWarnFieldOverridesAcross(next, 'strength')
+  eq(after, 0, 'after: 0 attractors with strength override')
+  // Other fields untouched.
+  eq(countClampWarnFieldOverridesAcross(next, 'radius'), 1, 'radius count unchanged')
+  eq(countClampWarnFieldOverridesAcross(next, 'x'),      1, 'x count unchanged')
+}
+
+console.log('PASS: countClampWarnFieldOverridesAcross + clearClampWarnFieldOverridesAcross (R26.45, ~50 asserts)')

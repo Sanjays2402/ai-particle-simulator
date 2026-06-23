@@ -23,6 +23,9 @@ import {
   // R25.45 — bulk-clear per-attractor + count projector
   clearClampWarnAttractorOverrides,
   countClampWarnAttractorOverridesFor,
+  // R26.45 — bulk-clear per-field-across-attractors + count projector
+  clearClampWarnFieldOverridesAcross,
+  countClampWarnFieldOverridesAcross,
 } from '../lib/midiMap'
 import { ATTRACTOR_TYPES } from '../lib/namedAttractors'
 import {
@@ -193,6 +196,26 @@ export default function MidiPanel({ open, onClose }) {
   // has the ref-equal-on-no-op contract baked in.
   const clearAllClampWarnOverridesForAttractor = (attractorId) => {
     const next = clearClampWarnAttractorOverrides(clampWarnAttractorOverrides, attractorId)
+    if (next === clampWarnAttractorOverrides) return  // no-op
+    setClampWarnAttractorOverridesState(next)
+    try {
+      if (typeof localStorage !== 'undefined') {
+        if (Object.keys(next).length === 0) {
+          localStorage.removeItem('midi-clamp-warn-attractor-overrides-v1')
+        } else {
+          localStorage.setItem('midi-clamp-warn-attractor-overrides-v1', JSON.stringify(next))
+        }
+      }
+    } catch { /* quota / private mode */ }
+  }
+  // R26.45 — wipe THIS field's per-attractor override on EVERY attractor
+  // that has one (the TRANSPOSE of R25.45). Companion bulk-clear so a
+  // power user can reset (say) every STRENGTH meter to its per-field
+  // fallback without losing X/Y/Z per-attractor tuning. Delegates to
+  // clearClampWarnFieldOverridesAcross which has the ref-equal-on-no-op
+  // contract baked in.
+  const clearAllClampWarnOverridesForField = (field) => {
+    const next = clearClampWarnFieldOverridesAcross(clampWarnAttractorOverrides, field)
     if (next === clampWarnAttractorOverrides) return  // no-op
     setClampWarnAttractorOverridesState(next)
     try {
@@ -1475,6 +1498,8 @@ export default function MidiPanel({ open, onClose }) {
                                         onClearAttractor={() => setClampWarnAttractorFieldOverrideUI(a.attractor && a.attractor.id, a.field, null)}
                                         attractorOverrideCount={countClampWarnAttractorOverridesFor(clampWarnAttractorOverrides, a.attractor && a.attractor.id)}
                                         onClearAllForAttractor={() => clearAllClampWarnOverridesForAttractor(a.attractor && a.attractor.id)}
+                                        fieldOverrideCountAcross={countClampWarnFieldOverridesAcross(clampWarnAttractorOverrides, a.field)}
+                                        onClearAllForField={() => clearAllClampWarnOverridesForField(a.field)}
                                         onClose={() => setClampThresholdPopoverFor(null)}
                                       />
                                     )}
@@ -2253,6 +2278,13 @@ function ClampThresholdPopover({
   // delegates to clearClampWarnAttractorOverrides under the hood.
   attractorOverrideCount = 0,
   onClearAllForAttractor,
+  // R26.45 — bulk-clear for the current FIELD across every attractor:
+  // wipe THIS field's per-attractor override on every attractor that
+  // has one, in one click. fieldOverrideCountAcross tells the popover
+  // how many attractors would be touched. Companion to R25.45's
+  // "Clear all for this attractor" — same surface, transposed axis.
+  fieldOverrideCountAcross = 0,
+  onClearAllForField,
   onClose,
 }) {
   const minPct = Math.round(CLAMP_WARN_THRESHOLD_MIN * 100)
@@ -2616,6 +2648,43 @@ function ClampThresholdPopover({
                 border: '1px solid rgba(167,139,250,0.45)',
                 fontWeight: 700,
               }}>{attractorOverrideCount}</span>
+            </button>
+          )}
+          {/* R26.45 — bulk-clear THIS field across every attractor.
+              Companion to R25.45 (per-attractor wipe) with the AXIS
+              transposed: instead of "wipe every field for this
+              attractor", this wipes "every attractor's override for
+              this field". Only renders when at least 2 attractors
+              have a per-attractor override for this field (1 would
+              just be the same as "Clear attr." on the current row,
+              redundant — same threshold as R25.45 uses for symmetry).
+              Distinct VIOLET-DEEP tint vs R25.45's pale violet so the
+              two adjacent buttons read as distinct at a glance. */}
+          {fieldOverrideCountAcross >= 2 && (
+            <button
+              onClick={() => {
+                if (typeof onClearAllForField === 'function') onClearAllForField()
+              }}
+              title={`Clear ${fieldLabel} per-attractor overrides on every attractor that has one (${fieldOverrideCountAcross} attractor${fieldOverrideCountAcross === 1 ? '' : 's'}); every ${fieldLabel} meter falls back to the per-field threshold (${fieldPct}%).`}
+              style={{
+                padding: '3px 9px', borderRadius: 4,
+                fontSize: 9.5, fontWeight: 600, letterSpacing: '0.04em',
+                background: 'rgba(139,92,246,0.18)',
+                color: '#ddd6fe',
+                border: '1px solid rgba(139,92,246,0.55)',
+                cursor: 'pointer',
+                textTransform: 'uppercase',
+                fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+              }}
+            >
+              <span>{fieldLabel} all</span>
+              <span style={{
+                fontSize: 8.5, padding: '0 4px', borderRadius: 3,
+                background: 'rgba(0,0,0,0.32)', color: '#c4b5fd',
+                border: '1px solid rgba(139,92,246,0.45)',
+                fontWeight: 700,
+              }}>{fieldOverrideCountAcross}</span>
             </button>
           )}
           {/* R23.32 — "Use global" clears this field's override so it
