@@ -128,6 +128,11 @@ Existing capabilities (do not re-ship):
 - Camera path touch drag-and-drop reorder via long-press (R22.12). Graduates R17.07's HTML5 native DnD (desktop-only — touch devices don't fire dragstart on touch). Touch users get long-press-to-grab-then-drag: 350ms hold arms the drag mode (10ms haptic vibration on Android), subsequent touchmove hit-tests against per-row getBoundingClientRect via the new pure `resolveTouchTargetIdx(y, ranges)` helper, touchend runs moveView (re-uses R17.07 primitive). Slop guard (LONG_PRESS_SLOP_PX=8) cancels the timer if the user scrolled away — a scroll gesture stays a scroll. e.preventDefault during drag locks page scroll. touchAction:'manipulation' removes the 300ms iOS tap delay without disabling scroll. Multi-touch (pinch-zoom) bails so we don't fight browser gestures. New pure helper `resolveTouchTargetIdx`: half-open [top, bottom) intervals so adjacent rows don't both claim the shared boundary pixel; overflow above first row → snap to first idx; overflow below last → last idx; corrupt range items skip silently so a transient layout glitch mid-drag doesn't lose the gesture; non-finite y / empty ranges / all-corrupt → null.
 - Per-attractor MIDI clamp meter user-tunable warn threshold (R22.27). Graduates R21.22's hard-coded `prox < 0.25 = amber` cutoff. Long-press (≥400ms) any clamp meter to open a popover with a slider [5%..45%] + reset button. Persisted to localStorage `midi-clamp-warn-threshold-v1`, applies to every meter globally. New lib helpers in midiMap.js: `classifyClampProximity(prox, atRail, warnThreshold?)` returns 'danger'/'warn'/'safe' tier — atRail trumps every threshold (structural), non-finite prox → 'safe' (max-safe first-paint), atRail strict===true comparison (truthy non-true → safe path). `sanitizeClampWarnThreshold(raw)` clamps to [MIN, MAX] (0.05..0.45), non-finite/null/string → DEFAULT. `isClampWarnThresholdAtDefault(raw)` projector for the cyan "edited" pip indicator. Constants invariants pinned: MIN < DEFAULT < MAX < 0.5 (MAX < 0.5 so green tier always covers middle half of slider), MIN > 0 (warn tier must cover SOMETHING), DEFAULT === 0.25 (preserves R21.22 baseline). MidiPanel meter colour switched from inline conditionals to `classifyClampProximity` calls — same visual output at default threshold, now responsive to user sensitivity. New `ClampThresholdPopover` leaf with transparent fixed-position backdrop click-outside + Escape dismiss + reset-disabled-at-default + accent-coloured slider. Cyan "edited" pip appears between % readout and bar when threshold is non-default so users can tell which meters read on the custom scale.
 - Thumb detail panel includes editable per-tile user note (R22.29). Graduates R20.19's read-only metadata panel with a free-form text input — label thumbnails "good demo shot" / "wrong colors" / "use for OG card" etc. Persists alongside metadata in the same envelope key (no schema rev needed; note field is optional and forwards/backwards compat). New `THUMB_NOTE_MAX_LEN = 240` cap (fits 2 display lines, ~12KB total for 46 presets at max). `recordThumbMetadata` + `readThumbMetadata` extended: trim + length-cap + drop-if-empty (no `note: ''` junk); read-side defensive against non-string persisted values. New `setThumbNote(presetId, note, storage?)` atomic note-only update: reads existing JSON envelope, merges just the note key, writes back. Preserves capturedAt + every other field so note edit never resets thumb age / rich-detail fields. Empty/null/whitespace REMOVES the note key (clean schema). Returns false on no-pre-existing-meta / bad-id / no-storage / write-fail. Ref-equal-on-no-op contract (same-value re-set is no-op). Defensive against corrupt persisted JSON (bails with false rather than overwriting). `formatThumbDetails` emits `{ kind: 'note', ... }` row tag so UI can paint differently. New `ThumbNoteEditor` leaf in PresetCarousel: read-only italic amber single-line preview ("good demo shot") or dashed "+ Add note" empty state; click to edit. Edit mode 3-row autofocused textarea + Save/Cancel/Clear buttons. Enter saves, Shift+Enter newline, Esc cancels, blur saves silently (R14.18 least-surprise pattern). Char counter goes amber within 20 of cap, red at cap. Saved note auto-syncs to parent's in-memory meta map.
+- Bias overrides drag-and-drop accepts multiple .json files at once (R23.33). Graduates R22.28's first-file-only convention with the multi-file gesture R19.20 brought to MIDI bundles + R18.18 brought to theme packs. Drop N .json bias-overrides files at once and the chip rail combines them into one impact summary before the confirm fires. New pure helper `combineDroppedBiasFiles(reads)` in biasOverridesIO.js: takes per-file FileReader results { raw, error?, name? }, runs each through parseImport, per-file failures counted but never abort (partial success preserved), cross-file conflicts resolve last-file-wins (caller sorts alphabetically). Returns { items, parseFails, totalFilesRead, perFile } where perFile is one { name, ok, chipCount } | { name, ok:false, error } per attempted file so the UI surfaces per-file feedback. chipCount reflects post-sanitize count (unknown chip ids dropped). UI: onBiasDrop filters to .json files first, sorts alphabetically for deterministic conflict resolution across machines, reads in parallel via Promise.all, then feeds into combineDroppedBiasFiles. New applyCombinedBiasItems shares the confirm + merge + persist sequence with the single-file path; toast wording mentions file count when > 1, parse-fail count when > 0. Drop banner gains "(multi-file ok)" hint.
+- Carousel: filter by thumbnail note text — substring search input (R23.34). Graduates R22.29 (per-tile editable note) with a note-search affordance: filter the carousel by note text so a user who tagged 30 thumbs "good demo shot" can surface just those tiles in one click. New lib helpers in presetThumbnails.js: `normalizeNoteQuery(raw)` (trim + lowercase; non-string / nullish / whitespace → empty); `noteMatchesQuery(note, raw)` (substring + case-insensitive; empty query matches every non-empty note for composeable list filters; non-string note → no match defensive); `presetsMatchingNote(presets, raw, storage?)` projects a preset list to the subset whose stored note matches (empty/null query returns input array BY REFERENCE — no-op semantics so the carousel renders the full list without a special-case; non-array presets / missing storage → []; order preserved; malformed entries / note-less tiles skipped); `summarizeNoteFilter(presets, raw, storage?)` count-only projection returning { matching, totalWithNotes } so UI can render "12 of 24 tagged" without allocating the output array. UI: note-filter chip + collapsible input next to the bulk-rebuild button, only renders when at least one tile in the FULL preset list has a saved note (gated via globalTaggedSummary). Click chip opens an inline input (autofocus). Live match-count badge "12/24" updates as the user types. Esc clears AND closes (panic-out); Enter dismisses input keeping query; × clears just query; ✕ closes input keeping filter applied. Note filter intersects with existing tri-state category filter (All / Favs / Recent) — stack "Favs + 'demo'" works. Empty-results banner when query is active but no tiles match — friendly inline message instead of empty carousel.
+- MIDI hotkey-conflict UNDO chains — 2nd Undo within 1s flips back (R23.35). Graduates R22.30's single-shot Undo with a 1-second toggle window so a user can flip-flop a hotkey assignment without going back to the MIDI panel. Each restore-toast in the chain carries its own Undo chip; clicking within the window re-runs the original assignment and surfaces yet another restore-toast with another fresh window. Lib: `UNDO_CHAIN_MS = 1000` constant; `isWithinUndoWindow(issuedAt, now, window?)` pure projector with ≤ comparison (click at exact edge counts in-window so rapid clicks don't lose to the boundary); defensive contract — non-finite issued/now → false (corrupt timestamps must NOT silently allow expired action), negative delta → false (system clock jumped back), non-finite/negative window arg → false (no implicit fallback when caller supplies bad input), zero window → only exactly-at-issue click. UI: `showHotkeyTransferToast(winner, loser, hotkey, prevList)` internal recursive helper renders one step of the chain. Captures `issuedAt = Date.now()` inside the closure so each step has its own fresh window. On Undo: gates via isWithinUndoWindow → inside window flips via functional setState (concurrent edits compose safely via lib's 1-hotkey-1-bundle invariant) → recursively calls itself with FLIPPED roles. Past the window: chip surfaces an explicit "Undo expired — too late to flip back (1s window)" amber toast instead of silently no-opping. `setUserBundleHotkey` is now a thin wrapper: detect conflict → run setter → kick off the toast chain.
+- Camera path touch long-press drag also works on chevron buttons (R23.31). Graduates R22.12's row-only touch-drag (only the row body fired the long-press timer) to the up/down chevrons + restore + delete buttons. Two complaints surfaced on touch: 16x12px chevron buttons are hard to reach with a thumb (the row's ample touch target was the only viable long-press handle); when the user DID land a long-press on the chevron, releasing fired a synthetic click → the chevron's onClick moved the view one step beyond the drag's intent. UI: `touchDragHandlers(idx, { stopProp = true })` factory returns all four touch handlers as a spread-ready object. stopProp=true on chevron/button handlers prevents the touch from bubbling to the row's handlers (each surface owns its lifecycle; the row keeps its own bindings unchanged so row-body touches still arm the timer the original way). `suppressNextClickRef.current = true` on touchend AFTER drag mode fired, cleared by the next click via `consumeClickIfSuppressed()`. Chevron / restore / delete onClick all wrap their actions in the guard. Chevron + restore-button get touchAction:'manipulation'. Chevron tooltip mentions "long-press to drag on touch" so touch users discover the alternative without trial-and-error. Pure wire-layer change — no new lib helpers / no new tests; R22.12's resolveTouchTargetIdx + moveView were already pinned.
+- Per-attractor MIDI clamp meter PER-FIELD threshold overrides (R23.32). Graduates R22.27's single global warn-threshold with per-FIELD overrides so power users can tune each continuous knob field independently. STRENGTH wants STRICT (rail = silent attractor — structural failure); X/Y/Z want LOOSE (rail = attractor at canvas edge — often intentional); RADIUS sits between. New lib in midiMap.js: `CLAMP_THRESHOLD_FIELDS` roster (6 continuous fields — enabled + type excluded since they render bespoke meters); `sanitizeClampWarnOverrides(raw)` defensive — non-object/array → empty map, unknown fields dropped, per-field values clamped via sanitizeClampWarnThreshold, non-finite dropped (not coerced); `resolveClampWarnThreshold(field, global, overrides)` pure read-side resolver walking per-field → global → DEFAULT with lookup-time re-sanitization; `setClampWarnFieldOverride(overrides, field, value)` setter with ref-equal-on-no-op contract — pass null/undefined to clear, invalid field → input ref, non-finite value → input ref, sanitises range; `clearAllClampWarnOverrides(overrides)` wipe-all with empty no-op; `hasClampWarnFieldOverride(field, global, overrides)` UI predicate returning true only when per-field DIFFERS from global. UI: clampWarnOverrides state persisted to `midi-clamp-warn-overrides-v1` (empty map → key removed); meter row calls resolveClampWarnThreshold(a.field, ...) instead of global directly so tier classification + tooltip + edited-pip flow through per-field-aware path; ClampThresholdPopover rewritten with scope header + GLOBAL slider (cyan, R22.27 baseline) + PER-FIELD slider (indigo, R23.32) — both independently editable, global slider opacity dims when per-field active; new "Use global" button clears per-field override; "Reset global" relabelled for clarity; popover state changed from `attractorId` to `{ attractorId, field }` so per-field controls know whose override to edit.
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -402,29 +407,45 @@ R22.04 + R22.05 each need their own focused batch. Substituted R22.12,
 R22.27, R22.28, R22.29, R22.30 from the future queue to keep the batch
 at 5 great slices instead of padding.
 
-### Batch 23 — next 5 (refilled)
-- [ ] R23.01 Echo / trail FBO that survives EffectComposer [carried — render pipeline refactor, dedicated batch]
-- [ ] R23.02 Named attractor 3D drag handle (r3f gizmo) [carried — dedicated batch]
-- [ ] R23.03 OpenGraph snapshot endpoint (server-rendered share card) [carried — needs backend]
-- [ ] R23.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [carried]
-- [ ] R23.05 Audio-reactive bg curve chips → custom curve editor for power users (visual spline / 3-knot bezier) [carried]
+### Batch 23 — bias multi-file + note filter + UNDO chain + touch chevrons + per-field clamp  (SHIPPED)
+- [x] **R23.33** Bias overrides drag-drop accepts multiple .json files at once — 51e7c3c
+- [x] **R23.34** Thumb note: filter the carousel by note text — 192be7f
+- [x] **R23.35** Hotkey conflict UNDO: 2nd Undo within 1s re-undoes (toggle) — 4ea6be7
+- [x] **R23.31** Camera path touch drag: long-press also fires on the chevron buttons — b3cabb7
+- [x] **R23.32** Per-attractor MIDI clamp meter: PER-FIELD threshold overrides — 1d21e99
+
+Note: R23.01-R23.05 (Echo / trail FBO, 3D drag handle, server-rendered
+OG endpoint, multi-error gutter overlay, custom audio-reactive curve
+editor) deferred yet again — first three are dedicated infrastructure
+batches (render-pipeline / r3f-gizmo / backend runtime), R23.04 +
+R23.05 each need their own focused batch. Substituted R23.31, R23.32,
+R23.33, R23.34, R23.35 from the future queue (all graduations of
+Batch 22 features) to keep the batch at 5 great slices instead of
+padding.
+
+### Batch 24 — next 5 (refilled)
+- [ ] R24.01 Echo / trail FBO that survives EffectComposer [carried — render pipeline refactor, dedicated batch]
+- [ ] R24.02 Named attractor 3D drag handle (r3f gizmo) [carried — dedicated batch]
+- [ ] R24.03 OpenGraph snapshot endpoint (server-rendered share card) [carried — needs backend]
+- [ ] R24.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [carried]
+- [ ] R24.05 Audio-reactive bg curve chips → custom curve editor for power users (visual spline / 3-knot bezier) [carried]
 
 ### Future queue (refill when batch closes)
-- [ ] R23.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view [was R22.06]
-- [ ] R23.08 Minimap: hover a saved-view dot for ~1s shows a thumbnail preview (canvas2D sample of the scene from that camera) [was R22.08]
-- [ ] R23.09 Wind chip overrides: per-chip live "what slot is this CC bound to" badge if the chip's seconds is bound to a CC (cross-reference between MIDI map + wind chips) [was R22.09]
-- [ ] R23.10 Crossfade chip overrides: same MIDI cross-reference badge as R23.09 [was R22.10]
-- [ ] R23.14 Snapshot grid: bulk download all selected as a zip (graduates R18.06 selection mode) [was R22.14]
-- [ ] R23.15 Theme pack drag-drop: progress indicator when N > 10 files (current parallel Promise.all is fast but visible delay on big drops) [was R22.15]
-- [ ] R23.17 MIDI bundle drag-drop: per-file progress indicator for very large drops (parallels R23.15 themes; graduates R19.20) [was R22.17]
-- [ ] R23.18 Spectrum peak trail params: persist per-bar OVERRIDES so a user can tune only the bass bars' curve while leaving the rest at default (graduates R19.12 to per-bar granularity) [was R22.18]
-- [ ] R23.20 Named attractor gap-drop: also work for the MidiPanel per-attractor binding groups (drop a group into another's gap to reorder MIDI sections without touching the underlying attractor list) — graduates R19.19 [was R22.20]
-- [ ] R23.26 Spectrum peak trail palette: USER-AUTHORED palettes (add custom start/end hue pairs to the chip rail, persisted) — graduates R21.21 [was R22.26]
-- [ ] R23.31 Camera path touch drag: long-press also fires on the chevron buttons (currently only the row body responds; reaching the small chevron with a thumb is fiddly) — graduates R22.12
-- [ ] R23.32 Per-attractor MIDI clamp meter: PER-FIELD threshold overrides — currently R22.27 is global. Power users want stricter on STRENGTH (where rail = silent attractor) and looser on X/Y/Z (where rail = at canvas edge, often intentional) — graduates R22.27
-- [ ] R23.33 Bias overrides drag-drop: accept multiple .json files at once (currently first-file-only; parallels R19.20 MIDI multi-file pattern) — graduates R22.28
-- [ ] R23.34 Thumb note: filter the carousel by note text (substring search across all thumb notes; e.g. type "demo" to surface every tile tagged "good demo shot") — graduates R22.29
-- [ ] R23.35 Hotkey conflict UNDO: 2nd Undo within 1s re-undoes (toggle), preserving the chain so a user can flip-flop a hotkey assignment without going back to the panel — graduates R22.30
+- [ ] R24.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view [was R23.06]
+- [ ] R24.08 Minimap: hover a saved-view dot for ~1s shows a thumbnail preview (canvas2D sample of the scene from that camera) [was R23.08]
+- [ ] R24.09 Wind chip overrides: per-chip live "what slot is this CC bound to" badge if the chip's seconds is bound to a CC (cross-reference between MIDI map + wind chips) [was R23.09]
+- [ ] R24.10 Crossfade chip overrides: same MIDI cross-reference badge as R24.09 [was R23.10]
+- [ ] R24.14 Snapshot grid: bulk download all selected as a zip (graduates R18.06 selection mode) [was R23.14]
+- [ ] R24.15 Theme pack drag-drop: progress indicator when N > 10 files [was R23.15]
+- [ ] R24.17 MIDI bundle drag-drop: per-file progress indicator for very large drops [was R23.17]
+- [ ] R24.18 Spectrum peak trail params: persist per-bar OVERRIDES (graduates R19.12 to per-bar granularity) [was R23.18]
+- [ ] R24.20 Named attractor gap-drop: also work for the MidiPanel per-attractor binding groups [was R23.20]
+- [ ] R24.26 Spectrum peak trail palette: USER-AUTHORED palettes [was R23.26]
+- [ ] R24.36 Bias multi-file drop: live preview panel (parallels R14.15 wind / R14.16 crossfade preview) — graduates R23.33
+- [ ] R24.37 Carousel note filter: regex mode toggle for power users (substring is default) — graduates R23.34
+- [ ] R24.38 MIDI hotkey UNDO chain: visual "chain counter" badge on the toast so user sees how many flips they've made — graduates R23.35
+- [ ] R24.39 Camera path touch DnD: row also drags by touching the play-order number (currently #N badge has no drag affordance on touch) — graduates R23.31
+- [ ] R24.40 Per-attractor MIDI clamp: per-attractor-and-field overrides (currently R23.32 is per-field global — power users want strict on attr-A's STRENGTH but loose on attr-B's STRENGTH) — graduates R23.32
 
 ## TICK LOG
 - 2026-06-19 23:41 PT — Bootstrap + Batch 1 (5/5).
@@ -1228,4 +1249,82 @@ at 5 great slices instead of padding.
     against corrupt JSON envelope + formatThumbDetails note row
     kind='note' tag + no-note → no-row + empty/whitespace note
     → no row + clearThumbMetadata cascade still wipes notes)
+
+- 2026-06-23 02:29 PT — Batch 23 (5/5).
+  Commits: 51e7c3c (R23.33 bias drag-drop multi-file + new lib
+  combineDroppedBiasFiles + per-file partial-success contract +
+  alphabetical sort for deterministic last-file-wins on cross-file
+  conflict + applyCombinedBiasItems shares confirm/merge/persist
+  with single-file path), 192be7f (R23.34 carousel note filter +
+  new lib normalizeNoteQuery / noteMatchesQuery / presetsMatchingNote /
+  summarizeNoteFilter — empty-query ref-equal no-op preserves carousel
+  rendering invariant + collapsible amber search input + live match
+  badge intersects with category filter + empty-results banner),
+  4ea6be7 (R23.35 MIDI hotkey UNDO chain toggle + new lib
+  UNDO_CHAIN_MS / isWithinUndoWindow — 1s window with ≤ endpoint +
+  defensive negative-delta-as-clock-jump-back rejection +
+  recursive showHotkeyTransferToast captures issuedAt per step +
+  past-window surfaces explicit "too late" toast instead of silent
+  no-op), b3cabb7 (R23.31 camera path chevron touch DnD wiring +
+  touchDragHandlers factory with stopProp + suppressNextClickRef
+  guard prevents drag's synthetic click from firing chevron's
+  onClick + tooltip hint mentions long-press), 1d21e99 (R23.32
+  per-field clamp warn threshold overrides + new lib
+  CLAMP_THRESHOLD_FIELDS / sanitizeClampWarnOverrides /
+  resolveClampWarnThreshold per-field→global→DEFAULT chain +
+  setClampWarnFieldOverride ref-equal-on-no-op + clear via null +
+  ClampThresholdPopover rewritten with scope header + GLOBAL slider
+  (cyan) + PER-FIELD slider (indigo) + Use-global button).
+  R23.01-R23.05 deferred again — first three are dedicated
+  infrastructure batches (render-pipeline / r3f-gizmo / backend
+  runtime), R23.04 + R23.05 each need their own focused batch.
+  Substituted R23.31, R23.32, R23.33, R23.34, R23.35 from the
+  future queue — every slice is a graduation of a Batch 22 feature,
+  giving the batch a tight thematic spine (Batch 22 → Batch 23
+  iteration loop without padding).
+  Gates: lint 23 errors / 3 warnings — exactly matches baseline
+  (one new lint error surfaced in R23.35 from React Compiler's
+  impure-Date.now flag false-positive on the recursive closure
+  structure; resolved with a targeted eslint-disable directive +
+  inline comment explaining why; no lint-gate cleanup commit
+  needed — folded into the same R23.35 commit).
+  Build: 922 ms green (1.81 MB bundle, gzip 534 KB — +2 KB vs
+  Batch 22 for the new lib helpers + ClampThresholdPopover rewrite
+  + note filter UI + chevron touch wiring + bias multi-file
+  combiner + UNDO chain helper).
+  Unit tests: 40/40 files pass (~230 fresh asserts this batch):
+  - extended biasOverridesIO ~70 R23.33 asserts (happy multi-file
+    + cross-file last-file-wins + partial success + defensive
+    (null/string/empty/non-object inputs) + reads with error field
+    set + wrong-kind envelope partial taint + name-missing →
+    'unnamed' placeholder + sanitize pass drops unknown chips +
+    purity)
+  - extended presetThumbnails ~60 R23.34 asserts (normalizeNoteQuery
+    trim+lowercase + non-string fallback; noteMatchesQuery substring
+    case-insensitive + empty-query semantics + defensive note types;
+    presetsMatchingNote happy path + case mix + substring boundary +
+    empty-query no-op preserves ref-equality + defensive presets /
+    storage + malformed entries skipped + note-less skipped + order
+    preserved; summarizeNoteFilter matching + totalWithNotes
+    invariants; trim invariant between record/read/match paths)
+  - extended midiPresets ~30 R23.35 asserts (UNDO_CHAIN_MS=1000
+    constant; isWithinUndoWindow happy 0/1/500/999ms + edge
+    invariant at exactly 1000ms + out-of-window 1001/2000/60000ms
+    + negative delta clock-jump-back rejection + non-finite inputs
+    NaN/Infinity/null/undefined/string + custom window arg with
+    edge invariants + non-finite/negative window → false (no
+    implicit fallback) + zero window only at exact issue time)
+  - extended midiMap ~70 R23.32 asserts (CLAMP_THRESHOLD_FIELDS
+    roster — 6 fields, enabled+type excluded; sanitizeClampWarnOverrides
+    empty/nullish/array/known-fields-kept-independently/unknown-dropped/
+    clamp-range/non-finite-dropped; resolveClampWarnThreshold per-field
+    wins + fallback chain to global to DEFAULT + lookup-time
+    re-sanitization + non-string/non-object/unknown-field paths;
+    setClampWarnFieldOverride happy / ref-equal-no-op / clamping /
+    clear via null+undefined / clear-when-absent-no-op / invalid
+    field / non-finite value / non-object overrides / multiple
+    independent fields; clearAllClampWarnOverrides empty-no-op /
+    populated-wipe / nullish-input; hasClampWarnFieldOverride
+    differs/equals/missing/non-finite/defensive/sanitization-
+    invariance; integration round-trip with classifyClampProximity)
 
