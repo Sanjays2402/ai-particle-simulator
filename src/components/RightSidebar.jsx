@@ -617,19 +617,59 @@ function CameraViews() {
               onMouseEnter={e => { if (!isDropTarget && !isBeingDragged) { e.currentTarget.style.background = 'rgba(168,85,247,0.07)'; e.currentTarget.style.borderColor = 'rgba(168,85,247,0.25)' } }}
               onMouseLeave={e => { if (!isDropTarget && !isBeingDragged) { e.currentTarget.style.background = 'rgba(255,255,255,0.025)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)' } }}
             >
-              {/* Play order index — also serves as the drop target label when
-                  we eventually wire drag-and-drop. Monospace so the column
-                  stays aligned even with 10+ views.
+              {/* Play order index — also serves as a drag-handle on
+                  touch (R24.39). Desktop users grab anywhere on the
+                  row to drag; touch users have a few overlapping
+                  affordances: the row body (R22.12), the chevrons
+                  (R23.31), and now the #N badge itself (R24.39 — the
+                  badge already wears `cursor: grab` styling so users
+                  reach for it expecting drag, and parallels the
+                  R18.19 named-attractor #N badge drag handle).
+                  Monospace so the column stays aligned even with 10+
+                  views.
                   R22.12 — tooltip mentions touch long-press alongside
-                  desktop drag/arrows. */}
+                  desktop drag/arrows.
+                  R24.39 — when views.length > 1 we attach
+                  touchDragHandlers AND a grab cursor so the badge
+                  reads as the affordance it now is. */}
               <span title={views.length > 1
-                ? `Path order ${idx + 1} \u2014 drag to reorder (long-press on touch), or use the arrows`
+                ? `Path order ${idx + 1} \u2014 drag to reorder (long-press to drag on touch), or use the arrows`
                 : `Path order ${idx + 1}`}
+                {...(views.length > 1 ? touchDragHandlers(idx) : {})}
                 style={{
                   width: 16, textAlign: 'center',
                   fontSize: 9.5, fontWeight: 600,
                   color: '#7a7a90', fontFamily: 'Geist Mono, JetBrains Mono, monospace',
                   letterSpacing: '0.04em',
+                  // R24.39 — grab cursor mirrors the R18.19 named-
+                  // attractor #N badge drag affordance. Only when
+                  // there's more than one view (single-view list has
+                  // nothing to reorder).
+                  cursor: views.length > 1 ? 'grab' : 'default',
+                  // R24.39 — manipulation removes the 300ms tap delay
+                  // on iOS without disabling pan/scroll; matches the
+                  // chevron + row body settings so the badge behaves
+                  // consistently with the rest of the touch surface.
+                  touchAction: views.length > 1 ? 'manipulation' : 'auto',
+                  // R24.39 — prevent native iOS callout / selection on
+                  // long-press so the badge becomes a clean drag
+                  // handle. Parallels R23.31 chevron settings.
+                  userSelect: views.length > 1 ? 'none' : 'auto',
+                  WebkitUserSelect: views.length > 1 ? 'none' : 'auto',
+                  WebkitTouchCallout: views.length > 1 ? 'none' : undefined,
+                  // Slightly more visible when the row has reorder
+                  // capability so the affordance reads as interactive
+                  // (without going so far that it dominates the row).
+                  opacity: views.length > 1 ? 0.85 : 1,
+                  // Compact display tweak — display:inline-flex so
+                  // the touch hit-box matches the visible 16px wide
+                  // box rather than the line's natural baseline.
+                  display: 'inline-flex',
+                  alignItems: 'center', justifyContent: 'center',
+                  // Slight padding extends the touch target without
+                  // changing the visual width (background is
+                  // transparent so the padding is invisible).
+                  padding: views.length > 1 ? '2px 0' : 0,
                 }}>
                 {idx + 1}
               </span>
