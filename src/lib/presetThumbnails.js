@@ -526,6 +526,104 @@ export function captureThumbnailToStorage(preset, opts = {}) {
   } catch { return false }
 }
 
+// R23.34 — note filtering for the carousel. Graduates R22.29 (per-tile
+// editable note) with a substring-search affordance: filter the
+// carousel by note text so a user who tagged 30 thumbs "good demo
+// shot" can surface just those tiles in one click.
+//
+// Why pure / lib-level: the carousel's tile rendering already does
+// per-render localStorage reads via readThumbMetadata; the matcher
+// stays here so its test coverage is independent of React state
+// timing. The query normalisation rules (case-insensitive, trim,
+// substring) are exposed via `normalizeNoteQuery` so the UI can
+// gate the filter on a non-empty query consistently with the matcher.
+//
+// Why substring and not exact-word: notes are short free-form labels
+// ("good demo shot", "use for OG card") — exact-match would force the
+// user to type the entire tag, defeating the point. Substring is the
+// least-surprise choice for a note search box.
+
+// Lower-cased + trimmed query (empty string when input is nullish /
+// whitespace). UI uses this to decide whether to render the filter
+// chip at all (no query → don't bother painting "0 matches" noise).
+export function normalizeNoteQuery(rawQuery) {
+  if (typeof rawQuery !== 'string') return ''
+  return rawQuery.trim().toLowerCase()
+}
+
+// Does a single note string match the query? Both are normalised to
+// trimmed + lower-case before comparison. Empty query matches every
+// non-null note (the caller decides whether to short-circuit on empty
+// queries — exposing the "empty query = match" branch lets the matcher
+// composeably feed list-filters).
+//
+// Defensive: non-string note → no match (so a corrupt persisted note
+// can't accidentally surface a tile). Non-string query falls through
+// to normalizeNoteQuery's empty-string normalisation.
+export function noteMatchesQuery(note, rawQuery) {
+  if (typeof note !== 'string' || !note) return false
+  const query = normalizeNoteQuery(rawQuery)
+  if (!query) return true
+  return note.toLowerCase().includes(query)
+}
+
+// Project a preset list down to the subset whose stored thumb note
+// matches the query. Returns the matching preset objects (not just
+// ids) so the UI can render directly. Reads notes from the metadata
+// side-store via readThumbMetadata so the matcher honours every
+// schema invariant (trimmed, length-capped, valid envelope).
+//
+// Defensive contract:
+//   - Empty/whitespace query → returns the input array unchanged
+//     (no-op semantics so the carousel can render the full list
+//     without a special-case branch).
+//   - Non-array presets → returns []
+//   - Missing storage → returns [] (we can't read notes without it)
+//   - Per-preset: malformed preset entries (null / non-string id)
+//     are skipped silently — they couldn't match anyway.
+//   - Presets without a note in their metadata are skipped (no note
+//     can possibly match a non-empty query).
+//
+// Pure read-side; never writes. Caller decides what to do with the
+// resulting array (render in place, count summary, etc.).
+export function presetsMatchingNote(presets, rawQuery, storage) {
+  if (!Array.isArray(presets)) return []
+  const query = normalizeNoteQuery(rawQuery)
+  if (!query) return presets  // no-op semantics — empty query matches all
+  const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null)
+  if (!store) return []
+  const out = []
+  for (const p of presets) {
+    if (!p || typeof p.id !== 'string' || !p.id) continue
+    const md = readThumbMetadata(p.id, store)
+    if (!md || typeof md.note !== 'string' || !md.note) continue
+    if (noteMatchesQuery(md.note, query)) out.push(p)
+  }
+  return out
+}
+
+// Count summary for the filter UI — returns `{ matching, totalWithNotes }`
+// so the UI can render "12 of 24 tagged" before any list filtering
+// happens. Cheaper than calling presetsMatchingNote when you only need
+// the counts (skips the output array allocation), but otherwise uses
+// the same matcher to stay consistent.
+export function summarizeNoteFilter(presets, rawQuery, storage) {
+  if (!Array.isArray(presets)) return { matching: 0, totalWithNotes: 0 }
+  const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null)
+  if (!store) return { matching: 0, totalWithNotes: 0 }
+  const query = normalizeNoteQuery(rawQuery)
+  let matching = 0
+  let totalWithNotes = 0
+  for (const p of presets) {
+    if (!p || typeof p.id !== 'string' || !p.id) continue
+    const md = readThumbMetadata(p.id, store)
+    if (!md || typeof md.note !== 'string' || !md.note) continue
+    totalWithNotes++
+    if (!query || noteMatchesQuery(md.note, query)) matching++
+  }
+  return { matching, totalWithNotes }
+}
+
 // Wipe the cached thumbnail for one preset id. Returns true if the
 // entry existed and was removed; false if there was nothing to remove
 // (or storage isn't available). Used by the carousel's "rebuild this

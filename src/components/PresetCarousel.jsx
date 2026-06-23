@@ -11,6 +11,8 @@ import {
   clearThumbnail,
   // R22.29 — per-thumb user note
   setThumbNote, THUMB_NOTE_MAX_LEN,
+  // R23.34 — note filter: substring matcher + projection + summary
+  presetsMatchingNote, summarizeNoteFilter, normalizeNoteQuery,
 } from '../lib/presetThumbnails'
 
 export default function PresetCarousel() {
@@ -26,6 +28,14 @@ export default function PresetCarousel() {
   const [detailId, setDetailId] = useState(null)
   // Tri-state filter: 'all' | 'favs' | 'recent'.
   const [filter, setFilter] = useState('all')
+  // R23.34 — note-search query. When non-empty, intersects the
+  // category-filtered list with presetsMatchingNote so a user can
+  // surface every tile tagged e.g. "demo" in one step. Empty/null
+  // query is a no-op so the carousel stays exactly as it was without
+  // the search affordance touched. Kept as plain state (not a ref)
+  // because tile list filters off it during render.
+  const [noteQuery, setNoteQuery] = useState('')
+  const [noteFilterOpen, setNoteFilterOpen] = useState(false)
   // Track which preset just had its thumb rebuilt — used to animate the
   // refresh icon for a moment so the user gets feedback the click landed.
   const [busyId, setBusyId] = useState(null)
@@ -138,7 +148,7 @@ export default function PresetCarousel() {
   const canBulkRebuild = bulkSummary.withThumb > 0
 
   // Sort: favorites first
-  const sorted = (filter === 'recent')
+  const sortedByFilter = (filter === 'recent')
     // Recent: explicit ordering by recency.
     ? recentPresets.map(id => presets.find(p => p.id === id)).filter(Boolean)
     : [...presets]
@@ -148,6 +158,22 @@ export default function PresetCarousel() {
           const bFav = favoritedPresets.includes(b.id) ? 0 : 1
           return aFav - bFav
         })
+  // R23.34 — apply note-search on top of the existing filter. Empty
+  // query is a no-op (presetsMatchingNote returns the input array by
+  // reference); non-empty query intersects with the note matcher so
+  // a user can stack "Favs + 'demo'" or "Recent + 'wrong'". noteSummary
+  // surfaces a count badge on the search input so the user knows how
+  // many tiles match before scanning the list.
+  const noteQueryNorm = normalizeNoteQuery(noteQuery)
+  const sorted = presetsMatchingNote(sortedByFilter, noteQueryNorm)
+  const noteSummary = noteQueryNorm
+    ? summarizeNoteFilter(sortedByFilter, noteQueryNorm)
+    : null
+  // R23.34 — global "tagged" badge always reflects how many tiles in
+  // the FULL preset list (independent of category filter) have notes.
+  // Used to gate the search button — no point opening a search input
+  // when there are zero notes to search across.
+  const globalTaggedSummary = summarizeNoteFilter(presets, '')
 
   return (
     <div className="hide-scrollbar" style={{
@@ -222,6 +248,146 @@ export default function PresetCarousel() {
             {bulkBusy ? 'Building' : `${bulkSummary.withThumb}/${bulkSummary.total}`}
           </span>
         </button>
+      )}
+      {/* R23.34 — note-filter button + collapsible input. Only renders
+          when at least one tile has a saved note (no point offering a
+          search across zero hits). Click toggles the input open; when
+          open the input commands focus + shows the live match count.
+          Empty/whitespace query is a no-op so toggling open without
+          typing doesn't disturb the list ordering. Escape clears the
+          query AND closes the input so a user can bail out without
+          reaching for the mouse. The count badge sits on the chip
+          itself when the input is closed but the query is non-empty
+          (e.g. the user typed, closed via X, came back) so the user
+          knows the filter is still applied. */}
+      {globalTaggedSummary.totalWithNotes > 0 && (
+        <div style={{
+          flexShrink: 0,
+          height: 70,
+          display: 'inline-flex', alignItems: 'center',
+          gap: 4,
+        }}>
+          {!noteFilterOpen ? (
+            <button
+              onClick={() => setNoteFilterOpen(true)}
+              title={noteQueryNorm
+                ? `Note filter: "${noteQuery}" (${noteSummary?.matching || 0} match)`
+                : `Filter by thumbnail note — ${globalTaggedSummary.totalWithNotes} tile${globalTaggedSummary.totalWithNotes === 1 ? '' : 's'} tagged`}
+              style={{
+                height: 70, width: 56,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                borderRadius: 10, cursor: 'pointer',
+                background: noteQueryNorm
+                  ? 'linear-gradient(135deg, rgba(245,158,11,0.28), rgba(251,191,36,0.18))'
+                  : 'rgba(255,255,255,0.04)',
+                color: noteQueryNorm ? '#fde68a' : '#8a8aa0',
+                border: noteQueryNorm ? '1px solid rgba(245,158,11,0.45)' : '1px solid rgba(255,255,255,0.07)',
+                fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase',
+                flexDirection: 'column', gap: 4,
+                transition: 'background 0.18s, border-color 0.18s, color 0.18s',
+              }}
+            >
+              <span style={{ fontSize: 16, lineHeight: 1 }}>{'\u2315'}</span>
+              <span style={{ fontSize: 9 }}>
+                {noteQueryNorm ? `${noteSummary?.matching || 0}` : 'Note'}
+              </span>
+            </button>
+          ) : (
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              height: 70, padding: '0 8px',
+              borderRadius: 10,
+              background: 'rgba(245,158,11,0.08)',
+              border: '1px solid rgba(245,158,11,0.40)',
+            }}>
+              <span style={{
+                fontSize: 14, lineHeight: 1, color: '#fde68a',
+              }}>{'\u2315'}</span>
+              <input
+                type="text"
+                autoFocus
+                value={noteQuery}
+                onChange={(e) => setNoteQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault()
+                    setNoteQuery('')
+                    setNoteFilterOpen(false)
+                  } else if (e.key === 'Enter') {
+                    e.preventDefault()
+                    // Enter just dismisses the input (keeps the query).
+                    setNoteFilterOpen(false)
+                  }
+                }}
+                placeholder="Search notes..."
+                title={`Filter the carousel by thumbnail note text. ${globalTaggedSummary.totalWithNotes} tiles tagged; substring + case-insensitive match.`}
+                style={{
+                  background: 'transparent',
+                  border: 'none', outline: 'none',
+                  color: '#fef3c7',
+                  fontSize: 11,
+                  width: 110,
+                  fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                }}
+              />
+              <span style={{
+                fontSize: 9, color: '#a8a8b0',
+                fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                minWidth: 24, textAlign: 'right',
+              }} title={`${noteSummary?.matching ?? 0} of ${globalTaggedSummary.totalWithNotes} tagged tiles match`}>
+                {noteQueryNorm ? `${noteSummary?.matching ?? 0}/${globalTaggedSummary.totalWithNotes}` : `${globalTaggedSummary.totalWithNotes}`}
+              </span>
+              {noteQueryNorm && (
+                <button
+                  type="button"
+                  onClick={() => setNoteQuery('')}
+                  title="Clear search"
+                  style={{
+                    width: 16, height: 16,
+                    borderRadius: '50%',
+                    background: 'rgba(245,158,11,0.18)',
+                    border: '1px solid rgba(245,158,11,0.35)',
+                    color: '#fde68a',
+                    fontSize: 10, lineHeight: 1, fontWeight: 700, cursor: 'pointer',
+                    padding: 0,
+                  }}
+                >{'\u00d7'}</button>
+              )}
+              <button
+                type="button"
+                onClick={() => setNoteFilterOpen(false)}
+                title="Close search (filter stays applied)"
+                style={{
+                  width: 16, height: 16,
+                  borderRadius: 4,
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.10)',
+                  color: '#9a9ab0',
+                  fontSize: 10, lineHeight: 1, fontWeight: 700, cursor: 'pointer',
+                  padding: 0,
+                }}
+              >{'\u2715'}</button>
+            </div>
+          )}
+        </div>
+      )}
+      {/* R23.34 — empty-results banner. When a query is active but
+          nothing in the current category-filter matches it, surface a
+          friendly note so the user doesn't think the carousel broke.
+          Inline so it doesn't push the layout around when not active. */}
+      {noteQueryNorm && sorted.length === 0 && (
+        <div style={{
+          flexShrink: 0,
+          height: 70, padding: '0 14px',
+          display: 'inline-flex', alignItems: 'center',
+          borderRadius: 10,
+          background: 'rgba(255,255,255,0.02)',
+          border: '1px dashed rgba(245,158,11,0.35)',
+          color: '#fde68a',
+          fontSize: 11, fontStyle: 'italic',
+        }}>
+          No tagged tiles match {'\u201c'}{noteQuery}{'\u201d'}
+        </div>
       )}
       {sorted.map(p => {
         const isFav = favoritedPresets.includes(p.id)

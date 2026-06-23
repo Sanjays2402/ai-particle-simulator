@@ -11,6 +11,8 @@ import {
   formatThumbDetails, formatByteSize,
   // R22.29 — per-thumb user note (free-form text)
   THUMB_NOTE_MAX_LEN, setThumbNote,
+  // R23.34 — note filtering: substring matcher, projection, summary
+  normalizeNoteQuery, noteMatchesQuery, presetsMatchingNote, summarizeNoteFilter,
   THUMB_WIDTH, THUMB_HEIGHT,
 } from './presetThumbnails.js'
 
@@ -758,3 +760,207 @@ console.log('PASS: presetThumbnails R19.13 metadata side-store + relative-time f
 }
 
 console.log('PASS: setThumbNote + note round-trip + formatThumbDetails note row (R22.29, ~50 asserts)')
+
+// --- R23.34: note filtering for the carousel ---------------------------
+//
+// Storage shim shared across the block so every preset's metadata can
+// be seeded in one place. We use Map under the hood (real localStorage
+// returns string|null and ignores .removeItem on missing keys; Map
+// + a thin wrapper matches that close enough for the matcher's needs).
+function makeNoteFilterShim() {
+  const m = new Map()
+  return {
+    getItem: (k) => m.has(k) ? m.get(k) : null,
+    setItem: (k, v) => { m.set(k, String(v)) },
+    removeItem: (k) => { m.delete(k) },
+    _size: () => m.size,
+  }
+}
+
+// --- normalizeNoteQuery: trim + lowercase ---
+eq(normalizeNoteQuery('demo'), 'demo',          'lowercase no-op for already-lower')
+eq(normalizeNoteQuery('DEMO'), 'demo',          'lowercase')
+eq(normalizeNoteQuery('  DemO  '), 'demo',      'trim + lowercase combined')
+eq(normalizeNoteQuery(''), '',                  'empty stays empty')
+eq(normalizeNoteQuery('   '), '',               'whitespace-only → empty')
+eq(normalizeNoteQuery(null), '',                'null → empty')
+eq(normalizeNoteQuery(undefined), '',           'undefined → empty')
+eq(normalizeNoteQuery(42), '',                  'number → empty (non-string)')
+eq(normalizeNoteQuery({}), '',                  'object → empty')
+
+// --- noteMatchesQuery: substring, case-insensitive ---
+eq(noteMatchesQuery('good demo shot', 'demo'), true,        'exact substring match')
+eq(noteMatchesQuery('good demo shot', 'DEMO'), true,        'case-insensitive query')
+eq(noteMatchesQuery('GOOD DEMO SHOT', 'demo'), true,        'case-insensitive note')
+eq(noteMatchesQuery('Good Demo Shot', 'Demo Shot'), true,   'multi-word substring')
+eq(noteMatchesQuery('use for OG card', 'og'), true,         'mid-word match')
+eq(noteMatchesQuery('cherry blossoms', 'demo'), false,      'no match')
+eq(noteMatchesQuery('cherry', 'cherry blossoms'), false,    'query longer than note')
+
+// Empty query matches every non-empty note.
+eq(noteMatchesQuery('anything', ''), true,        'empty query matches')
+eq(noteMatchesQuery('anything', '   '), true,     'whitespace query matches')
+eq(noteMatchesQuery('anything', null), true,      'null query matches')
+
+// Empty / non-string note never matches.
+eq(noteMatchesQuery('', 'demo'), false,           'empty note never matches')
+eq(noteMatchesQuery(null, 'demo'), false,         'null note never matches')
+eq(noteMatchesQuery(undefined, 'demo'), false,    'undefined note never matches')
+eq(noteMatchesQuery(42, 'demo'), false,           'number note → no match')
+eq(noteMatchesQuery({}, 'demo'), false,           'object note → no match')
+
+// --- presetsMatchingNote: lib-level projection ---
+{
+  const s = makeNoteFilterShim()
+  recordThumbMetadata('a', { note: 'good demo shot' }, s)
+  recordThumbMetadata('b', { note: 'wrong colors' }, s)
+  recordThumbMetadata('c', { note: 'use for OG card' }, s)
+  recordThumbMetadata('d', {}, s)  // no note
+  // e has no metadata at all (e.g. fresh preset never captured)
+  const presets = [
+    { id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }, { id: 'e' },
+  ]
+  const matchDemo = presetsMatchingNote(presets, 'demo', s)
+  eq(matchDemo.length, 1,                'one preset matches "demo"')
+  eq(matchDemo[0].id, 'a',               'matching preset is a')
+
+  const matchUpper = presetsMatchingNote(presets, 'DEMO', s)
+  eq(matchUpper.length, 1,               'uppercase query matches same preset')
+
+  const matchSubstring = presetsMatchingNote(presets, 'or', s)
+  eq(matchSubstring.length, 2,           '"or" matches "wrong colors" + "for OG card"')
+
+  const matchNone = presetsMatchingNote(presets, 'nonexistent', s)
+  eq(matchNone.length, 0,                'no matches → empty array')
+}
+
+// Empty query: returns the input array unchanged (no-op semantics so
+// the carousel renders the full list without a special-case branch).
+{
+  const s = makeNoteFilterShim()
+  const presets = [{ id: 'a' }, { id: 'b' }]
+  const out = presetsMatchingNote(presets, '', s)
+  truthy(out === presets, 'empty query returns input array by reference')
+  const out2 = presetsMatchingNote(presets, '   ', s)
+  truthy(out2 === presets, 'whitespace query returns input array by reference')
+  const out3 = presetsMatchingNote(presets, null, s)
+  truthy(out3 === presets, 'null query returns input array by reference')
+}
+
+// Defensive: non-array presets → empty.
+{
+  const s = makeNoteFilterShim()
+  eq(presetsMatchingNote(null, 'demo', s).length, 0,        'null presets → []')
+  eq(presetsMatchingNote(undefined, 'demo', s).length, 0,   'undefined presets → []')
+  eq(presetsMatchingNote('not-array', 'demo', s).length, 0, 'string presets → []')
+  eq(presetsMatchingNote({}, 'demo', s).length, 0,          'object presets → []')
+}
+
+// Defensive: missing storage → empty.
+{
+  const presets = [{ id: 'a' }, { id: 'b' }]
+  eq(presetsMatchingNote(presets, 'demo', null).length, 0, 'null storage → []')
+}
+
+// Defensive: malformed preset entries skipped silently.
+{
+  const s = makeNoteFilterShim()
+  recordThumbMetadata('a', { note: 'good demo shot' }, s)
+  const presets = [
+    null, undefined,
+    { /* no id */ },
+    { id: '' },           // empty id
+    { id: 42 },           // non-string id
+    { id: 'a' },          // valid
+  ]
+  const out = presetsMatchingNote(presets, 'demo', s)
+  eq(out.length, 1,       'malformed preset entries skipped')
+  eq(out[0].id, 'a',      'only valid preset returned')
+}
+
+// Presets with no note in metadata are skipped (note-less tile can't
+// possibly match a non-empty query).
+{
+  const s = makeNoteFilterShim()
+  recordThumbMetadata('hasNote', { note: 'demo' }, s)
+  recordThumbMetadata('noNote', {}, s)  // metadata present but no note
+  const presets = [{ id: 'hasNote' }, { id: 'noNote' }]
+  const out = presetsMatchingNote(presets, 'demo', s)
+  eq(out.length, 1,       'only preset with note matches')
+  eq(out[0].id, 'hasNote', 'note-less preset skipped')
+}
+
+// Order preserved — output mirrors input order, no sort.
+{
+  const s = makeNoteFilterShim()
+  recordThumbMetadata('z', { note: 'demo' }, s)
+  recordThumbMetadata('a', { note: 'demo' }, s)
+  recordThumbMetadata('m', { note: 'demo' }, s)
+  const out = presetsMatchingNote([{ id: 'z' }, { id: 'a' }, { id: 'm' }], 'demo', s)
+  eq(out.length, 3, 'all three match')
+  eq(out[0].id, 'z', 'order preserved [0]')
+  eq(out[1].id, 'a', 'order preserved [1]')
+  eq(out[2].id, 'm', 'order preserved [2]')
+}
+
+// --- summarizeNoteFilter: count-only projection ---
+{
+  const s = makeNoteFilterShim()
+  recordThumbMetadata('a', { note: 'good demo shot' }, s)
+  recordThumbMetadata('b', { note: 'wrong colors' }, s)
+  recordThumbMetadata('c', { note: 'use for OG card' }, s)
+  recordThumbMetadata('d', {}, s)
+  const presets = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }, { id: 'e' }]
+  const all = summarizeNoteFilter(presets, '', s)
+  eq(all.matching, 3,           'empty query matches every noted preset')
+  eq(all.totalWithNotes, 3,     'totalWithNotes counts non-empty notes')
+
+  const filtered = summarizeNoteFilter(presets, 'demo', s)
+  eq(filtered.matching, 1,        '"demo" matches one')
+  eq(filtered.totalWithNotes, 3,  'totalWithNotes unchanged by query')
+
+  const nomatch = summarizeNoteFilter(presets, 'nonexistent', s)
+  eq(nomatch.matching, 0,         'no-match returns 0 matching')
+  eq(nomatch.totalWithNotes, 3,   'totalWithNotes unchanged')
+}
+
+// summarizeNoteFilter defensive: non-array / missing storage.
+{
+  const sNull = summarizeNoteFilter(null, 'demo', makeNoteFilterShim())
+  eq(sNull.matching, 0,         'null presets → 0 matching')
+  eq(sNull.totalWithNotes, 0,   'null presets → 0 totalWithNotes')
+  const presets = [{ id: 'a' }]
+  const sStore = summarizeNoteFilter(presets, 'demo', null)
+  eq(sStore.matching, 0,        'null storage → 0 matching')
+  eq(sStore.totalWithNotes, 0,  'null storage → 0 totalWithNotes')
+}
+
+// Trim semantics consistent between query + lookup so a user typing
+// "  Demo  " surfaces the same tile as "demo".
+{
+  const s = makeNoteFilterShim()
+  recordThumbMetadata('a', { note: 'good demo shot' }, s)
+  const out = presetsMatchingNote([{ id: 'a' }], '  DEMO  ', s)
+  eq(out.length, 1,       'padded uppercase query matches lowercase note')
+}
+
+// Match against a NOTE that was passed in with surrounding whitespace —
+// recordThumbMetadata's trim contract means the persisted note is
+// already stripped, so the matcher sees the clean string.
+{
+  const s = makeNoteFilterShim()
+  recordThumbMetadata('a', { note: '   spaced note   ' }, s)
+  const out = presetsMatchingNote([{ id: 'a' }], 'spaced', s)
+  eq(out.length, 1,                                'matches the trimmed-by-record note')
+  eq(readThumbMetadata('a', s).note, 'spaced note', 'sanity: persisted note is trimmed')
+}
+
+// Substring boundary edge: query is the full note.
+{
+  const s = makeNoteFilterShim()
+  recordThumbMetadata('a', { note: 'demo' }, s)
+  eq(presetsMatchingNote([{ id: 'a' }], 'demo', s).length, 1, 'full-note query matches')
+  eq(presetsMatchingNote([{ id: 'a' }], 'demos', s).length, 0, 'query longer than note → no match')
+}
+
+console.log('PASS: presetsMatchingNote + summarizeNoteFilter + noteMatchesQuery + normalizeNoteQuery (R23.34, ~60 asserts)')
