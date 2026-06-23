@@ -122,7 +122,12 @@ Existing capabilities (do not re-ship):
 - Per-attractor MIDI TYPE row: proximity bar meter (R20.16). Graduates R19.16's invisible distanceToEdge01 projector with a scannable meter: a tiny 26×4 horizontal bar fills left→right showing how close the live CC value sits to the nearest TYPE flip boundary. Three-tier colour intent: red (prox<0.001, in dead-band), amber (0.001..0.40, in shoulder), type accent (≥0.40, safe). Meter sits inside the existing band tag (next to "2/4 vortex" + ·hold suffix) so the cue stays grouped with the band label. New `proximityToBoundary01` field on describeTypeBand: pure projector using the SAME band-width + hysteresis math as pickAttractorTypeForCC, edge-band semantics (v=0 / v=1 clamp to 1 — not real flip boundaries), single-type roster always reads 1 (no boundaries). Linear ramp from 0 (dead-band edge) to 1 (mid-band). 80ms width transition + 120ms colour transition for smooth visual updates.
 - Smash bias chips support per-chip JSON overrides — edit + persist + reset (R20.07). Graduates R12.04's three hard-coded bias chips with a JSON editor: users tweak any chip's counts/speed/glow/attract/chances/forceTypes and the edits persist per-chip across sessions via parallel storage keys (`smash-bias-overrides-<id>`). Chip identity (id/label/hint) stays immutable so the UI is unchanged — only the generator's behaviour shifts. New lib in randomScene.js: `SCENE_BIAS_RANGE_FIELDS` (4) + `SCENE_BIAS_CHANCE_FIELDS` (10) + `SCENE_BIAS_OVERRIDE_FIELDS` (union + forceTypes); `sanitizeBiasOverride(raw)` defensive projector (non-array ranges / wrong-length / negative / min>max / NaN / ±Infinity all drop the field silently; chances clamp to [0,1]; forceTypes empty/unknown drop, null member valid; unknown top-level keys silently dropped); `loadBiasOverride` / `saveBiasOverride` / `resetBiasOverride` / `hasBiasOverride` storage-aware (empty save WIPES entry — clean reset path); `resolveSceneBias(id, opts)` merges shipped default with persisted override, returns SAME REFERENCE on no-op. generateRandomScene plumbed through resolveSceneBias so overrides flow automatically; new opts.biasOverride lets tests inject without touching storage. UI: cyan dot in chip corner shows when override is active, right-click opens the JSON editor, "Edit bias JSON" link below the chip rail for discoverability. Editor popover: 10-row textarea seeded with live override OR shipped defaults (sans identity triple), Apply runs through sanitizer + rejects when sanitisation drops every key (no silent wipe), Reset clears the override.
 - Carousel per-preset thumb metadata badge opens rich detail panel on click (R20.19). Graduates R19.13's hover-only badge into a clickable affordance: clicking surfaces a 240-320px detail panel above the tile with the full ISO time + relative age, source classifier with hint, exact resolution, optional particle count (when present), render time (ms or s), and approximate byte size — all in a tight monospace 2-col grid. Badge keeps its hover-only fade-in but is now a button with an active state (highlighted indigo when its detail is open). Click toggles open/close; Esc closes; outside-click closes; bulk-clear closes. New lib helpers in presetThumbnails.js: `formatByteSize(bytes)` (B/KB/MB with 1-decimal under 10, rounded above; defensive non-finite→null); `formatThumbDetails(metadata, now)` (pure projector returning `[{ key, label, value, hint? }, ...]` ready for paint-only React render). recordThumbMetadata + readThumbMetadata extended with three OPTIONAL rich fields: `particleCount`, `captureMs`, `byteSize` — each independently validated so a corrupt single field can't reject the whole entry; missing fields skip their UI row (no "unknown" rendering). Source row carries a hint string explaining the capture path (live vs render).
-- MIDI user bundle per-bundle keyboard shortcut (R20.11). Graduates the chip-click apply gesture with a hotkey path: assign any modifier+key combo (shift+1 / alt+f5 / meta+ctrl+a / etc.) to a user bundle and it applies anywhere in the app without opening the MIDI panel. Click the new hotkey badge between the colour swatch + export button to enter capture mode (amber outline + "press…" text); next valid keydown sets the binding. Escape cancels; right-click clears. New lib roster + helpers in midiPresets.js: `VALID_HOTKEY_KEYS` set (26 letters + 10 digits + F1..F12 + 4 arrows + 9 control keys + small punctuation allowlist); `hotkeyFromEvent(event)` projects a DOM keyboard event to a canonical token (modifier-only skipped, Unidentified returns null, modifiers ordered meta/ctrl/alt/shift); `sanitizeHotkey(raw)` validates + canonicalises string input (whitespace tolerated, case-insensitive, modifier reorder); `setUserPresetHotkey(list, id, hotkey)` ref-equal-on-no-op contract with three semantics — null/'' clears; valid assigns + un-binds the same hotkey from any OTHER bundle (1-binding-per-hotkey invariant); invalid silently refuses; `findUserPresetByHotkey(list, hotkey)` canonical-normalised lookup. load/save thread sanitizeHotkey both directions so a corrupt persisted value (e.g. 'shift+bogus') drops the hotkey field without rejecting the whole bundle. UI: global keydown listener in MidiPanel resolves the event signature via findUserPresetByHotkey + applies via applyPresetToMap('replace'); skips events from text inputs / textareas / contentEditable so a user typing a binding name doesn't trigger their hotkey.
+- MIDI bundle hotkey-conflict warning toast when re-binding across bundles (R21.25). Graduates R20.11's silent "1-binding-per-hotkey" invariant with a pre-flight conflict detector so the user gets explicit feedback when their new hotkey assignment is about to STRIP the binding off another bundle. New pure helper in midiPresets.js: `detectHotkeyConflict(list, targetId, hotkey)` returns the OTHER bundle the user is about to displace, or null when hotkey is unbound / belongs to target bundle itself (self-rebind no-op) / is invalid / nothing to steal (null/empty hotkey). Shape mirrors findUserPresetByHotkey so the UI can pull .name / .color / .id off the result for the toast. MidiPanel's setUserBundleHotkey now runs the detector BEFORE setUserPresetHotkey lands, then surfaces a toast wearing the TARGET bundle's accent colour: `Hotkey "shift+1" stolen from "Drum Kit" → "Synth Pad"`. Self-rebinds and clears skip the toast — nothing was stolen.
+- Bias overrides drag-and-drop import to the chip rail (R22.28). Parallels R17.06 (themes) + R18.09 (MIDI bundles). Drop a .json bias-overrides file anywhere on the chip rail / Export-Import row and the existing R21.23 import path takes over (same window.confirm merge-vs-replace prompt, same toast feedback). Refactored R21.23's file-picker body into shared `parseAndApplyBiasImport(fileOrText)` so both entry points walk the same parse + confirm + merge + persist sequence (no behavioural drift between click-Import and drop). biasDragDepth nested counter handles dragenter/leave flicker across child elements. Filters by `dataTransfer.types.includes('Files')`. First-file-only convention (bias overrides are 3 chips; multi-file would invite per-chip resolution ambiguity). .json extension filter with toast on rejection. Pinned banner "Drop .json to import bias overrides" pointerEvents:none so drag events keep hitting parent.
+- MIDI hotkey-conflict toast includes UNDO action chip (R22.30). Graduates R21.25's read-only warning toast with a one-click rollback. New optional `action` arg on showToast(msg, icon, action?) — `{ label, onClick }` pair renders as a small uppercase mono button at the right edge; clicking fires onClick + dismisses immediately. try/catch around onClick so a throwing handler doesn't pin the toast. setUserBundleHotkey packs an undoAction that re-binds the displaced hotkey to the OLD bundle by calling the same setter — the lib's 1-binding-per-hotkey invariant handles the symmetric strip from the NEW bundle (no new lib code). Uses setUserPresets(prev => ...) functional form so a concurrent edit between toast-show and Undo-click rolls back against LIVE state, not a stale snapshot. Restore toast wears the RESTORED bundle's accent colour. Self-rebinds and clears skip the toast (nothing was stolen).
+- Camera path touch drag-and-drop reorder via long-press (R22.12). Graduates R17.07's HTML5 native DnD (desktop-only — touch devices don't fire dragstart on touch). Touch users get long-press-to-grab-then-drag: 350ms hold arms the drag mode (10ms haptic vibration on Android), subsequent touchmove hit-tests against per-row getBoundingClientRect via the new pure `resolveTouchTargetIdx(y, ranges)` helper, touchend runs moveView (re-uses R17.07 primitive). Slop guard (LONG_PRESS_SLOP_PX=8) cancels the timer if the user scrolled away — a scroll gesture stays a scroll. e.preventDefault during drag locks page scroll. touchAction:'manipulation' removes the 300ms iOS tap delay without disabling scroll. Multi-touch (pinch-zoom) bails so we don't fight browser gestures. New pure helper `resolveTouchTargetIdx`: half-open [top, bottom) intervals so adjacent rows don't both claim the shared boundary pixel; overflow above first row → snap to first idx; overflow below last → last idx; corrupt range items skip silently so a transient layout glitch mid-drag doesn't lose the gesture; non-finite y / empty ranges / all-corrupt → null.
+- Per-attractor MIDI clamp meter user-tunable warn threshold (R22.27). Graduates R21.22's hard-coded `prox < 0.25 = amber` cutoff. Long-press (≥400ms) any clamp meter to open a popover with a slider [5%..45%] + reset button. Persisted to localStorage `midi-clamp-warn-threshold-v1`, applies to every meter globally. New lib helpers in midiMap.js: `classifyClampProximity(prox, atRail, warnThreshold?)` returns 'danger'/'warn'/'safe' tier — atRail trumps every threshold (structural), non-finite prox → 'safe' (max-safe first-paint), atRail strict===true comparison (truthy non-true → safe path). `sanitizeClampWarnThreshold(raw)` clamps to [MIN, MAX] (0.05..0.45), non-finite/null/string → DEFAULT. `isClampWarnThresholdAtDefault(raw)` projector for the cyan "edited" pip indicator. Constants invariants pinned: MIN < DEFAULT < MAX < 0.5 (MAX < 0.5 so green tier always covers middle half of slider), MIN > 0 (warn tier must cover SOMETHING), DEFAULT === 0.25 (preserves R21.22 baseline). MidiPanel meter colour switched from inline conditionals to `classifyClampProximity` calls — same visual output at default threshold, now responsive to user sensitivity. New `ClampThresholdPopover` leaf with transparent fixed-position backdrop click-outside + Escape dismiss + reset-disabled-at-default + accent-coloured slider. Cyan "edited" pip appears between % readout and bar when threshold is non-default so users can tell which meters read on the custom scale.
+- Thumb detail panel includes editable per-tile user note (R22.29). Graduates R20.19's read-only metadata panel with a free-form text input — label thumbnails "good demo shot" / "wrong colors" / "use for OG card" etc. Persists alongside metadata in the same envelope key (no schema rev needed; note field is optional and forwards/backwards compat). New `THUMB_NOTE_MAX_LEN = 240` cap (fits 2 display lines, ~12KB total for 46 presets at max). `recordThumbMetadata` + `readThumbMetadata` extended: trim + length-cap + drop-if-empty (no `note: ''` junk); read-side defensive against non-string persisted values. New `setThumbNote(presetId, note, storage?)` atomic note-only update: reads existing JSON envelope, merges just the note key, writes back. Preserves capturedAt + every other field so note edit never resets thumb age / rich-detail fields. Empty/null/whitespace REMOVES the note key (clean schema). Returns false on no-pre-existing-meta / bad-id / no-storage / write-fail. Ref-equal-on-no-op contract (same-value re-set is no-op). Defensive against corrupt persisted JSON (bails with false rather than overwriting). `formatThumbDetails` emits `{ kind: 'note', ... }` row tag so UI can paint differently. New `ThumbNoteEditor` leaf in PresetCarousel: read-only italic amber single-line preview ("good demo shot") or dashed "+ Add note" empty state; click to edit. Edit mode 3-row autofocused textarea + Save/Cancel/Clear buttons. Enter saves, Shift+Enter newline, Esc cancels, blur saves silently (R14.18 least-surprise pattern). Char counter goes amber within 20 of cap, red at cap. Saved note auto-syncs to parent's in-memory meta map.
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -382,29 +387,44 @@ r3f-gizmo / backend runtime), R21.04 + R21.05 each need their own
 focused batch. Substituted R21.21, R21.22, R21.23, R21.24, R21.25
 from the future queue.
 
-### Batch 22 — next 5 (refilled)
-- [ ] R22.01 Echo / trail FBO that survives EffectComposer [carried — render pipeline refactor, dedicated batch]
-- [ ] R22.02 Named attractor 3D drag handle (r3f gizmo) [carried — dedicated batch]
-- [ ] R22.03 OpenGraph snapshot endpoint (server-rendered share card) [carried — needs backend]
-- [ ] R22.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [carried]
-- [ ] R22.05 Audio-reactive bg curve chips → custom curve editor for power users (visual spline / 3-knot bezier) [carried]
+### Batch 22 — bias drag-drop + hotkey UNDO + camera touch DnD + clamp threshold + thumb note  (SHIPPED)
+- [x] **R22.28** Bias overrides drag-and-drop import (parallels R17.06 + R18.09)  — f277293
+- [x] **R22.30** MIDI bundle hotkey conflict toast UNDO action chip (graduates R21.25)  — cfed5ef
+- [x] **R22.12** Camera path drag-reorder ALSO works on touch (long-press; graduates R17.07)  — f412fe1
+- [x] **R22.27** Per-attractor MIDI clamp meter long-press-to-tweak warning threshold (graduates R21.22)  — 5a9598d
+- [x] **R22.29** Thumb detail panel per-tile custom note field (graduates R20.19)  — faac257
+
+Note: R22.01-R22.05 (Echo / trail FBO, 3D drag handle, server-rendered
+OG endpoint, multi-error gutter overlay, custom audio-reactive curve
+editor) all deferred yet again — first three are dedicated
+infrastructure batches (render-pipeline / r3f-gizmo / backend runtime),
+R22.04 + R22.05 each need their own focused batch. Substituted R22.12,
+R22.27, R22.28, R22.29, R22.30 from the future queue to keep the batch
+at 5 great slices instead of padding.
+
+### Batch 23 — next 5 (refilled)
+- [ ] R23.01 Echo / trail FBO that survives EffectComposer [carried — render pipeline refactor, dedicated batch]
+- [ ] R23.02 Named attractor 3D drag handle (r3f gizmo) [carried — dedicated batch]
+- [ ] R23.03 OpenGraph snapshot endpoint (server-rendered share card) [carried — needs backend]
+- [ ] R23.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [carried]
+- [ ] R23.05 Audio-reactive bg curve chips → custom curve editor for power users (visual spline / 3-knot bezier) [carried]
 
 ### Future queue (refill when batch closes)
-- [ ] R22.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view [was R21.06]
-- [ ] R22.08 Minimap: hover a saved-view dot for ~1s shows a thumbnail preview (canvas2D sample of the scene from that camera) [was R21.08]
-- [ ] R22.09 Wind chip overrides: per-chip live "what slot is this CC bound to" badge if the chip's seconds is bound to a CC (cross-reference between MIDI map + wind chips) [was R21.09]
-- [ ] R22.10 Crossfade chip overrides: same MIDI cross-reference badge as R22.09 [was R21.10]
-- [ ] R22.12 Camera path: drag-and-drop reorder ALSO works on touch (R17.07 is desktop-only — touch users need a long-press-to-drag gesture) [was R21.12]
-- [ ] R22.14 Snapshot grid: bulk download all selected as a zip (graduates R18.06 selection mode) [was R21.14]
-- [ ] R22.15 Theme pack drag-drop: progress indicator when N > 10 files (current parallel Promise.all is fast but visible delay on big drops) [was R21.15]
-- [ ] R22.17 MIDI bundle drag-drop: per-file progress indicator for very large drops (parallels R22.15 themes; graduates R19.20) [was R21.17]
-- [ ] R22.18 Spectrum peak trail params: persist per-bar OVERRIDES so a user can tune only the bass bars' curve while leaving the rest at default (graduates R19.12 to per-bar granularity) [was R21.18]
-- [ ] R22.20 Named attractor gap-drop: also work for the MidiPanel per-attractor binding groups (drop a group into another's gap to reorder MIDI sections without touching the underlying attractor list) — graduates R19.19 [was R21.20]
-- [ ] R22.26 Spectrum peak trail palette: USER-AUTHORED palettes (add custom start/end hue pairs to the chip rail, persisted) — graduates R21.21
-- [ ] R22.27 Per-attractor MIDI clamp meter: long-press the meter to open a tweakable "warning threshold" slider (currently hard-coded prox<0.25 amber, prox<0.001 red) — graduates R21.22
-- [ ] R22.28 Bias overrides drag-and-drop import (parallels R17.06 theme drag-drop + R18.09 MIDI bundle drag-drop) — graduates R21.23
-- [ ] R22.29 Thumb detail panel: per-tile "Capture timestamp" custom note field (small text input persisted alongside the metadata so users can label "good demo shot" / "wrong colors" — graduates R21.24
-- [ ] R22.30 MIDI bundle hotkey conflict toast: also include an UNDO action chip (click "Undo" in the toast to roll back the just-applied conflicting assignment — graduates R21.25
+- [ ] R23.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view [was R22.06]
+- [ ] R23.08 Minimap: hover a saved-view dot for ~1s shows a thumbnail preview (canvas2D sample of the scene from that camera) [was R22.08]
+- [ ] R23.09 Wind chip overrides: per-chip live "what slot is this CC bound to" badge if the chip's seconds is bound to a CC (cross-reference between MIDI map + wind chips) [was R22.09]
+- [ ] R23.10 Crossfade chip overrides: same MIDI cross-reference badge as R23.09 [was R22.10]
+- [ ] R23.14 Snapshot grid: bulk download all selected as a zip (graduates R18.06 selection mode) [was R22.14]
+- [ ] R23.15 Theme pack drag-drop: progress indicator when N > 10 files (current parallel Promise.all is fast but visible delay on big drops) [was R22.15]
+- [ ] R23.17 MIDI bundle drag-drop: per-file progress indicator for very large drops (parallels R23.15 themes; graduates R19.20) [was R22.17]
+- [ ] R23.18 Spectrum peak trail params: persist per-bar OVERRIDES so a user can tune only the bass bars' curve while leaving the rest at default (graduates R19.12 to per-bar granularity) [was R22.18]
+- [ ] R23.20 Named attractor gap-drop: also work for the MidiPanel per-attractor binding groups (drop a group into another's gap to reorder MIDI sections without touching the underlying attractor list) — graduates R19.19 [was R22.20]
+- [ ] R23.26 Spectrum peak trail palette: USER-AUTHORED palettes (add custom start/end hue pairs to the chip rail, persisted) — graduates R21.21 [was R22.26]
+- [ ] R23.31 Camera path touch drag: long-press also fires on the chevron buttons (currently only the row body responds; reaching the small chevron with a thumb is fiddly) — graduates R22.12
+- [ ] R23.32 Per-attractor MIDI clamp meter: PER-FIELD threshold overrides — currently R22.27 is global. Power users want stricter on STRENGTH (where rail = silent attractor) and looser on X/Y/Z (where rail = at canvas edge, often intentional) — graduates R22.27
+- [ ] R23.33 Bias overrides drag-drop: accept multiple .json files at once (currently first-file-only; parallels R19.20 MIDI multi-file pattern) — graduates R22.28
+- [ ] R23.34 Thumb note: filter the carousel by note text (substring search across all thumb notes; e.g. type "demo" to surface every tile tagged "good demo shot") — graduates R22.29
+- [ ] R23.35 Hotkey conflict UNDO: 2nd Undo within 1s re-undoes (toggle), preserving the chain so a user can flip-flop a hotkey assignment without going back to the panel — graduates R22.30
 
 ## TICK LOG
 - 2026-06-19 23:41 PT — Bootstrap + Batch 1 (5/5).
@@ -1157,4 +1177,55 @@ from the future queue.
   + defensive null/empty list/targetId + multi-bundle conflict
   deterministic first-match + purity + detect+set integration
   · ~205 fresh asserts this batch).
+
+- 2026-06-22 22:53 PT — Batch 22 (5/5).
+  Commits: f277293 (R22.28 bias overrides drag-and-drop import +
+  shared parseAndApplyBiasImport), cfed5ef (R22.30 hotkey-conflict
+  toast UNDO action chip + Toast.jsx 3rd-arg action API), f412fe1
+  (R22.12 camera path touch drag-reorder via 350ms long-press +
+  resolveTouchTargetIdx pure helper), 5a9598d (R22.27 per-attractor
+  clamp meter user-tunable warn threshold + classifyClampProximity /
+  sanitizeClampWarnThreshold / isClampWarnThresholdAtDefault lib
+  helpers + ClampThresholdPopover leaf), faac257 (R22.29 thumb
+  detail panel editable per-tile note field + THUMB_NOTE_MAX_LEN +
+  setThumbNote atomic helper + ThumbNoteEditor leaf).
+  R22.01-R22.05 deferred again — first three are dedicated
+  infrastructure batches (render-pipeline / r3f-gizmo / backend
+  runtime), R22.04 + R22.05 each need their own focused batch.
+  Substituted R22.12, R22.27, R22.28, R22.29, R22.30 from the
+  future queue to keep the batch at 5 great slices.
+  Gates: lint 23 errors / 3 warnings — exactly matches baseline
+  (zero new errors / warnings in any of the 7 modified .js/.jsx
+  files + 3 modified .test.mjs files; no lint-gate cleanup commits
+  needed this batch — every commit was lint-clean on first land).
+  Build: 889 ms green (1.80 MB bundle, gzip 532 KB — +4 KB vs
+  Batch 21 for the new lib helpers + ClampThresholdPopover +
+  ThumbNoteEditor + touch DnD wiring + Toast action chip + bias
+  drop-zone JSX).
+  Unit tests: 40/40 files pass (~145 fresh asserts this batch):
+  - extended cameraViews ~35 R22.12 asserts (resolveTouchTargetIdx
+    happy paths + half-open boundary + overflow snap above + below
+    + defensive (NaN/Infinity/null/string y + non-array/empty/
+    nullish ranges) + single-row + partial-corrupt + all-corrupt
+    + determinism + mutation guard)
+  - extended midiMap ~60 R22.27 asserts (classifyClampProximity
+    atRail-trumps-threshold + default 0.25 preserves R21.22 +
+    lower-threshold shrinks warn / higher grows + defensive
+    non-finite prox → safe + atRail strict-equals-true semantics +
+    custom-threshold flow-through + sanitizeClampWarnThreshold
+    happy + bounds + non-finite/null/string → DEFAULT + constants
+    invariants MIN < DEFAULT < MAX < 0.5 / MIN > 0 / DEFAULT
+    preserves R21.22 + isClampWarnThresholdAtDefault contract +
+    integration with describeClampProximity through structured
+    object)
+  - extended presetThumbnails ~50 R22.29 asserts (note round-trip
+    + trim + length-cap on both record + read + empty/whitespace/
+    null/number/object → dropped + read-side defensive against
+    non-string persisted note + setThumbNote happy path / update /
+    clear via empty+null+ws + trim + cap + defensive bad-id/
+    no-storage/no-pre-existing-meta + ref-equal on same-value /
+    clear-when-clear + preserves every other field + defensive
+    against corrupt JSON envelope + formatThumbDetails note row
+    kind='note' tag + no-note → no-row + empty/whitespace note
+    → no row + clearThumbMetadata cascade still wipes notes)
 
