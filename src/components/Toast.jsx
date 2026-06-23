@@ -10,8 +10,15 @@ const listeners = new Set()
 // existing callers pass (msg, icon) and the chip simply doesn't
 // render. Kept as a 3rd positional arg so the call sites can
 // gradually opt in without touching the 2-arg ones.
-export function showToast(msg, icon, action) {
-  listeners.forEach(fn => fn({ id: Date.now() + Math.random(), msg, icon, action }))
+//
+// R24.38 — `badge` is an optional 4th arg shaped { text, color?, title? }
+// that renders a tiny pip to the LEFT of the action chip. Used by the
+// MIDI hotkey UNDO chain (R23.35) to surface a "chain counter" so the
+// user can see at a glance how many flips deep they are. Pure visual
+// — doesn't affect dismissal or interaction. Backwards-compatible:
+// every existing 2-arg / 3-arg caller works untouched.
+export function showToast(msg, icon, action, badge) {
+  listeners.forEach(fn => fn({ id: Date.now() + Math.random(), msg, icon, action, badge }))
 }
 
 export default function Toast() {
@@ -45,11 +52,41 @@ export default function Toast() {
         {toast.icon || <Sparkles size={10} color="#fff" strokeWidth={2.4} />}
       </span>
       <span style={{ flex: 1, minWidth: 0 }}>{toast.msg}</span>
+      {/* R24.38 — chain-counter badge. Renders to the LEFT of the
+          action chip so the eye-line is: message ... [badge] [ACTION].
+          Caller controls the colour via badge.color (defaults to the
+          chip's accent indigo) + the tooltip via badge.title. */}
+      {toast.badge && typeof toast.badge.text === 'string' && toast.badge.text && (
+        <span
+          title={toast.badge.title || ''}
+          style={{
+            marginLeft: 8,
+            padding: '2px 6px',
+            borderRadius: 4,
+            background: toast.badge.color
+              ? `${toast.badge.color}22`   // ~13% alpha
+              : 'rgba(99,102,241,0.18)',
+            color: toast.badge.color || '#c7d2fe',
+            border: toast.badge.color
+              ? `1px solid ${toast.badge.color}55`
+              : '1px solid rgba(99,102,241,0.45)',
+            fontSize: 9,
+            fontWeight: 700,
+            letterSpacing: '0.06em',
+            textTransform: 'uppercase',
+            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+            whiteSpace: 'nowrap',
+            lineHeight: 1.2,
+          }}
+        >
+          {toast.badge.text}
+        </span>
+      )}
       {toast.action && typeof toast.action.label === 'string' && toast.action.label && (
         <button
           onClick={fireAction}
           style={{
-            marginLeft: 10,
+            marginLeft: 8,
             padding: '3px 9px',
             borderRadius: 5,
             background: 'rgba(255,255,255,0.10)',

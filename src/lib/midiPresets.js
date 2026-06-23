@@ -422,6 +422,33 @@ export function isWithinUndoWindow(issuedAtMs, nowMs, windowMs = UNDO_CHAIN_MS) 
   return delta <= windowMs
 }
 
+// R24.38 — chain-counter badge formatter. Pure projector — turns a
+// 1-based `chainStep` (1 = first toast, 2+ = restore toasts in the
+// chain) into the badge text + tooltip the UI paints. Returns null on
+// step 1 (no chain to count yet — the first toast in a transfer chain
+// is just the initial warning, suppressing the badge keeps it clean).
+// Returns null on non-finite / < 1 input so a corrupt state can't paint
+// a "x0" or "xNaN" badge.
+//
+// Why pinned in tests: the chain-step bookkeeping in MidiPanel is
+// recursive, so the badge text needs a stable formula. If a future
+// refactor accidentally changes "x2" to "2x" or "(2)" the UX changes
+// silently. The formatter contract here is the single source of truth.
+export function formatHotkeyChainBadge(chainStep, windowMs = UNDO_CHAIN_MS) {
+  if (!Number.isFinite(chainStep) || chainStep < 2) return null
+  const step = Math.floor(chainStep)
+  // Tooltip mentions flips count (step - 1) and the window so users
+  // can read the meaning without external context.
+  const flipsSoFar = step - 1
+  const winSec = Number.isFinite(windowMs) && windowMs > 0
+    ? windowMs / 1000
+    : UNDO_CHAIN_MS / 1000
+  return {
+    text:  `x${step}`,
+    title: `Undo chain step ${step} \u2014 you\u2019ve flipped this hotkey ${flipsSoFar} time${flipsSoFar === 1 ? '' : 's'}. Click Undo within ${winSec}s to flip back.`,
+  }
+}
+
 // Load + sanitize the persisted user-preset list. Drops any entry
 // that fails the same validateMap gate as shipped bundles.
 export function loadUserPresets() {

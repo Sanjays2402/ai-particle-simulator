@@ -22,6 +22,8 @@ import {
   detectHotkeyConflict,
   // R23.35 — undo-chain toggle window (graduates R21.25 / R22.30)
   UNDO_CHAIN_MS, isWithinUndoWindow,
+  // R24.38 — chain-counter badge formatter
+  formatHotkeyChainBadge,
 } from './midiPresets.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -841,3 +843,71 @@ eq(UNDO_CHAIN_MS, 1000, 'UNDO_CHAIN_MS shipped default = 1000')
   ok(isWithinUndoWindow(issued, issued, 0),        'zero window: at issue → in')
   eq(isWithinUndoWindow(issued, issued + 1, 0), false, 'zero window: 1ms after → out')
 }
+
+// --- R24.38: formatHotkeyChainBadge — chain-counter UI projector -------
+
+// Step 1 → null (no chain to count yet; first toast in a transfer is
+// just the initial warning).
+{
+  eq(formatHotkeyChainBadge(1), null,    'step 1 → null (no badge)')
+  eq(formatHotkeyChainBadge(0), null,    'step 0 → null')
+  eq(formatHotkeyChainBadge(-1), null,   'negative step → null')
+}
+
+// Step 2+ → badge with text "xN" and a meaningful tooltip.
+{
+  const b2 = formatHotkeyChainBadge(2)
+  ok(b2 && typeof b2 === 'object',          'step 2 returns badge object')
+  eq(b2.text, 'x2',                          'step 2 text = "x2"')
+  ok(/step 2/i.test(b2.title || ''),         'step 2 tooltip mentions step number')
+  ok(/1 time/i.test(b2.title || ''),         'step 2 tooltip says "1 time"')
+}
+{
+  const b3 = formatHotkeyChainBadge(3)
+  eq(b3.text, 'x3', 'step 3 text = "x3"')
+  ok(/2 times/i.test(b3.title || ''), 'step 3 tooltip says "2 times" (plural)')
+}
+{
+  const b10 = formatHotkeyChainBadge(10)
+  eq(b10.text, 'x10', 'double-digit step text = "x10"')
+}
+
+// Tooltip mentions the chain window in seconds (default 1s).
+{
+  const b = formatHotkeyChainBadge(2)
+  ok(/1s/.test(b.title) || /1\.0s/.test(b.title) || /1 s/i.test(b.title),
+    'tooltip mentions 1s window')
+}
+
+// Custom window arg — surfaces in the tooltip.
+{
+  const b = formatHotkeyChainBadge(2, 2500)
+  ok(/2\.5\s*s/i.test(b.title), 'custom 2500ms window → tooltip mentions 2.5s')
+}
+
+// Non-finite / non-numeric step → null (defensive).
+{
+  eq(formatHotkeyChainBadge(NaN),       null, 'NaN step → null')
+  eq(formatHotkeyChainBadge(Infinity),  null, 'Infinity step → null')
+  eq(formatHotkeyChainBadge('2'),       null, 'string step → null')
+  eq(formatHotkeyChainBadge(null),      null, 'null step → null')
+  eq(formatHotkeyChainBadge(undefined), null, 'undefined step → null')
+}
+
+// Fractional step → floored to int.
+{
+  const b = formatHotkeyChainBadge(3.7)
+  eq(b.text, 'x3', 'fractional step floored (3.7 → x3)')
+}
+
+// Invalid window arg falls back to UNDO_CHAIN_MS default.
+{
+  const bNaN = formatHotkeyChainBadge(2, NaN)
+  ok(/1s/.test(bNaN.title), 'NaN window → falls back to default 1s in tooltip')
+  const bNeg = formatHotkeyChainBadge(2, -100)
+  ok(/1s/.test(bNeg.title), 'negative window → falls back to default 1s in tooltip')
+  const bZero = formatHotkeyChainBadge(2, 0)
+  ok(/1s/.test(bZero.title), '0 window → falls back to default in tooltip')
+}
+
+console.log('PASS: formatHotkeyChainBadge — chain-counter badge formatter (R24.38, ~20 asserts)')

@@ -34,6 +34,8 @@ import {
   // the window to flip-flop the assignment, after the window the
   // chip surfaces a "too late" hint instead of silently expiring)
   UNDO_CHAIN_MS, isWithinUndoWindow,
+  // R24.38 — chain-counter badge formatter for the toast pip
+  formatHotkeyChainBadge,
 } from '../lib/midiPresets'
 import {
   // R14.17 — single-bundle JSON export/import
@@ -347,6 +349,12 @@ export default function MidiPanel({ open, onClose }) {
   // a "too late" hint instead of silently expiring — the toast becomes
   // self-documenting about why the gesture stopped working.
   //
+  // R24.38 — surfaces a visual "chain counter" badge on each toast in
+  // the chain so the user can see at a glance how many flips deep
+  // they are (1, 2, 3...). Useful for the indecisive flipper — at flip
+  // #5 the badge reads "x5" and signals "maybe stop". Step 1 doesn't
+  // paint a badge (first toast in the chain — no chain yet to count).
+  //
   // We use functional setState (prev => ...) so each flip in the chain
   // sees LIVE state instead of the snapshot captured when the toast
   // first surfaced — concurrent edits between flips compose safely
@@ -358,8 +366,10 @@ export default function MidiPanel({ open, onClose }) {
   // and LOSER (had it stripped). On Undo, it FLIPS roles + calls
   // itself: winner becomes the new loser, loser becomes the new
   // winner. Recursion is bounded by user input + the 1s window, not
-  // by depth (each click resets the issuedAt clock).
-  const showHotkeyTransferToast = (winnerId, loserId, hotkey, prevList) => {
+  // by depth (each click resets the issuedAt clock). `chainStep` is
+  // 1-based: 1 = first toast (no badge), 2+ = restore toasts (with
+  // badge "x2", "x3", ...).
+  const showHotkeyTransferToast = (winnerId, loserId, hotkey, prevList, chainStep = 1) => {
     const winner = prevList.find(p => p.id === winnerId)
     const loser  = prevList.find(p => p.id === loserId)
     if (!winner || !loser) return  // either bundle deleted between flips
@@ -396,15 +406,28 @@ export default function MidiPanel({ open, onClose }) {
         saveUserPresets(flipped)
         // Chain the next step: the OLD loser is now the NEW winner;
         // the OLD winner is now the NEW loser. Re-issue the toast
-        // (with its own 1s window).
-        showHotkeyTransferToast(loserId, winnerId, hotkey, flipped)
+        // (with its own 1s window). R24.38 — increment chainStep so
+        // the badge counts up across the chain.
+        showHotkeyTransferToast(loserId, winnerId, hotkey, flipped, chainStep + 1)
         return flipped
       })
     }
+    // R24.38 — chain-counter badge. Suppressed on step 1 (the user is
+    // looking at the first warning — no chain to count yet). From step
+    // 2 onward, paint "x2", "x3", ... with the winner's accent colour
+    // so the badge visually ties to the bundle that just took the
+    // hotkey. The formatter (lib) returns null on step 1 / non-finite
+    // / < 1 input — that null becomes undefined here so showToast's
+    // truthy-on-text guard suppresses the badge cleanly.
+    const formatted = formatHotkeyChainBadge(chainStep, UNDO_CHAIN_MS)
+    const badge = formatted
+      ? { ...formatted, color: winnerColor.accent }
+      : undefined
     showToast(
       `Hotkey \u201c${hotkey}\u201d \u2192 \u201c${winner.name}\u201d (stolen from \u201c${loser.name}\u201d)`,
       <AlertCircle size={10} color={winnerColor.accent} strokeWidth={2.4} />,
       { label: 'Undo', onClick: flipBack },
+      badge,
     )
   }
   const setUserBundleHotkey = (id, hotkey) => {
