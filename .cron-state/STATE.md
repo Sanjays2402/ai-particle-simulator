@@ -110,6 +110,11 @@ Existing capabilities (do not re-ship):
 - Snapshot grid long-press multi-select for bulk delete (R18.06). Long-press (≥450ms) any tile in grid view to enter selection mode; a delete bar surfaces above the grid with Select all / Clear / Delete N (parallels R17.17 attractor multi-select). Tap-at-rest opens lightbox (unchanged); tap-in-select-mode toggles selection. Move guard (LONG_PRESS_SLOP_PX=8) bails out if the user starts to scroll/swipe — long-press only fires on a genuine hold. After firing, the synthetic click is swallowed. validSelectedIds reconciled at render-time via useMemo so externally-removed snapshots drop out of counts without setState-in-effect. Selection clears on gallery close / view-change (grid-only by design). New pure helper `removeSnapshots(items, idSet)` mirrors removeAttractors contract — Set | Array | iterable inputs, ref-equal-on-no-op skip, corrupt-row cleanup. Visual: selected tiles get red border + glow + filled red checkmark; unselected-in-select-mode get an empty ring; hover actions hidden in select mode so a careful tap doesn't fight the toggle. touchAction:'manipulation' + WebkitTouchCallout:'none' prevents iOS native long-press action sheet from intercepting.
 - Spectrum peak trail per-curve tunable parameters (R19.12). Graduates R16.17's fixed-shape curves (t^2 for exp, sqrt(t) for log) with one knob per shape: `exp.exponent` (1..6, default 2 — t^exponent; higher = sharper head bloom; 1.0 degenerates to linear) and `log.base` (2..8, default 4 — log(1+(base-1)*t)/log(base); higher = tail lingers more aggressively). Endpoint anchoring INVARIANT across every (curve, params) combination (0 at t=0, 1 at t=1) so swapping shapes or tweaking params never disturbs the trail's overall MIN/MAX brightness — only the distribution between. New pure helpers in waveform.js: `PEAK_TRAIL_CURVE_PARAMS` schema with min/max/step/default/label/hint per entry; `defaultPeakTrailCurveParams()` returns non-aliased fresh defaults; `sanitizeCurveParamValue(curve, key, raw)` clamps + non-finite-fallback-to-default; `sanitizeCurveParams(raw)` merges partial map with defaults; `setCurveParam(params, curve, key, raw)` ref-equal-on-no-op contract; `isCurveParamsAtDefaults(params)` projector. `applyTrailCurve(t, curve, params)` extended with params arg threaded through both branches. `readPeakTrail(state, barIndex, current, opts)` accepts opts.curveParams passthrough. UI: CurveChipWithLongPress wraps the R16.17 chip with pointer-event-based long-press (≥400ms hold opens the param editor popover); small sky-blue dot next to chip label when curve has non-default params; popover renders one slider per param with reset button (atomic reset across all curves, mirrors the chip overrides IO patterns). Store: spectrumPeakCurveParams persisted to `spectrum-peak-curve-params-v1`; sanitizeCurveParams runs on every read so corrupt persisted values resolve to defaults; setSpectrumPeakCurveParam + resetSpectrumPeakCurveParams actions.
 - Per-attractor MIDI: TYPE row shows live band on tooltip (R19.16). Graduates R18.16's invisible band-hysteresis with a scannable cue: each TYPE row with a bound CC + at least one message seen on that CC wears a tiny coloured tag showing "N/4 typename" (band index + type label) + a `·hold` amber suffix when the live value sits inside the dead-band so the user knows the type is HELD (not about to flip from jitter). New pure projector `describeTypeBand(v01, types?, hysteresis?)` in midiMap.js: returns `{ index, label, total, holdingPrev, distanceToEdge01 }` using the SAME band-width + hysteresis math as pickAttractorTypeForCC so the tag never lies about the picker's actual decision. holdingPrev is true only when v01 is inside the symmetric hysteresis window around a TRUE boundary (extremes 0/1 never hold since there's no neighbouring boundary). MidiPanel wires per-CC lastCCByNumber state cache (functional setState with same-value-skip + bound-CC-only filter so chatty controllers pumping unbound CCs don't trigger 60Hz re-renders). Badge wears the type's accent colour via attractorTypeStyle (parallels R14.05 indigo/red/violet/amber palette).
+- Spectrum peak-hold trail per-bar frequency-coloured tint PALETTE chip rail (R21.21). Graduates R20.13's single warm→cool ramp with 5 curated palettes selectable via a new chip in the WaveformOverlay header. Chip only renders when the existing tint chip is ON (the palette is meaningless when the trail inherits the bar's hue); warmCool stays first in cycle so an existing tint user's click target unchanged. Palettes: warmCool (R20.13 default, bass red-orange / treble blue-violet), rainbow (full 0→360 sweep), cool (260→180 indigo→teal for twilight presets), warm (0→50 red→amber for fire/embers), mono (215→195 narrow grey band, brightness-only map). New lib helpers in waveform.js: `PEAK_TRAIL_PALETTES` roster + `PEAK_TRAIL_PALETTE_NAMES` chip-cycle order + `isValidTrailPalette(name)` defensive-against-prototype-pollution + `nextTrailPalette(current)` wraparound + `peakTrailHueForBarIndexPalette(barIndex, totalBars, paletteName)` palette-aware hue projector with identical defensive contract as R20.13. INVARIANT pinned in tests: palette-aware call with 'warmCool' equals legacy peakTrailHueForBarIndex for every bar, so users with tint ON who never touch the chip see zero behavioural change. Store: spectrumPeakTrailPalette persisted to `spectrum-peak-trail-palette-v1`, default 'warmCool', corrupt values resolve via isValidTrailPalette. UI: tiny palette chip at left:188 in WaveformOverlay header wears the active palette's 3-stop linear-gradient as its own background so the chip visually previews the palette it controls.
+- Per-attractor MIDI clamp-proximity meter on STRENGTH / RADIUS / RADIUS·log / X / Y / Z rows (R21.22). Graduates R20.16's TYPE-row proximity meter to continuous fields. ENABLED rows skip (1-bit toggle — meter redundant); TYPE rows skip (R20.16 already drew the band-boundary meter). Semantic differs by field shape: TYPE = proximity to nearest FLIP BOUNDARY inside a band; continuous = proximity to nearest CLAMP EDGE of the slider. For continuous fields the safe zone is the middle of the sweep — knob at v01=0.5 reads MAX SAFE (max headroom both ways), knob at v01=0 or v01=1 reads MIN SAFE (the knob is at the rail — twisting further does nothing). New pure helpers in midiMap.js: `clampProximity01(v01)` symmetric inverted-V projector (returns 1 at centre, 0 at clamps; non-finite resolves to 1 = max-safe first-paint default) + `describeClampProximity(v01)` structured projector matching describeTypeBand's null-on-bad-input contract returning `{ kind: 'clamp', v01, proximityToBoundary01, atLow, atHigh }`. atLow / atHigh booleans fire only at the rails (v ≤ 0.001 / v ≥ 0.999) so the UI can colour the meter red specifically when knob is dead-against a clamp. UI: monospace tag between the existing typeBand tag and the CC badge, shows v01 as "87%" + a 26×4 horizontal bar; three-tier intent matches R20.16 (red at rail, amber close to clamp prox<0.25, green when safe prox≥0.25); 80ms width + 120ms colour transitions. Reuses R19.16 lastCCByNumber state cache as-is.
+- Smash bias overrides EXPORT / IMPORT as portable JSON file (R21.23). Graduates R20.07's per-chip bias editor with a portable share path. Parallels wind chip overrides IO (R12.17) + crossfade chip overrides IO (R13.14) — same envelope shape, same merge-vs-replace prompt, same MAX-bytes guard. New lib module `src/lib/biasOverridesIO.js`: kind=`ai-particle-simulator/bias-overrides`, v=1, MAX_IMPORT_BYTES=16 KB; exportableBiasIds() pulls from SCENE_BIASES so adding chips later auto-extends the IO; sanitizeBiasOverridesMap drops unknown chip ids + empty per-chip overrides; buildExportPayload / serialize / makeFilename ('particle-bias-YYYY-MM-DD.json'); parseImport handles full envelope + bare-items shorthand, rejects wrong-kind / unsupported-version / missing-items / all-invalid / invalid-JSON / non-string / top-level non-object / oversized; mergeImport with merge/replace semantics; summarizeImportImpact dry-run preview with conflicts + resultIds. UI: Export + Import buttons join the existing "Edit bias JSON" link above the chip rail in RightSidebar.jsx. Export disabled when no chip has overrides; replace-mode import also resets any chip the import didn't touch so a clean swap genuinely wipes prior state.
+- Carousel thumb detail panel: Rebuild + Clear action buttons (R21.24). Graduates R20.19's rich-detail panel with two action buttons scoped to the open tile. Before R21.24: Rebuild required closing the panel + hovering the tile to surface the hover-only "rebuild" button — workflow-breaking when the user is reading the metadata to decide whether to rebuild. Clear (per-tile) didn't exist at all; only path was the bulk "Rebuild all" which wiped everything. Two buttons share a 50/50 grid row at the bottom of the panel above the existing "Esc to close" hint: Rebuild (indigo) re-uses the same rebuildThumb path the hover button uses (setBusyId + setTimeout + recaptureThumbnail + particle:thumbnail-ready event); Clear (red) calls clearThumbnail (which cascades to clearThumbMetadata via the existing R19.13 contract) + updates the in-memory thumbs + meta maps via setState with the entry spread out so placeholder emoji tile returns immediately. Both actions auto-close the panel afterwards. Pure wire layer — no lib changes; clearThumbnail's cascade was already pinned in tests.
+- MIDI bundle hotkey-conflict warning toast when re-binding across bundles (R21.25). Graduates R20.11's silent "1-binding-per-hotkey" invariant with a pre-flight conflict detector so the user gets explicit feedback when their new hotkey assignment is about to STRIP the binding off another bundle. New pure helper in midiPresets.js: `detectHotkeyConflict(list, targetId, hotkey)` returns the OTHER bundle the user is about to displace, or null when hotkey is unbound / belongs to target bundle itself (self-rebind no-op) / is invalid / nothing to steal (null/empty hotkey). Shape mirrors findUserPresetByHotkey so the UI can pull .name / .color / .id off the result for the toast. MidiPanel's setUserBundleHotkey now runs the detector BEFORE setUserPresetHotkey lands, then surfaces a toast wearing the TARGET bundle's accent colour: `Hotkey "shift+1" stolen from "Drum Kit" → "Synth Pad"`. Self-rebinds and clears skip the toast — nothing was stolen.
 - Per-preset thumb metadata badge on hover (R19.13). Hover any preset tile in the carousel to see a tiny metadata badge in the bottom-left corner: "120×80 · render · 3h" (dimensions, source, age). Source-tagged colour (live=green, render=indigo) shows at a glance which capture path minted the thumb. Tooltip carries full ISO-localised timestamp + source explanation. New lib helpers in presetThumbnails.js: `thumbMetadataKey(id)` parallel storage-key shape (preset-thumb-meta-<id>); `recordThumbMetadata(id, opts, storage)` writes JSON-encoded {capturedAt, width, height, source}; `readThumbMetadata(id, storage)` reads + sanitises (returns null on missing/corrupt/missing-capturedAt); `clearThumbMetadata(id, storage)` matches clearThumbnail's contract; `summarizeThumbAge(metadata, now=Date.now())` returns compact "now"/"12s"/"4m"/"3h"/"2d"/"3w"/"2y" (future timestamps clamp to "now" so we never report negative ages). captureThumbnailToStorage + capturePresetThumbnail (live path) both record metadata; clearThumbnail + clearAllThumbnails cascade-wipe metadata so stale badges don't outlive their thumbs.
 - MIDI user bundle drag-and-drop accepts multiple .json files at once (R19.20). Graduates R18.09's first-file-only convention with the multi-file gesture R18.18 brought to theme packs. Drop N .json files at once and the panel COMBINES them into one impact summary before the confirm fires. Per-file failures (corrupt JSON, wrong-kind envelope, non-.json extension) are counted + toasted but don't block valid bundles in the same drop — partial success preserved. New pure helper `combineDroppedBundles(reads)` in midiUserBundleIO.js takes per-file FileReader results { raw, error?, name? } and returns { bundles, parseFails, totalFilesRead } using the same parseImportMulti → parseImport precedence as the single-file drop; pure / no DOM so the combine logic is regression-pinned without polyfilling FileReader. PresetBar drop handler accepts onDropFiles alongside onDropFile (multi-file is preferred when present, single-file is the fallback for older callsites). Drop banner gains "(multi-file ok)" hint.
 - Named attractor drag-reorder accepts drops on row gaps for insert-here (R19.19). Graduates R18.19's drop-on-row gesture with drop-on-GAP zones so users can insert an attractor EXACTLY into a target slot (insert semantics) instead of only swapping with a specific row's position. Thin gap zones appear between every pair of rows (and above the first / below the last). At rest: 6px tall + transparent (invisible spacer doesn't disturb the resting layout); during drag: stays 6px until hovered then expands to 22px with indigo dashed strip + soft gradient. Trailing gap below the last row only renders during an active drag. New pure helper `dropIndexForGap(from, gapIdx, listLength)` in namedAttractors.js encapsulates the splice-bookkeeping math (from < gapIdx: insert at gapIdx - 1 due to remove-then-insert shift; from >= gapIdx: insert at gapIdx; no-op when gap above/below self). Defensive: non-finite/negative/out-of-range inputs return null. NamedAttractorRow wraps in a fragment with leading gap div; the trailing-gap div lives at the block level.
@@ -362,29 +367,44 @@ r3f-gizmo / backend runtime), R20.04 + R20.05 each need their own
 focused batch. Substituted R20.07, R20.11, R20.13, R20.16, R20.19
 from the future queue to keep the batch at 5 great slices.
 
-### Batch 21 — next 5 (refilled)
-- [ ] R21.01 Echo / trail FBO that survives EffectComposer [carried — render pipeline refactor, dedicated batch]
-- [ ] R21.02 Named attractor 3D drag handle (r3f gizmo) [carried — dedicated batch]
-- [ ] R21.03 OpenGraph snapshot endpoint (server-rendered share card) [carried — needs backend]
-- [ ] R21.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [carried]
-- [ ] R21.05 Audio-reactive bg curve chips → custom curve editor for power users (visual spline / 3-knot bezier) [carried]
+### Batch 21 — peak trail palettes + clamp proximity + bias IO + thumb actions + hotkey conflict  (SHIPPED)
+- [x] **R21.21** Spectrum peak trail tint: alternate hue palettes — chip rail (warmCool / rainbow / cool / warm / mono)  — 6fd34d8
+- [x] **R21.22** Per-attractor MIDI proximity meter on STRENGTH / RADIUS / RADIUS·log / X / Y / Z rows  — 177d613
+- [x] **R21.23** Smash bias overrides export/import as JSON (parallels wind/crossfade IO)  — e296768
+- [x] **R21.24** Thumb detail panel: Rebuild + Clear action buttons  — 9c57856
+- [x] **R21.25** MIDI bundle hotkey-conflict warning toast (graduates R20.11)  — 1348474
+
+Note: R21.01 (Echo / trail FBO) / R21.02 (3D drag handle) / R21.03
+(server-rendered OG endpoint) / R21.04 (multi-error gutter overlay) /
+R21.05 (custom audio-reactive curve editor) all deferred AGAIN — first
+three are dedicated infrastructure batches (render-pipeline /
+r3f-gizmo / backend runtime), R21.04 + R21.05 each need their own
+focused batch. Substituted R21.21, R21.22, R21.23, R21.24, R21.25
+from the future queue.
+
+### Batch 22 — next 5 (refilled)
+- [ ] R22.01 Echo / trail FBO that survives EffectComposer [carried — render pipeline refactor, dedicated batch]
+- [ ] R22.02 Named attractor 3D drag handle (r3f gizmo) [carried — dedicated batch]
+- [ ] R22.03 OpenGraph snapshot endpoint (server-rendered share card) [carried — needs backend]
+- [ ] R22.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode) [carried]
+- [ ] R22.05 Audio-reactive bg curve chips → custom curve editor for power users (visual spline / 3-knot bezier) [carried]
 
 ### Future queue (refill when batch closes)
-- [ ] R21.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view [was R20.06]
-- [ ] R21.08 Minimap: hover a saved-view dot for ~1s shows a thumbnail preview (canvas2D sample of the scene from that camera) [was R20.08]
-- [ ] R21.09 Wind chip overrides: per-chip live "what slot is this CC bound to" badge if the chip's seconds is bound to a CC (cross-reference between MIDI map + wind chips) [was R20.09]
-- [ ] R21.10 Crossfade chip overrides: same MIDI cross-reference badge as R21.09 [was R20.10]
-- [ ] R21.12 Camera path: drag-and-drop reorder ALSO works on touch (R17.07 is desktop-only — touch users need a long-press-to-drag gesture) [was R20.12]
-- [ ] R21.14 Snapshot grid: bulk download all selected as a zip (graduates R18.06 selection mode) [was R20.14]
-- [ ] R21.15 Theme pack drag-drop: progress indicator when N > 10 files (current parallel Promise.all is fast but visible delay on big drops) [was R20.15]
-- [ ] R21.17 MIDI bundle drag-drop: per-file progress indicator for very large drops (parallels R21.15 themes; graduates R19.20) [was R20.17]
-- [ ] R21.18 Spectrum peak trail params: persist per-bar OVERRIDES so a user can tune only the bass bars' curve while leaving the rest at default (graduates R19.12 to per-bar granularity) [was R20.18]
-- [ ] R21.20 Named attractor gap-drop: also work for the MidiPanel per-attractor binding groups (drop a group into another's gap to reorder MIDI sections without touching the underlying attractor list) — graduates R19.19 [was R20.20]
-- [ ] R21.21 Spectrum peak trail tint: alternate hue palettes (rainbow / cool-only / warm-only / mono) — graduates R20.13 with a curated chip rail beyond the default warm→cool ramp
-- [ ] R21.22 Per-attractor MIDI proximity meter: also surface on STRENGTH/RADIUS rows to show how close the live CC is to the slider's clamp edges (graduates R20.16's projector pattern to non-band fields)
-- [ ] R21.23 Smash bias overrides: export/import the override map as JSON (parallels wind/crossfade override IO) — graduates R20.07
-- [ ] R21.24 Thumb detail panel: "Rebuild" + "Clear thumb" action buttons inside the panel (currently has to use the hover-only ↻ button on the tile) — graduates R20.19
-- [ ] R21.25 MIDI user bundle hotkey: hotkey-conflict warning toast when the user re-binds the same hotkey across bundles (currently silent "stripped from previous" semantic) — graduates R20.11
+- [ ] R22.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view [was R21.06]
+- [ ] R22.08 Minimap: hover a saved-view dot for ~1s shows a thumbnail preview (canvas2D sample of the scene from that camera) [was R21.08]
+- [ ] R22.09 Wind chip overrides: per-chip live "what slot is this CC bound to" badge if the chip's seconds is bound to a CC (cross-reference between MIDI map + wind chips) [was R21.09]
+- [ ] R22.10 Crossfade chip overrides: same MIDI cross-reference badge as R22.09 [was R21.10]
+- [ ] R22.12 Camera path: drag-and-drop reorder ALSO works on touch (R17.07 is desktop-only — touch users need a long-press-to-drag gesture) [was R21.12]
+- [ ] R22.14 Snapshot grid: bulk download all selected as a zip (graduates R18.06 selection mode) [was R21.14]
+- [ ] R22.15 Theme pack drag-drop: progress indicator when N > 10 files (current parallel Promise.all is fast but visible delay on big drops) [was R21.15]
+- [ ] R22.17 MIDI bundle drag-drop: per-file progress indicator for very large drops (parallels R22.15 themes; graduates R19.20) [was R21.17]
+- [ ] R22.18 Spectrum peak trail params: persist per-bar OVERRIDES so a user can tune only the bass bars' curve while leaving the rest at default (graduates R19.12 to per-bar granularity) [was R21.18]
+- [ ] R22.20 Named attractor gap-drop: also work for the MidiPanel per-attractor binding groups (drop a group into another's gap to reorder MIDI sections without touching the underlying attractor list) — graduates R19.19 [was R21.20]
+- [ ] R22.26 Spectrum peak trail palette: USER-AUTHORED palettes (add custom start/end hue pairs to the chip rail, persisted) — graduates R21.21
+- [ ] R22.27 Per-attractor MIDI clamp meter: long-press the meter to open a tweakable "warning threshold" slider (currently hard-coded prox<0.25 amber, prox<0.001 red) — graduates R21.22
+- [ ] R22.28 Bias overrides drag-and-drop import (parallels R17.06 theme drag-drop + R18.09 MIDI bundle drag-drop) — graduates R21.23
+- [ ] R22.29 Thumb detail panel: per-tile "Capture timestamp" custom note field (small text input persisted alongside the metadata so users can label "good demo shot" / "wrong colors" — graduates R21.24
+- [ ] R22.30 MIDI bundle hotkey conflict toast: also include an UNDO action chip (click "Undo" in the toast to roll back the just-applied conflicting assignment — graduates R21.25
 
 ## TICK LOG
 - 2026-06-19 23:41 PT — Bootstrap + Batch 1 (5/5).
@@ -1035,4 +1055,106 @@ from the future queue to keep the batch at 5 great slices.
   refuse + findUserPresetByHotkey happy/unbound-null/canonical-
   match-across-reorder/defensive + load/save round-trip including
   corrupt-hotkey-silent-drop · ~225 fresh asserts this batch).
+- 2026-06-22 19:31 PT — Batch 21 (5/5).
+  Commits: 6fd34d8 (R21.21 spectrum peak trail palette chip rail —
+  PEAK_TRAIL_PALETTES roster of 5 (warmCool default + rainbow / cool /
+  warm / mono) + PEAK_TRAIL_PALETTE_NAMES cycle order + isValidTrailPalette
+  defensive-against-prototype-pollution + nextTrailPalette wraparound +
+  peakTrailHueForBarIndexPalette palette-aware projector identical
+  defensive contract to R20.13; store spectrumPeakTrailPalette persisted
+  to `spectrum-peak-trail-palette-v1`, default 'warmCool' preserves
+  R20.13 visual via INVARIANT pinned in tests; WaveformOverlay chip
+  at left:188 wears active palette's 3-stop linear-gradient as its
+  own background previewing the palette it controls),
+  177d613 (R21.22 per-attractor MIDI clamp-proximity meter on STRENGTH
+  / RADIUS / RADIUS·log / X / Y / Z rows — clampProximity01 symmetric
+  inverted-V projector returning 1 at v=0.5 (max headroom), 0 at v=0/1
+  (at rail), NaN/non-finite resolves to 1 (max-safe first-paint
+  default); describeClampProximity structured projector matching
+  describeTypeBand null-on-bad-input contract returning kind=clamp +
+  v01 + proximityToBoundary01 + atLow/atHigh boundary flags; MidiPanel
+  reuses R19.16 lastCCByNumber state cache; monospace tag between
+  typeBand and CC badge with "87%" + 26x4 fill bar; three-tier intent
+  matches R20.16 (red rail / amber close / green safe) with 80ms width
+  + 120ms colour transitions),
+  e296768 (R21.23 smash bias overrides export/import as portable JSON
+  — new biasOverridesIO.js module parallels windOverridesIO + crossfade
+  OverridesIO patterns; kind=`ai-particle-simulator/bias-overrides`,
+  v=1, MAX_IMPORT_BYTES=16 KB; exportableBiasIds pulls from SCENE_BIASES
+  so new chips auto-extend IO; sanitizeBiasOverridesMap drops unknown
+  chip ids + empty-after-sanitize entries; buildExportPayload /
+  serialize / makeFilename ('particle-bias-YYYY-MM-DD.json'); parseImport
+  full envelope + bare-items shorthand, rejects wrong-kind / unsupported-
+  version / missing-items / all-invalid / invalid-JSON / oversized;
+  mergeImport with merge/replace semantics; summarizeImportImpact
+  dry-run preview with conflicts + resultIds; UI Export + Import
+  buttons join Edit-bias-JSON link above the chip rail in RightSidebar;
+  Export disabled when no chip has overrides via hasAnyBiasOverride
+  re-evaluated against overrideTick; replace-mode import also resets
+  any chip the import didn't touch so a clean swap genuinely wipes
+  prior state),
+  9c57856 (R21.24 thumb detail panel Rebuild + Clear action buttons —
+  graduates R20.19's rich-detail panel with two action buttons scoped
+  to the open tile; Rebuild (indigo) re-uses the same rebuildThumb
+  path the hover button uses + closes panel before rebuild lands so
+  user sees new thumb arrive on the tile; Clear (red) calls
+  clearThumbnail which cascades to clearThumbMetadata via R19.13
+  contract + updates in-memory thumbs/meta maps via setState
+  destructuring so placeholder emoji returns immediately; pure wire
+  layer — no lib changes; clearThumbnail cascade already pinned in
+  presetThumbnails.test.mjs),
+  1348474 (R21.25 MIDI bundle hotkey-conflict warning toast —
+  detectHotkeyConflict pure helper in midiPresets.js returns the OTHER
+  bundle the user is about to displace or null on no-conflict
+  (unbound / self-rebind / cleared / invalid); shape mirrors
+  findUserPresetByHotkey so UI can pull .name/.color/.id for the
+  toast; MidiPanel setUserBundleHotkey runs the detector BEFORE
+  setUserPresetHotkey lands then surfaces a toast wearing the TARGET
+  bundle's accent colour: 'Hotkey "shift+1" stolen from "X" → "Y"';
+  self-rebinds and clears skip the toast).
+  R21.01-R21.05 all deferred AGAIN — first three are dedicated
+  infrastructure batches (render-pipeline / r3f-gizmo / backend
+  runtime), R21.04 + R21.05 each need their own focused batch.
+  Substituted R21.21, R21.22, R21.23, R21.24, R21.25 from the
+  future queue.
+  Gates: lint 23 errors / 3 warnings — exactly matches baseline
+  (one new warning surfaced from an unused eslint-disable directive
+  in RightSidebar R21.23 wiring + two new warnings from defensive-
+  but-unused eslint-disable comments in PresetCarousel R21.24 setState
+  destructuring; all three resolved inline before commit, no separate
+  lint-gate cleanup commit needed). Build: 2.50 s green (1.78 MB
+  bundle, gzip 528 KB — +3 KB vs Batch 20 for the new pure helpers
+  + chip rail + meter + bias IO module + thumb-action-row JSX).
+  Unit tests: 40/40 files pass (added biasOverridesIO with ~75
+  asserts covering exportable ids cover shipped chips,
+  sanitizeBiasOverridesMap drops unknown chips + empty-after-
+  sanitize, corrupt per-chip values re-flow through sanitizeBias
+  Override, envelope build / serialize / parse round-trip, bare-
+  items shorthand, wrong-kind / unsupported-version / missing-
+  items / all-invalid / invalid-JSON / oversized rejection, non-
+  string + top-level non-object rejection, mergeImport merge vs
+  replace semantics with conflicts, summarizeImportImpact mode-
+  aware projections, empty edge cases, schema size invariants;
+  extended waveform with ~50 R21.21 asserts covering palette
+  roster + chip-cycle order + warmCool R20.13 anchor invariant +
+  isValidTrailPalette accept/reject incl. proto-chain bypass +
+  nextTrailPalette closed-loop wraparound + endpoint anchoring
+  across every palette + mid-bar midpoint + totalBars=1 midpoint
+  + R20.13 backwards-compat warmCool=legacy + unknown-fallback +
+  cool descending monotonicity + rainbow ascending monotonicity +
+  rainbow full 360 span + mono <=30deg spread + defensive contract;
+  extended midiMap with ~50 R21.22 asserts covering clampProximity01
+  endpoint behaviour + symmetry around 0.5 + quarter-point 0.5
+  reading + out-of-range clamp + defensive NaN/Infinity → 1 fallback
+  + [0,1] range invariant + inverted-V monotonicity + describeClamp
+  Proximity structured shape + atLow/atHigh boundary at exact
+  thresholds + out-of-range v01 clamped into returned object +
+  defensive null-on-non-finite + projector match between structured
+  + pure helpers + purity; extended midiPresets with ~30 R21.25
+  asserts covering conflict detection happy path + unbound-hotkey
+  null + self-rebind null + clearing null/empty null + invalid
+  hotkey null + canonical-form comparison + permuted-mods conflict
+  + defensive null/empty list/targetId + multi-bundle conflict
+  deterministic first-match + purity + detect+set integration
+  · ~205 fresh asserts this batch).
 
