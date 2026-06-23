@@ -16,6 +16,8 @@ import {
   buildBiasImportPreviewRows,
   // R25.41 — per-field diff projector + value equality
   buildBiasFieldDiff, biasFieldValuesEqual,
+  // R26.41 — chip-row counts projector for the per-row summary tag
+  summarizeFieldDiffCounts,
 } from './biasOverridesIO.js'
 import { SCENE_BIASES, SCENE_BIAS_RANGE_FIELDS, SCENE_BIAS_CHANCE_FIELDS } from './randomScene.js'
 
@@ -710,4 +712,133 @@ ok(SCENE_BIAS_CHANCE_FIELDS.length === 10, 'schema: 10 chance fields')
   eq(byField.bgChance, 'live-only', 'bgChance would be dropped in replace')
 }
 
-console.log(`PASS: biasOverridesIO — envelope build/parse, merge/replace, summarize, defensive, multi-file combine, R24.36 preview rows, R25.41 per-field diff (${SCENE_BIASES.length} chip ids, ${SCENE_BIAS_RANGE_FIELDS.length} ranges + ${SCENE_BIAS_CHANCE_FIELDS.length} chances per chip)`)
+// --- R26.41: summarizeFieldDiffCounts — per-row changed/unchanged ----
+
+// Happy path — counts add/change as 'changed', unchanged as 'unchanged'.
+{
+  const diff = [
+    { field: 'counts',           kind: 'range',  action: 'unchanged' },
+    { field: 'bgChance',         kind: 'chance', action: 'change' },
+    { field: 'forceFieldChance', kind: 'chance', action: 'add' },
+    { field: 'attractRange',     kind: 'range',  action: 'unchanged' },
+  ]
+  const out = summarizeFieldDiffCounts(diff, 'merge')
+  eq(out.changed,   2, 'change + add = 2 changed')
+  eq(out.unchanged, 2, 'two unchanged rows counted')
+}
+
+// Live-only rows: NOT counted in merge mode (live is preserved).
+{
+  const diff = [
+    { field: 'counts',   kind: 'range',  action: 'unchanged' },
+    { field: 'bgChance', kind: 'chance', action: 'live-only' },
+    { field: 'speedRange', kind: 'range', action: 'change' },
+  ]
+  const out = summarizeFieldDiffCounts(diff, 'merge')
+  eq(out.changed,   1, 'merge: live-only does NOT count as changed')
+  eq(out.unchanged, 1, 'merge: unchanged still counted')
+}
+
+// Live-only rows: ARE counted as 'changed' in replace mode (they drop).
+{
+  const diff = [
+    { field: 'counts',   kind: 'range',  action: 'unchanged' },
+    { field: 'bgChance', kind: 'chance', action: 'live-only' },
+    { field: 'speedRange', kind: 'range', action: 'change' },
+  ]
+  const out = summarizeFieldDiffCounts(diff, 'replace')
+  eq(out.changed,   2, 'replace: live-only + change = 2 changed')
+  eq(out.unchanged, 1, 'replace: unchanged still counted')
+}
+
+// Default mode = 'merge' (safer surface area — if a caller forgets the
+// arg we don't invent dropped-field counts).
+{
+  const diff = [
+    { field: 'bgChance', kind: 'chance', action: 'live-only' },
+  ]
+  const out = summarizeFieldDiffCounts(diff)
+  eq(out.changed,   0, 'default mode treats live-only as not-counted')
+  eq(out.unchanged, 0, 'default mode = merge')
+}
+
+// Empty array → zeros.
+{
+  const out = summarizeFieldDiffCounts([], 'merge')
+  eq(out.changed,   0, 'empty diff → 0 changed')
+  eq(out.unchanged, 0, 'empty diff → 0 unchanged')
+}
+
+// Defensive — non-array → zeros (graceful degrade).
+{
+  deepEq(summarizeFieldDiffCounts(null),       { changed: 0, unchanged: 0 }, 'null → zeros')
+  deepEq(summarizeFieldDiffCounts(undefined),  { changed: 0, unchanged: 0 }, 'undefined → zeros')
+  deepEq(summarizeFieldDiffCounts('not arr'),  { changed: 0, unchanged: 0 }, 'string → zeros')
+  deepEq(summarizeFieldDiffCounts(42),         { changed: 0, unchanged: 0 }, 'number → zeros')
+  deepEq(summarizeFieldDiffCounts({a:1}),      { changed: 0, unchanged: 0 }, 'plain object → zeros')
+}
+
+// Defensive — null entries / non-object entries silently skipped.
+{
+  const diff = [
+    null,
+    'not an object',
+    42,
+    { field: 'counts', kind: 'range', action: 'change' },
+    { /* missing action */ field: 'x', kind: 'chance' },
+    { field: 'bgChance', kind: 'chance', action: 'unchanged' },
+  ]
+  const out = summarizeFieldDiffCounts(diff, 'merge')
+  eq(out.changed,   1, 'only the real change row counted')
+  eq(out.unchanged, 1, 'only the real unchanged row counted')
+}
+
+// Unknown action values silently skipped (don't trip the counts).
+{
+  const diff = [
+    { field: 'counts', action: 'mystery-action' },
+    { field: 'bgChance', action: 'unchanged' },
+    { field: 'speed', action: 'change' },
+  ]
+  const out = summarizeFieldDiffCounts(diff, 'merge')
+  eq(out.changed,   1, 'unknown action does not count as changed')
+  eq(out.unchanged, 1, 'unchanged still counted')
+}
+
+// Integration — round-trip through buildBiasFieldDiff + this projector
+// should produce sensible counts on a realistic merge scenario.
+{
+  const incoming = { counts: [100, 200], bgChance: 0.5, attractRange: [0.1, 0.9] }
+  const live     = { counts: [100, 200], bgChance: 0.3 }  // counts match, bgChance differs, attractRange is new
+  const diff = buildBiasFieldDiff(incoming, live)
+  const out = summarizeFieldDiffCounts(diff, 'merge')
+  eq(out.changed,   2, 'integration merge: bgChance change + attractRange add = 2')
+  eq(out.unchanged, 1, 'integration merge: counts unchanged')
+}
+
+// Integration replace — same diff carries no extra live-only fields,
+// so the count is the same as merge.
+{
+  const incoming = { counts: [100, 200], bgChance: 0.5 }
+  const live     = { counts: [100, 200], bgChance: 0.3, speedRange: [0.1, 0.5] }
+  const diffMerge   = buildBiasFieldDiff(incoming, live)
+  const mergeOut   = summarizeFieldDiffCounts(diffMerge, 'merge')
+  const replaceOut = summarizeFieldDiffCounts(diffMerge, 'replace')
+  eq(mergeOut.changed,   1, 'merge mode: only bgChance change counted')
+  eq(mergeOut.unchanged, 1, 'merge mode: counts unchanged')
+  eq(replaceOut.changed,   2, 'replace mode: bgChance change + speedRange live-only = 2')
+  eq(replaceOut.unchanged, 1, 'replace mode: counts unchanged')
+}
+
+// Purity — does NOT mutate the input array (sanity check on the loop).
+{
+  const diff = [{ field: 'counts', action: 'change' }, { field: 'x', action: 'unchanged' }]
+  const before = JSON.stringify(diff)
+  summarizeFieldDiffCounts(diff, 'merge')
+  summarizeFieldDiffCounts(diff, 'replace')
+  eq(JSON.stringify(diff), before, 'input not mutated')
+}
+
+console.log('PASS: summarizeFieldDiffCounts — per-row chip summary counts (R26.41, ~30 asserts)')
+
+console.log(`PASS: biasOverridesIO — envelope build/parse, merge/replace, summarize, defensive, multi-file combine, R24.36 preview rows, R25.41 per-field diff, R26.41 summary counts (${SCENE_BIASES.length} chip ids, ${SCENE_BIAS_RANGE_FIELDS.length} ranges + ${SCENE_BIAS_CHANCE_FIELDS.length} chances per chip)`)

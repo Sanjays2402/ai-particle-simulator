@@ -17,6 +17,8 @@ import {
   combineDroppedBiasFiles,
   // R24.36 — preview-panel projector (parallels wind R14.15 / crossfade R14.16)
   buildBiasImportPreviewRows,
+  // R26.41 — equal-rows count projector for the per-row chip summary
+  summarizeFieldDiffCounts,
 } from '../lib/biasOverridesIO'
 import {
   loadCameraViews, saveCameraViews, appendView, moveView, moveViewUp, moveViewDown,
@@ -2274,6 +2276,16 @@ function BiasOverridesImportPreview({ pending, existing, onModeChange, onCancel,
               return d.action !== 'unchanged'
             })
             const hasInterestingDiff = diffRows.length > 0
+            // R26.41 — Surface the changed-vs-unchanged COUNT inline on
+            // every chip row summary so the user can see at a glance
+            // how much actually MATTERS in this import without first
+            // expanding the row. Skip mode (action='skip') rows in
+            // merge mode show the summary as muted info too — the live
+            // override stays, but knowing "this file would have changed
+            // 4 of the 7 fields" is still useful for the user deciding
+            // whether to flip to Replace.
+            const fieldCounts = summarizeFieldDiffCounts(r.fieldDiff, mode)
+            const showFieldCounts = (fieldCounts.changed + fieldCounts.unchanged) > 0
             return (
               <div key={r.id}>
                 <div
@@ -2322,6 +2334,32 @@ function BiasOverridesImportPreview({ pending, existing, onModeChange, onCancel,
                     {r.live ? `${liveFieldCount}f` : 'default'}
                   </span>
                   <span style={{ color: '#7a7a90', fontSize: 10 }}>{'\u2192'}</span>
+                  {/* R26.41 — changed-vs-unchanged inline count. Only
+                      paints when the row has at least one diff row
+                      (skips empty new-bias-with-no-fields edge case).
+                      Compact "Nc Nu" format keeps the row tight; full
+                      tooltip explains the abbreviations. */}
+                  {showFieldCounts && (
+                    <span
+                      title={`${fieldCounts.changed} changed field${fieldCounts.changed === 1 ? '' : 's'}, ${fieldCounts.unchanged} unchanged${mode === 'replace' && fieldCounts.changed > 0 ? ' (includes dropped fields under replace)' : ''}`}
+                      style={{
+                        fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                        fontSize: 9, padding: '1px 4px', borderRadius: 4,
+                        background: 'rgba(255,255,255,0.025)',
+                        color: '#7a7a90',
+                        border: '1px solid rgba(255,255,255,0.04)',
+                        letterSpacing: '0.04em',
+                        display: 'inline-flex', alignItems: 'center', gap: 3,
+                      }}>
+                      <span style={{ color: fieldCounts.changed > 0 ? '#fde68a' : '#5a5a70', fontWeight: 600 }}>
+                        {fieldCounts.changed}c
+                      </span>
+                      <span style={{ color: '#5a5a70' }}>{'\u00b7'}</span>
+                      <span style={{ color: '#7a7a90' }}>
+                        {fieldCounts.unchanged}u
+                      </span>
+                    </span>
+                  )}
                   <span style={{
                     fontFamily: 'Geist Mono, JetBrains Mono, monospace',
                     fontSize: 9.5, padding: '1px 5px', borderRadius: 4,

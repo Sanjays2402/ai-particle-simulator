@@ -396,6 +396,54 @@ export function buildBiasFieldDiff(incomingRaw, liveRaw) {
   return out
 }
 
+// R26.41 — Pure summary projector for a per-row field-diff array.
+// Returns the count of CHANGED vs UNCHANGED field rows so the preview
+// UI can surface "3 changed / 2 unchanged" as a single inline tag on
+// each chip row WITHOUT the user having to expand the row first. The
+// existing fieldCount tells the user how many fields are in the
+// import; this projector tells them how many of those fields actually
+// MATTER given the live override they're about to displace.
+//
+// Mode-aware:
+//   - 'merge'   : live-only rows are NOT counted at all (live is
+//                 preserved untouched, so they're neither changed
+//                 nor unchanged from the merge's perspective).
+//   - 'replace' : live-only rows ARE counted as 'changed' (they're
+//                 about to be DROPPED, which is a change worth
+//                 surfacing).
+// Default mode = 'merge' (matches buildBiasImportPreviewRows default
+// + safer surface area — if a caller forgets the arg we don't
+// invent dropped-field counts).
+//
+// Output shape: { changed, unchanged }
+//   - changed:   count of action='add' + 'change' rows (+ 'live-only'
+//                in replace mode)
+//   - unchanged: count of action='unchanged' rows
+// Both fields are non-negative integers. changed + unchanged ≤ the
+// fieldDiff length (live-only rows are excluded from both counts in
+// merge mode).
+//
+// Defensive: non-array fieldDiff → { changed: 0, unchanged: 0 };
+// rows missing an `action` field are silently skipped (treat as
+// uncategorized — not surfaced in either count).
+//
+// Pure / no DOM / no allocations beyond the result object.
+export function summarizeFieldDiffCounts(fieldDiff, mode = 'merge') {
+  if (!Array.isArray(fieldDiff)) return { changed: 0, unchanged: 0 }
+  let changed = 0
+  let unchanged = 0
+  const isReplace = mode === 'replace'
+  for (const d of fieldDiff) {
+    if (!d || typeof d !== 'object') continue
+    const action = d.action
+    if (action === 'unchanged') unchanged++
+    else if (action === 'add' || action === 'change') changed++
+    else if (action === 'live-only' && isReplace) changed++
+    // other / unknown actions: silently skip (not surfaced)
+  }
+  return { changed, unchanged }
+}
+
 // Pure equality check for bias-override field values. Routes by kind:
 //   - range fields (4): two-element numeric array, element-wise eq
 //   - chance fields (10): numeric eq
