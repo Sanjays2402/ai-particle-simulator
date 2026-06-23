@@ -2126,9 +2126,59 @@ function CodeBtn({ onClick, primary, disabled, title, children }) {
 // the live override (italic when chip is currently on shipped
 // defaults), the incoming field count, and a colour-coded action
 // badge.
+// R25.41 — Pretty-print the value(s) for one bias field-diff row. Used
+// inside BiasOverridesImportPreview to render the right-edge value
+// summary like \"[5K, 30K] \u2192 [1K, 5K]\" or \"0.30 \u2192 0.55\". Pure /
+// no DOM so it stays trivially testable when the time comes.
+function formatBiasFieldDiffValue(d) {
+  const fmtRange = (r) => Array.isArray(r) && r.length === 2
+    ? `[${formatCompactNum(r[0])}, ${formatCompactNum(r[1])}]`
+    : '?'
+  const fmtChance = (c) => Number.isFinite(c) ? c.toFixed(2) : '?'
+  const fmtForceTypes = (arr) => Array.isArray(arr)
+    ? `[${arr.length}]`   // count-only — full list shown in tooltip
+    : '?'
+  const fmtOne = (v) => {
+    if (d.kind === 'range')      return fmtRange(v)
+    if (d.kind === 'chance')     return fmtChance(v)
+    if (d.kind === 'forceTypes') return fmtForceTypes(v)
+    return String(v)
+  }
+  if (d.action === 'add')       return `\u2014 \u2192 ${fmtOne(d.incoming)}`
+  if (d.action === 'live-only') return `${fmtOne(d.live)} \u2192 \u2014`
+  if (d.action === 'change')    return `${fmtOne(d.live)} \u2192 ${fmtOne(d.incoming)}`
+  return fmtOne(d.incoming)
+}
+
+// Tiny number formatter for the bias-diff inline values. Keeps the
+// right column scannable without losing precision for small numbers.
+//   >= 10K  \u2192 \"10K\" / \"32K\"
+//   >= 1000 \u2192 \"1.5K\"
+//   integer \u2192 as-is
+//   float   \u2192 2 decimals
+function formatCompactNum(v) {
+  if (!Number.isFinite(v)) return '?'
+  if (Math.abs(v) >= 10000) return `${Math.round(v / 1000)}K`
+  if (Math.abs(v) >= 1000)  return `${(v / 1000).toFixed(1)}K`
+  if (Number.isInteger(v))  return `${v}`
+  return v.toFixed(2)
+}
+
 function BiasOverridesImportPreview({ pending, existing, onModeChange, onCancel, onCommit }) {
   const mode = pending.mode === 'replace' ? 'replace' : 'merge'
   const rows = buildBiasImportPreviewRows(pending.items, existing, mode)
+  // R25.41 — expanded-row tracker. Click a chip row to expand it
+  // in-place; the per-field diff renders below the summary line.
+  // Set keyed by chip id; defaults to all-collapsed so the preview
+  // surface stays tight by default (the per-field diff is opt-in).
+  const [expandedIds, setExpandedIds] = useState(() => new Set())
+  const toggleExpanded = (id) => {
+    setExpandedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
   const perFile = pending.perFile || []
   const okFiles = perFile.filter(p => p.ok)
   const fileCount = okFiles.length
@@ -2213,17 +2263,52 @@ function BiasOverridesImportPreview({ pending, existing, onModeChange, onCancel,
             const isSkip = r.action === 'skip'
             const isOverwrite = r.action === 'overwrite'
             const liveFieldCount = r.live ? Object.keys(r.live).length : 0
+            const isExpanded = expandedIds.has(r.id)
+            // R25.41 — per-field diff is only visible when expanded.
+            // In merge mode the row's action is 'skip' or 'add' so the
+            // per-field diff still has informational value (\"this is
+            // what we WOULD have changed if you flipped to Replace\");
+            // expand still works to surface it.
+            const diffRows = (r.fieldDiff || []).filter(d => {
+              if (mode === 'merge' && d.action === 'live-only') return false
+              return d.action !== 'unchanged'
+            })
+            const hasInterestingDiff = diffRows.length > 0
             return (
-              <div key={r.id} style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                fontSize: 10.5, padding: '3px 6px',
-                fontFamily: 'inherit', color: isSkip ? '#7a7a90' : '#d8d8e0',
-                opacity: isSkip ? 0.7 : 1,
-              }}>
+              <div key={r.id}>
+                <div
+                  onClick={() => hasInterestingDiff && toggleExpanded(r.id)}
+                  title={hasInterestingDiff
+                    ? (isExpanded ? 'Click to collapse field diff' : 'Click to expand field diff')
+                    : 'No field-level changes to show'}
+                  style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    fontSize: 10.5, padding: '3px 6px',
+                    fontFamily: 'inherit', color: isSkip ? '#7a7a90' : '#d8d8e0',
+                    opacity: isSkip ? 0.7 : 1,
+                    cursor: hasInterestingDiff ? 'pointer' : 'default',
+                    borderRadius: 4,
+                    background: isExpanded ? 'rgba(99,102,241,0.10)' : 'transparent',
+                    transition: 'background 0.12s ease-out',
+                  }}>
                 <span style={{
                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   maxWidth: '38%', fontWeight: 600,
-                }} title={r.label}>{r.label}</span>
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                }} title={r.label}>
+                  {/* R25.41 — expand caret. Only shown when the row has
+                      a non-empty diff to surface (otherwise expansion
+                      is a no-op and the caret would lie). */}
+                  {hasInterestingDiff && (
+                    <span style={{
+                      fontSize: 8, color: '#7a7a90',
+                      transition: 'transform 0.18s cubic-bezier(0.2,0.8,0.2,1)',
+                      transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                      display: 'inline-block', width: 8,
+                    }}>{'\u25b6'}</span>
+                  )}
+                  {r.label}
+                </span>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                   <span style={{
                     fontFamily: 'Geist Mono, JetBrains Mono, monospace',
@@ -2233,7 +2318,7 @@ function BiasOverridesImportPreview({ pending, existing, onModeChange, onCancel,
                     fontStyle: r.live ? 'normal' : 'italic',
                   }} title={r.live
                     ? `Live override: ${liveFieldCount} field${liveFieldCount === 1 ? '' : 's'} set`
-                    : 'No live override — chip uses shipped default'}>
+                    : 'No live override \u2014 chip uses shipped default'}>
                     {r.live ? `${liveFieldCount}f` : 'default'}
                   </span>
                   <span style={{ color: '#7a7a90', fontSize: 10 }}>{'\u2192'}</span>
@@ -2264,6 +2349,71 @@ function BiasOverridesImportPreview({ pending, existing, onModeChange, onCancel,
                     )}
                   </span>
                 </span>
+                </div>
+                {/* R25.41 — per-FIELD diff panel. Expands inline under
+                    the row when toggled. Each diff row shows the field
+                    name, kind tag, action badge, and value(s) so the
+                    user can audit the change at a glance. */}
+                {isExpanded && hasInterestingDiff && (
+                  <div style={{
+                    padding: '4px 6px 6px 18px',
+                    background: 'rgba(99,102,241,0.04)',
+                    borderRadius: 4,
+                    borderLeft: '2px solid rgba(99,102,241,0.30)',
+                    margin: '0 0 2px 6px',
+                  }}>
+                    {diffRows.map(d => {
+                      const isAdd = d.action === 'add'
+                      const isChange = d.action === 'change'
+                      const isLiveOnly = d.action === 'live-only'
+                      const tagBg = isAdd ? 'rgba(34,197,94,0.10)'
+                                  : isChange ? 'rgba(245,158,11,0.10)'
+                                  : 'rgba(239,68,68,0.10)'
+                      const tagBd = isAdd ? '1px solid rgba(34,197,94,0.30)'
+                                  : isChange ? '1px solid rgba(245,158,11,0.30)'
+                                  : '1px solid rgba(239,68,68,0.30)'
+                      const tagFg = isAdd ? '#86efac'
+                                  : isChange ? '#fde68a'
+                                  : '#fca5a5'
+                      const tagText = isAdd ? 'ADD'
+                                    : isChange ? 'CHG'
+                                    : 'DROP'
+                      return (
+                        <div key={d.field} style={{
+                          display: 'flex', alignItems: 'center', gap: 4,
+                          padding: '2px 0',
+                          fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                          fontSize: 9.5,
+                        }}>
+                          <span style={{
+                            padding: '1px 4px', borderRadius: 3,
+                            background: tagBg,
+                            color: tagFg,
+                            border: tagBd,
+                            fontSize: 8, fontWeight: 700, letterSpacing: '0.04em',
+                            minWidth: 28, textAlign: 'center',
+                          }}>{tagText}</span>
+                          <span style={{ color: '#c8c8d4', fontWeight: 600, minWidth: 100 }}
+                                title={`${d.kind} field`}>
+                            {d.field}
+                          </span>
+                          <span style={{
+                            color: '#7a7a90',
+                            fontSize: 9, padding: '0 3px',
+                            background: 'rgba(255,255,255,0.03)',
+                            borderRadius: 3,
+                          }}>{d.kind === 'forceTypes' ? 'list' : d.kind}</span>
+                          <span style={{
+                            color: '#a8a8b8', flex: 1, textAlign: 'right',
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }} title={`${isLiveOnly ? 'live → drop' : isChange ? 'live → incoming' : 'incoming'}: ${formatBiasFieldDiffValue(d)}`}>
+                            {formatBiasFieldDiffValue(d)}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             )
           })}

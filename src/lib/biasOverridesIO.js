@@ -32,6 +32,7 @@
 
 import {
   sanitizeBiasOverride, SCENE_BIASES,
+  SCENE_BIAS_RANGE_FIELDS, SCENE_BIAS_CHANCE_FIELDS,
 } from './randomScene.js'
 
 export const EXPORT_KIND = 'ai-particle-simulator/bias-overrides'
@@ -301,6 +302,9 @@ export function buildBiasImportPreviewRows(items, existing, mode = 'merge') {
     const action = mode === 'replace'
       ? (isExisting ? 'overwrite' : 'add')
       : (isExisting ? 'skip' : 'add')
+    // R25.41 — per-FIELD diff. Always computed so the UI can decide
+    // whether to render the expanded view, but cheap to skip when the
+    // row is collapsed.
     return {
       id,
       label: labelById[id] || id,
@@ -310,6 +314,7 @@ export function buildBiasImportPreviewRows(items, existing, mode = 'merge') {
       wouldWrite,
       action,
       fieldCount: Object.keys(incoming || {}).length,
+      fieldDiff: buildBiasFieldDiff(incoming, live),
     }
   })
   rows.sort((a, b) => {
@@ -318,6 +323,108 @@ export function buildBiasImportPreviewRows(items, existing, mode = 'merge') {
     return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi)
   })
   return rows
+}
+
+// R25.41 — Per-FIELD diff projector. Graduates R24.36 which only
+// surfaced a `fieldCount`. The user needs to see WHICH fields are
+// being added or changed (counts going up to 50K when they expected
+// 5K is a different kind of OH-NO than \"counts: [10,30] → [9,28]\").
+//
+// Output: one row per UNIONED field across (incoming, live). Field
+// order follows the canonical order:
+//   range fields first  (counts, speedRange, glowRange, attractRange)
+//   chance fields next  (bgChance, forceFieldChance, ...)
+//   forceTypes last
+//
+// Each row carries:
+//   - field        — canonical field key
+//   - kind         — 'range' | 'chance' | 'forceTypes'
+//   - incoming     — incoming sanitized value (or undefined if not in import)
+//   - live         — live sanitized value (or undefined if not in current override)
+//   - action       — 'add' | 'change' | 'unchanged' | 'live-only'
+//                    'add'        : field appears in incoming, not in live
+//                    'change'     : field in both, but values differ
+//                    'unchanged'  : field in both, values match (sanitized)
+//                    'live-only'  : field in live but NOT in incoming
+//                                   (only meaningful in replace mode —
+//                                    in merge mode the live value
+//                                    is preserved untouched and we
+//                                    omit these to keep the diff tight)
+//
+// Defensive: non-object inputs → []. null live / undefined incoming
+// handled gracefully.
+//
+// Comparison semantics:
+//   - ranges (counts, *Range): [min, max] tuples; arr equality on
+//     sanitized values
+//   - chances: numeric equality on sanitized (clamped [0,1]) values
+//   - forceTypes: string-array; order-sensitive equality (the picker
+//     respects order via roundRobin)
+//
+// Pure / no DOM — caller paints the rows.
+export function buildBiasFieldDiff(incomingRaw, liveRaw) {
+  const incoming = (incomingRaw && typeof incomingRaw === 'object' && !Array.isArray(incomingRaw))
+    ? sanitizeBiasOverride(incomingRaw)
+    : {}
+  const live = (liveRaw && typeof liveRaw === 'object' && !Array.isArray(liveRaw))
+    ? sanitizeBiasOverride(liveRaw)
+    : {}
+  // Canonical field order — ranges first, chances second, forceTypes last.
+  const allFields = [...SCENE_BIAS_RANGE_FIELDS, ...SCENE_BIAS_CHANCE_FIELDS, 'forceTypes']
+  const kindByField = {}
+  for (const f of SCENE_BIAS_RANGE_FIELDS) kindByField[f] = 'range'
+  for (const f of SCENE_BIAS_CHANCE_FIELDS) kindByField[f] = 'chance'
+  kindByField.forceTypes = 'forceTypes'
+  const out = []
+  for (const field of allFields) {
+    const inHas = Object.prototype.hasOwnProperty.call(incoming, field)
+    const liHas = Object.prototype.hasOwnProperty.call(live, field)
+    if (!inHas && !liHas) continue
+    const inVal = inHas ? incoming[field] : undefined
+    const liVal = liHas ? live[field]     : undefined
+    let action
+    if (!liHas)       action = 'add'
+    else if (!inHas)  action = 'live-only'
+    else if (biasFieldValuesEqual(field, inVal, liVal)) action = 'unchanged'
+    else              action = 'change'
+    out.push({
+      field, kind: kindByField[field],
+      incoming: inVal, live: liVal,
+      action,
+    })
+  }
+  return out
+}
+
+// Pure equality check for bias-override field values. Routes by kind:
+//   - range fields (4): two-element numeric array, element-wise eq
+//   - chance fields (10): numeric eq
+//   - forceTypes: string-array, order-sensitive eq
+// Defensive: type mismatch → false (treat as different so the UI
+// flags it for the user instead of silently \"unchanged\").
+export function biasFieldValuesEqual(field, a, b) {
+  if (a === b) return true
+  if (a == null || b == null) return false
+  if (SCENE_BIAS_RANGE_FIELDS.includes(field)) {
+    if (!Array.isArray(a) || !Array.isArray(b)) return false
+    if (a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return false
+    }
+    return true
+  }
+  if (SCENE_BIAS_CHANCE_FIELDS.includes(field)) {
+    return Number.isFinite(a) && Number.isFinite(b) && a === b
+  }
+  if (field === 'forceTypes') {
+    if (!Array.isArray(a) || !Array.isArray(b)) return false
+    if (a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return false
+    }
+    return true
+  }
+  return false
 }
 
 // Trigger a browser download of the JSON envelope. Returns the

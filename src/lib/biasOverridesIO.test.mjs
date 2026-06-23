@@ -14,6 +14,8 @@ import {
   parseImport, mergeImport, summarizeImportImpact,
   combineDroppedBiasFiles,
   buildBiasImportPreviewRows,
+  // R25.41 — per-field diff projector + value equality
+  buildBiasFieldDiff, biasFieldValuesEqual,
 } from './biasOverridesIO.js'
 import { SCENE_BIASES, SCENE_BIAS_RANGE_FIELDS, SCENE_BIAS_CHANCE_FIELDS } from './randomScene.js'
 
@@ -538,4 +540,174 @@ ok(SCENE_BIAS_CHANCE_FIELDS.length === 10, 'schema: 10 chance fields')
   eq(JSON.stringify(existing), beforeExist, 'existing not mutated')
 }
 
-console.log(`PASS: biasOverridesIO — envelope build/parse, merge/replace, summarize, defensive, multi-file combine, R24.36 preview rows (${SCENE_BIASES.length} chip ids, ${SCENE_BIAS_RANGE_FIELDS.length} ranges + ${SCENE_BIAS_CHANCE_FIELDS.length} chances per chip)`)
+// --- R25.41: buildBiasFieldDiff — per-FIELD diff projector ---------------
+
+// Add: incoming has the field, live doesn't (or no live at all).
+{
+  const diff = buildBiasFieldDiff({ counts: [100, 200] }, null)
+  eq(diff.length, 1, 'one field in incoming → one row')
+  eq(diff[0].field, 'counts', 'field name')
+  eq(diff[0].action, 'add', 'no live → add')
+  deepEq(diff[0].incoming, [100, 200], 'incoming carries the value')
+  eq(diff[0].live, undefined, 'no live value')
+  eq(diff[0].kind, 'range', 'counts is a range field')
+}
+
+// Change: same field both sides, different sanitized values.
+{
+  const diff = buildBiasFieldDiff({ counts: [100, 200] }, { counts: [50, 100] })
+  eq(diff.length, 1, 'one field both sides → one row')
+  eq(diff[0].action, 'change', 'differing values → change')
+  deepEq(diff[0].incoming, [100, 200], 'incoming carries new')
+  deepEq(diff[0].live,     [50, 100],  'live carries old')
+}
+
+// Unchanged: same field both sides, equal sanitized values.
+{
+  const diff = buildBiasFieldDiff({ bgChance: 0.5 }, { bgChance: 0.5 })
+  eq(diff.length, 1, 'one field both sides → one row')
+  eq(diff[0].action, 'unchanged', 'equal values → unchanged')
+}
+
+// Live-only: field exists in live but not in incoming.
+{
+  const diff = buildBiasFieldDiff({}, { counts: [1, 2] })
+  eq(diff.length, 1, 'one row for live-only field')
+  eq(diff[0].action, 'live-only', 'incoming missing → live-only')
+  eq(diff[0].incoming, undefined, 'no incoming')
+  deepEq(diff[0].live, [1, 2], 'live carries the value')
+}
+
+// Field ordering: ranges before chances before forceTypes.
+{
+  const diff = buildBiasFieldDiff({
+    forceTypes: ['attractor'],
+    bgChance:   0.5,
+    counts:     [1, 2],
+  }, null)
+  eq(diff.length, 3, 'all three rows')
+  eq(diff[0].field, 'counts',     'ranges first')
+  eq(diff[1].field, 'bgChance',   'chances second')
+  eq(diff[2].field, 'forceTypes', 'forceTypes last')
+}
+
+// Kind tagging — every field knows its kind.
+{
+  const diff = buildBiasFieldDiff({
+    counts: [1, 2], speedRange: [1, 2], glowRange: [1, 2], attractRange: [1, 2],
+    bgChance: 0.5, forceFieldChance: 0.5,
+    forceTypes: ['attractor'],
+  }, null)
+  const byKind = diff.reduce((acc, d) => {
+    acc[d.kind] = (acc[d.kind] || 0) + 1
+    return acc
+  }, {})
+  eq(byKind.range, 4,       '4 range fields')
+  eq(byKind.chance, 2,      '2 chance fields')
+  eq(byKind.forceTypes, 1,  '1 forceTypes')
+}
+
+// Defensive: non-object incoming → []. non-object live treated as empty.
+{
+  deepEq(buildBiasFieldDiff(null, null),       [], 'null incoming → []')
+  deepEq(buildBiasFieldDiff(undefined, null),  [], 'undefined incoming → []')
+  deepEq(buildBiasFieldDiff('str', null),      [], 'string incoming → []')
+  deepEq(buildBiasFieldDiff(42, null),         [], 'number incoming → []')
+  deepEq(buildBiasFieldDiff([1, 2], null),     [], 'array incoming → []')
+  const d = buildBiasFieldDiff({ bgChance: 0.5 }, 'not-an-object')
+  eq(d.length, 1, 'non-object live → treated as empty (live=undefined)')
+  eq(d[0].action, 'add', '... so the field reads as add')
+}
+
+// Sanitization: invalid input field values dropped (sanitizeBiasOverride
+// step runs first). Negative counts → field dropped → no diff row.
+{
+  const diff = buildBiasFieldDiff({ counts: [-5, 100] }, { counts: [50, 100] })
+  // The incoming is sanitized away (sub-zero rejected), so this is
+  // a live-only row — the incoming side is empty.
+  eq(diff.length, 1, 'still one row because live has the field')
+  eq(diff[0].action, 'live-only', 'invalid incoming → live-only after sanitize')
+}
+
+// Unknown field keys (not in schema) silently dropped by sanitizer.
+{
+  const diff = buildBiasFieldDiff({ counts: [1, 2], gibberish: 'foo' }, null)
+  eq(diff.length, 1, 'unknown keys dropped pre-diff')
+  eq(diff[0].field, 'counts', '... only the schema-valid one remains')
+}
+
+// --- R25.41: biasFieldValuesEqual — value equality semantics ---------------
+
+// Range equality: element-wise.
+{
+  ok(biasFieldValuesEqual('counts', [1, 2], [1, 2]),   'equal ranges')
+  ok(!biasFieldValuesEqual('counts', [1, 2], [1, 3]),  'different max')
+  ok(!biasFieldValuesEqual('counts', [1, 2], [2, 2]),  'different min')
+  ok(!biasFieldValuesEqual('counts', [1, 2], [1]),     'length mismatch')
+  ok(!biasFieldValuesEqual('counts', [1, 2], null),    'one null')
+  ok(!biasFieldValuesEqual('counts', [1, 2], 5),       'number not equal to range')
+}
+
+// Chance equality: numeric.
+{
+  ok(biasFieldValuesEqual('bgChance', 0.5, 0.5),         'equal chances')
+  ok(!biasFieldValuesEqual('bgChance', 0.5, 0.500001),   'tiny differences not equal')
+  ok(!biasFieldValuesEqual('bgChance', 0.5, null),       'one null')
+  ok(!biasFieldValuesEqual('bgChance', NaN, NaN),        'NaN never equal')
+}
+
+// forceTypes equality: order-sensitive.
+{
+  ok(biasFieldValuesEqual('forceTypes', ['a', 'b'], ['a', 'b']),    'same order')
+  ok(!biasFieldValuesEqual('forceTypes', ['a', 'b'], ['b', 'a']),   'different order → different')
+  ok(!biasFieldValuesEqual('forceTypes', ['a'], ['a', 'a']),        'length differs')
+  ok(biasFieldValuesEqual('forceTypes', [], []),                    'both empty arrays')
+  ok(!biasFieldValuesEqual('forceTypes', null, []),                 'null vs empty array')
+}
+
+// Identity short-circuit (same ref always equal).
+{
+  const arr = [1, 2]
+  ok(biasFieldValuesEqual('counts', arr, arr), 'same array ref is equal')
+  ok(biasFieldValuesEqual('forceTypes', arr, arr), 'same ref equal regardless of kind')
+}
+
+// Unknown field key (not in any kind list) → false for non-identical values
+// (defensive — we don't know the comparison semantics). Identity short-
+// circuit still applies for trivially-equal primitives, which is fine.
+{
+  ok(!biasFieldValuesEqual('gibberish', 1, 2), 'unknown field + different values → false')
+  ok(!biasFieldValuesEqual('gibberish', [1], [1]), 'unknown field + array refs → false')
+}
+
+// --- R25.41: integration — buildBiasImportPreviewRows now carries fieldDiff ---
+
+{
+  const rows = buildBiasImportPreviewRows(
+    { calm: { counts: [1, 100], bgChance: 0.3 } },
+    { calm: { counts: [1, 100], bgChance: 0.5 } },
+    'merge',
+  )
+  eq(rows.length, 1, 'one row for the chip')
+  ok(Array.isArray(rows[0].fieldDiff), 'fieldDiff present + array')
+  eq(rows[0].fieldDiff.length, 2, 'two fields in the diff')
+  // counts unchanged + bgChance changed.
+  const byField = Object.fromEntries(rows[0].fieldDiff.map(d => [d.field, d.action]))
+  eq(byField.counts,   'unchanged', 'counts equal both sides')
+  eq(byField.bgChance, 'change',    'bgChance differs')
+}
+
+// Replace mode: surfaces live-only fields the import would drop.
+{
+  const rows = buildBiasImportPreviewRows(
+    { calm: { counts: [1, 100] } },
+    { calm: { counts: [1, 100], bgChance: 0.5 } },
+    'replace',
+  )
+  eq(rows.length, 1, 'one row for the chip')
+  const byField = Object.fromEntries(rows[0].fieldDiff.map(d => [d.field, d.action]))
+  eq(byField.counts,   'unchanged', 'counts equal')
+  eq(byField.bgChance, 'live-only', 'bgChance would be dropped in replace')
+}
+
+console.log(`PASS: biasOverridesIO — envelope build/parse, merge/replace, summarize, defensive, multi-file combine, R24.36 preview rows, R25.41 per-field diff (${SCENE_BIASES.length} chip ids, ${SCENE_BIAS_RANGE_FIELDS.length} ranges + ${SCENE_BIAS_CHANCE_FIELDS.length} chances per chip)`)
