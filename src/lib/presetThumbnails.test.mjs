@@ -18,6 +18,10 @@ import {
   isValidNoteFilterMode, compileNoteRegex,
   noteMatchesQueryWithMode, isValidQueryForMode,
   presetsMatchingNoteWithMode, summarizeNoteFilterWithMode,
+  // R25.42 — note-filter pattern history dropdown
+  NOTE_FILTER_HISTORY_MAX, NOTE_FILTER_HISTORY_QUERY_MAX,
+  sanitizeNoteFilterHistory, loadNoteFilterHistory, saveNoteFilterHistory,
+  addNoteFilterHistoryEntry, removeNoteFilterHistoryEntry, clearNoteFilterHistory,
   THUMB_WIDTH, THUMB_HEIGHT,
 } from './presetThumbnails.js'
 
@@ -1154,3 +1158,184 @@ eq(isValidNoteFilterMode(42),          false, 'number is invalid')
 }
 
 console.log('PASS: noteMatchesQueryWithMode + presetsMatchingNoteWithMode + summarizeNoteFilterWithMode + compileNoteRegex (R24.37, regex mode toggle, ~70 asserts)')
+
+// -----------------------------------------------------------------
+// R25.42: Note-filter pattern history (dropdown)
+// -----------------------------------------------------------------
+
+// Constants exist + sensible.
+{
+  eq(typeof NOTE_FILTER_HISTORY_MAX, 'number', 'MAX is a number')
+  truthy(NOTE_FILTER_HISTORY_MAX > 0, 'MAX > 0')
+  truthy(NOTE_FILTER_HISTORY_MAX <= 50, 'MAX reasonable (<=50)')
+  eq(typeof NOTE_FILTER_HISTORY_QUERY_MAX, 'number', 'query max is a number')
+  truthy(NOTE_FILTER_HISTORY_QUERY_MAX >= 128, 'query max >= 128 chars')
+}
+
+// sanitizeNoteFilterHistory — happy + defensive.
+{
+  // Bad inputs → [].
+  if (sanitizeNoteFilterHistory(null).length !== 0) fail('null input → []')
+  if (sanitizeNoteFilterHistory(undefined).length !== 0) fail('undefined input → []')
+  if (sanitizeNoteFilterHistory({}).length !== 0) fail('object input → []')
+  if (sanitizeNoteFilterHistory('str').length !== 0) fail('string input → []')
+  if (sanitizeNoteFilterHistory(42).length !== 0) fail('number input → []')
+  // Bad entries dropped.
+  const partial = sanitizeNoteFilterHistory([
+    null, undefined, 'str', 42,
+    { query: '' },                                // empty query
+    { query: '  ' },                              // whitespace
+    { query: 'a'.repeat(NOTE_FILTER_HISTORY_QUERY_MAX + 1) },   // too long
+    { query: 'good', mode: 'substring' },         // valid
+    { query: 'demo', mode: 'invalid-mode' },      // mode coerces
+    { query: '^demo$', mode: 'regex' },           // valid
+  ])
+  eq(partial.length, 3, '3 valid entries kept')
+  eq(partial[0].query, 'good', 'first valid kept')
+  eq(partial[1].mode, 'substring', 'invalid mode coerces to substring')
+  eq(partial[2].mode, 'regex', 'regex mode preserved')
+  // Cap enforced.
+  const longList = Array.from({ length: NOTE_FILTER_HISTORY_MAX + 5 }, (_, i) =>
+    ({ query: `q${i}`, mode: 'substring' }))
+  eq(sanitizeNoteFilterHistory(longList).length, NOTE_FILTER_HISTORY_MAX, 'cap enforced')
+  // Trim applied.
+  eq(sanitizeNoteFilterHistory([{ query: '  demo  ' }])[0].query, 'demo', 'trimmed')
+  // addedAt back-fills if missing or non-finite.
+  const e = sanitizeNoteFilterHistory([{ query: 'x', addedAt: NaN }])
+  truthy(Number.isFinite(e[0].addedAt), 'NaN addedAt → backfilled')
+  const e2 = sanitizeNoteFilterHistory([{ query: 'x', addedAt: 12345 }])
+  eq(e2[0].addedAt, 12345, 'finite addedAt preserved')
+}
+
+// addNoteFilterHistoryEntry — MRU semantics.
+{
+  // Empty/whitespace query → no-op (returns input ref).
+  const empty = []
+  if (addNoteFilterHistoryEntry(empty, '', 'substring') !== empty) fail('empty query → no-op')
+  if (addNoteFilterHistoryEntry(empty, '   ', 'regex') !== empty) fail('whitespace query → no-op')
+  if (addNoteFilterHistoryEntry(empty, null, 'substring') !== empty) fail('null query → no-op')
+  if (addNoteFilterHistoryEntry(empty, 42, 'substring') !== empty) fail('non-string query → no-op')
+  // First entry: appears at head.
+  let list = addNoteFilterHistoryEntry([], 'demo', 'substring', 1000)
+  eq(list.length, 1, 'first entry added')
+  eq(list[0].query, 'demo', 'query saved')
+  eq(list[0].mode, 'substring', 'mode saved')
+  eq(list[0].addedAt, 1000, 'addedAt seeded')
+  // Second entry: head, first slides to second.
+  list = addNoteFilterHistoryEntry(list, 'test', 'regex', 2000)
+  eq(list.length, 2, 'second entry added')
+  eq(list[0].query, 'test', 'newest at head')
+  eq(list[1].query, 'demo', 'older slides down')
+  // Duplicate (same query + mode): moves existing to head — doesn't dupe.
+  list = addNoteFilterHistoryEntry(list, 'demo', 'substring', 3000)
+  eq(list.length, 2, 'no dupe')
+  eq(list[0].query, 'demo', 'dup moved to head')
+  eq(list[1].query, 'test', 'test slid down')
+  // Different mode same query: separate entry (regex 'demo' != substring 'demo').
+  list = addNoteFilterHistoryEntry(list, 'demo', 'regex', 4000)
+  eq(list.length, 3, 'different mode = new entry')
+  eq(list[0].query, 'demo', 'new at head')
+  eq(list[0].mode,  'regex', 'new mode')
+  // Same as head: no-op (ref-equal).
+  const before = list
+  const after  = addNoteFilterHistoryEntry(list, 'demo', 'regex', 5000)
+  if (after !== before) fail('same-as-head → ref-equal no-op')
+  // Cap enforced — oldest dropped.
+  let big = []
+  for (let i = 0; i < NOTE_FILTER_HISTORY_MAX + 3; i++) {
+    big = addNoteFilterHistoryEntry(big, `q${i}`, 'substring', 1000 + i)
+  }
+  eq(big.length, NOTE_FILTER_HISTORY_MAX, 'cap holds')
+  eq(big[0].query, `q${NOTE_FILTER_HISTORY_MAX + 2}`, 'newest at head')
+  // Invalid mode coerces to substring (still adds).
+  const coerced = addNoteFilterHistoryEntry([], 'q', 'gibberish', 7000)
+  eq(coerced[0].mode, 'substring', 'invalid mode → substring')
+  // Trim before storage.
+  const trimmed = addNoteFilterHistoryEntry([], '   demo  ', 'substring', 8000)
+  eq(trimmed[0].query, 'demo', 'trim applied')
+  // Too-long query → no-op.
+  const huge = addNoteFilterHistoryEntry([], 'a'.repeat(NOTE_FILTER_HISTORY_QUERY_MAX + 1), 'substring')
+  eq(huge.length, 0, 'oversize query rejected')
+}
+
+// removeNoteFilterHistoryEntry — happy + no-op.
+{
+  let list = []
+  list = addNoteFilterHistoryEntry(list, 'a', 'substring', 1000)
+  list = addNoteFilterHistoryEntry(list, 'b', 'substring', 2000)
+  list = addNoteFilterHistoryEntry(list, 'c', 'regex', 3000)
+  eq(list.length, 3, 'baseline')
+  // Remove middle entry.
+  const removed = removeNoteFilterHistoryEntry(list, 'a', 'substring')
+  eq(removed.length, 2, 'one entry removed')
+  eq(removed[0].query, 'c', 'order preserved')
+  eq(removed[1].query, 'b', 'order preserved (b after c)')
+  // Non-matching (query exists, wrong mode): no-op.
+  const noop = removeNoteFilterHistoryEntry(list, 'a', 'regex')
+  if (noop !== list) fail('non-matching → ref-equal no-op')
+  // Empty/whitespace query: no-op.
+  if (removeNoteFilterHistoryEntry(list, '', 'substring') !== list) fail('empty query → no-op')
+  // Non-array list: input ref.
+  const nullRet = removeNoteFilterHistoryEntry(null, 'q', 'substring')
+  eq(nullRet, null, 'null list → null')
+}
+
+// clearNoteFilterHistory.
+{
+  eq(clearNoteFilterHistory().length, 0, 'clear → empty')
+  // Always idempotent — return value never throws.
+  eq(clearNoteFilterHistory().length, 0, 'second clear → empty')
+}
+
+// Storage round-trip (save → load).
+{
+  // Stub storage that doesn't depend on the real localStorage.
+  const fakeStore = (() => {
+    const data = {}
+    return {
+      getItem: (k) => Object.prototype.hasOwnProperty.call(data, k) ? data[k] : null,
+      setItem: (k, v) => { data[k] = String(v) },
+      removeItem: (k) => { delete data[k] },
+    }
+  })()
+  // Empty load → [].
+  if (loadNoteFilterHistory(fakeStore).length !== 0) fail('empty store → []')
+  // Save populated.
+  let list = addNoteFilterHistoryEntry([], 'demo', 'substring', 1000)
+  list = addNoteFilterHistoryEntry(list, '^test$', 'regex', 2000)
+  if (!saveNoteFilterHistory(list, fakeStore)) fail('save returns true on success')
+  // Read back.
+  const read = loadNoteFilterHistory(fakeStore)
+  eq(read.length, 2, 'saved length')
+  eq(read[0].query, '^test$', 'newest first in round-trip')
+  eq(read[1].mode, 'substring', 'mode round-trips')
+  // Saving empty list REMOVES the key.
+  saveNoteFilterHistory([], fakeStore)
+  if (loadNoteFilterHistory(fakeStore).length !== 0) fail('empty save wipes key')
+  // Corrupt JSON → load returns [].
+  fakeStore.setItem('preset-note-filter-history-v1', '{not json}')
+  if (loadNoteFilterHistory(fakeStore).length !== 0) fail('corrupt JSON → []')
+  // Wrong version → [].
+  fakeStore.setItem('preset-note-filter-history-v1', JSON.stringify({ v: 99, items: [] }))
+  if (loadNoteFilterHistory(fakeStore).length !== 0) fail('wrong v → []')
+  // Missing items → [].
+  fakeStore.setItem('preset-note-filter-history-v1', JSON.stringify({ v: 1 }))
+  if (loadNoteFilterHistory(fakeStore).length !== 0) fail('missing items → []')
+  // No-storage paths.
+  if (loadNoteFilterHistory(null).length !== 0) fail('null storage load → []')
+  if (saveNoteFilterHistory([{ query: 'q' }], null) !== false) fail('null storage save → false')
+}
+
+// Pure input not mutated.
+{
+  const list = [{ query: 'a', mode: 'substring', addedAt: 1 }]
+  const beforeJSON = JSON.stringify(list)
+  addNoteFilterHistoryEntry(list, 'b', 'substring', 2)
+  eq(JSON.stringify(list), beforeJSON, 'add does not mutate input')
+  removeNoteFilterHistoryEntry(list, 'a', 'substring')
+  eq(JSON.stringify(list), beforeJSON, 'remove does not mutate input')
+  sanitizeNoteFilterHistory(list)
+  eq(JSON.stringify(list), beforeJSON, 'sanitize does not mutate input')
+}
+
+console.log('PASS: note-filter pattern history (R25.42, MRU + cap + storage round-trip + defensive, ~70 asserts)')

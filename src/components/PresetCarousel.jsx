@@ -19,6 +19,10 @@ import {
   NOTE_FILTER_MODE_SUBSTRING, NOTE_FILTER_MODE_REGEX,
   isValidNoteFilterMode, isValidQueryForMode,
   presetsMatchingNoteWithMode, summarizeNoteFilterWithMode,
+  // R25.42 — recent-patterns history dropdown
+  loadNoteFilterHistory, saveNoteFilterHistory,
+  addNoteFilterHistoryEntry, removeNoteFilterHistoryEntry,
+  clearNoteFilterHistory,
 } from '../lib/presetThumbnails'
 
 export default function PresetCarousel() {
@@ -55,6 +59,69 @@ export default function PresetCarousel() {
       return isValidNoteFilterMode(raw) ? raw : NOTE_FILTER_MODE_SUBSTRING
     } catch { return NOTE_FILTER_MODE_SUBSTRING }
   })
+  // R25.42 — recent-patterns history (MRU-ordered, capped). Loaded on
+  // mount; saved on every change via saveNoteFilterHistory. Sanitised
+  // on read + write so persisted corrupt JSON / hand-edited values
+  // can't crash the panel.
+  const [noteFilterHistory, setNoteFilterHistory] = useState(() => loadNoteFilterHistory())
+  // Dropdown open state. Auto-closes on Escape / outside-click /
+  // history-pick. Kept separate from the input's open state so a user
+  // can open the search input without immediately seeing the history
+  // (especially when the input has a draft query — the dropdown is
+  // about RECENT, not CURRENT).
+  const [historyOpen, setHistoryOpen] = useState(false)
+  // Save the history to localStorage with the ref-equal-on-no-op
+  // contract preserved from the lib (no redundant writes when nothing
+  // changed).
+  const persistNoteFilterHistory = (next) => {
+    if (next === noteFilterHistory) return   // no-op
+    setNoteFilterHistory(next)
+    saveNoteFilterHistory(next)
+  }
+  // Commit current (query, mode) to history. Called from the Enter-
+  // dismiss path (user signalled intent) and from the X-close path
+  // when the query is non-empty (user reviewed the filter before
+  // closing). Empty query is a no-op.
+  const commitToHistory = () => {
+    const raw = typeof noteQuery === 'string' ? noteQuery : ''
+    if (!raw.trim()) return
+    const next = addNoteFilterHistoryEntry(noteFilterHistory, raw, noteFilterMode)
+    persistNoteFilterHistory(next)
+  }
+  // Apply a history entry to the live filter — sets query + mode, closes
+  // the dropdown. Bumps the entry to the head of the MRU so re-using a
+  // pattern keeps it sticky.
+  const applyHistoryEntry = (entry) => {
+    if (!entry || typeof entry.query !== 'string') return
+    setNoteQuery(entry.query)
+    if (isValidNoteFilterMode(entry.mode) && entry.mode !== noteFilterMode) {
+      setNoteFilterMode(entry.mode)
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem('preset-note-filter-mode-v1', entry.mode)
+        }
+      } catch { /* quota */ }
+    }
+    setHistoryOpen(false)
+    // Bump to head (MRU). Same query + mode -> already-head -> ref-equal no-op.
+    const bumped = addNoteFilterHistoryEntry(noteFilterHistory, entry.query, entry.mode)
+    persistNoteFilterHistory(bumped)
+  }
+  // Remove one entry from history (X button on hover).
+  const removeHistoryEntry = (entry) => {
+    if (!entry) return
+    const next = removeNoteFilterHistoryEntry(noteFilterHistory, entry.query, entry.mode)
+    persistNoteFilterHistory(next)
+  }
+  // Wipe the whole history (footer button).
+  const clearHistory = () => {
+    persistNoteFilterHistory(clearNoteFilterHistory())
+    setHistoryOpen(false)
+  }
+  // Close dropdown when input collapses entirely.
+  useEffect(() => {
+    if (!noteFilterOpen) setHistoryOpen(false)
+  }, [noteFilterOpen])
   // Atomic mode-toggle: flip + persist + close the popover. Wrapped here
   // so the chip click + keyboard shortcut share the same code path.
   const toggleNoteFilterMode = () => {
@@ -346,6 +413,7 @@ export default function PresetCarousel() {
               border: noteQueryActive && !noteQueryUsable
                 ? '1px solid rgba(239,68,68,0.55)'
                 : '1px solid rgba(245,158,11,0.40)',
+              position: 'relative',   // R25.42 — anchor for history dropdown
             }}>
               <span style={{
                 fontSize: 14, lineHeight: 1,
@@ -359,12 +427,27 @@ export default function PresetCarousel() {
                 onKeyDown={(e) => {
                   if (e.key === 'Escape') {
                     e.preventDefault()
+                    if (historyOpen) {
+                      // Escape closes the dropdown first; second Esc clears the
+                      // query + closes the input (the original R23.34 behaviour).
+                      setHistoryOpen(false)
+                      return
+                    }
                     setNoteQuery('')
                     setNoteFilterOpen(false)
                   } else if (e.key === 'Enter') {
                     e.preventDefault()
-                    // Enter just dismisses the input (keeps the query).
+                    // R25.42 — Enter commits the current pattern to history
+                    // (signal of intent: user explicitly applied it) THEN
+                    // dismisses the input. Empty query is a no-op in commit.
+                    commitToHistory()
                     setNoteFilterOpen(false)
+                  } else if (e.key === 'ArrowDown' && noteFilterHistory.length > 0) {
+                    e.preventDefault()
+                    // R25.42 — Down arrow surfaces the history dropdown for
+                    // keyboard-only navigation. Clicking still works the
+                    // same. Doesn't auto-apply — user picks then Enter.
+                    setHistoryOpen(true)
                   }
                 }}
                 placeholder={noteFilterMode === NOTE_FILTER_MODE_REGEX
@@ -408,6 +491,37 @@ export default function PresetCarousel() {
                   letterSpacing: '0.05em',
                 }}
               >.*</button>
+              {/* R25.42 — history dropdown toggle. Only renders when at
+                  least one history entry exists; otherwise the user has
+                  no patterns to surface. Click toggles the dropdown
+                  below the input. */}
+              {noteFilterHistory.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setHistoryOpen(v => !v)}
+                  title={`Recent patterns (${noteFilterHistory.length}) — click to ${historyOpen ? 'hide' : 'show'} dropdown`}
+                  style={{
+                    width: 22, height: 16,
+                    borderRadius: 4,
+                    background: historyOpen
+                      ? 'rgba(34,211,238,0.22)'
+                      : 'rgba(255,255,255,0.04)',
+                    border: historyOpen
+                      ? '1px solid rgba(34,211,238,0.55)'
+                      : '1px solid rgba(255,255,255,0.10)',
+                    color: historyOpen ? '#67e8f9' : '#9a9ab0',
+                    fontSize: 9, lineHeight: 1, fontWeight: 700, cursor: 'pointer',
+                    padding: 0,
+                    fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                    letterSpacing: '0.05em',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    gap: 2,
+                  }}
+                >
+                  <span style={{ fontSize: 10 }}>{'\u29c9'}</span>
+                  <span style={{ fontSize: 8 }}>{noteFilterHistory.length}</span>
+                </button>
+              )}
               <span style={{
                 fontSize: 9,
                 color: noteQueryActive && !noteQueryUsable ? '#fecaca' : '#a8a8b0',
@@ -440,7 +554,13 @@ export default function PresetCarousel() {
               )}
               <button
                 type="button"
-                onClick={() => setNoteFilterOpen(false)}
+                onClick={() => {
+                  // R25.42 — closing via X also commits the query to
+                  // history if non-empty (parallels Enter dismissal).
+                  // Empty query is a no-op in commitToHistory.
+                  commitToHistory()
+                  setNoteFilterOpen(false)
+                }}
                 title="Close search (filter stays applied)"
                 style={{
                   width: 16, height: 16,
@@ -452,6 +572,139 @@ export default function PresetCarousel() {
                   padding: 0,
                 }}
               >{'\u2715'}</button>
+              {/* R25.42 — recent-patterns dropdown. Renders below the
+                  input row, MRU-ordered, with per-row apply (click) +
+                  remove (×) + a footer "Clear all". Click-outside +
+                  Escape close it (Escape inside the input is handled
+                  above so we re-use the input handler's path). */}
+              {historyOpen && noteFilterHistory.length > 0 && (
+                <>
+                  {/* Backdrop captures outside clicks — anchored beside
+                      the row, transparent so the page reads through. */}
+                  <span
+                    onClick={() => setHistoryOpen(false)}
+                    style={{
+                      position: 'fixed', inset: 0,
+                      zIndex: 200, background: 'transparent',
+                      cursor: 'default',
+                    }}
+                  />
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 4px)',
+                      right: 0,
+                      width: 240,
+                      maxHeight: 280,
+                      overflowY: 'auto',
+                      padding: '6px 0',
+                      borderRadius: 8,
+                      background: 'rgba(15,15,25,0.97)',
+                      border: '1px solid rgba(34,211,238,0.30)',
+                      boxShadow: '0 8px 22px rgba(0,0,0,0.55)',
+                      zIndex: 201,
+                      fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div style={{
+                      padding: '0 10px 4px',
+                      fontSize: 8.5, color: '#5a5a70',
+                      letterSpacing: '0.10em', textTransform: 'uppercase',
+                      borderBottom: '1px solid rgba(255,255,255,0.04)',
+                      marginBottom: 4,
+                    }}>Recent patterns ({noteFilterHistory.length})</div>
+                    {noteFilterHistory.map((entry, i) => {
+                      const isRegex = entry.mode === NOTE_FILTER_MODE_REGEX
+                      return (
+                        <div key={`${entry.mode}::${entry.query}`} style={{
+                          display: 'flex', alignItems: 'center', gap: 6,
+                          padding: '5px 8px',
+                          cursor: 'pointer',
+                          borderRadius: 4,
+                          background: i === 0 ? 'rgba(34,211,238,0.05)' : 'transparent',
+                          transition: 'background 0.10s ease-out',
+                        }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = 'rgba(34,211,238,0.12)'
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = i === 0
+                              ? 'rgba(34,211,238,0.05)' : 'transparent'
+                          }}
+                          onClick={() => applyHistoryEntry(entry)}
+                          title={`Click to apply "${entry.query}" (${entry.mode})`}
+                        >
+                          <span style={{
+                            fontSize: 8, padding: '1px 4px',
+                            borderRadius: 3, fontWeight: 700,
+                            background: isRegex
+                              ? 'rgba(99,102,241,0.18)'
+                              : 'rgba(245,158,11,0.14)',
+                            color: isRegex ? '#c7d2fe' : '#fde68a',
+                            border: isRegex
+                              ? '1px solid rgba(99,102,241,0.40)'
+                              : '1px solid rgba(245,158,11,0.30)',
+                            letterSpacing: '0.04em',
+                            minWidth: 22, textAlign: 'center',
+                          }}>{isRegex ? '.*' : 'AB'}</span>
+                          <span style={{
+                            flex: 1, color: '#e8e8f0', fontSize: 10.5,
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }}>{entry.query}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); removeHistoryEntry(entry) }}
+                            title="Remove from history"
+                            style={{
+                              width: 14, height: 14,
+                              borderRadius: '50%',
+                              background: 'rgba(255,255,255,0.04)',
+                              border: '1px solid rgba(255,255,255,0.10)',
+                              color: '#7a7a90',
+                              fontSize: 10, lineHeight: 1, fontWeight: 700, cursor: 'pointer',
+                              padding: 0, flexShrink: 0,
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background = 'rgba(239,68,68,0.15)'
+                              e.currentTarget.style.color = '#fca5a5'
+                              e.currentTarget.style.borderColor = 'rgba(239,68,68,0.30)'
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
+                              e.currentTarget.style.color = '#7a7a90'
+                              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.10)'
+                            }}
+                          >{'\u00d7'}</button>
+                        </div>
+                      )
+                    })}
+                    <div style={{
+                      borderTop: '1px solid rgba(255,255,255,0.04)',
+                      marginTop: 4, padding: '4px 8px 0',
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    }}>
+                      <span style={{ fontSize: 8.5, color: '#5a5a70' }}>
+                        {'\u2193'} arrow / click to apply
+                      </span>
+                      <button
+                        type="button"
+                        onClick={clearHistory}
+                        title="Wipe the whole recent-patterns list"
+                        style={{
+                          padding: '2px 8px',
+                          fontSize: 8.5, fontWeight: 700, letterSpacing: '0.06em',
+                          background: 'rgba(239,68,68,0.10)',
+                          color: '#fca5a5',
+                          border: '1px solid rgba(239,68,68,0.30)',
+                          borderRadius: 4, cursor: 'pointer',
+                          textTransform: 'uppercase',
+                        }}
+                      >Clear</button>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>

@@ -769,6 +769,138 @@ export function summarizeNoteFilterWithMode(presets, rawQuery, mode = NOTE_FILTE
   return { matching, totalWithNotes }
 }
 
+// R25.42 — Note-filter regex pattern HISTORY. Graduates R24.37's
+// regex-mode toggle with a dropdown of recently-used patterns the user
+// committed to (committed = applied to a non-empty result set OR
+// explicitly dismissed via Enter so the user signalled intent). Most
+// users land on 3-5 favourite patterns ("^demo$" / "good demo shot" /
+// "TODO|FIXME") and re-type them constantly; a one-click dropdown is
+// strictly better UX than retyping.
+//
+// Storage shape (localStorage key 'preset-note-filter-history-v1'):
+//   { v: 1, items: [{ query, mode, addedAt }, ...] }
+//
+// Cap at MAX_HISTORY entries; FIFO drops the oldest. Most-recent-first
+// order in the list so the UI can render top-down without re-sorting.
+// Duplicate (query, mode) pairs are deduped on add — re-adding an
+// existing entry moves it to the head (MRU semantics), it doesn't
+// stack new copies. Sanitised on every load + save so corrupt
+// persisted JSON / hand-edited values can't crash the panel.
+
+export const NOTE_FILTER_HISTORY_MAX = 12
+export const NOTE_FILTER_HISTORY_QUERY_MAX = 256  // matches compileNoteRegex's ReDoS guard
+const NOTE_FILTER_HISTORY_KEY = 'preset-note-filter-history-v1'
+
+// Sanitize one history entry. Returns null on bad shape.
+function sanitizeHistoryEntry(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const query = typeof raw.query === 'string' ? raw.query.trim() : ''
+  if (!query) return null
+  if (query.length > NOTE_FILTER_HISTORY_QUERY_MAX) return null
+  const mode = isValidNoteFilterMode(raw.mode) ? raw.mode : NOTE_FILTER_MODE_SUBSTRING
+  const addedAt = Number.isFinite(raw.addedAt) ? raw.addedAt : Date.now()
+  return { query, mode, addedAt }
+}
+
+// Sanitize the whole history list. Drops bad entries silently; caps
+// to MAX. Pure — input not mutated.
+export function sanitizeNoteFilterHistory(raw) {
+  if (!Array.isArray(raw)) return []
+  const out = []
+  for (const item of raw) {
+    const safe = sanitizeHistoryEntry(item)
+    if (safe) out.push(safe)
+    if (out.length >= NOTE_FILTER_HISTORY_MAX) break
+  }
+  return out
+}
+
+// Load the persisted history. Returns [] on missing/corrupt/no-storage.
+export function loadNoteFilterHistory(storage) {
+  const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null)
+  if (!store) return []
+  try {
+    const raw = store.getItem(NOTE_FILTER_HISTORY_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!parsed || parsed.v !== 1 || !Array.isArray(parsed.items)) return []
+    return sanitizeNoteFilterHistory(parsed.items)
+  } catch { return [] }
+}
+
+// Save the list to localStorage. No-op (returns false) when storage
+// isn't available. Empty lists REMOVE the key so we don't litter the
+// store with `{ items: [] }` shells.
+export function saveNoteFilterHistory(list, storage) {
+  const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null)
+  if (!store) return false
+  try {
+    const safe = sanitizeNoteFilterHistory(list)
+    if (safe.length === 0) {
+      store.removeItem(NOTE_FILTER_HISTORY_KEY)
+      return true
+    }
+    store.setItem(NOTE_FILTER_HISTORY_KEY, JSON.stringify({ v: 1, items: safe }))
+    return true
+  } catch { return false }
+}
+
+// Add a (query, mode) pair to the history list. Returns a NEW list
+// with MRU semantics:
+//   - blank / whitespace query: no-op (returns input ref)
+//   - invalid mode: coerces to substring (still adds)
+//   - duplicate (query, mode): moves existing to head, doesn't dupe
+//   - cap: oldest dropped when length exceeds MAX
+//
+// Ref-equal-on-no-op contract: same-as-current-head returns input ref
+// so the persistence layer can skip a redundant write.
+//
+// `nowMs` injectable for tests (defaults to Date.now()).
+export function addNoteFilterHistoryEntry(list, rawQuery, mode, nowMs) {
+  const safeList = Array.isArray(list) ? list : []
+  const query = typeof rawQuery === 'string' ? rawQuery.trim() : ''
+  if (!query) return list   // ref-equal no-op
+  if (query.length > NOTE_FILTER_HISTORY_QUERY_MAX) return list
+  const safeMode = isValidNoteFilterMode(mode) ? mode : NOTE_FILTER_MODE_SUBSTRING
+  const addedAt = Number.isFinite(nowMs) ? nowMs : Date.now()
+  // Check for an existing match — same (query, mode). Trim before
+  // compare so " demo" and "demo" don't stack.
+  const idx = safeList.findIndex(e =>
+    e && typeof e.query === 'string' && e.query.trim() === query
+       && (isValidNoteFilterMode(e.mode) ? e.mode : NOTE_FILTER_MODE_SUBSTRING) === safeMode)
+  // No-op if it's already at the head (no need to bump).
+  if (idx === 0) return list
+  const next = [{ query, mode: safeMode, addedAt }]
+  for (let i = 0; i < safeList.length; i++) {
+    if (i === idx) continue   // remove dup
+    if (next.length >= NOTE_FILTER_HISTORY_MAX) break
+    const safe = sanitizeHistoryEntry(safeList[i])
+    if (safe) next.push(safe)
+  }
+  return next
+}
+
+// Remove one entry from the list by (query, mode). Returns the input
+// ref unchanged when nothing matches (no-op) so the persistence layer
+// can short-circuit.
+export function removeNoteFilterHistoryEntry(list, rawQuery, mode) {
+  if (!Array.isArray(list)) return list
+  const query = typeof rawQuery === 'string' ? rawQuery.trim() : ''
+  if (!query) return list
+  const safeMode = isValidNoteFilterMode(mode) ? mode : NOTE_FILTER_MODE_SUBSTRING
+  const idx = list.findIndex(e =>
+    e && typeof e.query === 'string' && e.query.trim() === query
+       && (isValidNoteFilterMode(e.mode) ? e.mode : NOTE_FILTER_MODE_SUBSTRING) === safeMode)
+  if (idx === -1) return list
+  return list.slice(0, idx).concat(list.slice(idx + 1))
+}
+
+// Wipe the whole history. Returns the empty list (clear is always
+// idempotent + always returns []).
+export function clearNoteFilterHistory() {
+  return []
+}
+
 // Wipe the cached thumbnail for one preset id. Returns true if the
 // entry existed and was removed; false if there was nothing to remove
 // (or storage isn't available). Used by the carousel's "rebuild this
