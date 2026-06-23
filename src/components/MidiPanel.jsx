@@ -20,6 +20,9 @@ import {
   sanitizeClampWarnAttractorOverrides,
   hasClampWarnAttractorFieldOverride,
   pruneClampWarnAttractorOverrides,
+  // R25.45 — bulk-clear per-attractor + count projector
+  clearClampWarnAttractorOverrides,
+  countClampWarnAttractorOverridesFor,
 } from '../lib/midiMap'
 import { ATTRACTOR_TYPES } from '../lib/namedAttractors'
 import {
@@ -173,6 +176,23 @@ export default function MidiPanel({ open, onClose }) {
   // on-no-op contract + sanitization + empty-prune.
   const setClampWarnAttractorFieldOverrideUI = (attractorId, field, value) => {
     const next = setClampWarnAttractorFieldOverride(clampWarnAttractorOverrides, attractorId, field, value)
+    if (next === clampWarnAttractorOverrides) return  // no-op
+    setClampWarnAttractorOverridesState(next)
+    try {
+      if (typeof localStorage !== 'undefined') {
+        if (Object.keys(next).length === 0) {
+          localStorage.removeItem('midi-clamp-warn-attractor-overrides-v1')
+        } else {
+          localStorage.setItem('midi-clamp-warn-attractor-overrides-v1', JSON.stringify(next))
+        }
+      }
+    } catch { /* quota / private mode */ }
+  }
+  // R25.45 — wipe EVERY per-(attractor, field) override for ONE attractor
+  // in a single call. Delegates to clearClampWarnAttractorOverrides which
+  // has the ref-equal-on-no-op contract baked in.
+  const clearAllClampWarnOverridesForAttractor = (attractorId) => {
+    const next = clearClampWarnAttractorOverrides(clampWarnAttractorOverrides, attractorId)
     if (next === clampWarnAttractorOverrides) return  // no-op
     setClampWarnAttractorOverridesState(next)
     try {
@@ -1348,6 +1368,8 @@ export default function MidiPanel({ open, onClose }) {
                                         }
                                         onChangeAttractor={(v) => setClampWarnAttractorFieldOverrideUI(a.attractor && a.attractor.id, a.field, v)}
                                         onClearAttractor={() => setClampWarnAttractorFieldOverrideUI(a.attractor && a.attractor.id, a.field, null)}
+                                        attractorOverrideCount={countClampWarnAttractorOverridesFor(clampWarnAttractorOverrides, a.attractor && a.attractor.id)}
+                                        onClearAllForAttractor={() => clearAllClampWarnOverridesForAttractor(a.attractor && a.attractor.id)}
                                         onClose={() => setClampThresholdPopoverFor(null)}
                                       />
                                     )}
@@ -2119,6 +2141,13 @@ function ClampThresholdPopover({
   // only.
   attractorId, attractorLabel,
   attractorOverrideValue, onChangeAttractor, onClearAttractor,
+  // R25.45 — bulk-clear for the current attractor: wipe EVERY per-
+  // (attractor, field) override this attractor has, in one click.
+  // attractorOverrideCount tells the popover how many cells would be
+  // wiped — drives the button's count label + disabled state. onClearAllForAttractor
+  // delegates to clearClampWarnAttractorOverrides under the hood.
+  attractorOverrideCount = 0,
+  onClearAllForAttractor,
   onClose,
 }) {
   const minPct = Math.round(CLAMP_WARN_THRESHOLD_MIN * 100)
@@ -2451,6 +2480,38 @@ function ClampThresholdPopover({
                 opacity: hasAttractorOverride ? 1 : 0.55,
               }}
             >Clear attr.</button>
+          )}
+          {/* R25.45 — bulk-clear EVERY per-(attractor, field) override
+              for the current attractor in one click. Disabled when the
+              attractor has 0 or 1 overrides (1 = the same as "Clear attr."
+              for the current field). The count is surfaced so the user
+              knows exactly how many cells they're about to wipe. */}
+          {showAttractorRow && attractorOverrideCount >= 2 && (
+            <button
+              onClick={() => {
+                if (typeof onClearAllForAttractor === 'function') onClearAllForAttractor()
+              }}
+              title={`Clear all ${attractorOverrideCount} per-field overrides for ${attractorLabel || attractorId}; every field on this attractor falls back to the per-field threshold.`}
+              style={{
+                padding: '3px 9px', borderRadius: 4,
+                fontSize: 9.5, fontWeight: 600, letterSpacing: '0.04em',
+                background: 'rgba(196,181,253,0.16)',
+                color: '#ddd6fe',
+                border: '1px solid rgba(167,139,250,0.50)',
+                cursor: 'pointer',
+                textTransform: 'uppercase',
+                fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+              }}
+            >
+              <span>Clear all</span>
+              <span style={{
+                fontSize: 8.5, padding: '0 4px', borderRadius: 3,
+                background: 'rgba(0,0,0,0.32)', color: '#c4b5fd',
+                border: '1px solid rgba(167,139,250,0.45)',
+                fontWeight: 700,
+              }}>{attractorOverrideCount}</span>
+            </button>
           )}
           {/* R23.32 — "Use global" clears this field's override so it
               falls back to the global threshold. Disabled when no

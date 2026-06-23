@@ -813,6 +813,31 @@ export function clearClampWarnAttractorOverrides(attractorOverrides, attractorId
   return next
 }
 
+// R25.45 — count how many per-field overrides exist for a single
+// attractor. Pure projector that drives the "Clear all (N)" bulk-
+// clear affordance in the ClampThresholdPopover. Returns 0 when:
+//   - non-object / array / null overrides map
+//   - non-string / empty attractor id
+//   - attractor has no entry
+//   - inner entry is malformed (non-object / array)
+// Each FIELD key is counted at most once (parallel to the resolver's
+// per-field semantics), unknown/non-finite per-field values are not
+// counted so the button label never overstates the wipe scope.
+export function countClampWarnAttractorOverridesFor(attractorOverrides, attractorId) {
+  if (!attractorOverrides || typeof attractorOverrides !== 'object' || Array.isArray(attractorOverrides)) return 0
+  if (typeof attractorId !== 'string' || !attractorId) return 0
+  if (!Object.prototype.hasOwnProperty.call(attractorOverrides, attractorId)) return 0
+  const inner = attractorOverrides[attractorId]
+  if (!inner || typeof inner !== 'object' || Array.isArray(inner)) return 0
+  let n = 0
+  for (const field of CLAMP_THRESHOLD_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(inner, field)) continue
+    if (!Number.isFinite(inner[field])) continue
+    n++
+  }
+  return n
+}
+
 // Has the given (attractor, field) got a per-attractor override that
 // DIFFERS from the effective field threshold (tier 2/3/4)? Used by
 // the UI to paint a per-attractor pip on the meter itself, distinct

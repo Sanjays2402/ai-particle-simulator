@@ -35,6 +35,8 @@ import {
   setClampWarnAttractorFieldOverride,
   clearAllClampWarnAttractorOverrides,
   clearClampWarnAttractorOverrides,
+  // R25.45 — bulk-clear count projector
+  countClampWarnAttractorOverridesFor,
   hasClampWarnAttractorFieldOverride,
   pruneClampWarnAttractorOverrides,
 } from './midiMap.js'
@@ -1989,3 +1991,92 @@ console.log('PASS: per-field clamp warn threshold overrides (R23.32, ~70 asserts
 }
 
 console.log('PASS: per-(attractor, field) clamp warn threshold overrides (R24.40, ~60 asserts)')
+
+// --- R25.45: countClampWarnAttractorOverridesFor (bulk-clear count) ---
+
+// Happy path: count matches actual number of populated fields.
+{
+  const overrides = {
+    'attr-1': { strength: 0.10, x: 0.20, y: 0.30 },
+    'attr-2': { radius: 0.15 },
+  }
+  eq(countClampWarnAttractorOverridesFor(overrides, 'attr-1'), 3, 'attr-1 has 3 fields')
+  eq(countClampWarnAttractorOverridesFor(overrides, 'attr-2'), 1, 'attr-2 has 1 field')
+}
+
+// Missing attractor → 0.
+{
+  const overrides = { 'attr-1': { strength: 0.10 } }
+  eq(countClampWarnAttractorOverridesFor(overrides, 'attr-bogus'), 0, 'missing attractor → 0')
+}
+
+// Empty overrides map → 0.
+{
+  eq(countClampWarnAttractorOverridesFor({}, 'attr-1'), 0, 'empty map → 0')
+}
+
+// Non-finite values aren't counted.
+{
+  const overrides = {
+    'attr-1': { strength: 0.10, x: NaN, y: Infinity, radius: 0.20 },
+  }
+  eq(countClampWarnAttractorOverridesFor(overrides, 'attr-1'), 2, 'NaN+Infinity skipped')
+}
+
+// Unknown field keys aren't counted (only CLAMP_THRESHOLD_FIELDS).
+{
+  const overrides = {
+    'attr-1': { strength: 0.10, gibberish: 0.50, foo: 0.20 },
+  }
+  eq(countClampWarnAttractorOverridesFor(overrides, 'attr-1'), 1, 'only known fields counted')
+}
+
+// Defensive: non-object/null/array overrides → 0.
+{
+  eq(countClampWarnAttractorOverridesFor(null,      'attr-1'), 0, 'null → 0')
+  eq(countClampWarnAttractorOverridesFor(undefined, 'attr-1'), 0, 'undefined → 0')
+  eq(countClampWarnAttractorOverridesFor([],        'attr-1'), 0, 'array → 0')
+  eq(countClampWarnAttractorOverridesFor('str',     'attr-1'), 0, 'string → 0')
+  eq(countClampWarnAttractorOverridesFor(42,        'attr-1'), 0, 'number → 0')
+}
+
+// Defensive: non-string / empty attractor id → 0.
+{
+  const overrides = { 'attr-1': { strength: 0.10 } }
+  eq(countClampWarnAttractorOverridesFor(overrides, ''),        0, 'empty id → 0')
+  eq(countClampWarnAttractorOverridesFor(overrides, null),      0, 'null id → 0')
+  eq(countClampWarnAttractorOverridesFor(overrides, undefined), 0, 'undefined id → 0')
+  eq(countClampWarnAttractorOverridesFor(overrides, 42),        0, 'number id → 0')
+}
+
+// Defensive: inner entry is not an object → 0.
+{
+  const overrides = { 'attr-1': null }
+  eq(countClampWarnAttractorOverridesFor(overrides, 'attr-1'), 0, 'null inner → 0')
+  const overrides2 = { 'attr-1': 'string' }
+  eq(countClampWarnAttractorOverridesFor(overrides2, 'attr-1'), 0, 'string inner → 0')
+  const overrides3 = { 'attr-1': [0.10, 0.20] }
+  eq(countClampWarnAttractorOverridesFor(overrides3, 'attr-1'), 0, 'array inner → 0')
+}
+
+// Each field key counted at most ONCE (no double-counting).
+// Build a populated entry covering every threshold field and verify.
+{
+  const inner = {}
+  // Use a small sample (don't import CLAMP_THRESHOLD_FIELDS — that
+  // would couple the test to the constant's length; instead use known
+  // names from the resolution chain).
+  for (const f of ['strength', 'radius', 'x', 'y', 'z', 'radiusLog']) inner[f] = 0.20
+  const overrides = { 'attr-1': inner }
+  eq(countClampWarnAttractorOverridesFor(overrides, 'attr-1'), 6, '6 distinct fields counted')
+}
+
+// Pure: input not mutated.
+{
+  const overrides = { 'attr-1': { strength: 0.10 } }
+  const before = JSON.stringify(overrides)
+  countClampWarnAttractorOverridesFor(overrides, 'attr-1')
+  eq(JSON.stringify(overrides), before, 'overrides not mutated')
+}
+
+console.log('PASS: countClampWarnAttractorOverridesFor (R25.45, bulk-clear count, ~25 asserts)')
