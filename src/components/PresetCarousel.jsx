@@ -9,6 +9,8 @@ import {
   formatThumbDetails,
   // R21.24 — Clear action inside the detail panel
   clearThumbnail,
+  // R22.29 — per-thumb user note
+  setThumbNote, THUMB_NOTE_MAX_LEN,
 } from '../lib/presetThumbnails'
 
 export default function PresetCarousel() {
@@ -395,7 +397,11 @@ export default function PresetCarousel() {
                 propagation guards + ambient Escape listener) closes
                 the panel. */}
             {thumb && md && detailId === p.id && (() => {
-              const rows = formatThumbDetails(md)
+              const allRows = formatThumbDetails(md)
+              // R22.29 — note row is rendered separately (multi-line +
+              // editable) so we strip it from the telemetry grid.
+              const rows = allRows.filter(r => r.key !== 'note')
+              const noteRow = allRows.find(r => r.key === 'note')
               return (
                 <div
                   onClick={(e) => e.stopPropagation()}
@@ -460,6 +466,31 @@ export default function PresetCarousel() {
                       ))}
                     </div>
                   )}
+                  {/* R22.29 — per-thumb user note. Free-form text the
+                      user can attach to a thumbnail to label it ("good
+                      demo shot", "wrong colors", "use for OG card",
+                      etc). Persists alongside the metadata via
+                      setThumbNote; saves on Enter / blur (Shift+Enter
+                      newline). Capped at THUMB_NOTE_MAX_LEN — the
+                      counter goes amber within 20 of the cap so users
+                      see how much room they have left. */}
+                  <ThumbNoteEditor
+                    presetId={p.id}
+                    initialNote={noteRow ? noteRow.value : ''}
+                    onSaved={(savedNote) => {
+                      // Update the in-memory metadata map so the badge +
+                      // detail panel reflect the new note immediately
+                      // without waiting for the prerenderer event.
+                      setMeta(prev => {
+                        const cur = prev[p.id]
+                        if (!cur) return prev
+                        const next = { ...cur }
+                        if (savedNote) next.note = savedNote
+                        else delete next.note
+                        return { ...prev, [p.id]: next }
+                      })
+                    }}
+                  />
                   {/* R21.24 — Rebuild / Clear action buttons scoped to
                       this tile. Currently the hover-only rebuild button
                       on the tile is the ONLY way to trigger a per-tile
@@ -589,6 +620,221 @@ export default function PresetCarousel() {
         .preset-tile .thumb-meta-badge { opacity: 0; transition: opacity 0.18s ease-out; }
         .preset-tile:hover .thumb-meta-badge { opacity: 1; }
       `}</style>
+    </div>
+  )
+}
+
+// R22.29 — per-thumb user note editor. Free-form text the user can
+// attach to a thumbnail to label it. Local state for the in-progress
+// draft; commits to localStorage via setThumbNote on Save / blur /
+// Enter. Empty / whitespace clears the note (collapses to no note).
+//
+// Lives as a leaf so the local draft state doesn't bubble up to the
+// PresetCarousel parent on every keystroke (would re-render the whole
+// grid for 46 tiles on each character typed). Mounting/unmounting on
+// detail-panel open/close is fine — the editor is render-cheap and
+// the data lives in localStorage, not React state.
+function ThumbNoteEditor({ presetId, initialNote, onSaved }) {
+  const [draft, setDraft] = useState(initialNote || '')
+  const [editing, setEditing] = useState(false)
+  // Sync the draft when the detail panel opens onto a different
+  // preset id (rare — we usually unmount/remount, but be safe).
+  // Resetting `editing` ensures the textarea doesn't carry a draft
+  // from the previous tile.
+  useEffect(() => {
+    setDraft(initialNote || '')
+    setEditing(false)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetId])
+
+  const trimmed = draft.trim().slice(0, THUMB_NOTE_MAX_LEN)
+  const charsLeft = THUMB_NOTE_MAX_LEN - trimmed.length
+  const dirty = trimmed !== (initialNote || '')
+
+  const save = () => {
+    if (!dirty) {
+      setEditing(false)
+      return
+    }
+    const ok = setThumbNote(presetId, trimmed)
+    if (ok) {
+      setEditing(false)
+      if (typeof onSaved === 'function') onSaved(trimmed)
+    }
+  }
+  const cancel = () => {
+    setDraft(initialNote || '')
+    setEditing(false)
+  }
+  const clear = () => {
+    setDraft('')
+    const ok = setThumbNote(presetId, '')
+    if (ok) {
+      setEditing(false)
+      if (typeof onSaved === 'function') onSaved('')
+    }
+  }
+
+  // Read-only view — single line of italic text + edit pencil.
+  // Empty state: "+ Add note" placeholder.
+  if (!editing) {
+    return (
+      <div style={{
+        marginTop: 8, paddingTop: 6,
+        borderTop: '1px solid rgba(255,255,255,0.06)',
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'flex-start', gap: 8,
+          minHeight: 18,
+        }}>
+          {initialNote ? (
+            <span
+              onClick={() => setEditing(true)}
+              title="Click to edit this note"
+              style={{
+                flex: 1, fontSize: 10.5, lineHeight: 1.5,
+                color: '#fde68a', fontStyle: 'italic',
+                wordBreak: 'break-word',
+                cursor: 'pointer',
+                padding: '2px 4px', margin: '-2px -4px',
+                borderRadius: 4,
+                transition: 'background 0.12s ease-out',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(245,158,11,0.08)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+            >
+              \u201c{initialNote}\u201d
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              title={`Attach a note to this thumbnail (\u2264${THUMB_NOTE_MAX_LEN} chars).`}
+              style={{
+                flex: 1, textAlign: 'left',
+                padding: '3px 6px', borderRadius: 4,
+                background: 'rgba(255,255,255,0.03)',
+                color: '#7a7a90',
+                border: '1px dashed rgba(255,255,255,0.10)',
+                fontSize: 10, fontStyle: 'italic',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >+ Add note</button>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // Edit mode — textarea + Save / Cancel / Clear buttons.
+  const overCap = charsLeft <= 0
+  const nearCap = charsLeft <= 20
+  return (
+    <div style={{
+      marginTop: 8, paddingTop: 6,
+      borderTop: '1px solid rgba(255,255,255,0.06)',
+    }}>
+      <textarea
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value.slice(0, THUMB_NOTE_MAX_LEN))}
+        onKeyDown={(e) => {
+          // Enter saves; Shift+Enter inserts newline. Esc cancels.
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault()
+            save()
+          } else if (e.key === 'Escape') {
+            e.preventDefault()
+            cancel()
+          }
+        }}
+        onBlur={() => {
+          // Blur saves silently (matches the camera-view rename pattern
+          // R14.18 — least-surprise for a free-text editor).
+          if (dirty) save()
+        }}
+        rows={3}
+        maxLength={THUMB_NOTE_MAX_LEN}
+        placeholder="Label this thumbnail \u2014 e.g. 'good demo shot', 'wrong colors', 'use for OG card'."
+        style={{
+          width: '100%', boxSizing: 'border-box',
+          padding: '5px 7px', borderRadius: 5,
+          background: 'rgba(2,2,8,0.65)',
+          border: '1px solid rgba(245,158,11,0.35)',
+          color: '#fde68a',
+          fontFamily: 'inherit',
+          fontSize: 10.5, lineHeight: 1.45,
+          resize: 'vertical',
+          minHeight: 50,
+        }}
+      />
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        marginTop: 5, gap: 6,
+      }}>
+        <span style={{
+          fontSize: 9, color: overCap ? '#fca5a5' : nearCap ? '#fbbf24' : '#7a7a90',
+          fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+        }}>
+          {trimmed.length}/{THUMB_NOTE_MAX_LEN} \u2014 Enter saves, Esc cancels
+        </span>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {initialNote && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); clear() }}
+              title="Remove this note"
+              style={{
+                padding: '3px 7px', borderRadius: 4,
+                fontSize: 9.5, fontWeight: 600,
+                background: 'rgba(239,68,68,0.10)',
+                color: '#fca5a5',
+                border: '1px solid rgba(239,68,68,0.30)',
+                cursor: 'pointer',
+                fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                textTransform: 'uppercase', letterSpacing: '0.06em',
+              }}
+            >Clear</button>
+          )}
+          <button
+            type="button"
+            onMouseDown={(e) => { e.preventDefault(); cancel() }}
+            title="Cancel without saving (Esc)"
+            style={{
+              padding: '3px 7px', borderRadius: 4,
+              fontSize: 9.5, fontWeight: 600,
+              background: 'rgba(255,255,255,0.04)',
+              color: '#9a9ab0',
+              border: '1px solid rgba(255,255,255,0.10)',
+              cursor: 'pointer',
+              fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+              textTransform: 'uppercase', letterSpacing: '0.06em',
+            }}
+          >Cancel</button>
+          <button
+            type="button"
+            onMouseDown={(e) => { e.preventDefault(); save() }}
+            disabled={!dirty}
+            title={dirty ? 'Save the note (Enter)' : 'No changes to save'}
+            style={{
+              padding: '3px 9px', borderRadius: 4,
+              fontSize: 9.5, fontWeight: 700,
+              background: dirty
+                ? 'linear-gradient(135deg, rgba(245,158,11,0.35), rgba(236,72,153,0.20))'
+                : 'rgba(255,255,255,0.04)',
+              color: dirty ? '#fed7aa' : '#5a5a70',
+              border: dirty
+                ? '1px solid rgba(245,158,11,0.45)'
+                : '1px solid rgba(255,255,255,0.05)',
+              cursor: dirty ? 'pointer' : 'not-allowed',
+              fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+              textTransform: 'uppercase', letterSpacing: '0.06em',
+              opacity: dirty ? 1 : 0.55,
+            }}
+          >Save</button>
+        </div>
+      </div>
     </div>
   )
 }

@@ -70,6 +70,62 @@ export function thumbMetadataKey(presetId) {
 
 const VALID_SOURCES = new Set(['live', 'render'])
 
+// R22.29 — max length cap for the per-thumb user note. 240 chars
+// fits two display lines in the detail panel at the current font
+// without forcing a scrollbar; keeps storage bounded so 46 presets
+// max out at <12 KB of note data even at the cap.
+export const THUMB_NOTE_MAX_LEN = 240
+
+// R22.29 — atomic note update. Reads the existing metadata, merges
+// the new note (trimmed + length-capped), writes back. Returns true
+// on a successful write OR a true clear (note===''/null/undefined
+// followed by a successful write of the metadata WITHOUT a note
+// field). Returns false on missing-storage / no-pre-existing-meta /
+// write failure. Pure side-effect via `storage` arg so tests can
+// inject an in-memory shim.
+//
+// We DON'T re-record the rest of the metadata fresh — that would
+// reset capturedAt + lose source/dimensions on a note edit. Instead
+// we mutate just the note key in the existing JSON envelope.
+//
+// When `note` is empty/whitespace/null/undefined, the field is REMOVED
+// (so a future readThumbMetadata returns metadata without a `note`
+// key, not metadata with `note: ''`). This keeps the schema clean
+// and the "no note" branch of the detail panel renders consistently.
+export function setThumbNote(presetId, note, storage) {
+  if (typeof presetId !== 'string' || !presetId) return false
+  const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null)
+  if (!store) return false
+  // Read the existing metadata raw — we want to preserve every field
+  // (incl. ones not in our current schema, e.g. future extensions)
+  // so a partial write doesn't lose data.
+  let raw
+  try { raw = store.getItem(thumbMetadataKey(presetId)) }
+  catch { return false }
+  if (!raw) return false  // no metadata to attach the note to
+  let parsed
+  try { parsed = JSON.parse(raw) }
+  catch { return false }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false
+  // Capture / clear the note.
+  const trimmed = typeof note === 'string' ? note.trim().slice(0, THUMB_NOTE_MAX_LEN) : ''
+  if (trimmed) {
+    // No-op if the note is already exactly this value (matches the
+    // ref-equal-on-no-op pattern from other lib helpers — saves a
+    // round-trip through JSON.stringify + localStorage write).
+    if (parsed.note === trimmed) return true
+    parsed.note = trimmed
+  } else {
+    // Empty / clearing — drop the key. No-op if already absent.
+    if (!Object.prototype.hasOwnProperty.call(parsed, 'note')) return true
+    delete parsed.note
+  }
+  try {
+    store.setItem(thumbMetadataKey(presetId), JSON.stringify(parsed))
+    return true
+  } catch { return false }
+}
+
 export function recordThumbMetadata(presetId, opts = {}, storage) {
   if (typeof presetId !== 'string' || !presetId) return false
   const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null)
@@ -94,6 +150,13 @@ export function recordThumbMetadata(presetId, opts = {}, storage) {
   }
   if (Number.isFinite(opts.byteSize) && opts.byteSize >= 0) {
     meta.byteSize = Math.round(opts.byteSize)
+  }
+  // R22.29 — user-authored note ("good demo shot", "wrong colors",
+  // etc). Optional; trimmed; capped at THUMB_NOTE_MAX_LEN to keep
+  // localStorage bounded and the detail panel layout sane.
+  if (typeof opts.note === 'string') {
+    const trimmed = opts.note.trim().slice(0, THUMB_NOTE_MAX_LEN)
+    if (trimmed) meta.note = trimmed
   }
   try {
     store.setItem(thumbMetadataKey(presetId), JSON.stringify(meta))
@@ -135,6 +198,12 @@ export function readThumbMetadata(presetId, storage) {
   }
   if (Number.isFinite(parsed.byteSize) && parsed.byteSize >= 0) {
     out.byteSize = Math.round(parsed.byteSize)
+  }
+  // R22.29 — user-authored note. Sanitized: trimmed, length-capped.
+  // Empty / non-string drops the field.
+  if (typeof parsed.note === 'string') {
+    const trimmed = parsed.note.trim().slice(0, THUMB_NOTE_MAX_LEN)
+    if (trimmed) out.note = trimmed
   }
   return out
 }
@@ -271,6 +340,18 @@ export function formatThumbDetails(metadata, now = Date.now()) {
     if (sizeStr) {
       out.push({ key: 'byteSize', label: 'Size', value: sizeStr })
     }
+  }
+  // R22.29 — user-authored note (free-form text). Tag the row with
+  // kind:'note' so the UI can paint it differently (italics / muted
+  // accent / multi-line wrap) — telemetry rows above use the default
+  // mono-key/value layout. Only emitted when a non-empty note exists.
+  if (typeof metadata.note === 'string' && metadata.note.trim()) {
+    out.push({
+      key: 'note',
+      label: 'Note',
+      value: metadata.note.trim(),
+      kind: 'note',
+    })
   }
   return out
 }

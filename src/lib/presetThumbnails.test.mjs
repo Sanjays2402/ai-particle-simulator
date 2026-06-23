@@ -9,6 +9,8 @@ import {
   summarizeThumbAge,
   // R20.19 — rich-detail formatter + byte-size formatter
   formatThumbDetails, formatByteSize,
+  // R22.29 — per-thumb user note (free-form text)
+  THUMB_NOTE_MAX_LEN, setThumbNote,
   THUMB_WIDTH, THUMB_HEIGHT,
 } from './presetThumbnails.js'
 
@@ -515,3 +517,244 @@ eq(thumbMetadataKey('spiral-galaxy'), 'preset-thumb-meta-spiral-galaxy', 'metada
 }
 
 console.log('PASS: presetThumbnails R19.13 metadata side-store + relative-time formatter')
+
+// --- R22.29: setThumbNote + note round-trip + formatThumbDetails ----------
+
+// THUMB_NOTE_MAX_LEN constant invariant.
+{
+  truthy(Number.isFinite(THUMB_NOTE_MAX_LEN), 'THUMB_NOTE_MAX_LEN is a finite number')
+  truthy(THUMB_NOTE_MAX_LEN > 0, 'THUMB_NOTE_MAX_LEN > 0')
+  truthy(THUMB_NOTE_MAX_LEN <= 1024, 'THUMB_NOTE_MAX_LEN bounded reasonably (≤1024) to keep storage small')
+}
+
+// Happy path — record metadata with a note + read it back.
+{
+  const s = makeFakeStorage()
+  const okWrite = recordThumbMetadata('a', {
+    width: 120, height: 80, source: 'live',
+    capturedAt: '2026-06-22T16:00:00.000Z',
+    note: 'good demo shot',
+  }, s)
+  truthy(okWrite, 'note write succeeds')
+  const md = readThumbMetadata('a', s)
+  eq(md.note, 'good demo shot', 'note round-trips through record+read')
+}
+
+// Note is trimmed on write.
+{
+  const s = makeFakeStorage()
+  recordThumbMetadata('b', { capturedAt: '2026-06-22T16:00:00.000Z', note: '   spaced   ' }, s)
+  eq(readThumbMetadata('b', s).note, 'spaced', 'note is trimmed on write')
+}
+
+// Note is length-capped on write.
+{
+  const s = makeFakeStorage()
+  const huge = 'x'.repeat(THUMB_NOTE_MAX_LEN + 100)
+  recordThumbMetadata('c', { capturedAt: '2026-06-22T16:00:00.000Z', note: huge }, s)
+  const md = readThumbMetadata('c', s)
+  eq(md.note.length, THUMB_NOTE_MAX_LEN, 'note is length-capped on write')
+}
+
+// Empty / whitespace note is dropped (not stored as empty string).
+{
+  const s = makeFakeStorage()
+  recordThumbMetadata('d', { capturedAt: '2026-06-22T16:00:00.000Z', note: '' }, s)
+  eq(readThumbMetadata('d', s).note, undefined, 'empty note is dropped')
+  recordThumbMetadata('e', { capturedAt: '2026-06-22T16:00:00.000Z', note: '   ' }, s)
+  eq(readThumbMetadata('e', s).note, undefined, 'whitespace-only note is dropped')
+}
+
+// Non-string note types silently skip (defensive).
+{
+  const s = makeFakeStorage()
+  recordThumbMetadata('f', { capturedAt: '2026-06-22T16:00:00.000Z', note: 42 }, s)
+  eq(readThumbMetadata('f', s).note, undefined, 'numeric note dropped')
+  recordThumbMetadata('g', { capturedAt: '2026-06-22T16:00:00.000Z', note: null }, s)
+  eq(readThumbMetadata('g', s).note, undefined, 'null note dropped')
+  recordThumbMetadata('h', { capturedAt: '2026-06-22T16:00:00.000Z', note: { x: 1 } }, s)
+  eq(readThumbMetadata('h', s).note, undefined, 'object note dropped')
+}
+
+// Read-side sanitization — corrupt persisted note still parses.
+{
+  const s = makeFakeStorage()
+  // Stuff a hand-rolled JSON with an over-long note.
+  const huge = 'y'.repeat(THUMB_NOTE_MAX_LEN + 500)
+  s.setItem(thumbMetadataKey('i'), JSON.stringify({
+    capturedAt: '2026-06-22T16:00:00.000Z',
+    width: 120, height: 80, source: 'live',
+    note: huge,
+  }))
+  const md = readThumbMetadata('i', s)
+  eq(md.note.length, THUMB_NOTE_MAX_LEN, 'read-side caps an over-long persisted note')
+}
+{
+  const s = makeFakeStorage()
+  // Note field present but non-string.
+  s.setItem(thumbMetadataKey('j'), JSON.stringify({
+    capturedAt: '2026-06-22T16:00:00.000Z',
+    width: 120, height: 80, source: 'live',
+    note: 99,
+  }))
+  const md = readThumbMetadata('j', s)
+  eq(md.note, undefined, 'non-string note on read returns undefined (no junk)')
+  // Other fields still intact.
+  eq(md.width, 120, 'corrupt note doesn\'t poison the read of other fields')
+  eq(md.source, 'live', 'corrupt note doesn\'t poison source')
+}
+
+// setThumbNote happy path — adds a note to existing metadata.
+{
+  const s = makeFakeStorage()
+  recordThumbMetadata('k1', { capturedAt: '2026-06-22T16:00:00.000Z' }, s)
+  const okSet = setThumbNote('k1', 'first note', s)
+  truthy(okSet, 'setThumbNote returns truthy on success')
+  eq(readThumbMetadata('k1', s).note, 'first note', 'setThumbNote adds note to existing meta')
+}
+
+// setThumbNote — updates existing note in place.
+{
+  const s = makeFakeStorage()
+  recordThumbMetadata('k2', { capturedAt: '2026-06-22T16:00:00.000Z', note: 'initial' }, s)
+  eq(readThumbMetadata('k2', s).note, 'initial', 'sanity: initial note present')
+  setThumbNote('k2', 'updated', s)
+  eq(readThumbMetadata('k2', s).note, 'updated', 'setThumbNote updates existing note')
+}
+
+// setThumbNote — empty / null / whitespace CLEARS the note field.
+{
+  const s = makeFakeStorage()
+  recordThumbMetadata('k3', { capturedAt: '2026-06-22T16:00:00.000Z', note: 'to clear' }, s)
+  setThumbNote('k3', '', s)
+  eq(readThumbMetadata('k3', s).note, undefined, 'empty string clears note')
+  // And the rest of the metadata survives.
+  truthy(readThumbMetadata('k3', s).capturedAt, 'clearing note preserves capturedAt')
+}
+{
+  const s = makeFakeStorage()
+  recordThumbMetadata('k4', { capturedAt: '2026-06-22T16:00:00.000Z', note: 'to clear' }, s)
+  setThumbNote('k4', null, s)
+  eq(readThumbMetadata('k4', s).note, undefined, 'null clears note')
+}
+{
+  const s = makeFakeStorage()
+  recordThumbMetadata('k5', { capturedAt: '2026-06-22T16:00:00.000Z', note: 'to clear' }, s)
+  setThumbNote('k5', '   \t  ', s)
+  eq(readThumbMetadata('k5', s).note, undefined, 'whitespace-only clears note')
+}
+
+// setThumbNote — trims + length-caps just like recordThumbMetadata.
+{
+  const s = makeFakeStorage()
+  recordThumbMetadata('k6', { capturedAt: '2026-06-22T16:00:00.000Z' }, s)
+  setThumbNote('k6', '   trimmed   ', s)
+  eq(readThumbMetadata('k6', s).note, 'trimmed', 'setThumbNote trims')
+  const huge = 'z'.repeat(THUMB_NOTE_MAX_LEN + 50)
+  setThumbNote('k6', huge, s)
+  eq(readThumbMetadata('k6', s).note.length, THUMB_NOTE_MAX_LEN, 'setThumbNote length-caps')
+}
+
+// setThumbNote — defensive return values.
+{
+  const s = makeFakeStorage()
+  // No pre-existing metadata for this id → false (we DON'T mint a
+  // new metadata envelope just for a note; notes attach to existing
+  // thumbs only).
+  eq(setThumbNote('nonexistent', 'oops', s), false,
+    'setThumbNote without pre-existing metadata → false')
+  // Bad presetId → false.
+  eq(setThumbNote('', 'oops', s), false, 'empty presetId → false')
+  eq(setThumbNote(null, 'oops', s), false, 'null presetId → false')
+  eq(setThumbNote(undefined, 'oops', s), false, 'undefined presetId → false')
+  eq(setThumbNote(123, 'oops', s), false, 'numeric presetId → false')
+  // No storage → false.
+  eq(setThumbNote('k1', 'oops', undefined, /* storage missing */), false,
+    'no storage available → false')
+}
+
+// setThumbNote — ref-equal no-op patterns.
+{
+  const s = makeFakeStorage()
+  recordThumbMetadata('k7', { capturedAt: '2026-06-22T16:00:00.000Z', note: 'same' }, s)
+  // Setting the SAME note again is a no-op but still returns true.
+  truthy(setThumbNote('k7', 'same', s), 'same-value re-set returns true (no-op)')
+  // Clearing an already-empty note is a no-op but returns true.
+  setThumbNote('k7', '', s)  // clear
+  truthy(setThumbNote('k7', '', s), 'clear-when-already-clear returns true (no-op)')
+}
+
+// setThumbNote — preserves other metadata fields untouched.
+{
+  const s = makeFakeStorage()
+  recordThumbMetadata('k8', {
+    capturedAt: '2026-06-22T16:00:00.000Z',
+    width: 200, height: 100, source: 'render',
+    particleCount: 5000, captureMs: 42, byteSize: 1024,
+  }, s)
+  setThumbNote('k8', 'attached', s)
+  const md = readThumbMetadata('k8', s)
+  eq(md.note,           'attached',                'note attached')
+  eq(md.capturedAt,     '2026-06-22T16:00:00.000Z', 'capturedAt preserved')
+  eq(md.width,          200,                        'width preserved')
+  eq(md.height,         100,                        'height preserved')
+  eq(md.source,         'render',                   'source preserved')
+  eq(md.particleCount,  5000,                       'particleCount preserved')
+  eq(md.captureMs,      42,                         'captureMs preserved')
+  eq(md.byteSize,       1024,                       'byteSize preserved')
+}
+
+// setThumbNote — defensive against corrupt persisted metadata.
+{
+  const s = makeFakeStorage()
+  s.setItem(thumbMetadataKey('corrupt-1'), 'not-json{{{')
+  eq(setThumbNote('corrupt-1', 'note', s), false,
+    'setThumbNote bails on corrupt JSON (returns false rather than overwriting)')
+  s.setItem(thumbMetadataKey('corrupt-2'), '"a string, not an object"')
+  eq(setThumbNote('corrupt-2', 'note', s), false,
+    'setThumbNote bails on non-object JSON')
+  s.setItem(thumbMetadataKey('corrupt-3'), '[1,2,3]')
+  eq(setThumbNote('corrupt-3', 'note', s), false,
+    'setThumbNote bails on array-top-level JSON')
+}
+
+// formatThumbDetails — note row is emitted with kind='note'.
+{
+  const md = {
+    capturedAt: '2026-06-22T16:00:00.000Z',
+    width: 120, height: 80, source: 'live',
+    note: 'good demo shot',
+  }
+  const rows = formatThumbDetails(md, Date.parse(md.capturedAt) + 1000)
+  const noteRow = rows.find(r => r.key === 'note')
+  truthy(noteRow, 'formatThumbDetails emits a note row when present')
+  eq(noteRow.label, 'Note', 'note row label')
+  eq(noteRow.value, 'good demo shot', 'note row value matches the stored note')
+  eq(noteRow.kind,  'note', 'note row tagged with kind for distinct rendering')
+}
+
+// formatThumbDetails — no note → no note row.
+{
+  const md = { capturedAt: '2026-06-22T16:00:00.000Z', width: 120, height: 80, source: 'live' }
+  const rows = formatThumbDetails(md)
+  truthy(rows.every(r => r.key !== 'note'), 'no note → no note row')
+}
+
+// formatThumbDetails — empty / whitespace note is treated as absent.
+{
+  const md1 = { capturedAt: '2026-06-22T16:00:00.000Z', width: 120, height: 80, source: 'live', note: '' }
+  const md2 = { capturedAt: '2026-06-22T16:00:00.000Z', width: 120, height: 80, source: 'live', note: '   ' }
+  truthy(formatThumbDetails(md1).every(r => r.key !== 'note'), 'empty-string note → no note row')
+  truthy(formatThumbDetails(md2).every(r => r.key !== 'note'), 'whitespace note → no note row')
+}
+
+// clearThumbMetadata + clearThumbnail cascade still works WITH notes.
+{
+  const s = makeFakeStorage()
+  recordThumbMetadata('cascade', { capturedAt: '2026-06-22T16:00:00.000Z', note: 'will be wiped' }, s)
+  eq(readThumbMetadata('cascade', s).note, 'will be wiped', 'sanity: note present')
+  clearThumbMetadata('cascade', s)
+  eq(readThumbMetadata('cascade', s), null, 'clearThumbMetadata wipes meta incl. note')
+}
+
+console.log('PASS: setThumbNote + note round-trip + formatThumbDetails note row (R22.29, ~50 asserts)')
