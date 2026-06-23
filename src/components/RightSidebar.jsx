@@ -756,6 +756,52 @@ function SceneBookmarks() {
       showToast('Bias export failed — check console')
     }
   }
+  // R21.23 + R22.28 — shared apply path. Both the file-picker (R21.23)
+  // AND the drag-drop drop zone (R22.28) flow through this, so the
+  // confirm prompt + merge/replace persistence stay in lockstep across
+  // entry points. Pass a File OR a string of raw JSON. Returns true on
+  // a successful import (UI used for confirm-callback semantics).
+  const parseAndApplyBiasImport = async (fileOrText) => {
+    try {
+      const text = typeof fileOrText === 'string'
+        ? fileOrText
+        : await fileOrText.text()
+      const res = parseBiasOverridesImport(text)
+      if (!res.ok) {
+        showToast(`Bias import failed: ${res.error}`)
+        return false
+      }
+      const existing = collectAllBiasOverrides()
+      const importCount = Object.keys(res.items).length
+      const conflictCount = Object.keys(res.items).filter(id => id in existing).length
+      const mode = window.confirm(
+        `Import ${importCount} bias override${importCount === 1 ? '' : 's'}` +
+        (conflictCount > 0 ? ` (${conflictCount} overlap your current edits)?` : '?') +
+        `\n\nOK = Merge into your existing overrides (your current edits stay; only new chips added).\n` +
+        `Cancel = Replace your overrides with the imported set.`
+      ) ? 'merge' : 'replace'
+      const merge = mergeBiasOverridesImport(existing, res.items, mode)
+      // Persist each chip's resolved override (and CLEAR chips that
+      // drop out under replace mode).
+      for (const id of exportableBiasIds()) {
+        if (Object.prototype.hasOwnProperty.call(merge.items, id)) {
+          saveBiasOverride(id, merge.items[id])
+        } else if (mode === 'replace') {
+          // Replace mode: wipe any chip the import didn't touch.
+          resetBiasOverride(id)
+        }
+      }
+      setOverrideTick(t => t + 1)
+      const summary = mode === 'merge'
+        ? `Imported ${merge.added}, skipped ${merge.skipped}`
+        : `Replaced — ${merge.added} chip${merge.added === 1 ? '' : 's'} now active`
+      showToast(summary, <Upload size={10} color="#fff" strokeWidth={2.4} />)
+      return true
+    } catch (e) {
+      showToast(`Bias import error: ${e.message || 'unknown'}`)
+      return false
+    }
+  }
   const importBiasOverridesFromFile = () => {
     const input = document.createElement('input')
     input.type = 'file'
@@ -763,43 +809,53 @@ function SceneBookmarks() {
     input.onchange = async () => {
       const file = input.files?.[0]
       if (!file) return
-      try {
-        const text = await file.text()
-        const res = parseBiasOverridesImport(text)
-        if (!res.ok) {
-          showToast(`Bias import failed: ${res.error}`)
-          return
-        }
-        const existing = collectAllBiasOverrides()
-        const importCount = Object.keys(res.items).length
-        const conflictCount = Object.keys(res.items).filter(id => id in existing).length
-        const mode = window.confirm(
-          `Import ${importCount} bias override${importCount === 1 ? '' : 's'}` +
-          (conflictCount > 0 ? ` (${conflictCount} overlap your current edits)?` : '?') +
-          `\n\nOK = Merge into your existing overrides (your current edits stay; only new chips added).\n` +
-          `Cancel = Replace your overrides with the imported set.`
-        ) ? 'merge' : 'replace'
-        const merge = mergeBiasOverridesImport(existing, res.items, mode)
-        // Persist each chip's resolved override (and CLEAR chips that
-        // drop out under replace mode).
-        for (const id of exportableBiasIds()) {
-          if (Object.prototype.hasOwnProperty.call(merge.items, id)) {
-            saveBiasOverride(id, merge.items[id])
-          } else if (mode === 'replace') {
-            // Replace mode: wipe any chip the import didn't touch.
-            resetBiasOverride(id)
-          }
-        }
-        setOverrideTick(t => t + 1)
-        const summary = mode === 'merge'
-          ? `Imported ${merge.added}, skipped ${merge.skipped}`
-          : `Replaced — ${merge.added} chip${merge.added === 1 ? '' : 's'} now active`
-        showToast(summary, <Upload size={10} color="#fff" strokeWidth={2.4} />)
-      } catch (e) {
-        showToast(`Bias import error: ${e.message || 'unknown'}`)
-      }
+      await parseAndApplyBiasImport(file)
     }
     input.click()
+  }
+  // R22.28 — drag-and-drop import. Parallels R17.06 (custom themes) +
+  // R18.09 (MIDI bundles): nested dragDepth counter so the drop zone
+  // highlight only clears when the drag ACTUALLY leaves the bias
+  // container (browsers fire enter/leave on every child element a drag
+  // crosses; naive boolean would flicker at every chip boundary).
+  // Filters by `dataTransfer.types.includes('Files')` so stray text-
+  // drags don't trigger the overlay. Only the FIRST .json file in a
+  // multi-file drop is read (bias overrides are tiny — a multi-file
+  // path would just import the latest file, no merge semantics across
+  // arbitrary files).
+  const [biasDragDepth, setBiasDragDepth] = useState(0)
+  const biasDragActive = biasDragDepth > 0
+  const onBiasDragEnter = (e) => {
+    if (!e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    setBiasDragDepth(d => d + 1)
+  }
+  const onBiasDragOver = (e) => {
+    if (!e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+  }
+  const onBiasDragLeave = (e) => {
+    if (!e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return
+    setBiasDragDepth(d => Math.max(0, d - 1))
+  }
+  const onBiasDrop = async (e) => {
+    if (!e.dataTransfer) return
+    e.preventDefault()
+    setBiasDragDepth(0)
+    const files = e.dataTransfer.files
+    if (!files || files.length === 0) {
+      showToast('Drop a .json bias overrides file to import')
+      return
+    }
+    // First-file-only: bias overrides are 3 chips; combining N files
+    // would invite confusion about which file's values win per chip.
+    const file = files[0]
+    if (!/\.json$/i.test(file.name || '')) {
+      showToast(`Not a .json file: ${file.name || 'unnamed'}`)
+      return
+    }
+    await parseAndApplyBiasImport(file)
   }
 
   const save = (name) => {
@@ -961,11 +1017,44 @@ function SceneBookmarks() {
           surprise configurations without losing the previous winner.
           The bias chip rail below pre-selects a range profile so
           "Mostly Calm" produces gentle scenes and "Mostly Wild"
-          cranks every dial. Selection persists across sessions. */}
-      <div style={{
-        display: 'grid', gridTemplateColumns: `repeat(${SCENE_BIASES.length}, 1fr)`,
-        gap: 4, marginBottom: 6,
-      }}>
+          cranks every dial. Selection persists across sessions.
+          R22.28 — the rail + buttons together form a drop zone for
+          bias-overrides .json files (parallels R17.06 themes +
+          R18.09 MIDI bundles). Drop anywhere in the indigo-dashed
+          region to import. */}
+      <div
+        onDragEnter={onBiasDragEnter}
+        onDragOver={onBiasDragOver}
+        onDragLeave={onBiasDragLeave}
+        onDrop={onBiasDrop}
+        style={{
+          position: 'relative',
+          padding: biasDragActive ? '6px' : '0',
+          marginBottom: 6,
+          borderRadius: 8,
+          outline: biasDragActive ? '2px dashed rgba(99,102,241,0.55)' : '1px solid transparent',
+          outlineOffset: biasDragActive ? 4 : 0,
+          background: biasDragActive ? 'rgba(99,102,241,0.05)' : 'transparent',
+          transition: 'outline-color 0.18s ease-out, background 0.18s ease-out, padding 0.12s ease-out',
+        }}>
+        {biasDragActive && (
+          <div style={{
+            position: 'absolute', top: -10, left: 0, right: 0,
+            padding: '4px 10px', borderRadius: 6,
+            background: 'rgba(99,102,241,0.20)',
+            color: '#dbeafe',
+            fontSize: 10.5, fontWeight: 600, letterSpacing: '0.04em',
+            textAlign: 'center',
+            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+            border: '1px solid rgba(99,102,241,0.4)',
+            pointerEvents: 'none',
+            zIndex: 5,
+          }}>Drop .json to import bias overrides</div>
+        )}
+        <div style={{
+          display: 'grid', gridTemplateColumns: `repeat(${SCENE_BIASES.length}, 1fr)`,
+          gap: 4, marginBottom: 6,
+        }}>
         {SCENE_BIASES.map(b => {
           const active = smashBias === b.id
           // R20.07 — refresh on overrideTick so the dot appears the
@@ -1068,6 +1157,7 @@ function SceneBookmarks() {
           <Pencil size={9} strokeWidth={2.2} /> Edit bias JSON
         </button>
       </div>
+      </div>{/* R22.28 — close bias drop-zone wrapper */}
       {editingBias && (
         <div style={{
           padding: 10, marginBottom: 8,
