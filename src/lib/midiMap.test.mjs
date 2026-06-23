@@ -21,6 +21,9 @@ import {
   describeTypeBand,
   // R21.22 — clamp-proximity projector for continuous (non-band) fields
   clampProximity01, describeClampProximity,
+  // R22.27 — user-tunable warning threshold for the clamp meter
+  classifyClampProximity, sanitizeClampWarnThreshold, isClampWarnThresholdAtDefault,
+  CLAMP_WARN_THRESHOLD_DEFAULT, CLAMP_WARN_THRESHOLD_MIN, CLAMP_WARN_THRESHOLD_MAX,
 } from './midiMap.js'
 import { STRENGTH_MAX, RADIUS_MIN, RADIUS_MAX, POSITION_MIN, POSITION_MAX, ATTRACTOR_TYPES } from './namedAttractors.js'
 
@@ -1172,3 +1175,172 @@ eq(describeClampProximity('half'),    null, 'string → null')
   eq(a.proximityToBoundary01, b.proximityToBoundary01,
     'pure: same proximityToBoundary01 across calls')
 }
+
+// --- R22.27: classifyClampProximity + tunable warn threshold ----------
+
+// Tier semantics — atRail trumps every threshold.
+{
+  // atRail=true → danger regardless of prox / threshold.
+  eq(classifyClampProximity(0.99, true), 'danger',
+    'atRail true → danger even with high prox')
+  eq(classifyClampProximity(0.50, true), 'danger',
+    'atRail true → danger at half prox')
+  eq(classifyClampProximity(0.01, true), 'danger',
+    'atRail true → danger at low prox')
+  eq(classifyClampProximity(0,    true), 'danger',
+    'atRail true → danger at zero prox')
+  // Custom warn threshold doesn't unstick danger.
+  eq(classifyClampProximity(0.99, true, 0.05),  'danger', 'atRail trumps low threshold')
+  eq(classifyClampProximity(0.10, true, 0.45),  'danger', 'atRail trumps high threshold')
+}
+
+// Default threshold (0.25) — preserves R21.22 baseline.
+{
+  // Just below default → warn.
+  eq(classifyClampProximity(0.10, false), 'warn',
+    'prox 0.10 < 0.25 default → warn')
+  eq(classifyClampProximity(0.24, false), 'warn',
+    'prox 0.24 < 0.25 default → warn (just below)')
+  // At default → safe (boundary is exclusive on the low side).
+  eq(classifyClampProximity(0.25, false), 'safe',
+    'prox 0.25 == 0.25 default → safe (boundary inclusive on safe side)')
+  // Just above default → safe.
+  eq(classifyClampProximity(0.30, false), 'safe',
+    'prox 0.30 > 0.25 default → safe')
+  eq(classifyClampProximity(0.99, false), 'safe',
+    'prox 0.99 (centred) → safe')
+}
+
+// Lowering the threshold makes the warn zone SMALLER (fewer values warn).
+{
+  // prox 0.10 with threshold 0.05 → safe (no longer warns)
+  eq(classifyClampProximity(0.10, false, 0.05), 'safe',
+    'low threshold (0.05) makes prox 0.10 safe')
+  // prox 0.10 with threshold 0.45 → warn (more values flagged)
+  eq(classifyClampProximity(0.10, false, 0.45), 'warn',
+    'high threshold (0.45) makes prox 0.10 warn')
+  // prox 0.40 with threshold 0.45 → warn (close to clamp under high threshold)
+  eq(classifyClampProximity(0.40, false, 0.45), 'warn',
+    'high threshold (0.45) makes prox 0.40 warn (sensitivity up)')
+  eq(classifyClampProximity(0.46, false, 0.45), 'safe',
+    'high threshold (0.45) makes prox 0.46 safe (above threshold)')
+}
+
+// Defensive — non-finite prox → safe (max-safe first-paint default).
+{
+  eq(classifyClampProximity(NaN,       false), 'safe', 'NaN prox → safe')
+  eq(classifyClampProximity(Infinity,  false), 'safe', '+Infinity prox → safe')
+  eq(classifyClampProximity(-Infinity, false), 'safe', '-Infinity prox → safe')
+  eq(classifyClampProximity(undefined, false), 'safe', 'undefined prox → safe')
+  eq(classifyClampProximity(null,      false), 'safe', 'null prox → safe')
+  eq(classifyClampProximity('half',    false), 'safe', 'string prox → safe')
+  // Non-finite + atRail → still danger (rail check runs first).
+  eq(classifyClampProximity(NaN, true), 'danger', 'NaN + atRail → danger')
+}
+
+// Custom threshold defensively clamped through sanitize.
+{
+  // Threshold below min → effectively MIN.
+  eq(classifyClampProximity(0.04, false, -1), 'warn',
+    'negative threshold → MIN; prox 0.04 < 0.05 → warn')
+  eq(classifyClampProximity(0.06, false, -1), 'safe',
+    'negative threshold → MIN; prox 0.06 > 0.05 → safe')
+  // Threshold above max → effectively MAX.
+  eq(classifyClampProximity(0.44, false, 100), 'warn',
+    'above-max threshold → MAX; prox 0.44 < 0.45 → warn')
+  eq(classifyClampProximity(0.50, false, 100), 'safe',
+    'above-max threshold → MAX; prox 0.50 > 0.45 → safe')
+  // Non-finite threshold → DEFAULT.
+  eq(classifyClampProximity(0.20, false, NaN), 'warn',
+    'NaN threshold → DEFAULT 0.25; prox 0.20 < 0.25 → warn')
+  eq(classifyClampProximity(0.30, false, NaN), 'safe',
+    'NaN threshold → DEFAULT 0.25; prox 0.30 > 0.25 → safe')
+}
+
+// Threshold-only edge: atRail=undefined (legacy callers) treated as falsy.
+{
+  eq(classifyClampProximity(0.50, undefined), 'safe',
+    'undefined atRail (falsy) → safe path')
+  eq(classifyClampProximity(0.10, undefined), 'warn',
+    'undefined atRail (falsy) → warn path at low prox')
+  eq(classifyClampProximity(0.50, null), 'safe',
+    'null atRail → safe path')
+  eq(classifyClampProximity(0.50, 0), 'safe',
+    '0 atRail (falsy) → safe path')
+  // Truthy but not boolean true — only EXACT === true counts as atRail.
+  eq(classifyClampProximity(0.99, 1), 'safe',
+    '1 (truthy non-true) atRail → safe path (strict === check)')
+}
+
+// sanitizeClampWarnThreshold contract.
+{
+  // Happy values pass through.
+  eq(sanitizeClampWarnThreshold(0.05), 0.05, 'MIN passes through')
+  eq(sanitizeClampWarnThreshold(0.10), 0.10, 'mid-low passes through')
+  eq(sanitizeClampWarnThreshold(0.25), 0.25, 'DEFAULT passes through')
+  eq(sanitizeClampWarnThreshold(0.30), 0.30, 'mid-high passes through')
+  eq(sanitizeClampWarnThreshold(0.45), 0.45, 'MAX passes through')
+  // Out-of-range clamps to bounds.
+  eq(sanitizeClampWarnThreshold(0),     CLAMP_WARN_THRESHOLD_MIN, 'below MIN → MIN')
+  eq(sanitizeClampWarnThreshold(0.01),  CLAMP_WARN_THRESHOLD_MIN, 'just below MIN → MIN')
+  eq(sanitizeClampWarnThreshold(-1),    CLAMP_WARN_THRESHOLD_MIN, 'negative → MIN')
+  eq(sanitizeClampWarnThreshold(0.50),  CLAMP_WARN_THRESHOLD_MAX, 'above MAX → MAX')
+  eq(sanitizeClampWarnThreshold(0.99),  CLAMP_WARN_THRESHOLD_MAX, 'way above MAX → MAX')
+  eq(sanitizeClampWarnThreshold(100),   CLAMP_WARN_THRESHOLD_MAX, '100 → MAX')
+  // Non-finite → DEFAULT.
+  eq(sanitizeClampWarnThreshold(NaN),       CLAMP_WARN_THRESHOLD_DEFAULT, 'NaN → DEFAULT')
+  eq(sanitizeClampWarnThreshold(Infinity),  CLAMP_WARN_THRESHOLD_DEFAULT, '+Infinity → DEFAULT')
+  eq(sanitizeClampWarnThreshold(-Infinity), CLAMP_WARN_THRESHOLD_DEFAULT, '-Infinity → DEFAULT')
+  eq(sanitizeClampWarnThreshold(undefined), CLAMP_WARN_THRESHOLD_DEFAULT, 'undefined → DEFAULT')
+  eq(sanitizeClampWarnThreshold(null),      CLAMP_WARN_THRESHOLD_DEFAULT, 'null → DEFAULT')
+  eq(sanitizeClampWarnThreshold('0.3'),     CLAMP_WARN_THRESHOLD_DEFAULT, 'string → DEFAULT')
+}
+
+// Constants invariants.
+{
+  ok(CLAMP_WARN_THRESHOLD_MIN < CLAMP_WARN_THRESHOLD_DEFAULT, 'MIN < DEFAULT invariant')
+  ok(CLAMP_WARN_THRESHOLD_DEFAULT < CLAMP_WARN_THRESHOLD_MAX, 'DEFAULT < MAX invariant')
+  ok(CLAMP_WARN_THRESHOLD_MAX < 0.5, 'MAX < 0.5 invariant (green tier must cover middle half of slider)')
+  ok(CLAMP_WARN_THRESHOLD_MIN > 0, 'MIN > 0 invariant (warn tier must cover SOMETHING)')
+  eq(CLAMP_WARN_THRESHOLD_DEFAULT, 0.25, 'DEFAULT preserves R21.22 baseline')
+}
+
+// isClampWarnThresholdAtDefault contract.
+{
+  ok(isClampWarnThresholdAtDefault(0.25)        === true,  'default → true')
+  ok(isClampWarnThresholdAtDefault(0.30)        === false, 'above default → false')
+  ok(isClampWarnThresholdAtDefault(0.10)        === false, 'below default → false')
+  // Sanitize-collapsed values: non-finite resolves to DEFAULT under
+  // the hood, so isAtDefault returns true.
+  ok(isClampWarnThresholdAtDefault(NaN)         === true,  'NaN → true (sanitizes to default)')
+  ok(isClampWarnThresholdAtDefault(undefined)   === true,  'undefined → true')
+  ok(isClampWarnThresholdAtDefault(null)        === true,  'null → true')
+}
+
+// Integration with describeClampProximity (R21.22 projector) — the
+// classifier reads atLow|atHigh and proximityToBoundary01 from the
+// structured object so the UI pipeline stays composable.
+{
+  // Knob at rail (v=0.0001) → describeClampProximity reports atLow,
+  // classifier reports 'danger'.
+  const lo = describeClampProximity(0.0001)
+  eq(classifyClampProximity(lo.proximityToBoundary01, lo.atLow || lo.atHigh), 'danger',
+    'integration: knob at low rail → danger')
+  // Knob at high rail (v=0.9999) → atHigh, danger.
+  const hi = describeClampProximity(0.9999)
+  eq(classifyClampProximity(hi.proximityToBoundary01, hi.atLow || hi.atHigh), 'danger',
+    'integration: knob at high rail → danger')
+  // Knob at v=0.10 → prox=0.20 (close), not atRail → warn.
+  const close = describeClampProximity(0.10)
+  eq(classifyClampProximity(close.proximityToBoundary01, close.atLow || close.atHigh), 'warn',
+    'integration: knob at v=0.10 → warn under default threshold')
+  // Knob at v=0.50 → prox=1.0 (max), not atRail → safe.
+  const mid = describeClampProximity(0.50)
+  eq(classifyClampProximity(mid.proximityToBoundary01, mid.atLow || mid.atHigh), 'safe',
+    'integration: knob at v=0.50 → safe (max headroom)')
+  // Same knob v=0.10 but with LOW threshold → safe (warn zone shrank).
+  eq(classifyClampProximity(close.proximityToBoundary01, close.atLow || close.atHigh, 0.15), 'safe',
+    'integration: low threshold (0.15) makes v=0.10 (prox=0.20) safe')
+}
+
+console.log('PASS: classifyClampProximity + sanitizeClampWarnThreshold + isClampWarnThresholdAtDefault (R22.27, ~60 asserts)')

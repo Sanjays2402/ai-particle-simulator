@@ -499,6 +499,62 @@ export function describeClampProximity(v01) {
   }
 }
 
+// R22.27 — user-tunable warning threshold for the clamp-proximity
+// meter. Graduates R21.22's hard-coded `prox < 0.25` amber cutoff.
+//
+// Tier semantics:
+//   'danger' — knob is AT one of the clamp rails (atLow OR atHigh).
+//              Threshold is fixed at v01<=0.001 / v01>=0.999 (rail
+//              detection is structural, not a taste choice).
+//   'warn'   — knob is close to a rail but not on it. Proximity
+//              (distance from nearest clamp, normalised) is BELOW
+//              the user's warn threshold. Default 0.25 = same as
+//              R21.22 baseline.
+//   'safe'   — knob has plenty of headroom in both directions.
+//              Proximity is AT or ABOVE the warn threshold.
+//
+// Defaults / bounds: user can move the threshold inside
+// [CLAMP_WARN_THRESHOLD_MIN, CLAMP_WARN_THRESHOLD_MAX]. The min is
+// chosen so the warn tier always covers SOMETHING (a 0 threshold
+// would mean "warn only when at the rail" which is just the danger
+// tier — useless). The max caps below 0.5 so the green tier always
+// represents the centre half of the slider — a value above 0.5
+// would mean even a perfectly-centred knob reads "warn" which
+// inverts the intent.
+export const CLAMP_WARN_THRESHOLD_DEFAULT = 0.25
+export const CLAMP_WARN_THRESHOLD_MIN = 0.05
+export const CLAMP_WARN_THRESHOLD_MAX = 0.45
+
+// Pure projector. Defensive: non-finite prox falls through to 'safe'
+// (treat unknown CC as safe-first-paint, matches R21.22 max-safe
+// default). atRail trumps everything — even with a low threshold,
+// a knob literally at the rail is danger.
+export function classifyClampProximity(prox01, atRail, warnThreshold = CLAMP_WARN_THRESHOLD_DEFAULT) {
+  if (atRail === true) return 'danger'
+  if (!Number.isFinite(prox01)) return 'safe'
+  const t = sanitizeClampWarnThreshold(warnThreshold)
+  return prox01 < t ? 'warn' : 'safe'
+}
+
+// Clamp the threshold into the supported range. Non-finite / out-of-
+// range falls back to the shipped default so a corrupt persisted
+// value never lands the user in "every meter is amber forever"
+// limbo.
+export function sanitizeClampWarnThreshold(raw) {
+  if (!Number.isFinite(raw)) return CLAMP_WARN_THRESHOLD_DEFAULT
+  if (raw < CLAMP_WARN_THRESHOLD_MIN) return CLAMP_WARN_THRESHOLD_MIN
+  if (raw > CLAMP_WARN_THRESHOLD_MAX) return CLAMP_WARN_THRESHOLD_MAX
+  return raw
+}
+
+// True when the threshold value is at exactly the shipped default.
+// UI uses this to decide whether to render the "edited" dot next to
+// the meter so users can tell which proximity readings reflect a
+// custom threshold vs the baseline.
+export function isClampWarnThresholdAtDefault(raw) {
+  return sanitizeClampWarnThreshold(raw) === CLAMP_WARN_THRESHOLD_DEFAULT
+}
+
 export function describeTypeBand(v01, types = ATTRACTOR_TYPES, hysteresis = TYPE_BAND_HYSTERESIS) {
   const list = Array.isArray(types) ? types.filter(t => typeof t === 'string' && t.length > 0) : []
   if (list.length === 0) return null

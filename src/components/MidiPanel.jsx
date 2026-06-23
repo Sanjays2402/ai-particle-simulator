@@ -7,6 +7,10 @@ import {
   // R21.22 — describeClampProximity graduates R20.16's per-band meter
   // to continuous fields (strength/radius/x/y/z/radiusLog).
   describeTypeBand, describeClampProximity, ccToNormalized,
+  // R22.27 — user-tunable warning threshold for the clamp meter
+  classifyClampProximity,
+  sanitizeClampWarnThreshold, isClampWarnThresholdAtDefault,
+  CLAMP_WARN_THRESHOLD_DEFAULT, CLAMP_WARN_THRESHOLD_MIN, CLAMP_WARN_THRESHOLD_MAX,
 } from '../lib/midiMap'
 import { ATTRACTOR_TYPES } from '../lib/namedAttractors'
 import {
@@ -65,6 +69,43 @@ export default function MidiPanel({ open, onClose }) {
   // controller pumping unbound CCs would re-render the panel ~60×/sec
   // for no visible effect.
   const [lastCCByNumber, setLastCCByNumber] = useState({})
+  // R22.27 — user-tunable warning threshold for the clamp-proximity
+  // meter. Graduates R21.22's hard-coded `< 0.25 = amber` cutoff.
+  // Persisted to localStorage so the user's chosen sensitivity sticks
+  // across sessions. The popover surfaces via a long-press on any
+  // continuous-field clamp meter — discoverable without an extra
+  // global panel, scoped to the place where the threshold matters.
+  const [clampWarnThreshold, setClampWarnThresholdState] = useState(() => {
+    try {
+      const raw = typeof localStorage !== 'undefined'
+        ? localStorage.getItem('midi-clamp-warn-threshold-v1')
+        : null
+      if (raw === null) return CLAMP_WARN_THRESHOLD_DEFAULT
+      const parsed = parseFloat(raw)
+      return sanitizeClampWarnThreshold(parsed)
+    } catch { return CLAMP_WARN_THRESHOLD_DEFAULT }
+  })
+  const setClampWarnThreshold = (raw) => {
+    const next = sanitizeClampWarnThreshold(raw)
+    setClampWarnThresholdState(next)
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('midi-clamp-warn-threshold-v1', String(next))
+      }
+    } catch { /* quota / private mode */ }
+  }
+  const resetClampWarnThreshold = () => {
+    setClampWarnThresholdState(CLAMP_WARN_THRESHOLD_DEFAULT)
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem('midi-clamp-warn-threshold-v1')
+      }
+    } catch { /* quota / private mode */ }
+  }
+  // Popover open state — null when closed, otherwise the attractor-row
+  // action id whose meter was long-pressed (so the popover anchors
+  // visually near that meter without us having to track DOM positions).
+  const [clampThresholdPopoverFor, setClampThresholdPopoverFor] = useState(null)
   const [learnFor, setLearnFor] = useState(null) // actionId waiting for next CC
   // R13.05 — user-authored bundle list. Persisted separately from the
   // live binding map so saving a bundle never touches the live state.
@@ -972,29 +1013,62 @@ export default function MidiPanel({ open, onClose }) {
                               {clampProx && (() => {
                                 const prox = clampProx.proximityToBoundary01
                                 const atRail = clampProx.atLow || clampProx.atHigh
-                                const proxFillColor = atRail
-                                  ? 'rgba(239,68,68,0.85)'   // red — at clamp
-                                  : prox < 0.25
-                                    ? 'rgba(251,191,36,0.80)' // amber — close
-                                    : 'rgba(134,239,172,0.85)' // green — safe headroom
-                                const proxTextColor = atRail
-                                  ? '#fca5a5'
-                                  : prox < 0.25
-                                    ? '#fbbf24'
-                                    : '#86efac'
-                                const proxBorderColor = atRail
-                                  ? 'rgba(239,68,68,0.40)'
-                                  : prox < 0.25
-                                    ? 'rgba(251,191,36,0.32)'
-                                    : 'rgba(34,197,94,0.32)'
-                                const proxBgColor = atRail
-                                  ? 'rgba(239,68,68,0.10)'
-                                  : prox < 0.25
-                                    ? 'rgba(245,158,11,0.08)'
-                                    : 'rgba(34,197,94,0.08)'
+                                // R22.27 — three-tier classifier uses
+                                // the user-tunable threshold instead of
+                                // R21.22's hard-coded 0.25. Sanitized in
+                                // the state setter so this value is
+                                // always in-bounds.
+                                const tier = classifyClampProximity(prox, atRail, clampWarnThreshold)
+                                const proxFillColor =
+                                  tier === 'danger' ? 'rgba(239,68,68,0.85)' :  // red — at clamp
+                                  tier === 'warn'   ? 'rgba(251,191,36,0.80)' : // amber — close
+                                                      'rgba(134,239,172,0.85)'  // green — safe
+                                const proxTextColor =
+                                  tier === 'danger' ? '#fca5a5' :
+                                  tier === 'warn'   ? '#fbbf24' :
+                                                      '#86efac'
+                                const proxBorderColor =
+                                  tier === 'danger' ? 'rgba(239,68,68,0.40)' :
+                                  tier === 'warn'   ? 'rgba(251,191,36,0.32)' :
+                                                      'rgba(34,197,94,0.32)'
+                                const proxBgColor =
+                                  tier === 'danger' ? 'rgba(239,68,68,0.10)' :
+                                  tier === 'warn'   ? 'rgba(245,158,11,0.08)' :
+                                                      'rgba(34,197,94,0.08)'
                                 const pct = Math.round(clampProx.v01 * 100)
+                                // R22.27 — small "edited" dot when the
+                                // threshold is non-default, so the user
+                                // knows the meter is reading on their
+                                // custom scale.
+                                const edited = !isClampWarnThresholdAtDefault(clampWarnThreshold)
                                 return (
-                                  <span title={`Knob at ${pct}% of [${a.min}..${a.max}]. ${atRail ? 'AT THE RAIL — twisting further does nothing.' : prox < 0.25 ? 'Close to clamp — limited headroom in this direction.' : 'Safe — plenty of room either way.'} Proximity: ${(prox * 100).toFixed(0)}% from nearest clamp.`}
+                                  <span title={`Knob at ${pct}% of [${a.min}..${a.max}]. ${tier === 'danger' ? 'AT THE RAIL — twisting further does nothing.' : tier === 'warn' ? 'Close to clamp — limited headroom in this direction.' : 'Safe — plenty of room either way.'} Proximity: ${(prox * 100).toFixed(0)}% from nearest clamp. Long-press to tweak the warn threshold (currently ${Math.round(clampWarnThreshold * 100)}%${edited ? '' : ', default'}).`}
+                                    onPointerDown={(e) => {
+                                      // R22.27 — long-press (≥400ms) to
+                                      // open the threshold-tweak popover.
+                                      // Pure pointer-event so works on
+                                      // touch + mouse. Right-click /
+                                      // multi-touch bail.
+                                      if (e.button != null && e.button !== 0) return
+                                      const tmrId = setTimeout(() => {
+                                        setClampThresholdPopoverFor(a.id)
+                                        e.currentTarget.__pressFired = true
+                                      }, 400)
+                                      e.currentTarget.__pressTimer = tmrId
+                                      e.currentTarget.__pressFired = false
+                                    }}
+                                    onPointerUp={(e) => {
+                                      if (e.currentTarget.__pressTimer) {
+                                        clearTimeout(e.currentTarget.__pressTimer)
+                                        e.currentTarget.__pressTimer = null
+                                      }
+                                    }}
+                                    onPointerLeave={(e) => {
+                                      if (e.currentTarget.__pressTimer) {
+                                        clearTimeout(e.currentTarget.__pressTimer)
+                                        e.currentTarget.__pressTimer = null
+                                      }
+                                    }}
                                     style={{
                                       padding: '1px 5px', borderRadius: 4,
                                       fontSize: 9, fontWeight: 600, letterSpacing: '0.04em',
@@ -1004,8 +1078,27 @@ export default function MidiPanel({ open, onClose }) {
                                       fontFamily: 'Geist Mono, JetBrains Mono, monospace',
                                       textTransform: 'uppercase',
                                       display: 'inline-flex', alignItems: 'center', gap: 4,
+                                      cursor: 'pointer',
+                                      position: 'relative',
+                                      // touchAction:'manipulation' removes
+                                      // the 300ms iOS tap delay without
+                                      // killing scroll/pinch.
+                                      touchAction: 'manipulation',
                                     }}>
                                     <span>{pct}%</span>
+                                    {/* R22.27 — edited dot. Cyan pip
+                                        shown when the warn threshold has
+                                        been moved off the shipped default.
+                                        Lives between the % readout and
+                                        the bar so it's adjacent to the
+                                        tier classification it modifies. */}
+                                    {edited && (
+                                      <span style={{
+                                        width: 4, height: 4, borderRadius: '50%',
+                                        background: 'rgba(34,211,238,0.85)',
+                                        boxShadow: '0 0 3px rgba(34,211,238,0.6)',
+                                      }} title={`Warn threshold: ${Math.round(clampWarnThreshold * 100)}% (custom; default ${Math.round(CLAMP_WARN_THRESHOLD_DEFAULT * 100)}%)`} />
+                                    )}
                                     {/* Proximity bar — fill scales from 0 (at clamp) to 100% (centred). */}
                                     <span style={{
                                       display: 'inline-block',
@@ -1023,6 +1116,22 @@ export default function MidiPanel({ open, onClose }) {
                                         transition: 'width 80ms linear, background 120ms linear',
                                       }} />
                                     </span>
+                                    {/* R22.27 — popover for tweaking the
+                                        warn threshold. Anchored to THIS
+                                        meter (we filter by a.id) so it
+                                        appears where the user pressed.
+                                        position: absolute lifts it above
+                                        the table layout; pointerEvents
+                                        on the backdrop captures click-
+                                        outside to close. */}
+                                    {clampThresholdPopoverFor === a.id && (
+                                      <ClampThresholdPopover
+                                        value={clampWarnThreshold}
+                                        onChange={setClampWarnThreshold}
+                                        onReset={resetClampWarnThreshold}
+                                        onClose={() => setClampThresholdPopoverFor(null)}
+                                      />
+                                    )}
                                   </span>
                                 )
                               })()}
@@ -1761,5 +1870,151 @@ function UserBundleChip({ preset, onApply, onDelete, onRename, onExport, onSetCo
         </div>
       )}
     </div>
+  )
+}
+
+// R22.27 — popover for tweaking the clamp-meter warn threshold.
+// Surfaces above the meter that was long-pressed (`position: absolute`).
+// Click-outside closes it (handled by the backdrop's onClick); reset
+// button restores the shipped default. Slider step is 0.01 to match
+// the sanitize precision (we don't want sub-percent noise).
+function ClampThresholdPopover({ value, onChange, onReset, onClose }) {
+  const pct = Math.round(value * 100)
+  const minPct = Math.round(CLAMP_WARN_THRESHOLD_MIN * 100)
+  const maxPct = Math.round(CLAMP_WARN_THRESHOLD_MAX * 100)
+  const defPct = Math.round(CLAMP_WARN_THRESHOLD_DEFAULT * 100)
+  const atDefault = isClampWarnThresholdAtDefault(value)
+  // Escape key closes — paired with onClose so the user has a
+  // keyboard-only path (the popover is small enough that mouse-out
+  // would be too fiddly; explicit dismissal is friendlier).
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  return (
+    <>
+      {/* Backdrop — captures click-outside so the popover dismisses
+          when the user taps anywhere else. Transparent so the page
+          stays visible behind it. */}
+      <span
+        onClick={(e) => { e.stopPropagation(); onClose() }}
+        style={{
+          position: 'fixed', inset: 0,
+          background: 'transparent',
+          zIndex: 100,
+          cursor: 'default',
+        }}
+      />
+      {/* Popover surface — anchored to the meter via the parent's
+          position:relative. Width chosen so the slider has enough
+          travel to feel responsive (~180px). */}
+      <span
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+        style={{
+          position: 'absolute',
+          top: 'calc(100% + 6px)',
+          left: 0,
+          minWidth: 220, maxWidth: 280,
+          padding: '10px 12px',
+          borderRadius: 7,
+          background: 'rgba(15,15,25,0.96)',
+          border: '1px solid rgba(34,211,238,0.35)',
+          boxShadow: '0 6px 22px rgba(0,0,0,0.5)',
+          zIndex: 101,
+          color: '#e8e8f0',
+          fontSize: 10,
+          fontWeight: 500,
+          fontFamily: 'system-ui, -apple-system, sans-serif',
+          textTransform: 'none',
+          letterSpacing: 'normal',
+          display: 'block',
+        }}
+      >
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          marginBottom: 6, gap: 8,
+        }}>
+          <span style={{
+            fontSize: 10.5, fontWeight: 700, letterSpacing: '0.06em',
+            color: '#67e8f9', textTransform: 'uppercase',
+            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+          }}>Warn threshold</span>
+          <span style={{
+            fontSize: 10.5, fontWeight: 700,
+            color: atDefault ? '#9a9ab0' : '#67e8f9',
+            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+          }}>{pct}%</span>
+        </div>
+        <input
+          type="range"
+          min={minPct}
+          max={maxPct}
+          step={1}
+          value={pct}
+          onChange={(e) => onChange(Number(e.target.value) / 100)}
+          style={{
+            width: '100%',
+            accentColor: '#22d3ee',
+            cursor: 'pointer',
+          }}
+        />
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          marginTop: 4, fontSize: 9,
+          color: '#7a7a90',
+          fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+        }}>
+          <span>{minPct}%</span>
+          <span>{maxPct}%</span>
+        </div>
+        <div style={{
+          marginTop: 8, fontSize: 9.5, lineHeight: 1.45, color: '#a8a8b8',
+        }}>
+          When the knob's proximity to its nearest clamp drops below
+          this threshold, the meter turns amber. Lower = stricter
+          (more values flagged); higher = looser. The danger tier
+          (knob AT the rail) is always on.
+        </div>
+        <div style={{
+          display: 'flex', justifyContent: 'flex-end', gap: 6,
+          marginTop: 10, paddingTop: 6,
+          borderTop: '1px solid rgba(255,255,255,0.06)',
+        }}>
+          <button
+            onClick={() => { onReset(); onClose() }}
+            disabled={atDefault}
+            title={atDefault ? 'Already at the shipped default' : `Reset to ${defPct}%`}
+            style={{
+              padding: '3px 9px', borderRadius: 4,
+              fontSize: 10, fontWeight: 600, letterSpacing: '0.06em',
+              background: atDefault ? 'rgba(255,255,255,0.04)' : 'rgba(239,68,68,0.10)',
+              color: atDefault ? '#5a5a70' : '#fca5a5',
+              border: atDefault
+                ? '1px solid rgba(255,255,255,0.05)'
+                : '1px solid rgba(239,68,68,0.30)',
+              cursor: atDefault ? 'not-allowed' : 'pointer',
+              textTransform: 'uppercase',
+              fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+              opacity: atDefault ? 0.55 : 1,
+            }}
+          >Reset</button>
+          <button
+            onClick={onClose}
+            style={{
+              padding: '3px 11px', borderRadius: 4,
+              fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
+              background: 'linear-gradient(135deg, rgba(34,211,238,0.30), rgba(99,102,241,0.22))',
+              color: '#e0f2fe',
+              border: '1px solid rgba(34,211,238,0.45)',
+              cursor: 'pointer',
+              textTransform: 'uppercase',
+              fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+            }}
+          >Done</button>
+        </div>
+      </span>
+    </>
   )
 }
