@@ -7,6 +7,13 @@ import { generateRandomScene, SCENE_BIASES, SCENE_BIAS_DEFAULT,
   loadBiasOverride, saveBiasOverride, hasBiasOverride, resetBiasOverride,
   getSceneBias, sanitizeBiasOverride,
 } from '../lib/randomScene'
+// R21.23 — bias overrides export/import as portable JSON file
+import {
+  downloadBiasOverridesFile,
+  parseImport as parseBiasOverridesImport,
+  mergeImport as mergeBiasOverridesImport,
+  exportableBiasIds,
+} from '../lib/biasOverridesIO'
 import { loadCameraViews, saveCameraViews, appendView, moveView, moveViewUp, moveViewDown, removeView, CAMERA_VIEWS_MAX } from '../lib/cameraViews'
 import {
   PATH_SECONDS_MIN, PATH_SECONDS_MAX, PATH_SECONDS_DEFAULT,
@@ -709,6 +716,92 @@ function SceneBookmarks() {
     closeBiasEditor()
   }
 
+  // R21.23 — bias overrides export/import. The override map is
+  // persisted PER-CHIP in localStorage; we collect every chip's
+  // override into a single map before handing it to the IO module
+  // (and back the other way during import). overrideTick drives the
+  // hasAnyBiasOverride read so the export button enables/disables
+  // immediately after an edit, without waiting for the next render
+  // from elsewhere.
+  const _biasTick = overrideTick
+  const collectAllBiasOverrides = () => {
+    const map = {}
+    for (const id of exportableBiasIds()) {
+      const live = loadBiasOverride(id)
+      if (Object.keys(live).length > 0) map[id] = live
+    }
+    return map
+  }
+  const hasAnyBiasOverride = (() => {
+    // Mark overrideTick as a render-time dep so the export button
+    // enables immediately after an Apply / Reset.
+    void _biasTick
+    for (const id of exportableBiasIds()) {
+      if (hasBiasOverride(id)) return true
+    }
+    return false
+  })()
+  const exportBiasOverridesNow = () => {
+    const map = collectAllBiasOverrides()
+    if (Object.keys(map).length === 0) {
+      showToast('No bias overrides to export — edit a chip first')
+      return
+    }
+    const filename = downloadBiasOverridesFile(map)
+    if (filename) {
+      const n = Object.keys(map).length
+      showToast(`Exported ${n} bias override${n === 1 ? '' : 's'} \u2192 ${filename}`,
+        <Download size={10} color="#fff" strokeWidth={2.4} />)
+    } else {
+      showToast('Bias export failed — check console')
+    }
+  }
+  const importBiasOverridesFromFile = () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'application/json,.json'
+    input.onchange = async () => {
+      const file = input.files?.[0]
+      if (!file) return
+      try {
+        const text = await file.text()
+        const res = parseBiasOverridesImport(text)
+        if (!res.ok) {
+          showToast(`Bias import failed: ${res.error}`)
+          return
+        }
+        const existing = collectAllBiasOverrides()
+        const importCount = Object.keys(res.items).length
+        const conflictCount = Object.keys(res.items).filter(id => id in existing).length
+        const mode = window.confirm(
+          `Import ${importCount} bias override${importCount === 1 ? '' : 's'}` +
+          (conflictCount > 0 ? ` (${conflictCount} overlap your current edits)?` : '?') +
+          `\n\nOK = Merge into your existing overrides (your current edits stay; only new chips added).\n` +
+          `Cancel = Replace your overrides with the imported set.`
+        ) ? 'merge' : 'replace'
+        const merge = mergeBiasOverridesImport(existing, res.items, mode)
+        // Persist each chip's resolved override (and CLEAR chips that
+        // drop out under replace mode).
+        for (const id of exportableBiasIds()) {
+          if (Object.prototype.hasOwnProperty.call(merge.items, id)) {
+            saveBiasOverride(id, merge.items[id])
+          } else if (mode === 'replace') {
+            // Replace mode: wipe any chip the import didn't touch.
+            resetBiasOverride(id)
+          }
+        }
+        setOverrideTick(t => t + 1)
+        const summary = mode === 'merge'
+          ? `Imported ${merge.added}, skipped ${merge.skipped}`
+          : `Replaced — ${merge.added} chip${merge.added === 1 ? '' : 's'} now active`
+        showToast(summary, <Upload size={10} color="#fff" strokeWidth={2.4} />)
+      } catch (e) {
+        showToast(`Bias import error: ${e.message || 'unknown'}`)
+      }
+    }
+    input.click()
+  }
+
   const save = (name) => {
     const scene = captureScene(useStore.getState())
     const next = appendBookmark(items, { name, scene })
@@ -917,11 +1010,48 @@ function SceneBookmarks() {
       </div>
       {/* R20.07 — small "edit bias" link row. Surfaces the editor for
           the currently-selected chip so users discover the override
-          path without having to right-click. */}
+          path without having to right-click.
+          R21.23 — also carries Export / Import for the full override
+          map (parallels wind R12.17 + crossfade R13.14 IO buttons). */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
         marginBottom: 6, gap: 6, fontSize: 10,
       }}>
+        <button
+          onClick={exportBiasOverridesNow}
+          title={`Export every chip's bias overrides as a portable JSON file. Empty overrides (chips you haven't edited) are skipped.`}
+          disabled={!hasAnyBiasOverride}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            padding: '2px 6px', borderRadius: 4,
+            background: hasAnyBiasOverride ? 'rgba(99,102,241,0.10)' : 'rgba(255,255,255,0.03)',
+            color: hasAnyBiasOverride ? '#c7d2fe' : '#5a5a70',
+            border: hasAnyBiasOverride
+              ? '1px solid rgba(99,102,241,0.25)'
+              : '1px solid rgba(255,255,255,0.05)',
+            cursor: hasAnyBiasOverride ? 'pointer' : 'not-allowed',
+            fontSize: 9, letterSpacing: '0.04em',
+            textTransform: 'uppercase', fontWeight: 600,
+            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+            opacity: hasAnyBiasOverride ? 1 : 0.55,
+          }}>
+          <Download size={9} strokeWidth={2.2} /> Export
+        </button>
+        <button
+          onClick={importBiasOverridesFromFile}
+          title="Load a bias overrides JSON file. Merge keeps your existing overrides; Replace wipes them and uses the imported set."
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            padding: '2px 6px', borderRadius: 4,
+            background: 'rgba(168,85,247,0.10)',
+            color: '#e9d5ff',
+            border: '1px solid rgba(168,85,247,0.25)',
+            cursor: 'pointer', fontSize: 9, letterSpacing: '0.04em',
+            textTransform: 'uppercase', fontWeight: 600,
+            fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+          }}>
+          <Upload size={9} strokeWidth={2.2} /> Import
+        </button>
         <button
           onClick={() => openBiasEditor(smashBias)}
           title={`Open the JSON editor for the "${SCENE_BIASES.find(b => b.id === smashBias)?.label || smashBias}" bias (counts, speed, chances, force-type weights).`}
