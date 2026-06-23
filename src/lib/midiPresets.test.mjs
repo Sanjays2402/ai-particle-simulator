@@ -18,6 +18,8 @@ import {
   userPresetColorStyle, setUserPresetColor,
   // R20.11 — per-bundle keyboard shortcut
   sanitizeHotkey, hotkeyFromEvent, setUserPresetHotkey, findUserPresetByHotkey,
+  // R21.25 — pre-flight hotkey conflict detector for the warning toast
+  detectHotkeyConflict,
 } from './midiPresets.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -626,4 +628,133 @@ for (const c of USER_PRESET_COLORS) {
   eq(loadedBad.length, 1, 'bad hotkey didn\'t reject the bundle')
   ok(!('hotkey' in loadedBad[0]), 'bad hotkey silently dropped on load')
   uninstallLocalStorage()
+}
+
+// --- R21.25: detectHotkeyConflict — pre-flight warning helper --------
+
+// Conflict detected: assigning a hotkey already bound to a DIFFERENT
+// bundle returns that bundle (the one about to be stripped).
+{
+  const list = [
+    { id: 'user-1', name: 'Drum Kit',  map: { '21': 'speed' }, hotkey: 'shift+1' },
+    { id: 'user-2', name: 'Synth Pad', map: { '22': 'glow' }  /* no hotkey */ },
+  ]
+  const conflict = detectHotkeyConflict(list, 'user-2', 'shift+1')
+  ok(conflict !== null, 'conflict detected on existing hotkey')
+  eq(conflict.id,   'user-1',   'returns the bundle being stripped')
+  eq(conflict.name, 'Drum Kit', 'bundle.name available for the toast')
+}
+
+// No conflict: hotkey is currently UNBOUND in the list.
+{
+  const list = [
+    { id: 'user-1', name: 'A', map: { '21': 'speed' }, hotkey: 'shift+1' },
+    { id: 'user-2', name: 'B', map: { '22': 'glow' } /* no hotkey */ },
+  ]
+  eq(detectHotkeyConflict(list, 'user-2', 'shift+f9'), null, 'unbound hotkey → null')
+  eq(detectHotkeyConflict(list, 'user-1', 'alt+9'),    null, 'unbound for any target → null')
+}
+
+// Self-rebind: assigning a hotkey already on the TARGET bundle is
+// NOT a conflict (it's the no-op path; the setter returns input ref).
+{
+  const list = [
+    { id: 'user-1', name: 'A', map: { '21': 'speed' }, hotkey: 'shift+1' },
+    { id: 'user-2', name: 'B', map: { '22': 'glow' }  /* no hotkey */ },
+  ]
+  eq(detectHotkeyConflict(list, 'user-1', 'shift+1'), null,
+    'rebinding the SAME hotkey to the SAME bundle is not a conflict')
+}
+
+// Clearing a hotkey is not a conflict (nothing to steal).
+{
+  const list = [
+    { id: 'user-1', name: 'A', map: { '21': 'speed' }, hotkey: 'shift+1' },
+  ]
+  eq(detectHotkeyConflict(list, 'user-1', null), null, 'null hotkey → no conflict')
+  eq(detectHotkeyConflict(list, 'user-1', ''),   null, 'empty hotkey → no conflict')
+}
+
+// Invalid hotkey input: detector returns null (matches setter's silent refusal).
+{
+  const list = [
+    { id: 'user-1', name: 'A', map: { '21': 'speed' }, hotkey: 'shift+1' },
+  ]
+  eq(detectHotkeyConflict(list, 'user-1', 'shift+bogus'), null,
+    'unknown key in input → no conflict')
+  eq(detectHotkeyConflict(list, 'user-1', 'shift'), null,
+    'modifier-only input → no conflict')
+}
+
+// Canonical-form comparison: input in non-canonical order still resolves
+// to the right conflict (sanitizeHotkey runs both sides).
+{
+  const list = [
+    { id: 'user-1', name: 'A', map: { '21': 'speed' }, hotkey: 'shift+meta+a' },
+  ]
+  // 'alt+shift+ctrl+meta+a' is not equivalent to 'shift+meta+a'
+  // (different mod set), so should NOT conflict.
+  eq(detectHotkeyConflict(list, 'user-2', 'alt+shift+ctrl+meta+a'), null,
+    'different modifier set → no conflict')
+  // Permuted-but-equivalent input resolves to the same canonical key
+  // and triggers the conflict.
+  const conflict = detectHotkeyConflict(list, 'user-2', 'shift+meta+a')
+  ok(conflict !== null, 'permuted-but-equivalent input still conflicts')
+  eq(conflict.id, 'user-1', 'canonical match returns the right bundle')
+}
+
+// Defensive — bad list / bad targetId returns null (matches setter contract).
+{
+  eq(detectHotkeyConflict(null,        'user-1', 'shift+1'), null, 'null list → null')
+  eq(detectHotkeyConflict('not-array', 'user-1', 'shift+1'), null, 'non-array list → null')
+  eq(detectHotkeyConflict([],          'user-1', 'shift+1'), null, 'empty list → null')
+  eq(detectHotkeyConflict([{ id: 'user-1', name: 'A', map: { '21': 'speed' }, hotkey: 'shift+1' }],
+    null,      'shift+1'), null, 'null targetId → null')
+  eq(detectHotkeyConflict([{ id: 'user-1', name: 'A', map: { '21': 'speed' }, hotkey: 'shift+1' }],
+    '',        'shift+1'), null, 'empty targetId → null')
+}
+
+// Multi-bundle conflict — when MORE than one bundle carries the same
+// hotkey (shouldn't happen via the setter, but tolerated by load/save),
+// the FIRST match is returned (deterministic so the toast names a
+// stable bundle).
+{
+  const list = [
+    { id: 'user-1', name: 'First',  map: { '21': 'speed' }, hotkey: 'shift+1' },
+    { id: 'user-2', name: 'Second', map: { '22': 'glow' },  hotkey: 'shift+1' },
+  ]
+  const conflict = detectHotkeyConflict(list, 'user-3', 'shift+1')
+  ok(conflict !== null, 'multi-bundle conflict detected')
+  eq(conflict.id, 'user-1', 'first-match wins (deterministic)')
+}
+
+// Pure — detector doesn't mutate the list or its bundles.
+{
+  const list = [
+    { id: 'user-1', name: 'A', map: { '21': 'speed' }, hotkey: 'shift+1' },
+    { id: 'user-2', name: 'B', map: { '22': 'glow' } },
+  ]
+  const snap = JSON.stringify(list)
+  detectHotkeyConflict(list, 'user-2', 'shift+1')
+  eq(JSON.stringify(list), snap, 'list unchanged by detector')
+}
+
+// detect + set integration — what the UI does in setUserBundleHotkey:
+// 1. detect the conflict (warn the user)
+// 2. set the hotkey (the setter still strips it from the other bundle)
+// The setter returns a NEW list ref; the detected conflict is the same
+// bundle whose hotkey is now gone in the new list.
+{
+  const list = [
+    { id: 'user-1', name: 'A', map: { '21': 'speed' }, hotkey: 'shift+1' },
+    { id: 'user-2', name: 'B', map: { '22': 'glow' }  /* no hotkey */ },
+  ]
+  const conflict = detectHotkeyConflict(list, 'user-2', 'shift+1')
+  eq(conflict.id, 'user-1', 'integration: conflict identified BEFORE set')
+  const next = setUserPresetHotkey(list, 'user-2', 'shift+1')
+  ok(next !== list, 'integration: setter returns new ref on actual change')
+  const after1 = next.find(p => p.id === 'user-1')
+  const after2 = next.find(p => p.id === 'user-2')
+  ok(!('hotkey' in after1), 'integration: user-1 hotkey stripped after setter')
+  eq(after2.hotkey, 'shift+1', 'integration: user-2 hotkey now set')
 }

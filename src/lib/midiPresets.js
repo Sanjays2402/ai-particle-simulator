@@ -358,6 +358,35 @@ export function findUserPresetByHotkey(list, hotkey) {
   return null
 }
 
+// R21.25 — detect a hotkey conflict BEFORE setUserPresetHotkey lands.
+// Used by the UI to surface a warning toast when a binding will be
+// silently stolen from another bundle (setUserPresetHotkey's
+// "1-binding-per-hotkey invariant" strips the hotkey from whichever
+// other bundle was carrying it, with no in-band feedback).
+//
+// Returns the OTHER bundle the user is about to displace, or null
+// when the hotkey is unbound / belongs to the target bundle itself /
+// is invalid. The shape mirrors findUserPresetByHotkey so the UI can
+// pull .name / .color / .id off the result for the toast.
+//
+// `targetId` is the bundle the user is ABOUT TO assign the hotkey to.
+// Re-binding the SAME hotkey to the SAME bundle never reports a
+// conflict (it's the no-op path). Clearing a hotkey (null / '') never
+// reports a conflict (nothing to steal). Invalid input returns null
+// (the setter would refuse anyway).
+export function detectHotkeyConflict(list, targetId, hotkey) {
+  if (!Array.isArray(list) || !targetId) return null
+  if (hotkey == null || hotkey === '') return null
+  const safe = sanitizeHotkey(hotkey)
+  if (!safe) return null
+  for (const p of list) {
+    if (!p) continue
+    if (p.id === targetId) continue   // self — not a conflict
+    if (sanitizeHotkey(p.hotkey) === safe) return p
+  }
+  return null
+}
+
 // Load + sanitize the persisted user-preset list. Drops any entry
 // that fails the same validateMap gate as shipped bundles.
 export function loadUserPresets() {

@@ -21,6 +21,8 @@ import {
   MAX_USER_PRESETS,
   // R20.11 — per-bundle keyboard shortcut
   setUserPresetHotkey, hotkeyFromEvent, findUserPresetByHotkey,
+  // R21.25 — pre-flight hotkey conflict detector for the warning toast
+  detectHotkeyConflict,
 } from '../lib/midiPresets'
 import {
   // R14.17 — single-bundle JSON export/import
@@ -245,11 +247,23 @@ export default function MidiPanel({ open, onClose }) {
   // setUserBundleColor's ref-equal-on-no-op skip. Hotkey conflicts
   // are resolved at the lib layer (the same hotkey can only be bound
   // to ONE bundle; the lib silently un-binds it from any other).
+  // R21.25 — detect that silent strip BEFORE the setter runs so the
+  // UI can warn the user with a toast. Self-rebinds (the no-op path)
+  // and clears (null/'') skip the warning since nothing is stolen.
   const setUserBundleHotkey = (id, hotkey) => {
+    const conflict = detectHotkeyConflict(userPresets, id, hotkey)
     const next = setUserPresetHotkey(userPresets, id, hotkey)
     if (next === userPresets) return false
     setUserPresets(next)
     saveUserPresets(next)
+    if (conflict) {
+      const targetBundle = next.find(p => p.id === id)
+      const targetColor = userPresetColorStyle(targetBundle?.color || DEFAULT_USER_PRESET_COLOR)
+      showToast(
+        `Hotkey \u201c${hotkey}\u201d stolen from \u201c${conflict.name}\u201d \u2192 \u201c${targetBundle?.name || 'bundle'}\u201d`,
+        <AlertCircle size={10} color={targetColor.accent} strokeWidth={2.4} />,
+      )
+    }
     return true
   }
 
