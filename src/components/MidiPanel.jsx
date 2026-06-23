@@ -28,6 +28,11 @@ import {
   countClampWarnFieldOverridesAcross,
 } from '../lib/midiMap'
 import { ATTRACTOR_TYPES } from '../lib/namedAttractors'
+// R26.20 — touch-drag hit-test helper. Same pure projector the camera-
+// path R22.12 / R23.31 touch DnD uses; lifting it here keeps the
+// MidiPanel binding-group DnD logic symmetric with the camera-path
+// pattern without duplicating the half-open-interval math.
+import { resolveTouchTargetIdx } from '../lib/cameraViews'
 import {
   MIDI_PRESETS, applyPresetToMap, detectPresetForInput, presetBindingCount,
   // R13.05 — user preset bundle editor
@@ -255,6 +260,156 @@ export default function MidiPanel({ open, onClose }) {
   const [draggingGroupIdx, setDraggingGroupIdx] = useState(null)
   const [dragOverGroupIdx, setDragOverGroupIdx] = useState(null)
   const moveNamedAttractorByIndex = useStore(s => s.moveNamedAttractorByIndex)
+  // R26.20 — touch-drag support for the binding-group reorder
+  // (graduates R25.20's desktop-only HTML5 native DnD; touch devices
+  // don't fire dragstart so they were locked out). Parallels camera-
+  // path R22.12 / R23.31 touch DnD:
+  //   1. touchstart on the grab handle (⠇): arm a 350ms long-press
+  //      timer + record starting Y.
+  //   2. touchmove before timer fires: cancel if moved > 8px (so a
+  //      scroll stays a scroll).
+  //   3. Timer fires: enter drag mode + 10ms haptic if available.
+  //   4. touchmove during drag: hit-test against per-group bounding
+  //      rects via resolveTouchTargetIdx, update dragOverGroupIdx.
+  //   5. touchend: run moveNamedAttractorByIndex.
+  // Group refs hold the live DOM nodes by liveIdx for the touchmove
+  // getBoundingClientRect read. Cleared on each render via the
+  // ref-callback pattern (setGroupRef(idx)) so deleted groups don't
+  // ghost-hit-test.
+  const groupRefs = useRef(new Map())
+  const setGroupRef = (idx) => (el) => {
+    if (el) groupRefs.current.set(idx, el)
+    else groupRefs.current.delete(idx)
+  }
+  // Touch-drag state in refs (touchmove fires at ~60Hz; setState would
+  // re-render the whole panel). Visual state lives in draggingGroupIdx
+  // / dragOverGroupIdx React state, updated only when those values
+  // actually change.
+  const touchStartYRef = useRef(0)
+  const touchTimerRef = useRef(0)
+  const touchActiveRef = useRef(false)
+  // Flag set on touchend AFTER drag mode fired; click-side counterpart
+  // suppresses the synthetic click the browser emits on tap-release so
+  // it doesn't fire any onClick on the group surface mid-drag.
+  const suppressNextGroupClickRef = useRef(false)
+  const TOUCH_GROUP_LONG_PRESS_MS = 350
+  const TOUCH_GROUP_SLOP_PX = 8
+
+  const cancelGroupTouchTimer = () => {
+    if (touchTimerRef.current) {
+      clearTimeout(touchTimerRef.current)
+      touchTimerRef.current = 0
+    }
+  }
+  const onGroupTouchStart = (idx, totalGroups) => (e) => {
+    if (totalGroups <= 1) return  // nothing to reorder
+    // Multi-touch (pinch-zoom) — bail so we don't fight browser gestures.
+    if (e.touches && e.touches.length > 1) {
+      cancelGroupTouchTimer()
+      return
+    }
+    const t = e.touches?.[0]
+    if (!t) return
+    touchStartYRef.current = t.clientY
+    touchActiveRef.current = false
+    cancelGroupTouchTimer()
+    touchTimerRef.current = setTimeout(() => {
+      touchTimerRef.current = 0
+      touchActiveRef.current = true
+      setDraggingGroupIdx(idx)
+      // Haptic feedback when entering drag (Android vibration API).
+      // Silently skipped on iOS / desktop / browsers that gate it.
+      try { navigator.vibrate?.(10) } catch { /* unsupported */ }
+    }, TOUCH_GROUP_LONG_PRESS_MS)
+  }
+  const onGroupTouchMove = (idx, totalGroups) => (e) => {
+    const t = e.touches?.[0]
+    if (!t) return
+    // Pre-arm: cancel the timer if user scrolled away from start.
+    if (!touchActiveRef.current) {
+      const dy = Math.abs(t.clientY - touchStartYRef.current)
+      if (dy > TOUCH_GROUP_SLOP_PX) cancelGroupTouchTimer()
+      return
+    }
+    // Drag-active: lock scroll + hit-test the new target idx.
+    try { e.preventDefault() } catch { /* passive listener */ }
+    const ranges = []
+    for (let i = 0; i < totalGroups; i++) {
+      const el = groupRefs.current.get(i)
+      if (!el) { ranges.push(null); continue }
+      const r = el.getBoundingClientRect()
+      ranges.push({ top: r.top, bottom: r.bottom })
+    }
+    const target = resolveTouchTargetIdx(t.clientY, ranges)
+    if (target !== null && target !== idx) {
+      setDragOverGroupIdx(prev => (prev === target ? prev : target))
+    } else if (target === idx) {
+      // Over the row being dragged — clear hint so we don't paint
+      // a misleading "drop here" indicator on the source row itself.
+      setDragOverGroupIdx(prev => (prev === null ? prev : null))
+    }
+  }
+  const onGroupTouchEnd = () => {
+    cancelGroupTouchTimer()
+    if (!touchActiveRef.current) {
+      // Just a tap that never crossed the long-press threshold. Don't
+      // fire any reorder.
+      return
+    }
+    touchActiveRef.current = false
+    // Flag the next synthetic click for suppression (parallels camera-
+    // path's suppressNextClickRef).
+    suppressNextGroupClickRef.current = true
+    const from = draggingGroupIdx
+    const to = dragOverGroupIdx
+    setDraggingGroupIdx(null)
+    setDragOverGroupIdx(null)
+    if (from === null || to === null || from === to) return
+    moveNamedAttractorByIndex(from, to)
+  }
+  const onGroupTouchCancel = () => {
+    cancelGroupTouchTimer()
+    if (touchActiveRef.current) {
+      touchActiveRef.current = false
+      setDraggingGroupIdx(null)
+      setDragOverGroupIdx(null)
+    }
+  }
+  // Click-side counterpart — chain the suppressed click so any nested
+  // onClick (e.g. Learn / Remove buttons inside the group rows) doesn't
+  // fire on tap-release of a long-press drag. One-shot: clears the flag
+  // on first inspection.
+  const consumeGroupClickIfSuppressed = () => {
+    if (suppressNextGroupClickRef.current) {
+      suppressNextGroupClickRef.current = false
+      return false
+    }
+    return true
+  }
+  // Group touch-handler factory — spread onto the grab handle (which
+  // arms the drag) and the group surface (which acts as drop target +
+  // continues the gesture once armed). stopProp=true on the handle so
+  // the same touchstart doesn't bubble + re-arm the group's own
+  // handler (which would also work but the cleaner contract is each
+  // surface owns its touch lifecycle).
+  const groupTouchHandlers = (idx, totalGroups, { stopProp = false } = {}) => ({
+    onTouchStart: (e) => {
+      if (stopProp) e.stopPropagation()
+      onGroupTouchStart(idx, totalGroups)(e)
+    },
+    onTouchMove: (e) => {
+      if (stopProp) e.stopPropagation()
+      onGroupTouchMove(idx, totalGroups)(e)
+    },
+    onTouchEnd: (e) => {
+      if (stopProp) e.stopPropagation()
+      onGroupTouchEnd(e)
+    },
+    onTouchCancel: (e) => {
+      if (stopProp) e.stopPropagation()
+      onGroupTouchCancel(e)
+    },
+  })
   // Subscribe to the live attractor list so per-attractor MIDI rows
   // appear/disappear and re-label in real time as the user adds,
   // renames, or deletes attractors. attractorActions() is pure data
@@ -1063,8 +1218,12 @@ export default function MidiPanel({ open, onClose }) {
                   const isBeingDragged = draggable && draggingGroupIdx === liveIdx
                   const isDropTarget    = draggable && dragOverGroupIdx === liveIdx
                                           && draggingGroupIdx != null && draggingGroupIdx !== liveIdx
+                  // R26.20 — total live groups; used by touch handlers so
+                  // single-attractor lists skip the long-press arm.
+                  const totalGroups = (namedAttractors || []).length
                   return (
                     <div key={group.attractorId}
+                      ref={draggable ? setGroupRef(liveIdx) : undefined}
                       onDragOver={draggable ? (e) => {
                         // Allow drop only when a group drag is in progress
                         // and we're not the SAME group being dragged.
@@ -1087,6 +1246,7 @@ export default function MidiPanel({ open, onClose }) {
                         if (from == null || from === to) return
                         moveNamedAttractorByIndex(from, to)
                       } : undefined}
+                      {...(draggable ? groupTouchHandlers(liveIdx, totalGroups) : {})}
                       style={{
                         border: isDropTarget
                           ? '1px solid rgba(168,85,247,0.65)'
@@ -1130,16 +1290,41 @@ export default function MidiPanel({ open, onClose }) {
                               setDraggingGroupIdx(null)
                               setDragOverGroupIdx(null)
                             }}
-                            title="Drag to reorder this attractor's binding group"
+                            // R26.20 — touch handlers spread onto the
+                            // grab handle so a thumb-down on the ⠇
+                            // glyph starts the long-press timer
+                            // directly. stopProp=true so the same
+                            // touchstart doesn't bubble to the group
+                            // surface's own handler (would re-arm the
+                            // timer; works but the cleaner contract is
+                            // each surface owns its lifecycle).
+                            {...groupTouchHandlers(liveIdx, totalGroups, { stopProp: true })}
+                            onClick={(e) => {
+                              // R26.20 — swallow the synthetic click
+                              // that browsers emit on tap-release after
+                              // a long-press drag; without this, the
+                              // browser fires a click on the grab
+                              // handle (no onClick handler currently
+                              // but defensive in case future code adds
+                              // one) AND on bubbling parent buttons
+                              // (which is the real risk).
+                              if (!consumeGroupClickIfSuppressed()) {
+                                e.preventDefault()
+                                e.stopPropagation()
+                              }
+                            }}
+                            title="Drag to reorder this attractor's binding group (touch: long-press to grab)"
                             style={{
                               cursor: 'grab',
                               color: isStale ? '#a78bfa' : groupStyle.fgMuted,
                               fontSize: 12, lineHeight: 1,
                               userSelect: 'none',
                               WebkitUserSelect: 'none',
+                              WebkitTouchCallout: 'none',
                               padding: '0 2px',
                               fontFamily: 'Geist Mono, JetBrains Mono, monospace',
                               fontWeight: 700,
+                              touchAction: 'manipulation',
                             }}
                           >{'\u2807'}</span>
                         )}
