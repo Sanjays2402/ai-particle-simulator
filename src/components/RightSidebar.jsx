@@ -15,6 +15,8 @@ import {
   exportableBiasIds,
   // R23.33 — multi-file drop combiner (parallels R19.20 midi bundles)
   combineDroppedBiasFiles,
+  // R24.36 — preview-panel projector (parallels wind R14.15 / crossfade R14.16)
+  buildBiasImportPreviewRows,
 } from '../lib/biasOverridesIO'
 import {
   loadCameraViews, saveCameraViews, appendView, moveView, moveViewUp, moveViewDown,
@@ -989,11 +991,17 @@ function SceneBookmarks() {
       showToast('Bias export failed — check console')
     }
   }
-  // R21.23 + R22.28 — shared apply path. Both the file-picker (R21.23)
-  // AND the drag-drop drop zone (R22.28) flow through this, so the
-  // confirm prompt + merge/replace persistence stay in lockstep across
-  // entry points. Pass a File OR a string of raw JSON. Returns true on
-  // a successful import (UI used for confirm-callback semantics).
+  // R21.23 + R22.28 — shared apply path for the file-picker (R21.23) AND
+  // the drag-drop drop zone (R22.28). Pass a File OR a string of raw
+  // JSON. Returns true on a successful staged import (UI used for
+  // confirm-callback semantics).
+  //
+  // R24.36 — graduates the inline window.confirm path to flow through
+  // the same staged preview panel as the multi-file drop. The single-
+  // file picker stages `{ items, perFile: [{ name, ok: true,
+  // chipCount }], parseFails: 0, mode: 'merge' }`; the preview UI is
+  // identical to the multi-file drop's, so the user gets a consistent
+  // diff view regardless of how they kicked off the import.
   const parseAndApplyBiasImport = async (fileOrText) => {
     try {
       const text = typeof fileOrText === 'string'
@@ -1004,31 +1012,18 @@ function SceneBookmarks() {
         showToast(`Bias import failed: ${res.error}`)
         return false
       }
-      const existing = collectAllBiasOverrides()
-      const importCount = Object.keys(res.items).length
-      const conflictCount = Object.keys(res.items).filter(id => id in existing).length
-      const mode = window.confirm(
-        `Import ${importCount} bias override${importCount === 1 ? '' : 's'}` +
-        (conflictCount > 0 ? ` (${conflictCount} overlap your current edits)?` : '?') +
-        `\n\nOK = Merge into your existing overrides (your current edits stay; only new chips added).\n` +
-        `Cancel = Replace your overrides with the imported set.`
-      ) ? 'merge' : 'replace'
-      const merge = mergeBiasOverridesImport(existing, res.items, mode)
-      // Persist each chip's resolved override (and CLEAR chips that
-      // drop out under replace mode).
-      for (const id of exportableBiasIds()) {
-        if (Object.prototype.hasOwnProperty.call(merge.items, id)) {
-          saveBiasOverride(id, merge.items[id])
-        } else if (mode === 'replace') {
-          // Replace mode: wipe any chip the import didn't touch.
-          resetBiasOverride(id)
-        }
-      }
-      setOverrideTick(t => t + 1)
-      const summary = mode === 'merge'
-        ? `Imported ${merge.added}, skipped ${merge.skipped}`
-        : `Replaced — ${merge.added} chip${merge.added === 1 ? '' : 's'} now active`
-      showToast(summary, <Upload size={10} color="#fff" strokeWidth={2.4} />)
+      // Surface the staging gate through the same path the multi-file
+      // drop uses so single-file imports also get a preview.
+      const name = typeof fileOrText === 'string'
+        ? 'pasted.json'
+        : (fileOrText?.name || 'file.json')
+      const chipCount = Object.keys(res.items).length
+      setBiasImportPending({
+        items: res.items,
+        perFile: [{ name, ok: true, chipCount }],
+        parseFails: 0,
+        mode: 'merge',
+      })
       return true
     } catch (e) {
       showToast(`Bias import error: ${e.message || 'unknown'}`)
@@ -1064,6 +1059,13 @@ function SceneBookmarks() {
   // pre-R23.33 special-case did.
   const [biasDragDepth, setBiasDragDepth] = useState(0)
   const biasDragActive = biasDragDepth > 0
+  // R24.36 — staged import preview. Holds { items, perFile, parseFails,
+  // mode } when a drop is awaiting commit. Shows a per-chip diff list +
+  // mode toggle in a preview panel below the chip rail, parallels the
+  // wind (R14.15) + crossfade (R14.16) import previews. `null` when no
+  // import is pending. Apply commits + clears; Cancel clears without
+  // touching the live overrides.
+  const [biasImportPending, setBiasImportPending] = useState(null)
   const onBiasDragEnter = (e) => {
     if (!e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return
     e.preventDefault()
@@ -1078,32 +1080,16 @@ function SceneBookmarks() {
     if (!e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return
     setBiasDragDepth(d => Math.max(0, d - 1))
   }
-  // R23.33 — apply path for a COMBINED items map (the multi-file result
-  // from combineDroppedBiasFiles). Mirrors parseAndApplyBiasImport's
-  // confirm + merge + persist sequence but skips the per-file parse
-  // step (already done in the combiner). Behaviour is identical for a
-  // 1-file drop; only the toast wording differs.
-  const applyCombinedBiasItems = (items, perFile, parseFails) => {
-    if (Object.keys(items).length === 0) {
-      // Every file failed — surface the count so the user knows nothing
-      // landed (the combiner already records per-file errors).
-      showToast(`Bias import: ${parseFails} file${parseFails === 1 ? '' : 's'} had no valid overrides`)
-      return false
-    }
+  // R24.36 — commit the staged bias import after the preview confirms.
+  // Same merge math as the pre-R24.36 path, just gated behind the
+  // preview's Apply button. Persists each chip's resolved override (and
+  // CLEARS chips that drop out under replace mode).
+  const commitBiasImport = () => {
+    if (!biasImportPending) return
+    const { items, mode } = biasImportPending
+    const fileCount = biasImportPending.perFile?.filter(p => p.ok).length || 0
+    const parseFails = biasImportPending.parseFails || 0
     const existing = collectAllBiasOverrides()
-    const importCount = Object.keys(items).length
-    const conflictCount = Object.keys(items).filter(id => id in existing).length
-    const fileCount = perFile.filter(p => p.ok).length
-    const failNote = parseFails > 0
-      ? `\n\n(${parseFails} file${parseFails === 1 ? '' : 's'} skipped — couldn't parse)`
-      : ''
-    const fileNote = fileCount > 1 ? ` from ${fileCount} files` : ''
-    const mode = window.confirm(
-      `Import ${importCount} bias override${importCount === 1 ? '' : 's'}${fileNote}` +
-      (conflictCount > 0 ? ` (${conflictCount} overlap your current edits)?` : '?') +
-      `\n\nOK = Merge into your existing overrides (your current edits stay; only new chips added).\n` +
-      `Cancel = Replace your overrides with the imported set.` + failNote
-    ) ? 'merge' : 'replace'
     const merge = mergeBiasOverridesImport(existing, items, mode)
     for (const id of exportableBiasIds()) {
       if (Object.prototype.hasOwnProperty.call(merge.items, id)) {
@@ -1113,10 +1099,36 @@ function SceneBookmarks() {
       }
     }
     setOverrideTick(t => t + 1)
+    const failNote = parseFails > 0
+      ? ` (${parseFails} file${parseFails === 1 ? '' : 's'} skipped)`
+      : ''
+    const fileNote = fileCount > 1 ? ` (from ${fileCount} files)` : ''
     const summary = mode === 'merge'
-      ? `Imported ${merge.added}, skipped ${merge.skipped}${fileCount > 1 ? ` (from ${fileCount} files)` : ''}`
-      : `Replaced — ${merge.added} chip${merge.added === 1 ? '' : 's'} now active${fileCount > 1 ? ` (from ${fileCount} files)` : ''}`
+      ? `Imported ${merge.added}, skipped ${merge.skipped}${fileNote}${failNote}`
+      : `Replaced \u2014 ${merge.added} chip${merge.added === 1 ? '' : 's'} now active${fileNote}${failNote}`
     showToast(summary, <Upload size={10} color="#fff" strokeWidth={2.4} />)
+    setBiasImportPending(null)
+  }
+  // R23.33 — apply path for a COMBINED items map (the multi-file result
+  // from combineDroppedBiasFiles).
+  //
+  // R24.36 — graduates the inline window.confirm with a staged preview
+  // panel. Mirrors wind (R14.15) + crossfade (R14.16): the panel
+  // surfaces a per-chip diff + Merge/Replace toggle before any data
+  // lands. Apply commits via commitBiasImport; Cancel clears via
+  // setBiasImportPending(null).
+  const applyCombinedBiasItems = (items, perFile, parseFails) => {
+    if (Object.keys(items).length === 0) {
+      // Every file failed — surface the count so the user knows nothing
+      // landed (the combiner already records per-file errors).
+      showToast(`Bias import: ${parseFails} file${parseFails === 1 ? '' : 's'} had no valid overrides`)
+      return false
+    }
+    // R24.36 — stage instead of inline-confirm. Default mode is 'merge'
+    // (the more conservative outcome — preserves the user's current
+    // edits). The preview panel surfaces the diff + lets the user flip
+    // to 'replace' before clicking Apply.
+    setBiasImportPending({ items, perFile, parseFails, mode: 'merge' })
     return true
   }
   const onBiasDrop = async (e) => {
@@ -1452,6 +1464,19 @@ function SceneBookmarks() {
           <Pencil size={9} strokeWidth={2.2} /> Edit bias JSON
         </button>
       </div>
+      {/* R24.36 — staged import preview. Surfaces a per-chip diff +
+          Merge/Replace toggle before any bias data lands. Parallels
+          wind R14.15 + crossfade R14.16 import previews. Apply commits
+          via commitBiasImport; Cancel clears via setBiasImportPending(null). */}
+      {biasImportPending && (
+        <BiasOverridesImportPreview
+          pending={biasImportPending}
+          existing={collectAllBiasOverrides()}
+          onModeChange={(mode) => setBiasImportPending(p => p ? { ...p, mode } : p)}
+          onCancel={() => setBiasImportPending(null)}
+          onCommit={commitBiasImport}
+        />
+      )}
       </div>{/* R22.28 — close bias drop-zone wrapper */}
       {editingBias && (
         <div style={{
@@ -2042,5 +2067,216 @@ function CodeBtn({ onClick, primary, disabled, title, children }) {
         transition: 'all 0.15s ease-out',
       }}
     >{children}</button>
+  )
+}
+
+// R24.36 — BiasOverridesImportPreview: surfaces what an imported bias-
+// overrides file (single OR multi-file) will actually CHANGE before
+// the user commits. Parallels the wind import preview (R14.15) +
+// crossfade import preview (R14.16): same staging pattern, same per-
+// row action badges (add / skip / overwrite), same Merge/Replace
+// toggle that recomputes the diff in-place.
+//
+// Why we surfaced this: the multi-file drop had a window.confirm()
+// that only displayed an aggregate count ("Import 3 bias overrides
+// from 5 files?"). When you've spent time tuning per-chip settings,
+// a yes/no prompt against an opaque count is anxiety-inducing — you
+// can't see WHICH chips will get overwritten. The preview turns the
+// decision into an informed click: per-chip diff with the chip's name,
+// the live override (italic when chip is currently on shipped
+// defaults), the incoming field count, and a colour-coded action
+// badge.
+function BiasOverridesImportPreview({ pending, existing, onModeChange, onCancel, onCommit }) {
+  const mode = pending.mode === 'replace' ? 'replace' : 'merge'
+  const rows = buildBiasImportPreviewRows(pending.items, existing, mode)
+  const perFile = pending.perFile || []
+  const okFiles = perFile.filter(p => p.ok)
+  const fileCount = okFiles.length
+  const fileNames = okFiles.map(p => p.name).join(', ')
+  const parseFails = pending.parseFails || 0
+  const willWrite = rows.filter(r => r.wouldWrite).length
+  const willSkip = mode === 'merge' ? rows.filter(r => !r.wouldWrite).length : 0
+  const willOverwrite = mode === 'replace' ? rows.filter(r => r.isExisting).length : 0
+  // Replace mode also wipes any LIVE override the import didn't touch —
+  // surface that count so users know they're not just adding/overwriting
+  // but also dropping.
+  const liveIds = new Set(Object.keys(existing || {}))
+  const incomingIds = new Set(rows.map(r => r.id))
+  const willDropOnReplace = mode === 'replace'
+    ? [...liveIds].filter(id => !incomingIds.has(id)).length
+    : 0
+  // Title row text — describes the source of the staged import.
+  const sourceLabel = fileCount > 1
+    ? `${fileCount} files`
+    : (okFiles[0]?.name || 'file')
+  return (
+    <div style={{
+      marginTop: 8, padding: 10, borderRadius: 8,
+      background: 'rgba(99,102,241,0.06)',
+      border: '1px solid rgba(99,102,241,0.25)',
+      animation: 'bias-import-rise 0.18s cubic-bezier(0.2,0.8,0.2,1)',
+    }}>
+      <style>{`@keyframes bias-import-rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }`}</style>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        marginBottom: 8, gap: 6,
+      }}>
+        <span style={{ fontSize: 11, color: '#c7d2fe', fontWeight: 600, letterSpacing: '0.02em' }}>
+          Preview: {rows.length} bias chip{rows.length === 1 ? '' : 's'} in import
+        </span>
+        <span style={{
+          fontSize: 10, color: '#7a7a90', fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+          maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }} title={fileNames || sourceLabel}>
+          {sourceLabel}
+        </span>
+      </div>
+      {/* Mode selector — Merge / Replace */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 8 }}>
+        <button onClick={() => onModeChange('merge')}
+          title="Keep existing overrides, only apply chips the file mentions that aren't already overridden."
+          style={{
+            padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+            cursor: 'pointer',
+            background: mode === 'merge' ? 'rgba(168,85,247,0.22)' : 'rgba(255,255,255,0.04)',
+            color: mode === 'merge' ? '#e9d5ff' : '#8a8aa0',
+            border: mode === 'merge' ? '1px solid rgba(168,85,247,0.45)' : '1px solid rgba(255,255,255,0.07)',
+          }}>Merge</button>
+        <button onClick={() => onModeChange('replace')}
+          title="Drop all existing overrides, then write the chips from the file."
+          style={{
+            padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+            cursor: 'pointer',
+            background: mode === 'replace' ? 'rgba(236,72,153,0.20)' : 'rgba(255,255,255,0.04)',
+            color: mode === 'replace' ? '#fbcfe8' : '#8a8aa0',
+            border: mode === 'replace' ? '1px solid rgba(236,72,153,0.42)' : '1px solid rgba(255,255,255,0.07)',
+          }}>Replace</button>
+      </div>
+      {/* Diff list — one row per chip the import touches. */}
+      {rows.length === 0 ? (
+        <p style={{
+          fontSize: 10.5, color: '#7a7a90', fontStyle: 'italic',
+          margin: 0, marginBottom: 8, lineHeight: 1.5,
+          padding: '6px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.02)',
+          border: '1px dashed rgba(255,255,255,0.08)',
+        }}>
+          No valid bias chips in this file.
+        </p>
+      ) : (
+        <div style={{
+          maxHeight: 144, overflowY: 'auto',
+          marginBottom: 8, padding: 4, borderRadius: 6,
+          background: 'rgba(0,0,0,0.18)',
+          border: '1px solid rgba(255,255,255,0.04)',
+        }}>
+          {rows.map(r => {
+            const isSkip = r.action === 'skip'
+            const isOverwrite = r.action === 'overwrite'
+            const liveFieldCount = r.live ? Object.keys(r.live).length : 0
+            return (
+              <div key={r.id} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                fontSize: 10.5, padding: '3px 6px',
+                fontFamily: 'inherit', color: isSkip ? '#7a7a90' : '#d8d8e0',
+                opacity: isSkip ? 0.7 : 1,
+              }}>
+                <span style={{
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  maxWidth: '38%', fontWeight: 600,
+                }} title={r.label}>{r.label}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{
+                    fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                    fontSize: 9.5, padding: '1px 5px', borderRadius: 4,
+                    background: 'rgba(255,255,255,0.04)', color: '#9a9ab0',
+                    border: '1px solid rgba(255,255,255,0.06)',
+                    fontStyle: r.live ? 'normal' : 'italic',
+                  }} title={r.live
+                    ? `Live override: ${liveFieldCount} field${liveFieldCount === 1 ? '' : 's'} set`
+                    : 'No live override — chip uses shipped default'}>
+                    {r.live ? `${liveFieldCount}f` : 'default'}
+                  </span>
+                  <span style={{ color: '#7a7a90', fontSize: 10 }}>{'\u2192'}</span>
+                  <span style={{
+                    fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                    fontSize: 9.5, padding: '1px 5px', borderRadius: 4,
+                    background: isSkip
+                      ? 'rgba(255,255,255,0.03)'
+                      : isOverwrite
+                        ? 'rgba(245,158,11,0.10)'
+                        : 'rgba(34,197,94,0.10)',
+                    color: isSkip ? '#7a7a90' : isOverwrite ? '#fde68a' : '#86efac',
+                    border: isSkip
+                      ? '1px solid rgba(255,255,255,0.05)'
+                      : isOverwrite
+                        ? '1px solid rgba(245,158,11,0.30)'
+                        : '1px solid rgba(34,197,94,0.30)',
+                  }} title={`Incoming: ${r.fieldCount} field${r.fieldCount === 1 ? '' : 's'}`}>
+                    {`${r.fieldCount}f`}
+                    {isSkip && (
+                      <span style={{ marginLeft: 4, fontSize: 8, fontWeight: 700 }}>SKIP</span>
+                    )}
+                    {isOverwrite && (
+                      <span style={{ marginLeft: 4, fontSize: 8, fontWeight: 700 }}>OVR</span>
+                    )}
+                    {!isSkip && !isOverwrite && (
+                      <span style={{ marginLeft: 4, fontSize: 8, fontWeight: 700 }}>ADD</span>
+                    )}
+                  </span>
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      {/* Impact line — mode-aware summary so the user understands the
+          exact outcome before clicking Apply. parseFails count surfaces
+          here too so a multi-file drop with some corrupt files
+          documents itself. */}
+      <p style={{
+        fontSize: 10.5, color: mode === 'replace' ? '#fbcfe8' : '#a5b4fc',
+        margin: 0, marginBottom: 8, lineHeight: 1.5,
+        fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+      }}>
+        {mode === 'replace'
+          ? `Replace: write ${willWrite} chip${willWrite === 1 ? '' : 's'}${willOverwrite ? ` (${willOverwrite} overwrite)` : ''}${willDropOnReplace ? `, drop ${willDropOnReplace}` : ''}.`
+          : `Merge: add ${willWrite} new${willSkip ? ` \u00b7 skip ${willSkip} existing` : ''}.`}
+        {parseFails > 0 && (
+          <span style={{ color: '#fbbf24', display: 'block', marginTop: 2 }}>
+            {parseFails} file{parseFails === 1 ? '' : 's'} skipped {'\u2014'} couldn{'\u2019'}t parse.
+          </span>
+        )}
+      </p>
+      {/* Apply / Cancel */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+        <button onClick={onCancel}
+          style={{
+            padding: '7px 0', borderRadius: 7, fontSize: 11.5, fontWeight: 550,
+            cursor: 'pointer',
+            background: 'rgba(255,255,255,0.04)',
+            color: '#c8c8d4',
+            border: '1px solid rgba(255,255,255,0.07)',
+          }}>Cancel</button>
+        <button onClick={onCommit}
+          disabled={willWrite === 0 && mode === 'merge'}
+          title={(willWrite === 0 && mode === 'merge') ? 'Nothing new to merge' : `Apply ${mode}`}
+          style={{
+            padding: '7px 0', borderRadius: 7, fontSize: 11.5, fontWeight: 600,
+            cursor: (willWrite === 0 && mode === 'merge') ? 'not-allowed' : 'pointer',
+            background: (willWrite === 0 && mode === 'merge')
+              ? 'rgba(255,255,255,0.04)'
+              : mode === 'replace'
+                ? 'linear-gradient(135deg, rgba(236,72,153,0.28), rgba(168,85,247,0.18))'
+                : 'linear-gradient(135deg, rgba(99,102,241,0.28), rgba(168,85,247,0.18))',
+            color: (willWrite === 0 && mode === 'merge') ? '#5a5a70' : '#ffffff',
+            border: (willWrite === 0 && mode === 'merge')
+              ? '1px solid rgba(255,255,255,0.07)'
+              : mode === 'replace'
+                ? '1px solid rgba(236,72,153,0.45)'
+                : '1px solid rgba(99,102,241,0.45)',
+            opacity: (willWrite === 0 && mode === 'merge') ? 0.6 : 1,
+          }}>Apply {mode === 'replace' ? 'Replace' : 'Merge'}</button>
+      </div>
+    </div>
   )
 }

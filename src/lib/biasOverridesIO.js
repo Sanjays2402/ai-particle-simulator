@@ -257,6 +257,69 @@ export function combineDroppedBiasFiles(reads) {
   return { items, parseFails, totalFilesRead, perFile }
 }
 
+// R24.36 — preview-panel projector. Graduates the multi-file drop
+// from R23.33 with a per-chip diff list so the user can see what a
+// drop will actually CHANGE before committing — parallels the wind
+// (R14.15) + crossfade (R14.16) import previews.
+//
+// Returns one structured row per chip the import touches. Each row
+// carries:
+//   - id, label           — chip identity
+//   - incoming            — sanitized override map the import will write
+//   - live                — current override map (or null when chip is on shipped defaults)
+//   - isExisting          — whether the chip already has any live override
+//   - wouldWrite          — would this row actually persist post-commit?
+//                           (merge: only when !isExisting; replace: always)
+//   - action              — 'add' | 'skip' | 'overwrite'  — UI badge hint
+//   - fieldCount          — number of distinct keys in the incoming override
+//                           (small but useful so the UI can say "3 fields")
+//
+// `mode` is one of 'merge' | 'replace' (defaults to 'merge' for the
+// same reason mergeImport does — most-conservative default).
+//
+// Rows are sorted by SCENE_BIASES order so the preview list reads in
+// the same order as the chip rail above it (calm → surprise → wild),
+// regardless of the order the import file happens to use.
+//
+// Defensive — non-object items / array items / null all return [].
+// SCENE_BIASES is queried fresh each call so a future chip addition
+// auto-extends the preview without touching this helper.
+export function buildBiasImportPreviewRows(items, existing, mode = 'merge') {
+  if (!items || typeof items !== 'object' || Array.isArray(items)) return []
+  const safeItems = sanitizeBiasOverridesMap(items)
+  const safeExisting = sanitizeBiasOverridesMap(existing || {})
+  const sceneOrder = SCENE_BIASES.map(b => b.id)
+  const labelById = Object.fromEntries(SCENE_BIASES.map(b => [b.id, b.label || b.id]))
+  const importedIds = Object.keys(safeItems)
+  const rows = importedIds.map(id => {
+    const incoming = safeItems[id]
+    const live = Object.prototype.hasOwnProperty.call(safeExisting, id)
+      ? safeExisting[id]
+      : null
+    const isExisting = live != null
+    const wouldWrite = mode === 'replace' ? true : !isExisting
+    const action = mode === 'replace'
+      ? (isExisting ? 'overwrite' : 'add')
+      : (isExisting ? 'skip' : 'add')
+    return {
+      id,
+      label: labelById[id] || id,
+      incoming,
+      live,
+      isExisting,
+      wouldWrite,
+      action,
+      fieldCount: Object.keys(incoming || {}).length,
+    }
+  })
+  rows.sort((a, b) => {
+    const ai = sceneOrder.indexOf(a.id)
+    const bi = sceneOrder.indexOf(b.id)
+    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi)
+  })
+  return rows
+}
+
 // Trigger a browser download of the JSON envelope. Returns the
 // filename used, or null when something went wrong (e.g. no document
 // available during SSR).

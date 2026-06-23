@@ -13,6 +13,7 @@ import {
   buildExportPayload, serializeBiasOverrides, makeFilename,
   parseImport, mergeImport, summarizeImportImpact,
   combineDroppedBiasFiles,
+  buildBiasImportPreviewRows,
 } from './biasOverridesIO.js'
 import { SCENE_BIASES, SCENE_BIAS_RANGE_FIELDS, SCENE_BIAS_CHANCE_FIELDS } from './randomScene.js'
 
@@ -414,4 +415,127 @@ ok(SCENE_BIAS_CHANCE_FIELDS.length === 10, 'schema: 10 chance fields')
   eq(JSON.stringify(input), frozen,    'input array unchanged')
 }
 
-console.log(`PASS: biasOverridesIO — envelope build/parse, merge/replace, summarize, defensive, multi-file combine (${SCENE_BIASES.length} chip ids, ${SCENE_BIAS_RANGE_FIELDS.length} ranges + ${SCENE_BIAS_CHANCE_FIELDS.length} chances per chip)`)
+// --- R24.36: buildBiasImportPreviewRows — diff projection -------------
+
+// Merge mode + no existing → every row is 'add'.
+{
+  const rows = buildBiasImportPreviewRows(
+    { calm: { counts: [1000, 2000] }, wild: { counts: [50000, 60000] } },
+    {},
+    'merge',
+  )
+  eq(rows.length, 2,                          'merge+empty: 2 rows')
+  ok(rows.every(r => r.action === 'add'),     'merge+empty: all action=add')
+  ok(rows.every(r => r.wouldWrite === true),  'merge+empty: all wouldWrite')
+  ok(rows.every(r => r.isExisting === false), 'merge+empty: none existing')
+}
+
+// Merge mode + existing entries → existing skip, new add.
+{
+  const rows = buildBiasImportPreviewRows(
+    { calm: { counts: [9999, 9999] }, wild: { counts: [50000, 60000] } },
+    { calm: { counts: [1, 2] } },
+    'merge',
+  )
+  const calm = rows.find(r => r.id === 'calm')
+  const wild = rows.find(r => r.id === 'wild')
+  eq(calm.action,    'skip',  'merge: existing calm = skip')
+  eq(calm.wouldWrite, false,  'merge: existing skip wouldNotWrite')
+  eq(wild.action,    'add',   'merge: new wild = add')
+  eq(wild.wouldWrite, true,   'merge: new wild wouldWrite')
+}
+
+// Replace mode + existing → 'overwrite' instead of 'skip'.
+{
+  const rows = buildBiasImportPreviewRows(
+    { calm: { counts: [9999, 9999] }, wild: { counts: [50000, 60000] } },
+    { calm: { counts: [1, 2] } },
+    'replace',
+  )
+  const calm = rows.find(r => r.id === 'calm')
+  const wild = rows.find(r => r.id === 'wild')
+  eq(calm.action,    'overwrite', 'replace: existing calm = overwrite')
+  eq(calm.wouldWrite, true,       'replace: every row wouldWrite')
+  eq(wild.action,    'add',       'replace: new wild still add')
+}
+
+// Default mode = 'merge'.
+{
+  const rows = buildBiasImportPreviewRows(
+    { calm: { counts: [1, 2] } },
+    { calm: { counts: [1, 2] } },
+  )
+  eq(rows[0].action, 'skip', 'default mode merge-skips existing')
+}
+
+// fieldCount reflects post-sanitize field count.
+{
+  const rows = buildBiasImportPreviewRows(
+    { calm: { counts: [1, 2], bgChance: 0.4, kaleidoChance: 0.7 } },
+    {},
+    'merge',
+  )
+  eq(rows[0].fieldCount, 3, 'fieldCount = 3 distinct fields')
+}
+
+// Live override surfaced on existing rows.
+{
+  const rows = buildBiasImportPreviewRows(
+    { calm: { counts: [9999, 9999] } },
+    { calm: { counts: [1, 2], bgChance: 0.5 } },
+    'merge',
+  )
+  ok(rows[0].live != null,             'live surfaced on existing row')
+  deepEq(rows[0].live.counts, [1, 2],  'live.counts preserved')
+}
+
+// Rows sorted by SCENE_BIASES order regardless of input key order.
+{
+  // SCENE_BIASES order: calm, surprise, wild — verify the sort.
+  const sceneOrder = SCENE_BIASES.map(b => b.id)
+  const rows = buildBiasImportPreviewRows(
+    { wild: { counts: [1, 2] }, calm: { counts: [3, 4] }, surprise: { counts: [5, 6] } },
+    {},
+    'merge',
+  )
+  deepEq(rows.map(r => r.id), sceneOrder,
+    'rows sorted by SCENE_BIASES order')
+}
+
+// Unknown chip ids dropped before rendering rows.
+{
+  const rows = buildBiasImportPreviewRows(
+    { calm: { counts: [1, 2] }, bogusChip: { counts: [9, 9] } },
+    {},
+    'merge',
+  )
+  eq(rows.length, 1,             'unknown chip not in preview')
+  eq(rows[0].id, 'calm',         'only known chip kept')
+}
+
+// Defensive: null/non-object items → empty preview.
+{
+  deepEq(buildBiasImportPreviewRows(null, {}, 'merge'),         [], 'null items → []')
+  deepEq(buildBiasImportPreviewRows(undefined, {}, 'merge'),    [], 'undefined items → []')
+  deepEq(buildBiasImportPreviewRows('not-obj', {}, 'merge'),    [], 'string items → []')
+  deepEq(buildBiasImportPreviewRows(42, {}, 'merge'),           [], 'number items → []')
+  deepEq(buildBiasImportPreviewRows([], {}, 'merge'),           [], 'array items → []')
+}
+
+// Empty items map → empty rows (not an error).
+{
+  deepEq(buildBiasImportPreviewRows({}, {}, 'merge'), [], 'empty items → []')
+}
+
+// Pure: input not mutated.
+{
+  const items    = { calm: { counts: [1, 2] } }
+  const existing = { wild: { counts: [3, 4] } }
+  const beforeItems = JSON.stringify(items)
+  const beforeExist = JSON.stringify(existing)
+  buildBiasImportPreviewRows(items, existing, 'merge')
+  eq(JSON.stringify(items),    beforeItems, 'items not mutated')
+  eq(JSON.stringify(existing), beforeExist, 'existing not mutated')
+}
+
+console.log(`PASS: biasOverridesIO — envelope build/parse, merge/replace, summarize, defensive, multi-file combine, R24.36 preview rows (${SCENE_BIASES.length} chip ids, ${SCENE_BIAS_RANGE_FIELDS.length} ranges + ${SCENE_BIAS_CHANCE_FIELDS.length} chances per chip)`)
