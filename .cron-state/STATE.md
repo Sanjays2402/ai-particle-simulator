@@ -143,6 +143,11 @@ Existing capabilities (do not re-ship):
 - MIDI hotkey UNDO chain badge alternates direction glyph (R25.43). Graduates R24.38's chain-counter ("x2"/"x3"/...) with an alternating direction glyph (« or ») prefixed to the count so the user can see which way the LAST flip went. Chain alternates by definition (each Undo flips roles), so direction maps directly to (chainStep mod 2): step 2 (first restore) = « (reverse — undoing the initial), step 3 (re-undo back) = » (forward — back to initial direction), step 4 = «, etc. After enough flips the alternating glyph signals "warmer or colder" relative to the original assignment without the user having to mentally track odd/even steps. New pure helper `directionGlyphForChainStep(chainStep)` in midiPresets.js: step ≤ 1 / non-finite / non-numeric → '' (no glyph); even step → «; odd step ≥ 3 → »; fractional step floors to int (consistent with formatHotkeyChainBadge). `formatHotkeyChainBadge` now embeds the glyph as text prefix and exposes a separate `direction` field on the badge object for UI callers; tooltip mentions the glyph + step number.
 - Per-attractor clamp popover bulk-clear all overrides for attractor (R25.45). Graduates R24.40 (per-(attractor, field) clamp warn threshold overrides) with a "Clear all (N)" button in the threshold popover footer (violet, matches per-attractor scope), only rendered when the attractor has 2+ per-field overrides (with 1 override, "Clear all" = "Clear attr." for the current field — redundant). Count badge shows exactly how many cells the wipe scope covers. Re-uses existing `clearClampWarnAttractorOverrides` helper for the actual wipe. New pure projector `countClampWarnAttractorOverridesFor(overrides, attractorId)` in midiMap.js returns the count of populated per-field overrides for one attractor — only counts keys in CLAMP_THRESHOLD_FIELDS, only counts finite numeric values, defensive against null/array/non-object/non-string-id/malformed-inner, no double-counting.
 - MidiPanel per-attractor binding-group drag-and-drop reorder (R25.20). Graduates R18.19 (named-attractor row DnD in LeftSidebar) + R15.20 (chevrons) + R16.18 (jump-to-position) — three existing reorder gestures all live in LeftSidebar. R25.20 adds a FOURTH path that lives in the MidiPanel so a power user mid-MIDI-binding-work can reorder attractors without leaving the panel. Each binding group header gets a small grab handle (⠇ braille pattern) at left edge when ≥2 entries; stale groups (deleted attractor still has bindings) are NOT draggable; live position "#N" badge next to type chip keeps the user oriented; violet border + tint on drop target; dragged group dims to 0.55 opacity. Pure wire-layer on existing primitives — moveAttractorByIndex (R15.20 tests), sibling-enter-before-leave guard (R17.07 / R18.19), HTML5 native DnD. New store action `moveNamedAttractorByIndex(fromIdx, toIdx)` wraps the lib helper with standard ref-equal-on-no-op + save-then-set pattern. The per-attractor binding rows below each group header are emitted in same array order as the live attractor list (since R13.18) so reordering the underlying list automatically reorders the per-attractor sections — order of headers in panel ↔ order of attractors in scene, both directions.
+- Bias import preview chip-row shows changed-vs-unchanged field counts (R26.41). Graduates R25.41 (per-FIELD diff panel, expandable) with an always-visible chip-row summary so the user can see at a glance how much actually MATTERS in this import without first expanding the row. New pure projector `summarizeFieldDiffCounts(fieldDiff, mode)` in biasOverridesIO.js returns `{ changed, unchanged }` counts; mode-aware (merge treats live-only as not-counted, replace treats as 'changed'). Defensive contract (non-array → zeros; null/non-object entries silently skipped; unknown action values silently skipped; missing-action rows silently skipped). UI: inline monospace "Nc·Nu" pip between live tag and action badge in BiasOverridesImportPreview; changed count wears amber when >0, grey when 0. Only paints when row has at least one diff row.
+- Carousel note filter history entries can be PINNED to top (R26.42). Graduates R25.42 (recent-patterns dropdown) with a per-entry pin so frequently-used patterns stay above the MRU drop boundary across many subsequent searches. Right-click any history row OR click its star glyph to toggle pin; pinned entries sort to the top of the dropdown (preserving MRU within tier) and survive the cap drop. New helpers in presetThumbnails.js: `togglePinNoteFilterHistoryEntry(list, query, mode)` (returns new list with flag flipped; ref-equal-on-no-op for missing; defensive non-array/blank/null/non-string; invalid mode coerces to substring); `sortNoteFilterHistoryForDisplay(list)` (pure sort projector — pinned first preserving MRU within each tier; non-array → []; strict-true pinned only). Updated contracts: sanitizeHistoryEntry reads/writes `pinned` (strict bool; non-bool → false); sanitizeNoteFilterHistory keeps PINNED preferentially when over-cap (pinned count > MAX → keep ALL pins, never silently drop); addNoteFilterHistoryEntry preserves pinned flag on bump, cap drops oldest UNPINNED rather than oldest. UI: pinned rows wear amber row tint + amber-filled star ★; unpinned rows hollow star ☆ at 0.55 opacity until hover. Click star to toggle; right-click row also toggles (preventDefault skips native context menu). Storage round-trips pinned flag.
+- MIDI hotkey UNDO chain badge colour-codes by direction (R26.43). Graduates R25.43's alternating direction GLYPH (« / ») with matching alternating accent COLOURS so the user can read direction at peripheral glance without parsing the chevron shape. Cyan-tinted badge for « (reverse / undo direction); amber-tinted for » (forward / re-apply direction). Together with R25.43's glyph, R24.38's counter, and R23.35's 1s window, the chain UI now carries four parallel cues without overlap. New lib helpers: HOTKEY_CHAIN_COLOR_REVERSE = '#67e8f9' (cyan); HOTKEY_CHAIN_COLOR_FORWARD = '#fbbf24' (amber); `directionColorForChainStep(chainStep)` pure helper (returns colour or null; non-finite / < 2 / non-numeric → null; even step → cyan; odd step ≥ 3 → amber; fractional floors). `formatHotkeyChainBadge` extended to surface a `color` field on the returned badge object; UI drops the previous winner-bundle-accent override so the directional colour drives the badge. The bundle accent is still on the toast's left icon (unchanged) — moving the badge colour to direction-coded carries more information per pixel.
+- Clamp popover bulk-clear "THIS FIELD across every attractor" (R26.45). Graduates R25.45 (per-attractor bulk-clear) with the TRANSPOSED axis: instead of "wipe every field for this attractor", this button wipes "this field's per-attractor override on every attractor that has one". Real-world use case: power user has 8 attractors with custom STRENGTH thresholds and wants to reset all 8 back to a single per-field-global value without losing X/Y/Z per-attractor tuning. One click instead of opening 8 popovers. New lib helpers in midiMap.js: `countClampWarnFieldOverridesAcross(overrides, field)` (count of attractors with override for this field; only counts CLAMP_THRESHOLD_FIELDS keys + finite values; defensive non-object/null/array/bad field → 0; pure); `clearClampWarnFieldOverridesAcross(overrides, field)` (strips ONE field from EVERY attractor's per-attractor map; drops empty entries last-cell-prune; preserves corrupt inner entries as-is; ref-equal-on-no-op when nothing to wipe; ref-equal on bad inputs; pure / no mutation). UI: new violet-deep tinted button between R25.45's button and "Use global" in the ClampThresholdPopover footer, only renders when ≥ 2 attractors have an override for this field. Label "STRENGTH all (M)" / "RADIUS all (M)" / etc with count badge.
+- MidiPanel binding-group DnD touch / long-press support (R26.20). Graduates R25.20's desktop-only HTML5 native DnD with a touch gesture for mobile / tablet users (touch devices don't fire dragstart, so they were locked out). Parallels camera-path R22.12 / R23.31 touch DnD: 350ms long-press on the grab handle (⠇) arms the drag + 10ms haptic; touchmove > 8px before timer fires cancels (scroll stays a scroll); hit-test against per-group bounding rects via resolveTouchTargetIdx; touchend runs moveNamedAttractorByIndex + suppresses synthetic click. Pure wire layer — no new lib helpers / no new tests; moveAttractorByIndex (R15.20) + resolveTouchTargetIdx (R22.12) + sibling-enter-before-leave guard (R17.07 / R18.19) all already pinned in their respective test files. Touch state in refs (touchmove ~60Hz; setState would re-render whole panel). groupRefs map keyed by liveIdx for getBoundingClientRect. groupTouchHandlers(idx, totalGroups, opts) factory mirrors camera-path's touchDragHandlers shape; stopProp=true on grab handle. Grab handle gets touchAction:'manipulation' (kills iOS 300ms delay) + WebkitTouchCallout:'none' (suppresses iOS action sheet). Title tooltip mentions touch gesture.
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -473,12 +478,19 @@ padding.
 - [ ] R25.44 Camera path touch DnD: badge wears a haptic-feedback pulse on long-press start (Android vibrate API) — graduates R24.39
 - [x] R25.45 Per-attractor MIDI clamp: bulk-clear button in the popover that wipes EVERY per-(attractor, field) override for the current attractor — 8159d65
 
-### Batch 26 — refilled queue (graduations of THIS batch's slices)
-- [ ] R26.41 Bias import preview per-field diff: also surface the EQUAL-rows count in the chip-row summary (e.g. "3 changed / 2 unchanged") so the user can see at a glance how much overlap exists — graduates R25.41
-- [ ] R26.42 Note filter history: pin entries (right-click → pin) so they stay above the MRU drop boundary; pinned entries get a star glyph — graduates R25.42
-- [ ] R26.43 UNDO chain direction glyph: also colour the badge by direction (« cyan / » amber) so the alternation is visible at a peripheral glance — graduates R25.43
-- [ ] R26.45 Clamp popover bulk-clear: also surface a "Clear all (M) for THIS FIELD across every attractor" companion button — graduates R25.45
-- [ ] R26.20 MidiPanel binding-group DnD: touch / long-press support for mobile users (parallels R22.12 camera path touch DnD) — graduates R25.20
+### Batch 26 — graduations of Batch 25 slices  (SHIPPED)
+- [x] R26.41 Bias import preview per-field diff: also surface the EQUAL-rows count in the chip-row summary (e.g. "3 changed / 2 unchanged") so the user can see at a glance how much overlap exists — bf8d333
+- [x] R26.42 Note filter history: pin entries (right-click → pin) so they stay above the MRU drop boundary; pinned entries get a star glyph — f13fbd2
+- [x] R26.43 UNDO chain direction glyph: also colour the badge by direction (« cyan / » amber) so the alternation is visible at a peripheral glance — d43b4c2
+- [x] R26.45 Clamp popover bulk-clear: also surface a "Clear all (M) for THIS FIELD across every attractor" companion button — a898502
+- [x] R26.20 MidiPanel binding-group DnD: touch / long-press support for mobile users (parallels R22.12 camera path touch DnD) — f25f073
+
+### Batch 27 — refilled queue (graduations of THIS batch's slices)
+- [ ] R27.41 Bias import preview chip-row counts: also surface a TOTAL-fields-touched count across the whole preview ("Touching 12 of 30 fields total") so users picking between many imports can compare scope at a glance — graduates R26.41
+- [ ] R27.42 Note filter history pin: bulk-unpin button in the dropdown footer when ≥2 entries are pinned (parallels Clear footer behaviour) — graduates R26.42
+- [ ] R27.43 UNDO chain direction colour: also fade the colour intensity over the 1s window (cyan/amber → grey as window expires) so the colour visually warns "click soon to flip back" — graduates R26.43
+- [ ] R27.45 Clamp popover field-wipe: also surface inline preview chips listing the N attractors that will be affected before commit (parallels R26.41's chip-row counts UX) — graduates R26.45
+- [ ] R27.20 MidiPanel binding-group DnD: gap-drop zones between groups for explicit insert-here semantics (parallels R19.19 named-attractor gap-drop) — graduates R26.20
 
 ### Future queue carried from Batch 24 (refill on next batch)
 
@@ -1502,3 +1514,81 @@ padding.
     null/array/non-object overrides → 0; non-string / empty / null /
     undefined / number id → 0; non-object inner → 0; each field
     counted at most once across all 6 threshold fields; purity)
+
+- 2026-06-23 14:31 PT — Batch 26 (5/5).
+  Commits: bf8d333 (R26.41 bias preview chip-row counts —
+  summarizeFieldDiffCounts projector with mode-aware live-only
+  semantics, inline "Nc·Nu" pip between live tag + action badge),
+  f13fbd2 (R26.42 note filter history pin — togglePinNoteFilterHistoryEntry
+  + sortNoteFilterHistoryForDisplay + sanitize-keeps-pins-past-cap +
+  add-preserves-pin-on-bump; right-click row OR star toggles; amber
+  tint + ★/☆ glyph; storage round-trip), d43b4c2 (R26.43 UNDO chain
+  direction colour — directionColorForChainStep + HOTKEY_CHAIN_COLOR_REVERSE/FORWARD
+  constants; formatHotkeyChainBadge surfaces color field; UI drops
+  winner-accent override so directional colour drives badge),
+  a898502 (R26.45 clamp popover field-wipe — countClampWarn
+  FieldOverridesAcross + clearClampWarnFieldOverridesAcross with
+  last-cell-prune + ref-equal-on-no-op + corrupt-inner-preserved
+  contract; new violet-deep button between R25.45 + Use global),
+  f25f073 (R26.20 binding-group touch DnD — 350ms long-press +
+  haptic + 8px slop + groupRefs map + groupTouchHandlers factory
+  mirroring camera-path R22.12 / R23.31 pattern; pure wire layer
+  on existing primitives, no new lib helpers).
+  Substituted R26.20, R26.41, R26.42, R26.43, R26.45 from the
+  pre-refilled Batch 26 queue (every slice graduates a Batch 25
+  feature, tight thematic spine: Batch 25 → Batch 26 iteration loop
+  without padding). R26.01-R26.05 (render-pipeline / r3f-gizmo /
+  backend runtime) deferred — same as Batches 14-25.
+  Gates: lint 23 errors / 3 warnings — exactly matches baseline
+  (zero new errors in any of the 7 modified .js/.jsx files +
+  3 modified .test.mjs files; no lint-gate cleanup commits needed
+  this batch — every commit was lint-clean on first land).
+  Build: 6.13 s green (1.84 MB bundle, gzip 542 KB — +1 KB vs Batch
+  25 for the new lib helpers + chip-row pip + pin button + direction
+  colour helpers + bulk-clear field button + touch handler factory).
+  Unit tests: 40/40 files pass (~155 fresh asserts this batch):
+  - extended biasOverridesIO with ~30 R26.41 asserts (summarize
+    FieldDiffCounts happy add+change=2 counted as changed;
+    live-only NOT counted in merge mode (preserves live);
+    live-only IS counted as changed in replace mode (about to drop);
+    default mode = merge (safer surface area); empty array → zeros;
+    defensive non-array → zeros (null/undefined/string/number/object);
+    null/non-object entries silently skipped; missing-action rows
+    silently skipped; unknown action values silently skipped;
+    integration through buildBiasFieldDiff in merge + replace;
+    purity (input not mutated))
+  - extended presetThumbnails with ~45 R26.42 asserts (togglePin
+    NoteFilterHistoryEntry happy flip false→true→false; only-matching-
+    entry affected; ref-equal-on-no-op for missing; defensive
+    non-array/blank/null/non-string; invalid mode coercion; order
+    preserved; purity; add-preserves-pinned-flag-on-bump; pinned-
+    survive-cap; sanitize defensive against corrupt persisted pinned
+    via strict-equals (string/number → false); over-cap prefers pins;
+    pinned-count > MAX keeps ALL pins; sortForDisplay pinned-first
+    with MRU preserved + defensive null/array/object/string/number → [];
+    strict-bool semantics; storage round-trip pinned flag)
+  - extended midiPresets with ~30 R26.43 asserts (directionColorFor
+    ChainStep step ≤ 1 → null; alternation pairs 2/3/4/5/10/11;
+    defensive NaN/Infinity/string/null/undefined → null; fractional
+    floors to int; full-sweep regression 19 consecutive steps → 18
+    transitions perfect alternation; colours distinct + valid 6-digit
+    hex; integration formatHotkeyChainBadge.color matches helper;
+    glyph-colour pairing invariant across sampled steps)
+  - extended midiMap with ~50 R26.45 asserts (countClampWarnField
+    OverridesAcross happy 5-fields × 3-attractors; fields outside
+    CLAMP_THRESHOLD_FIELDS → 0; empty map → 0; non-finite values
+    not counted; defensive against bad overrides (null/undefined/
+    array/string/number) + bad field (empty/null/undefined/number);
+    malformed inner entries silently skipped; pure no-mutation.
+    clearClampWarnFieldOverridesAcross happy wipes preserving other
+    fields; empty-entries dropped after wipe; ref-equal-on-no-op
+    when nothing to wipe; ref-equal on bad inputs (unknown field /
+    non-CLAMP_THRESHOLD_FIELDS field both no-op); pure / no mutation;
+    corrupt inner entries preserved as-is; integration count + clear
+    round-trip — count BEFORE = N → after clear count = 0, other
+    fields' counts untouched)
+  - R26.20 ships zero new lib helpers / tests — pure wire layer on
+    resolveTouchTargetIdx (R22.12, already pinned in cameraViews
+    tests) + moveAttractorByIndex (R15.20, already pinned in
+    namedAttractors tests) + the sibling-enter-before-leave guard
+    (R17.07 / R18.19 wire-layer pattern, no test surface to add).
