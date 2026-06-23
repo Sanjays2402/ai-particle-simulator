@@ -434,6 +434,18 @@ export function isWithinUndoWindow(issuedAtMs, nowMs, windowMs = UNDO_CHAIN_MS) 
 // recursive, so the badge text needs a stable formula. If a future
 // refactor accidentally changes "x2" to "2x" or "(2)" the UX changes
 // silently. The formatter contract here is the single source of truth.
+//
+// R25.43 — adds a per-step DIRECTION glyph alongside the count so the
+// user knows whether the LAST flip went A→B or B→A. The chain
+// alternates by definition (each Undo flips roles), so direction maps
+// directly to (chainStep mod 2): odd step = original direction
+// (winner→loser), even step = reversed (loser→winner). The glyph
+// renders as a small chevron prefix in the badge — '\u00bb' (»)
+// for forward (original direction), '\u00ab' (« ) for reverse.
+//
+// Step 1 still returns null (no chain yet to indicate direction for).
+// Step 2 is the FIRST restore — direction reverses from initial → «.
+// Step 3 flips back again → ». And so on alternating.
 export function formatHotkeyChainBadge(chainStep, windowMs = UNDO_CHAIN_MS) {
   if (!Number.isFinite(chainStep) || chainStep < 2) return null
   const step = Math.floor(chainStep)
@@ -443,10 +455,39 @@ export function formatHotkeyChainBadge(chainStep, windowMs = UNDO_CHAIN_MS) {
   const winSec = Number.isFinite(windowMs) && windowMs > 0
     ? windowMs / 1000
     : UNDO_CHAIN_MS / 1000
+  // R25.43 — direction: step 2 (first restore) is reverse (« ); step
+  // 3 (re-undo back) is forward (» ); etc. The user sees the badge
+  // ALTERNATE as they keep clicking Undo, so the eye learns "this
+  // flip went the OTHER way" without reading the count.
+  const directionGlyph = directionGlyphForChainStep(step)
   return {
-    text:  `x${step}`,
-    title: `Undo chain step ${step} \u2014 you\u2019ve flipped this hotkey ${flipsSoFar} time${flipsSoFar === 1 ? '' : 's'}. Click Undo within ${winSec}s to flip back.`,
+    text:  `${directionGlyph}x${step}`,
+    title: `Undo chain step ${step} ${directionGlyph} \u2014 you\u2019ve flipped this hotkey ${flipsSoFar} time${flipsSoFar === 1 ? '' : 's'}. Click Undo within ${winSec}s to flip back.`,
+    direction: directionGlyph,
   }
+}
+
+// R25.43 — direction glyph for a chain step. Pure helper exposed for
+// tests so the alternation contract is regression-pinned.
+// Step 2 (first Undo restore — reverses initial assignment): « (reverse)
+// Step 3 (second Undo — back to initial direction):           » (forward)
+// Step 4 (third Undo — reverses again):                       «
+// ...
+// Step 1 (initial warning toast, never carries a badge):       ''
+//
+// Direction is NOT tied to a specific bundle identity (we don't know
+// at this layer whether A→B or B→A is "forward" in absolute terms);
+// it tells the USER that the LAST flip reversed direction relative
+// to the previous one. After enough flips the user is "warmer or
+// colder" to the original state.
+//
+// Defensive: non-finite / < 2 step returns '' (no glyph).
+export function directionGlyphForChainStep(chainStep) {
+  if (!Number.isFinite(chainStep) || chainStep < 2) return ''
+  const step = Math.floor(chainStep)
+  // Even step = first restore + subsequent backwards flips relative
+  // to initial assignment.
+  return step % 2 === 0 ? '\u00ab' : '\u00bb'
 }
 
 // Load + sanitize the persisted user-preset list. Drops any entry

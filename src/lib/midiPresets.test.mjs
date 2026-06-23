@@ -24,6 +24,8 @@ import {
   UNDO_CHAIN_MS, isWithinUndoWindow,
   // R24.38 — chain-counter badge formatter
   formatHotkeyChainBadge,
+  // R25.43 — alternating direction glyph for chain step
+  directionGlyphForChainStep,
 } from './midiPresets.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -854,22 +856,30 @@ eq(UNDO_CHAIN_MS, 1000, 'UNDO_CHAIN_MS shipped default = 1000')
   eq(formatHotkeyChainBadge(-1), null,   'negative step → null')
 }
 
-// Step 2+ → badge with text "xN" and a meaningful tooltip.
+// Step 2+ → badge with text "[direction]xN" and a meaningful tooltip.
+// R25.43 graduates R24.38: badge text now carries an alternating
+// direction glyph (« for reverse / » for forward) so the user can see
+// at a glance which way the LAST flip went.
 {
   const b2 = formatHotkeyChainBadge(2)
   ok(b2 && typeof b2 === 'object',          'step 2 returns badge object')
-  eq(b2.text, 'x2',                          'step 2 text = "x2"')
+  // Step 2 is the FIRST restore → reverses initial direction → «.
+  eq(b2.text, '\u00abx2',                    'step 2 text = «x2 (first restore, reverse)')
+  eq(b2.direction, '\u00ab',                 'step 2 direction field = «')
   ok(/step 2/i.test(b2.title || ''),         'step 2 tooltip mentions step number')
   ok(/1 time/i.test(b2.title || ''),         'step 2 tooltip says "1 time"')
 }
 {
   const b3 = formatHotkeyChainBadge(3)
-  eq(b3.text, 'x3', 'step 3 text = "x3"')
+  // Step 3 flips back to original direction → ».
+  eq(b3.text, '\u00bbx3', 'step 3 text = »x3 (back to original direction)')
+  eq(b3.direction, '\u00bb', 'step 3 direction field = »')
   ok(/2 times/i.test(b3.title || ''), 'step 3 tooltip says "2 times" (plural)')
 }
 {
+  // Step 10 is even → reverse direction.
   const b10 = formatHotkeyChainBadge(10)
-  eq(b10.text, 'x10', 'double-digit step text = "x10"')
+  eq(b10.text, '\u00abx10', 'double-digit step text = «x10')
 }
 
 // Tooltip mentions the chain window in seconds (default 1s).
@@ -897,7 +907,7 @@ eq(UNDO_CHAIN_MS, 1000, 'UNDO_CHAIN_MS shipped default = 1000')
 // Fractional step → floored to int.
 {
   const b = formatHotkeyChainBadge(3.7)
-  eq(b.text, 'x3', 'fractional step floored (3.7 → x3)')
+  eq(b.text, '\u00bbx3', 'fractional step floored (3.7 → »x3)')
 }
 
 // Invalid window arg falls back to UNDO_CHAIN_MS default.
@@ -911,3 +921,74 @@ eq(UNDO_CHAIN_MS, 1000, 'UNDO_CHAIN_MS shipped default = 1000')
 }
 
 console.log('PASS: formatHotkeyChainBadge — chain-counter badge formatter (R24.38, ~20 asserts)')
+
+// --- R25.43: directionGlyphForChainStep — alternating direction --------
+
+// Step 1: no direction (no badge anyway).
+{
+  eq(directionGlyphForChainStep(1), '', 'step 1 → no glyph')
+  eq(directionGlyphForChainStep(0), '', 'step 0 → no glyph')
+  eq(directionGlyphForChainStep(-1), '', 'negative → no glyph')
+}
+
+// Alternation contract: even steps are « (reverse), odd steps are ».
+{
+  eq(directionGlyphForChainStep(2),  '\u00ab', 'step 2: « (first restore)')
+  eq(directionGlyphForChainStep(3),  '\u00bb', 'step 3: »')
+  eq(directionGlyphForChainStep(4),  '\u00ab', 'step 4: «')
+  eq(directionGlyphForChainStep(5),  '\u00bb', 'step 5: »')
+  eq(directionGlyphForChainStep(10), '\u00ab', 'step 10: «')
+  eq(directionGlyphForChainStep(11), '\u00bb', 'step 11: »')
+}
+
+// Direction is consistent across a full sweep — alternates exactly
+// once per step, never lies. This is the regression that catches a
+// future refactor accidentally swapping odd/even.
+{
+  const directions = []
+  for (let s = 2; s <= 20; s++) directions.push(directionGlyphForChainStep(s))
+  // First 4 should be: «, », «, »
+  eq(directions[0], '\u00ab', 'sweep[0]=« (step 2)')
+  eq(directions[1], '\u00bb', 'sweep[1]=» (step 3)')
+  eq(directions[2], '\u00ab', 'sweep[2]=« (step 4)')
+  eq(directions[3], '\u00bb', 'sweep[3]=» (step 5)')
+  // Each subsequent pair flips — verify by counting transitions.
+  let flips = 0
+  for (let i = 1; i < directions.length; i++) {
+    if (directions[i] !== directions[i - 1]) flips++
+  }
+  eq(flips, directions.length - 1, 'every consecutive pair flips (no two in a row match)')
+}
+
+// Defensive contract on bad inputs.
+{
+  eq(directionGlyphForChainStep(NaN),       '', 'NaN → no glyph')
+  eq(directionGlyphForChainStep(Infinity),  '', 'Infinity → no glyph')
+  eq(directionGlyphForChainStep('2'),       '', 'string → no glyph')
+  eq(directionGlyphForChainStep(null),      '', 'null → no glyph')
+  eq(directionGlyphForChainStep(undefined), '', 'undefined → no glyph')
+}
+
+// Fractional step floors to int for direction (matches formatHotkeyChainBadge).
+{
+  eq(directionGlyphForChainStep(2.9), '\u00ab', '2.9 → 2 → «')
+  eq(directionGlyphForChainStep(3.1), '\u00bb', '3.1 → 3 → »')
+}
+
+// Integration: formatHotkeyChainBadge embeds the direction glyph as
+// a text prefix AND surfaces it as a `direction` field for callers
+// that want to style based on direction (colour / icon).
+{
+  const b4 = formatHotkeyChainBadge(4)
+  eq(b4.text.startsWith('\u00ab'), true, 'step 4 badge text starts with direction glyph «')
+  eq(b4.direction, '\u00ab', 'step 4 direction field exposed for UI')
+  const b5 = formatHotkeyChainBadge(5)
+  eq(b5.text.startsWith('\u00bb'), true, 'step 5 badge text starts with direction glyph »')
+  eq(b5.direction, '\u00bb', 'step 5 direction field exposed for UI')
+  // Tooltip contains the glyph too so a screen-reader-friendly title
+  // surfaces the direction context.
+  ok(b4.title.includes('\u00ab'), 'step 4 tooltip mentions direction')
+  ok(b5.title.includes('\u00bb'), 'step 5 tooltip mentions direction')
+}
+
+console.log('PASS: directionGlyphForChainStep — alternating direction indicator (R25.43, ~25 asserts)')
