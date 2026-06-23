@@ -22,6 +22,8 @@ import {
   NOTE_FILTER_HISTORY_MAX, NOTE_FILTER_HISTORY_QUERY_MAX,
   sanitizeNoteFilterHistory, loadNoteFilterHistory, saveNoteFilterHistory,
   addNoteFilterHistoryEntry, removeNoteFilterHistoryEntry, clearNoteFilterHistory,
+  // R26.42 — pin history entries (graduates R25.42)
+  togglePinNoteFilterHistoryEntry, sortNoteFilterHistoryForDisplay,
   THUMB_WIDTH, THUMB_HEIGHT,
 } from './presetThumbnails.js'
 
@@ -1339,3 +1341,264 @@ console.log('PASS: noteMatchesQueryWithMode + presetsMatchingNoteWithMode + summ
 }
 
 console.log('PASS: note-filter pattern history (R25.42, MRU + cap + storage round-trip + defensive, ~70 asserts)')
+
+// ----------------------------------------------------------------------------
+// R26.42: Note-filter history PIN — pin/unpin entries so they stay above
+// the MRU drop boundary across many searches.
+// ----------------------------------------------------------------------------
+
+// togglePinNoteFilterHistoryEntry — happy path: flip false → true → false.
+{
+  let list = addNoteFilterHistoryEntry([], 'demo', 'substring', 1000)
+  eq(list[0].pinned, false, 'new entry defaults to pinned=false')
+  list = togglePinNoteFilterHistoryEntry(list, 'demo', 'substring')
+  eq(list[0].pinned, true, 'first toggle pins the entry')
+  list = togglePinNoteFilterHistoryEntry(list, 'demo', 'substring')
+  eq(list[0].pinned, false, 'second toggle un-pins the entry')
+}
+
+// togglePinNoteFilterHistoryEntry — only matching entry is affected.
+{
+  let list = addNoteFilterHistoryEntry([], 'demo', 'substring', 1000)
+  list = addNoteFilterHistoryEntry(list, '^test$', 'regex', 2000)
+  list = addNoteFilterHistoryEntry(list, 'TODO', 'substring', 3000)
+  const pinned = togglePinNoteFilterHistoryEntry(list, 'demo', 'substring')
+  const pinnedEntry = pinned.find(e => e.query === 'demo')
+  eq(pinnedEntry.pinned, true, 'demo pinned')
+  eq(pinned.find(e => e.query === '^test$').pinned, false, 'other untouched')
+  eq(pinned.find(e => e.query === 'TODO').pinned, false, 'other untouched')
+}
+
+// togglePinNoteFilterHistoryEntry — ref-equal-on-no-op for missing entry.
+{
+  const list = addNoteFilterHistoryEntry([], 'demo', 'substring', 1000)
+  const same = togglePinNoteFilterHistoryEntry(list, 'nope', 'substring')
+  if (same !== list) fail('missing entry → input ref (ref-equal-on-no-op)')
+}
+
+// togglePinNoteFilterHistoryEntry — defensive contract.
+{
+  if (togglePinNoteFilterHistoryEntry(null, 'q', 'substring') !== null) fail('null list → null')
+  if (togglePinNoteFilterHistoryEntry(undefined, 'q', 'substring') !== undefined) fail('undefined → undefined')
+  const list = []
+  if (togglePinNoteFilterHistoryEntry(list, '', 'substring') !== list) fail('empty query → input ref')
+  if (togglePinNoteFilterHistoryEntry(list, '   ', 'substring') !== list) fail('whitespace query → input ref')
+  if (togglePinNoteFilterHistoryEntry(list, null, 'substring') !== list) fail('null query → input ref')
+  if (togglePinNoteFilterHistoryEntry(list, 42, 'substring') !== list) fail('number query → input ref')
+}
+
+// togglePinNoteFilterHistoryEntry — invalid mode coerces to substring
+// (matches addNoteFilterHistoryEntry's contract so toggling against
+// the wrong mode label doesn't silently miss the entry).
+{
+  let list = addNoteFilterHistoryEntry([], 'demo', 'substring', 1000)
+  list = togglePinNoteFilterHistoryEntry(list, 'demo', 'mystery-mode')
+  eq(list[0].pinned, true, 'invalid mode coerced to substring → matches')
+}
+
+// togglePinNoteFilterHistoryEntry — preserves order of other entries.
+{
+  let list = addNoteFilterHistoryEntry([], 'a', 'substring', 1000)
+  list = addNoteFilterHistoryEntry(list, 'b', 'substring', 2000)
+  list = addNoteFilterHistoryEntry(list, 'c', 'substring', 3000)
+  // Order is MRU: c, b, a (most recent first).
+  eq(list[0].query, 'c')
+  eq(list[1].query, 'b')
+  eq(list[2].query, 'a')
+  const pinned = togglePinNoteFilterHistoryEntry(list, 'b', 'substring')
+  // Order stays the same — pin doesn't bump.
+  eq(pinned[0].query, 'c', 'order preserved [0]')
+  eq(pinned[1].query, 'b', 'order preserved [1] (still pinned in original slot)')
+  eq(pinned[1].pinned, true, 'b is pinned')
+  eq(pinned[2].query, 'a', 'order preserved [2]')
+}
+
+// togglePinNoteFilterHistoryEntry — does not mutate input list.
+{
+  const list = addNoteFilterHistoryEntry([], 'demo', 'substring', 1000)
+  const before = JSON.stringify(list)
+  togglePinNoteFilterHistoryEntry(list, 'demo', 'substring')
+  eq(JSON.stringify(list), before, 'input not mutated')
+}
+
+// addNoteFilterHistoryEntry — bump preserves pinned flag.
+{
+  let list = addNoteFilterHistoryEntry([], 'demo', 'substring', 1000)
+  list = togglePinNoteFilterHistoryEntry(list, 'demo', 'substring')
+  // Add unrelated entries (push demo down).
+  list = addNoteFilterHistoryEntry(list, 'a', 'substring', 2000)
+  list = addNoteFilterHistoryEntry(list, 'b', 'substring', 3000)
+  // Bump demo back to head — pinned flag must survive.
+  list = addNoteFilterHistoryEntry(list, 'demo', 'substring', 4000)
+  eq(list[0].query, 'demo', 'bumped demo to head')
+  eq(list[0].pinned, true, 'bumped entry preserves pinned flag')
+}
+
+// addNoteFilterHistoryEntry — pinned entries survive the cap, only
+// unpinned dropped.
+{
+  let list = []
+  // Pin entries q0..q3, then add unpinned q4..q15 to overflow.
+  for (let i = 0; i < 4; i++) {
+    list = addNoteFilterHistoryEntry(list, `q${i}`, 'substring', i)
+    list = togglePinNoteFilterHistoryEntry(list, `q${i}`, 'substring')
+  }
+  for (let i = 4; i < 4 + NOTE_FILTER_HISTORY_MAX + 5; i++) {
+    list = addNoteFilterHistoryEntry(list, `q${i}`, 'substring', i)
+  }
+  // All 4 pinned entries must still be there.
+  const pinnedCount = list.filter(e => e.pinned).length
+  eq(pinnedCount, 4, 'all 4 pinned entries survived')
+  // Total length is capped at MAX.
+  eq(list.length, NOTE_FILTER_HISTORY_MAX, 'unpinned fill brings total to cap')
+}
+
+// sanitizeNoteFilterHistory — corrupt JSON with pinned flag still parses.
+{
+  const out = sanitizeNoteFilterHistory([
+    { query: 'a', mode: 'substring', pinned: true },
+    { query: 'b', mode: 'regex', pinned: false },
+    { query: 'c', mode: 'substring' },                  // missing pinned → default false
+    { query: 'd', mode: 'substring', pinned: 'true' },   // non-bool → false (strict equals check)
+    { query: 'e', mode: 'substring', pinned: 1 },        // numeric → false
+  ])
+  eq(out[0].pinned, true,  'true pinned preserved')
+  eq(out[1].pinned, false, 'false pinned preserved')
+  eq(out[2].pinned, false, 'missing pinned → false')
+  eq(out[3].pinned, false, 'string "true" → false (strict equals)')
+  eq(out[4].pinned, false, 'numeric 1 → false (strict equals)')
+}
+
+// sanitizeNoteFilterHistory — over-cap with pinned mix: pins kept
+// preferentially.
+{
+  // 8 pinned + 10 unpinned, cap = 12. Should keep all 8 pinned + 4 unpinned.
+  const items = []
+  for (let i = 0; i < 8; i++)  items.push({ query: `p${i}`, mode: 'substring', pinned: true,  addedAt: 1000 + i })
+  for (let i = 0; i < 10; i++) items.push({ query: `u${i}`, mode: 'substring', pinned: false, addedAt: 2000 + i })
+  const out = sanitizeNoteFilterHistory(items)
+  eq(out.length, NOTE_FILTER_HISTORY_MAX, 'output capped at MAX')
+  eq(out.filter(e => e.pinned).length,  8, 'all pinned retained')
+  eq(out.filter(e => !e.pinned).length, NOTE_FILTER_HISTORY_MAX - 8, 'unpinned filled remaining slots')
+}
+
+// sanitizeNoteFilterHistory — pinned count alone > MAX: keep ALL pins
+// (never silently drop a pin).
+{
+  const items = []
+  for (let i = 0; i < NOTE_FILTER_HISTORY_MAX + 3; i++) {
+    items.push({ query: `p${i}`, mode: 'substring', pinned: true, addedAt: 1000 + i })
+  }
+  const out = sanitizeNoteFilterHistory(items)
+  eq(out.length, NOTE_FILTER_HISTORY_MAX + 3, 'all pinned kept past MAX')
+  if (!out.every(e => e.pinned)) fail('all kept entries are pinned')
+}
+
+// sortNoteFilterHistoryForDisplay — happy: pinned-first preserving
+// internal MRU order within each tier.
+{
+  const list = [
+    { query: 'newest-unpinned', mode: 'substring', pinned: false, addedAt: 5000 },
+    { query: 'middle-pinned',   mode: 'substring', pinned: true,  addedAt: 4000 },
+    { query: 'older-unpinned',  mode: 'substring', pinned: false, addedAt: 3000 },
+    { query: 'older-pinned',    mode: 'substring', pinned: true,  addedAt: 2000 },
+    { query: 'oldest-unpinned', mode: 'substring', pinned: false, addedAt: 1000 },
+  ]
+  const sorted = sortNoteFilterHistoryForDisplay(list)
+  eq(sorted[0].query, 'middle-pinned',   'pinned first [0]')
+  eq(sorted[1].query, 'older-pinned',    'pinned first [1] (MRU order preserved)')
+  eq(sorted[2].query, 'newest-unpinned', 'unpinned next [2]')
+  eq(sorted[3].query, 'older-unpinned',  'unpinned next [3] (MRU order preserved)')
+  eq(sorted[4].query, 'oldest-unpinned', 'unpinned next [4]')
+}
+
+// sortNoteFilterHistoryForDisplay — defensive contract.
+{
+  if (sortNoteFilterHistoryForDisplay(null).length !== 0) fail('null → []')
+  if (sortNoteFilterHistoryForDisplay(undefined).length !== 0) fail('undefined → []')
+  if (sortNoteFilterHistoryForDisplay({}).length !== 0) fail('object → []')
+  if (sortNoteFilterHistoryForDisplay('str').length !== 0) fail('string → []')
+  if (sortNoteFilterHistoryForDisplay(42).length !== 0) fail('number → []')
+}
+
+// sortNoteFilterHistoryForDisplay — all pinned: order preserved.
+{
+  const list = [
+    { query: 'a', pinned: true, addedAt: 1 },
+    { query: 'b', pinned: true, addedAt: 2 },
+    { query: 'c', pinned: true, addedAt: 3 },
+  ]
+  const sorted = sortNoteFilterHistoryForDisplay(list)
+  eq(sorted[0].query, 'a', 'all-pinned order preserved [0]')
+  eq(sorted[1].query, 'b', 'all-pinned order preserved [1]')
+  eq(sorted[2].query, 'c', 'all-pinned order preserved [2]')
+}
+
+// sortNoteFilterHistoryForDisplay — none pinned: order preserved.
+{
+  const list = [
+    { query: 'a', pinned: false, addedAt: 1 },
+    { query: 'b', pinned: false, addedAt: 2 },
+    { query: 'c', pinned: false, addedAt: 3 },
+  ]
+  const sorted = sortNoteFilterHistoryForDisplay(list)
+  eq(sorted[0].query, 'a', 'none-pinned order preserved [0]')
+  eq(sorted[1].query, 'b', 'none-pinned order preserved [1]')
+  eq(sorted[2].query, 'c', 'none-pinned order preserved [2]')
+}
+
+// sortNoteFilterHistoryForDisplay — pinned: non-bool defaults to false.
+{
+  const list = [
+    { query: 'a', pinned: 'true', addedAt: 1 },
+    { query: 'b', pinned: 1,      addedAt: 2 },
+    { query: 'c', pinned: true,   addedAt: 3 },
+  ]
+  const sorted = sortNoteFilterHistoryForDisplay(list)
+  eq(sorted[0].query, 'c', 'only strict-true pinned bubbles up')
+}
+
+// sortNoteFilterHistoryForDisplay — null/non-object entries skipped.
+{
+  const list = [
+    null,
+    'not an object',
+    { query: 'a', pinned: true, addedAt: 1 },
+    { query: 'b', pinned: false, addedAt: 2 },
+  ]
+  const sorted = sortNoteFilterHistoryForDisplay(list)
+  eq(sorted.length, 2, 'null + string entries skipped')
+  eq(sorted[0].query, 'a', 'pinned still first')
+  eq(sorted[1].query, 'b', 'unpinned next')
+}
+
+// sortNoteFilterHistoryForDisplay — purity: input not mutated.
+{
+  const list = [
+    { query: 'a', pinned: false, addedAt: 1 },
+    { query: 'b', pinned: true,  addedAt: 2 },
+  ]
+  const before = JSON.stringify(list)
+  sortNoteFilterHistoryForDisplay(list)
+  eq(JSON.stringify(list), before, 'sort does not mutate input')
+}
+
+// Storage round-trip — pinned flag survives a save+load cycle.
+{
+  const stub = (() => {
+    let v = null
+    return {
+      getItem: () => v,
+      setItem: (_k, x) => { v = x },
+      removeItem: () => { v = null },
+    }
+  })()
+  let list = addNoteFilterHistoryEntry([], 'demo', 'substring', 1000)
+  list = togglePinNoteFilterHistoryEntry(list, 'demo', 'substring')
+  saveNoteFilterHistory(list, stub)
+  const loaded = loadNoteFilterHistory(stub)
+  eq(loaded[0].query,  'demo', 'storage round-trip query')
+  eq(loaded[0].pinned, true,   'storage round-trip pinned flag')
+}
+
+console.log('PASS: note-filter pattern PIN — togglePinEntry + sortForDisplay + cap-respects-pins (R26.42, ~45 asserts)')

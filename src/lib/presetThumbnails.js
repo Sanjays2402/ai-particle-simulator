@@ -799,20 +799,41 @@ function sanitizeHistoryEntry(raw) {
   if (query.length > NOTE_FILTER_HISTORY_QUERY_MAX) return null
   const mode = isValidNoteFilterMode(raw.mode) ? raw.mode : NOTE_FILTER_MODE_SUBSTRING
   const addedAt = Number.isFinite(raw.addedAt) ? raw.addedAt : Date.now()
-  return { query, mode, addedAt }
+  // R26.42 — `pinned` flag. Strict boolean. Missing/non-bool → false.
+  // Pinned entries skip the FIFO cap drop (within reason — see below)
+  // + sort to the top of the display list so they stay accessible
+  // across many subsequent searches.
+  const pinned = raw.pinned === true
+  return { query, mode, addedAt, pinned }
 }
 
 // Sanitize the whole history list. Drops bad entries silently; caps
 // to MAX. Pure — input not mutated.
+// R26.42 — When the input exceeds MAX, PINNED entries are kept
+// preferentially (matches addNoteFilterHistoryEntry's contract that
+// pins survive the cap). Order preserved within each tier.
 export function sanitizeNoteFilterHistory(raw) {
   if (!Array.isArray(raw)) return []
-  const out = []
+  // Pre-sanitize without enforcing cap so we can prioritise pins.
+  const all = []
   for (const item of raw) {
     const safe = sanitizeHistoryEntry(item)
-    if (safe) out.push(safe)
-    if (out.length >= NOTE_FILTER_HISTORY_MAX) break
+    if (safe) all.push(safe)
   }
-  return out
+  if (all.length <= NOTE_FILTER_HISTORY_MAX) return all
+  // Over cap — keep all pinned (in original order) + first unpinned
+  // up to remaining slots.
+  const out = []
+  for (const e of all) if (e.pinned) out.push(e)
+  for (const e of all) {
+    if (out.length >= NOTE_FILTER_HISTORY_MAX) break
+    if (!e.pinned) out.push(e)
+  }
+  // If we somehow still exceed the cap (pinned > MAX), keep ALL pinned
+  // — the user explicitly asked for them, never silently drop pins.
+  return out.length > NOTE_FILTER_HISTORY_MAX
+    ? all.filter(e => e.pinned)
+    : out
 }
 
 // Load the persisted history. Returns [] on missing/corrupt/no-storage.
@@ -850,7 +871,13 @@ export function saveNoteFilterHistory(list, storage) {
 //   - blank / whitespace query: no-op (returns input ref)
 //   - invalid mode: coerces to substring (still adds)
 //   - duplicate (query, mode): moves existing to head, doesn't dupe
-//   - cap: oldest dropped when length exceeds MAX
+//     R26.42 — DUP CASE PRESERVES THE EXISTING `pinned` FLAG. Bumping
+//     an entry to head must not silently un-pin it.
+//   - cap: oldest UNPINNED dropped when length exceeds MAX. Pinned
+//     entries are never dropped (the user explicitly asked to keep
+//     them). At the hard cap with all entries pinned, a fresh add
+//     still slots in — pinned entries can grow past MAX, but the
+//     UI advertises MAX as the unpinned ceiling.
 //
 // Ref-equal-on-no-op contract: same-as-current-head returns input ref
 // so the persistence layer can skip a redundant write.
@@ -870,14 +897,78 @@ export function addNoteFilterHistoryEntry(list, rawQuery, mode, nowMs) {
        && (isValidNoteFilterMode(e.mode) ? e.mode : NOTE_FILTER_MODE_SUBSTRING) === safeMode)
   // No-op if it's already at the head (no need to bump).
   if (idx === 0) return list
-  const next = [{ query, mode: safeMode, addedAt }]
+  // R26.42 — preserve pinned flag when bumping an existing entry to head.
+  const prevPinned = idx >= 0 && safeList[idx] && safeList[idx].pinned === true
+  const head = { query, mode: safeMode, addedAt, pinned: prevPinned }
+  // R26.42 — keep all PINNED entries even past MAX. Unpinned trim to
+  // (MAX - 1 - existingPinnedCount) so the total visible list never
+  // exceeds MAX when nothing is pinned; with pins the cap stretches.
+  const next = [head]
+  // First pass: keep all pinned entries (excluding the bumped one).
   for (let i = 0; i < safeList.length; i++) {
-    if (i === idx) continue   // remove dup
+    if (i === idx) continue
+    const e = sanitizeHistoryEntry(safeList[i])
+    if (!e) continue
+    if (e.pinned) next.push(e)
+  }
+  // Second pass: fill with unpinned up to cap.
+  for (let i = 0; i < safeList.length; i++) {
+    if (i === idx) continue
     if (next.length >= NOTE_FILTER_HISTORY_MAX) break
-    const safe = sanitizeHistoryEntry(safeList[i])
-    if (safe) next.push(safe)
+    const e = sanitizeHistoryEntry(safeList[i])
+    if (!e || e.pinned) continue
+    next.push(e)
   }
   return next
+}
+
+// R26.42 — Toggle the `pinned` flag on the entry matching (query, mode).
+// Returns a NEW list with the flag flipped, or the INPUT REF unchanged
+// when nothing matches (ref-equal-on-no-op contract — persistence
+// layer can short-circuit). Pure / no mutation of input.
+//
+// Defensive:
+//   - non-array list → input ref
+//   - blank / non-string query → input ref
+//   - invalid mode coerced to substring (matches addNoteFilterHistoryEntry)
+//   - missing entry → input ref
+//
+// Order is preserved (a pin doesn't bump the entry; that's the
+// UI sort layer's job via sortNoteFilterHistoryForDisplay).
+export function togglePinNoteFilterHistoryEntry(list, rawQuery, mode) {
+  if (!Array.isArray(list)) return list
+  const query = typeof rawQuery === 'string' ? rawQuery.trim() : ''
+  if (!query) return list
+  const safeMode = isValidNoteFilterMode(mode) ? mode : NOTE_FILTER_MODE_SUBSTRING
+  const idx = list.findIndex(e =>
+    e && typeof e.query === 'string' && e.query.trim() === query
+       && (isValidNoteFilterMode(e.mode) ? e.mode : NOTE_FILTER_MODE_SUBSTRING) === safeMode)
+  if (idx === -1) return list
+  // Build a sanitized copy with just this one entry's pinned flipped.
+  const next = list.slice()
+  const target = sanitizeHistoryEntry(list[idx]) || { query, mode: safeMode, addedAt: Date.now(), pinned: false }
+  next[idx] = { ...target, pinned: !target.pinned }
+  return next
+}
+
+// R26.42 — Sort projector: pinned entries first (preserving their
+// relative MRU order), then unpinned (also preserving MRU). Pure —
+// returns a NEW array; input not mutated. Defensive — non-array
+// returns []; entries with missing/non-bool pinned default to false.
+//
+// UI uses this on the render path so storage stays in MRU order
+// (the addNoteFilterHistoryEntry contract assumes [0] is the head),
+// while the dropdown reads pinned-first for visual stability.
+export function sortNoteFilterHistoryForDisplay(list) {
+  if (!Array.isArray(list)) return []
+  const pinned = []
+  const unpinned = []
+  for (const e of list) {
+    if (!e || typeof e !== 'object') continue
+    if (e.pinned === true) pinned.push(e)
+    else unpinned.push(e)
+  }
+  return pinned.concat(unpinned)
 }
 
 // Remove one entry from the list by (query, mode). Returns the input

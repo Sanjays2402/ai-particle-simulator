@@ -23,6 +23,8 @@ import {
   loadNoteFilterHistory, saveNoteFilterHistory,
   addNoteFilterHistoryEntry, removeNoteFilterHistoryEntry,
   clearNoteFilterHistory,
+  // R26.42 — pin entries to the top of the dropdown (graduates R25.42)
+  togglePinNoteFilterHistoryEntry, sortNoteFilterHistoryForDisplay,
 } from '../lib/presetThumbnails'
 
 export default function PresetCarousel() {
@@ -111,6 +113,15 @@ export default function PresetCarousel() {
   const removeHistoryEntry = (entry) => {
     if (!entry) return
     const next = removeNoteFilterHistoryEntry(noteFilterHistory, entry.query, entry.mode)
+    persistNoteFilterHistory(next)
+  }
+  // R26.42 — toggle pin flag on one history entry. Right-click the row
+  // OR the star glyph to pin/unpin. Pinned entries sort first via
+  // sortNoteFilterHistoryForDisplay so they stay accessible across
+  // many subsequent searches without being lost to the FIFO cap.
+  const togglePinHistoryEntry = (entry) => {
+    if (!entry) return
+    const next = togglePinNoteFilterHistoryEntry(noteFilterHistory, entry.query, entry.mode)
     persistNoteFilterHistory(next)
   }
   // Wipe the whole history (footer button).
@@ -614,26 +625,44 @@ export default function PresetCarousel() {
                       borderBottom: '1px solid rgba(255,255,255,0.04)',
                       marginBottom: 4,
                     }}>Recent patterns ({noteFilterHistory.length})</div>
-                    {noteFilterHistory.map((entry, i) => {
+                    {/* R26.42 — sort pinned-first for visual stability so a
+                        pinned pattern doesn't drift down as new searches
+                        bump unpinned entries. */}
+                    {sortNoteFilterHistoryForDisplay(noteFilterHistory).map((entry, i) => {
                       const isRegex = entry.mode === NOTE_FILTER_MODE_REGEX
+                      const isPinned = entry.pinned === true
                       return (
                         <div key={`${entry.mode}::${entry.query}`} style={{
                           display: 'flex', alignItems: 'center', gap: 6,
                           padding: '5px 8px',
                           cursor: 'pointer',
                           borderRadius: 4,
-                          background: i === 0 ? 'rgba(34,211,238,0.05)' : 'transparent',
+                          background: isPinned
+                            ? 'rgba(245,158,11,0.06)'
+                            : (i === 0 ? 'rgba(34,211,238,0.05)' : 'transparent'),
                           transition: 'background 0.10s ease-out',
                         }}
                           onMouseEnter={(e) => {
-                            e.currentTarget.style.background = 'rgba(34,211,238,0.12)'
+                            e.currentTarget.style.background = isPinned
+                              ? 'rgba(245,158,11,0.14)'
+                              : 'rgba(34,211,238,0.12)'
                           }}
                           onMouseLeave={(e) => {
-                            e.currentTarget.style.background = i === 0
-                              ? 'rgba(34,211,238,0.05)' : 'transparent'
+                            e.currentTarget.style.background = isPinned
+                              ? 'rgba(245,158,11,0.06)'
+                              : (i === 0 ? 'rgba(34,211,238,0.05)' : 'transparent')
                           }}
                           onClick={() => applyHistoryEntry(entry)}
-                          title={`Click to apply "${entry.query}" (${entry.mode})`}
+                          onContextMenu={(e) => {
+                            // R26.42 — right-click toggles pin (no native
+                            // menu). Browsers that suppress contextmenu
+                            // events on touch still get the star button.
+                            e.preventDefault()
+                            togglePinHistoryEntry(entry)
+                          }}
+                          title={isPinned
+                            ? `Pinned \u2014 click to apply, right-click to unpin`
+                            : `Click to apply "${entry.query}" (${entry.mode}); right-click to pin`}
                         >
                           <span style={{
                             fontSize: 8, padding: '1px 4px',
@@ -652,6 +681,46 @@ export default function PresetCarousel() {
                             flex: 1, color: '#e8e8f0', fontSize: 10.5,
                             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                           }}>{entry.query}</span>
+                          {/* R26.42 — pin button. Star when pinned (amber);
+                              hollow star when unpinned (mutes to invisible
+                              until row hover via opacity). Click-to-toggle. */}
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); togglePinHistoryEntry(entry) }}
+                            title={isPinned ? 'Unpin from list' : 'Pin to top of list'}
+                            style={{
+                              width: 14, height: 14,
+                              borderRadius: '50%',
+                              background: isPinned
+                                ? 'rgba(245,158,11,0.18)'
+                                : 'rgba(255,255,255,0.04)',
+                              border: isPinned
+                                ? '1px solid rgba(245,158,11,0.50)'
+                                : '1px solid rgba(255,255,255,0.10)',
+                              color: isPinned ? '#fde68a' : '#7a7a90',
+                              fontSize: 9, lineHeight: 1, fontWeight: 700, cursor: 'pointer',
+                              padding: 0, flexShrink: 0,
+                              opacity: isPinned ? 1 : 0.55,
+                              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                              transition: 'background 0.12s, color 0.12s, opacity 0.12s',
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.opacity = '1'
+                              if (!isPinned) {
+                                e.currentTarget.style.background = 'rgba(245,158,11,0.10)'
+                                e.currentTarget.style.color = '#fde68a'
+                                e.currentTarget.style.borderColor = 'rgba(245,158,11,0.30)'
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.opacity = isPinned ? '1' : '0.55'
+                              if (!isPinned) {
+                                e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
+                                e.currentTarget.style.color = '#7a7a90'
+                                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.10)'
+                              }
+                            }}
+                          >{isPinned ? '\u2605' : '\u2606'}</button>
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); removeHistoryEntry(entry) }}
@@ -685,7 +754,7 @@ export default function PresetCarousel() {
                       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     }}>
                       <span style={{ fontSize: 8.5, color: '#5a5a70' }}>
-                        {'\u2193'} arrow / click to apply
+                        {'\u2193'} arrow / click {'\u00b7'} right-click to pin
                       </span>
                       <button
                         type="button"
