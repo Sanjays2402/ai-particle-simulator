@@ -138,6 +138,11 @@ Existing capabilities (do not re-ship):
 - MIDI hotkey UNDO chain visual chain-counter badge (R24.38). Graduates R23.35's undo-chain with a visible chain counter so the user knows how many flips deep they are. Every restore toast in the chain wears a tiny pip to the LEFT of the Undo button: step 1 (initial warning) no badge; step 2 (1st undo restore) "x2"; step 3 (2nd undo flip-back) "x3"; and so on. Badge wears the WINNER bundle's accent colour so the visual ties to whichever bundle just took the hotkey. Tooltip explains the math: "Undo chain step 3 — you've flipped this hotkey 2 times. Click Undo within 1s to flip back." Toast.jsx — `showToast()` grows a 4th positional arg `badge` shaped `{ text, color?, title? }`; renders a tiny mono pip to the left of the Undo button. midiPresets.js — new pure helper `formatHotkeyChainBadge(chainStep, windowMs)`: step 1 / non-finite / < 1 → null (suppresses badge); step 2+ → `{ text: "xN", title: "..." }`; fractional step floors to int; invalid windowMs falls back to UNDO_CHAIN_MS default. MidiPanel.jsx — `showHotkeyTransferToast()` grows a chainStep param (default 1); recursive call site increments it when scheduling the next step. Single source of truth for the badge format means a future refactor can't accidentally change "x2" to "(2)" or "2x" silently.
 - Per-(attractor, field) clamp warn threshold overrides (R24.40). Graduates R23.32's per-field-only overrides with a 3rd tier so power users can tune ONE specific attractor's STRENGTH meter strict while leaving every OTHER attractor's STRENGTH meter on the per-field-global value. Real-world use case: a critical "bass-thump" attractor where rail = silent attractor coexists with a decorative attractor where rail = visible at canvas edge (often intentional). Resolution chain (4-tier): per-(attractor, field) → per-field → global → shipped default. New lib helpers in midiMap.js: `sanitizeClampWarnAttractorOverrides(raw)` defensive structural cleaner; `resolveClampWarnThresholdFor(attractorId, field, global, fieldOver, attractorOver)` 4-tier resolver (skips tier 1 when attractorId is null/undefined/empty for back-compat); `setClampWarnAttractorFieldOverride(overrides, attractorId, field, value)` setter with ref-equal-on-no-op + last-cell-prune; `clearAllClampWarnAttractorOverrides` / `clearClampWarnAttractorOverrides(overrides, attractorId)` wipe paths; `hasClampWarnAttractorFieldOverride` UI predicate; `pruneClampWarnAttractorOverrides(overrides, liveAttractorIds)` GC orphans (accepts Set | Array | iterable). UI: persisted to `midi-clamp-warn-attractor-overrides-v1`; useEffect prunes orphans on attractor-list changes (no-op fast-path); meter resolver swapped to the 4-tier version; edited-pip flags ANY tier with an override; ClampThresholdPopover extended with a third slider row (violet, #a78bfa accent) for the per-attractor override; surface border colour now distinguishes which tier is driving the meter (violet/indigo/cyan); inactive sliders dim to 0.55 opacity; new "Clear attr." button + flexWrap for narrow popovers; priority footer reads "this attractor > this field > global" with colour-coded chips.
 - Camera path touch DnD: drag by the #N play-order badge (R24.39). Graduates R23.31's "long-press the chevron buttons" with the #N play-order badge as a third drag affordance on touch. Parallels the R18.19 named-attractor #N badge drag handle so the two reorderable lists behave consistently. Pure wire-layer change — no new lib helpers / no new tests; `resolveTouchTargetIdx` + `moveView` + the `touchDragHandlers` factory were already pinned by R22.12 + R23.31. When `views.length > 1` the badge gets `touchDragHandlers(idx)` + `cursor: grab` + `touchAction: 'manipulation'` (kills iOS 300ms tap delay) + `userSelect / WebkitTouchCallout: none` (so long-press doesn't trigger native callout) + slight padding to extend the touch target without changing visible width. Single-view lists skip the binding entirely. Synthetic-click suppression flows through unchanged (the badge has no onClick of its own; drag's synthetic click hits the parent row button which already handles suppression via consumeClickIfSuppressed).
+- Bias import preview: per-FIELD diff panel inline on each chip row (R25.41). Graduates R24.36 which surfaced fieldCount only ("3f → 5f"). Click any preview row with interesting changes to expand it in-place; the per-field diff panel renders below the summary with ADD (green) / CHG (amber) / DROP (red) badges per field, kind chip (range / chance / list), and inline before→after value summary using compact number formatter ("[10K, 30K] → [5K, 15K]", "0.30 → 0.55", "[3]" for forceTypes). Canonical field ordering (4 ranges, 10 chances, forceTypes last); merge mode hides 'live-only' rows because the live value is preserved untouched; replace mode shows them clearly. New lib in biasOverridesIO.js: `buildBiasFieldDiff(incoming, live)` returns `[{ field, kind, incoming, live, action }, ...]`; `biasFieldValuesEqual(field, a, b)` routes by kind with appropriate equality semantics. Caret only paints when expansion would show something (rows with zero diff stay un-clickable to honest the UI).
+- Carousel note filter regex pattern HISTORY dropdown (R25.42). Graduates R24.37's regex mode toggle with a recent-patterns dropdown so the power user re-typing "^demo$" / "TODO|FIXME" / "good demo shot" across sessions can pick a saved pattern in one click. Press Enter inside the search input (or close via X) to commit (current query, mode) to history; empty/whitespace query never lands in history. New cyan stacked-tile icon button next to the .* mode toggle shows count + opens dropdown (only renders when ≥1 entry exists). Down arrow inside input also surfaces dropdown for keyboard-only users; double-Escape (first closes dropdown, second clears query + closes input). Each row shows mode pill (.* indigo regex / AB amber substring) + query text + per-row × to remove. Footer "Clear" wipes the list. Click any row to apply (sets query + mode + bumps to head — MRU semantics). Cap MAX_HISTORY=12 entries; FIFO drops oldest. New lib in presetThumbnails.js: NOTE_FILTER_HISTORY_MAX + QUERY_MAX, sanitizeNoteFilterHistory, loadNoteFilterHistory, saveNoteFilterHistory, addNoteFilterHistoryEntry (ref-equal-on-no-op on blank-query / same-as-head; duplicate moves to head, no dupe; cap enforced; invalid mode coerces to substring; trim applied; oversize query rejected), removeNoteFilterHistoryEntry (ref-equal-on-no-op contract), clearNoteFilterHistory (always returns []).
+- MIDI hotkey UNDO chain badge alternates direction glyph (R25.43). Graduates R24.38's chain-counter ("x2"/"x3"/...) with an alternating direction glyph (« or ») prefixed to the count so the user can see which way the LAST flip went. Chain alternates by definition (each Undo flips roles), so direction maps directly to (chainStep mod 2): step 2 (first restore) = « (reverse — undoing the initial), step 3 (re-undo back) = » (forward — back to initial direction), step 4 = «, etc. After enough flips the alternating glyph signals "warmer or colder" relative to the original assignment without the user having to mentally track odd/even steps. New pure helper `directionGlyphForChainStep(chainStep)` in midiPresets.js: step ≤ 1 / non-finite / non-numeric → '' (no glyph); even step → «; odd step ≥ 3 → »; fractional step floors to int (consistent with formatHotkeyChainBadge). `formatHotkeyChainBadge` now embeds the glyph as text prefix and exposes a separate `direction` field on the badge object for UI callers; tooltip mentions the glyph + step number.
+- Per-attractor clamp popover bulk-clear all overrides for attractor (R25.45). Graduates R24.40 (per-(attractor, field) clamp warn threshold overrides) with a "Clear all (N)" button in the threshold popover footer (violet, matches per-attractor scope), only rendered when the attractor has 2+ per-field overrides (with 1 override, "Clear all" = "Clear attr." for the current field — redundant). Count badge shows exactly how many cells the wipe scope covers. Re-uses existing `clearClampWarnAttractorOverrides` helper for the actual wipe. New pure projector `countClampWarnAttractorOverridesFor(overrides, attractorId)` in midiMap.js returns the count of populated per-field overrides for one attractor — only counts keys in CLAMP_THRESHOLD_FIELDS, only counts finite numeric values, defensive against null/array/non-object/non-string-id/malformed-inner, no double-counting.
+- MidiPanel per-attractor binding-group drag-and-drop reorder (R25.20). Graduates R18.19 (named-attractor row DnD in LeftSidebar) + R15.20 (chevrons) + R16.18 (jump-to-position) — three existing reorder gestures all live in LeftSidebar. R25.20 adds a FOURTH path that lives in the MidiPanel so a power user mid-MIDI-binding-work can reorder attractors without leaving the panel. Each binding group header gets a small grab handle (⠇ braille pattern) at left edge when ≥2 entries; stale groups (deleted attractor still has bindings) are NOT draggable; live position "#N" badge next to type chip keeps the user oriented; violet border + tint on drop target; dragged group dims to 0.55 opacity. Pure wire-layer on existing primitives — moveAttractorByIndex (R15.20 tests), sibling-enter-before-leave guard (R17.07 / R18.19), HTML5 native DnD. New store action `moveNamedAttractorByIndex(fromIdx, toIdx)` wraps the lib helper with standard ref-equal-on-no-op + save-then-set pattern. The per-attractor binding rows below each group header are emitted in same array order as the live attractor list (since R13.18) so reordering the underlying list automatically reorders the per-attractor sections — order of headers in panel ↔ order of attractors in scene, both directions.
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -460,13 +465,20 @@ padding.
 - [ ] R25.15 Theme pack drag-drop: progress indicator when N > 10 files [was R24.15]
 - [ ] R25.17 MIDI bundle drag-drop: per-file progress indicator for very large drops [was R24.17]
 - [ ] R25.18 Spectrum peak trail params: persist per-bar OVERRIDES (graduates R19.12 to per-bar granularity) [was R24.18]
-- [ ] R25.20 Named attractor gap-drop: also work for the MidiPanel per-attractor binding groups [was R24.20]
 - [ ] R25.26 Spectrum peak trail palette: USER-AUTHORED palettes [was R24.26]
-- [ ] R25.41 Bias import preview: per-FIELD diff inside each chip row (currently R24.36 shows fieldCount only) — graduates R24.36
-- [ ] R25.42 Carousel note filter regex: history dropdown of recent successful patterns — graduates R24.37
-- [ ] R25.43 MIDI UNDO chain badge: also colour-codes the chain step direction (alternating A→B / B→A indicator) — graduates R24.38
+- [x] R25.20 Named attractor gap-drop: also work for the MidiPanel per-attractor binding groups — c08cedc
+- [x] R25.41 Bias import preview: per-FIELD diff inside each chip row — 18024b6
+- [x] R25.42 Carousel note filter regex: history dropdown of recent successful patterns — f995349
+- [x] R25.43 MIDI UNDO chain badge: also colour-codes the chain step direction (alternating A→B / B→A indicator) — 6da5357
 - [ ] R25.44 Camera path touch DnD: badge wears a haptic-feedback pulse on long-press start (Android vibrate API) — graduates R24.39
-- [ ] R25.45 Per-attractor MIDI clamp: bulk-clear button in the popover that wipes EVERY per-(attractor, field) override for the current attractor — graduates R24.40
+- [x] R25.45 Per-attractor MIDI clamp: bulk-clear button in the popover that wipes EVERY per-(attractor, field) override for the current attractor — 8159d65
+
+### Batch 26 — refilled queue (graduations of THIS batch's slices)
+- [ ] R26.41 Bias import preview per-field diff: also surface the EQUAL-rows count in the chip-row summary (e.g. "3 changed / 2 unchanged") so the user can see at a glance how much overlap exists — graduates R25.41
+- [ ] R26.42 Note filter history: pin entries (right-click → pin) so they stay above the MRU drop boundary; pinned entries get a star glyph — graduates R25.42
+- [ ] R26.43 UNDO chain direction glyph: also colour the badge by direction (« cyan / » amber) so the alternation is visible at a peripheral glance — graduates R25.43
+- [ ] R26.45 Clamp popover bulk-clear: also surface a "Clear all (M) for THIS FIELD across every attractor" companion button — graduates R25.45
+- [ ] R26.20 MidiPanel binding-group DnD: touch / long-press support for mobile users (parallels R22.12 camera path touch DnD) — graduates R25.20
 
 ### Future queue carried from Batch 24 (refill on next batch)
 
@@ -1416,3 +1428,77 @@ padding.
     happy path keeps live + drops orphans + ref-equal-no-op when
     no orphans + Set/iterable input + non-string members treated
     as missing + non-object input defensive)
+
+- 2026-06-23 10:46 PT — Batch 25 (5/5).
+  Commits: 18024b6 (R25.41 bias import preview per-FIELD diff —
+  buildBiasFieldDiff projector + biasFieldValuesEqual kind-routed
+  equality + expandable per-row UI with caret + tag chips ADD/CHG/DROP
+  + compact value formatter; canonical field order; merge mode hides
+  live-only rows, replace mode shows them), f995349 (R25.42 carousel
+  note filter regex pattern history dropdown — NOTE_FILTER_HISTORY_MAX
+  /QUERY_MAX + sanitizeNoteFilterHistory/load/save + addEntry with MRU
+  semantics + ref-equal-on-no-op + removeEntry + clear + cyan stacked
+  -tile icon button + dropdown panel with per-row mode pill + remove +
+  Clear footer; Enter / X-close commit to history; Down-arrow surfaces
+  dropdown for keyboard nav), 6da5357 (R25.43 hotkey UNDO chain badge
+  alternating direction glyph — directionGlyphForChainStep helper +
+  formatHotkeyChainBadge embeds glyph as text prefix + exposes
+  direction field; step 2=« / 3=» / 4=« alternation pinned in tests;
+  R24.38 existing tests updated to new badge format), 8159d65 (R25.45
+  per-attractor clamp bulk-clear — countClampWarnAttractorOverridesFor
+  projector + "Clear all (N)" button in ClampThresholdPopover footer
+  only when 2+ overrides exist; violet to match per-attractor scope;
+  count badge surfaces exact wipe scope; re-uses existing clear
+  ClampWarnAttractorOverrides helper for actual wipe), c08cedc (R25.20
+  MidiPanel binding-group DnD reorder — moveNamedAttractorByIndex
+  store action wraps lib helper with ref-equal-on-no-op + save-then-
+  set pattern; each group header gets braille-pattern grab handle when
+  ≥2 entries; stale groups skip; live position "#N" badge keeps user
+  oriented; violet drop-target highlight; opacity 0.55 on dragged
+  group; sibling-enter-before-leave guard mirrors R17.07/R18.19).
+  R25.01-R25.05 deferred again — first three are dedicated
+  infrastructure batches (render-pipeline / r3f-gizmo / backend
+  runtime), R25.04 + R25.05 each need their own focused batch.
+  Substituted R25.20, R25.41, R25.42, R25.43, R25.45 from the future
+  queue (every slice graduates a Batch 24 feature, tight thematic
+  spine: Batch 24 → Batch 25 iteration loop without padding).
+  Gates: lint 23 errors / 3 warnings — exactly matches baseline (zero
+  new errors in any of the 7 modified .js/.jsx files + 4 modified
+  .test.mjs files; no lint-gate cleanup commits needed this batch —
+  every commit was lint-clean on first land).
+  Build: 1.61 s green (1.84 MB bundle, gzip 541 KB — +0 KB vs Batch
+  24 because most slices are pure wire layers on existing lib
+  primitives, with only small new pure helpers added).
+  Unit tests: 40/40 files pass (~190 fresh asserts this batch):
+  - extended biasOverridesIO with ~50 R25.41 asserts (buildBiasFieldDiff
+    add/change/unchanged/live-only paths, field ordering invariant,
+    kind tagging, defensive null/non-object/array inputs, sanitize-
+    pass interaction (invalid values dropped pre-diff), integration
+    check that buildBiasImportPreviewRows now carries fieldDiff;
+    biasFieldValuesEqual range/chance/forceTypes equality semantics
+    with order-sensitivity for forceTypes + NaN never equal + identity
+    short-circuit + unknown-field defensive false on non-identical)
+  - extended presetThumbnails with ~70 R25.42 asserts (sanitize
+    defensive against null/string/number inputs, bad entries dropped,
+    cap enforced, trim applied, addedAt backfill; addEntry MRU
+    contract: blank-query no-op, head-bump no-dupe, cap drop oldest,
+    same-as-head ref-equal-no-op, invalid mode coercion, oversize
+    query rejection, trim applied; removeEntry happy + ref-equal on
+    non-matching + empty query + non-array list; clear always returns
+    []; full storage round-trip via stub localStorage: save→load
+    preserves order + mode, empty save removes key, corrupt JSON /
+    wrong version / missing items → []; purity invariant for all
+    helpers)
+  - extended midiPresets with ~25 R25.43 asserts (directionGlyphForChainStep
+    step 1/0/-1 → ''; alternation contract step 2→«, 3→», 4→«, 5→»,
+    10→«, 11→»; full-sweep regression: 19 consecutive steps every
+    pair MUST flip — counts transitions, must equal length-1;
+    defensive NaN/Infinity/string/null/undefined → ''; fractional
+    floors to int; integration: formatHotkeyChainBadge.text starts
+    with glyph + .direction field surfaced + tooltip contains glyph)
+  - extended midiMap with ~25 R25.45 asserts (countClampWarnAttractor
+    OverridesFor happy 3-field + 1-field counts; missing attractor /
+    empty map / non-finite values / unknown field keys → 0; defensive
+    null/array/non-object overrides → 0; non-string / empty / null /
+    undefined / number id → 0; non-object inner → 0; each field
+    counted at most once across all 6 threshold fields; purity)
