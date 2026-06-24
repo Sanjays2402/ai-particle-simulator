@@ -26,6 +26,8 @@ import {
   // R26.45 — bulk-clear per-field-across-attractors + count projector
   clearClampWarnFieldOverridesAcross,
   countClampWarnFieldOverridesAcross,
+  // R27.45 — list per-attractor overrides for this field (preview chips)
+  listClampWarnFieldOverridesAcross,
 } from '../lib/midiMap'
 import { ATTRACTOR_TYPES } from '../lib/namedAttractors'
 // R26.20 — touch-drag hit-test helper. Same pure projector the camera-
@@ -1683,9 +1685,17 @@ export default function MidiPanel({ open, onClose }) {
                                         attractorOverrideCount={countClampWarnAttractorOverridesFor(clampWarnAttractorOverrides, a.attractor && a.attractor.id)}
                                         onClearAllForAttractor={() => clearAllClampWarnOverridesForAttractor(a.attractor && a.attractor.id)}
                                         fieldOverrideCountAcross={countClampWarnFieldOverridesAcross(clampWarnAttractorOverrides, a.field)}
+                                        /* R27.45 — list the attractors that
+                                           will be wiped (id + value) and the
+                                           live namedAttractors for label
+                                           resolution so the popover can
+                                           paint inline preview chips before
+                                           the user clicks "STRENGTH all". */
+                                        fieldOverridesAcross={listClampWarnFieldOverridesAcross(clampWarnAttractorOverrides, a.field)}
+                                        namedAttractors={namedAttractors}
                                         onClearAllForField={() => clearAllClampWarnOverridesForField(a.field)}
                                         onClose={() => setClampThresholdPopoverFor(null)}
-                                      />
+                                        />
                                     )}
                                   </span>
                                 )
@@ -2469,6 +2479,15 @@ function ClampThresholdPopover({
   // "Clear all for this attractor" — same surface, transposed axis.
   fieldOverrideCountAcross = 0,
   onClearAllForField,
+  // R27.45 — explicit list of the [{ id, value }] cells that will be
+  // wiped by the field-across button, paired with the live
+  // namedAttractors list for label resolution. UI uses this to paint
+  // inline preview chips ABOVE the wipe button so the user sees
+  // exactly which attractors are about to be reset (parallels
+  // R26.41's chip-row counts UX — surface the scope explicitly,
+  // don't hide it behind the button's count badge alone).
+  fieldOverridesAcross = [],
+  namedAttractors = [],
   onClose,
 }) {
   const minPct = Math.round(CLAMP_WARN_THRESHOLD_MIN * 100)
@@ -2773,6 +2792,98 @@ function ClampThresholdPopover({
           Pin one attractor's STRENGTH strict (rail = silent attractor) without
           touching every other attractor's STRENGTH meter.
         </div>
+        {/* R27.45 — Inline preview chips listing the attractors that
+            will be reset by the "STRENGTH all (M)" wipe button below.
+            Renders only when 2+ cells will be wiped (matches the
+            button's gating from R26.45 so chips never appear when the
+            wipe button is hidden). Each chip shows attractor label +
+            current per-attractor threshold so the user can sanity-check
+            the scope ("am I sure I want to reset this 5% override on
+            attr-bass?") before clicking. Click an individual chip to
+            jump straight to clearing just THAT cell (delegates to the
+            existing onClearAttractor which is per-(attractor, field)
+            scoped — works for any attractor whose meter the user opens
+            next). Chips paint in the field's accent (indigo) with a
+            small "%" pip showing the threshold value. */}
+        {fieldOverridesAcross.length >= 2 && (
+          <div style={{
+            marginTop: 8, padding: '6px 8px',
+            borderRadius: 5,
+            background: 'rgba(139,92,246,0.04)',
+            border: '1px solid rgba(139,92,246,0.20)',
+          }}>
+            <div style={{
+              fontSize: 8.5, fontWeight: 700, letterSpacing: '0.10em',
+              color: '#8a8aa0', textTransform: 'uppercase',
+              fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+              marginBottom: 4,
+            }}>
+              {fieldLabel} resets {fieldOverridesAcross.length} attractor{fieldOverridesAcross.length === 1 ? '' : 's'}
+            </div>
+            <div style={{
+              display: 'flex', flexWrap: 'wrap', gap: 4,
+              maxHeight: 64, overflowY: 'auto',
+            }}>
+              {fieldOverridesAcross.map(({ id, value }) => {
+                // Label resolution: live attractor wins; stale (deleted
+                // attractor still has persisted override) falls back to
+                // a truncated id so users can still identify the cell.
+                const liveAttr = (namedAttractors || []).find(a => a && a.id === id)
+                const label = liveAttr && liveAttr.name
+                  ? liveAttr.name
+                  : (id.length > 12 ? `${id.slice(0, 9)}\u2026` : id)
+                const pct = Math.round(value * 100)
+                const isStale = !liveAttr
+                const isCurrent = id === attractorId
+                return (
+                  <span
+                    key={id}
+                    title={isStale
+                      ? `${id} (stale — attractor deleted) currently at ${pct}%`
+                      : `${liveAttr.name} (id=${id}) currently at ${pct}% \u2014 will reset to per-field threshold`}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 3,
+                      padding: '2px 6px', borderRadius: 4,
+                      fontSize: 9.5, fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                      background: isCurrent
+                        ? 'rgba(196,181,253,0.20)'
+                        : isStale
+                          ? 'rgba(255,255,255,0.04)'
+                          : 'rgba(99,102,241,0.10)',
+                      color: isCurrent ? '#ddd6fe' : isStale ? '#7a7a90' : '#c7d2fe',
+                      border: isCurrent
+                        ? '1px solid rgba(167,139,250,0.55)'
+                        : isStale
+                          ? '1px solid rgba(255,255,255,0.06)'
+                          : '1px solid rgba(99,102,241,0.25)',
+                      fontStyle: isStale ? 'italic' : 'normal',
+                    }}>
+                    {/* Tiny dot prefix in the type accent — same colour
+                        as the attractor's row badge so the chip ties
+                        back to the named-attractor list visually. */}
+                    {liveAttr && (
+                      <span style={{
+                        width: 6, height: 6, borderRadius: '50%',
+                        background: attractorTypeStyle(liveAttr.type).fg,
+                        display: 'inline-block', flexShrink: 0,
+                      }} />
+                    )}
+                    <span style={{
+                      maxWidth: 80,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>{label}</span>
+                    <span style={{
+                      fontSize: 8.5, padding: '0 3px', borderRadius: 2,
+                      background: 'rgba(0,0,0,0.32)',
+                      color: isCurrent ? '#c4b5fd' : '#a5b4fc',
+                      fontWeight: 700,
+                    }}>{pct}%</span>
+                  </span>
+                )
+              })}
+            </div>
+          </div>
+        )}
         <div style={{
           display: 'flex', justifyContent: 'flex-end', gap: 6, flexWrap: 'wrap',
           marginTop: 10, paddingTop: 6,

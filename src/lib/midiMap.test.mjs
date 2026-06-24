@@ -39,6 +39,8 @@ import {
   countClampWarnAttractorOverridesFor,
   // R26.45 — bulk-clear THIS field across all attractors
   countClampWarnFieldOverridesAcross, clearClampWarnFieldOverridesAcross,
+  // R27.45 — list per-attractor overrides for THIS field (preview chips)
+  listClampWarnFieldOverridesAcross,
   hasClampWarnAttractorFieldOverride,
   pruneClampWarnAttractorOverrides,
 } from './midiMap.js'
@@ -2268,3 +2270,147 @@ console.log('PASS: countClampWarnAttractorOverridesFor (R25.45, bulk-clear count
 }
 
 console.log('PASS: countClampWarnFieldOverridesAcross + clearClampWarnFieldOverridesAcross (R26.45, ~50 asserts)')
+
+// --- R27.45: listClampWarnFieldOverridesAcross — preview-chip projector
+// Drives the inline preview chips above the "Clear all for THIS FIELD"
+// button so the user sees which attractors will be reset before commit.
+
+// Happy: 3 attractors with STRENGTH overrides → 3 entries in [{id,value}].
+{
+  const overrides = {
+    'attr-a': { strength: 0.10, x: 0.30 },
+    'attr-b': { strength: 0.40 },
+    'attr-c': { strength: 0.25, radius: 0.20 },
+  }
+  const list = listClampWarnFieldOverridesAcross(overrides, 'strength')
+  if (list.length !== 3) fail(`expected 3 entries, got ${list.length}`)
+  // Values are sanitized (clamped to [MIN, MAX] which is [0.05, 0.45]).
+  const byId = Object.fromEntries(list.map(e => [e.id, e.value]))
+  if (byId['attr-a'] !== 0.10) fail(`attr-a value: got ${byId['attr-a']}`)
+  if (byId['attr-b'] !== 0.40) fail(`attr-b value: got ${byId['attr-b']}`)
+  if (byId['attr-c'] !== 0.25) fail(`attr-c value: got ${byId['attr-c']}`)
+}
+
+// Out-of-range values get sanitized to [MIN, MAX] (parallel to slider clamp).
+{
+  const overrides = {
+    'attr-a': { strength: 0.02 },   // below MIN=0.05 — clamps up
+    'attr-b': { strength: 0.99 },   // above MAX=0.45 — clamps down
+  }
+  const list = listClampWarnFieldOverridesAcross(overrides, 'strength')
+  if (list.length !== 2) fail(`expected 2 entries, got ${list.length}`)
+  // Values clamped to slider range
+  const byId = Object.fromEntries(list.map(e => [e.id, e.value]))
+  if (byId['attr-a'] < 0.05) fail(`attr-a should clamp up from 0.02, got ${byId['attr-a']}`)
+  if (byId['attr-b'] > 0.45) fail(`attr-b should clamp down from 0.99, got ${byId['attr-b']}`)
+}
+
+// Per-field isolation — overrides for OTHER fields not surfaced when
+// querying a specific field.
+{
+  const overrides = {
+    'attr-a': { x: 0.10, y: 0.20, z: 0.30 },        // no strength
+    'attr-b': { strength: 0.25, x: 0.40 },          // has strength + x
+    'attr-c': { y: 0.15 },                          // no strength
+  }
+  const list = listClampWarnFieldOverridesAcross(overrides, 'strength')
+  if (list.length !== 1) fail(`isolation: only attr-b has strength, got ${list.length}`)
+  if (list[0].id !== 'attr-b') fail(`isolation: expected attr-b, got ${list[0].id}`)
+}
+
+// Non-finite values silently skipped (parallel to count projector).
+{
+  const overrides = {
+    'attr-a': { strength: 0.10 },
+    'attr-b': { strength: NaN },
+    'attr-c': { strength: Infinity },
+    'attr-d': { strength: -Infinity },
+    'attr-e': { strength: 0.20 },
+  }
+  const list = listClampWarnFieldOverridesAcross(overrides, 'strength')
+  if (list.length !== 2) fail(`non-finite skip: got ${list.length}, expected 2`)
+  const ids = list.map(e => e.id).sort()
+  if (ids[0] !== 'attr-a' || ids[1] !== 'attr-e') fail(`wrong ids: ${ids.join(',')}`)
+}
+
+// Malformed inner entries silently skipped.
+{
+  const overrides = {
+    'attr-good':    { strength: 0.20 },
+    'attr-null':    null,
+    'attr-array':   [0.10],
+    'attr-string':  'oops',
+    'attr-number':  42,
+    'attr-no-key':  { other: 0.30 },     // doesn't HAVE 'strength'
+    'attr-also-ok': { strength: 0.15 },
+  }
+  const list = listClampWarnFieldOverridesAcross(overrides, 'strength')
+  if (list.length !== 2) fail(`malformed inner skip: got ${list.length}, expected 2`)
+}
+
+// Empty overrides map → empty list.
+{
+  if (listClampWarnFieldOverridesAcross({}, 'strength').length !== 0) fail('empty map → []')
+}
+
+// Defensive — non-object/array/null overrides → [].
+{
+  if (listClampWarnFieldOverridesAcross(null,      'strength').length !== 0) fail('null → []')
+  if (listClampWarnFieldOverridesAcross(undefined, 'strength').length !== 0) fail('undefined → []')
+  if (listClampWarnFieldOverridesAcross('bad',     'strength').length !== 0) fail('string → []')
+  if (listClampWarnFieldOverridesAcross(42,        'strength').length !== 0) fail('number → []')
+  if (listClampWarnFieldOverridesAcross([],        'strength').length !== 0) fail('array → []')
+  if (listClampWarnFieldOverridesAcross(['s'],     'strength').length !== 0) fail('non-empty array → []')
+}
+
+// Defensive — bad field returns [].
+{
+  const overrides = { 'attr-a': { strength: 0.10 } }
+  if (listClampWarnFieldOverridesAcross(overrides, '').length !== 0) fail('empty field → []')
+  if (listClampWarnFieldOverridesAcross(overrides, null).length !== 0) fail('null field → []')
+  if (listClampWarnFieldOverridesAcross(overrides, undefined).length !== 0) fail('undefined field → []')
+  if (listClampWarnFieldOverridesAcross(overrides, 42).length !== 0) fail('number field → []')
+  if (listClampWarnFieldOverridesAcross(overrides, 'gibberish').length !== 0) fail('unknown field → []')
+  if (listClampWarnFieldOverridesAcross(overrides, 'enabled').length !== 0) fail('enabled (not CLAMP_THRESHOLD_FIELDS) → []')
+}
+
+// Integration with count projector — list length === count.
+{
+  const overrides = {
+    'attr-a': { strength: 0.10, x: 0.30 },
+    'attr-b': { strength: 0.40 },
+    'attr-c': { strength: NaN },          // skipped
+    'attr-d': { x: 0.20 },                // no strength
+  }
+  const count = countClampWarnFieldOverridesAcross(overrides, 'strength')
+  const list  = listClampWarnFieldOverridesAcross(overrides, 'strength')
+  if (count !== list.length) fail(`count (${count}) !== list.length (${list.length})`)
+  if (count !== 2) fail(`integration: expected 2, got count=${count} list.length=${list.length}`)
+}
+
+// Integration with clear projector — after wipe, list is empty.
+{
+  const overrides = {
+    'attr-a': { strength: 0.10, x: 0.30 },
+    'attr-b': { strength: 0.40 },
+  }
+  const before = listClampWarnFieldOverridesAcross(overrides, 'strength')
+  if (before.length !== 2) fail('pre-clear list length')
+  const wiped = clearClampWarnFieldOverridesAcross(overrides, 'strength')
+  const after = listClampWarnFieldOverridesAcross(wiped, 'strength')
+  if (after.length !== 0) fail(`post-clear list should be empty, got ${after.length}`)
+  // OTHER fields preserved (attr-a still has x).
+  const xList = listClampWarnFieldOverridesAcross(wiped, 'x')
+  if (xList.length !== 1) fail(`post-clear x preserved: got ${xList.length}`)
+  if (xList[0].id !== 'attr-a' || xList[0].value !== 0.30) fail('post-clear x value preserved')
+}
+
+// Purity — input not mutated.
+{
+  const overrides = { 'attr-a': { strength: 0.10 } }
+  const before = JSON.stringify(overrides)
+  listClampWarnFieldOverridesAcross(overrides, 'strength')
+  if (JSON.stringify(overrides) !== before) fail('input mutated')
+}
+
+console.log('PASS: listClampWarnFieldOverridesAcross — preview-chip projector (R27.45, ~25 asserts)')

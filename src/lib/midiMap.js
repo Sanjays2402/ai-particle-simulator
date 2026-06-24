@@ -870,6 +870,45 @@ export function countClampWarnFieldOverridesAcross(attractorOverrides, field) {
   return n
 }
 
+// R27.45 — List the attractor IDs that have a per-attractor override for
+// THIS field, paired with their per-attractor threshold value. Drives
+// the "Clear all for this field" button's inline preview chips so the
+// user sees which attractors will be reset before they commit. Pure
+// projector parallel to countClampWarnFieldOverridesAcross.
+//
+// Returns array of `{ id, value }`:
+//   - id    : attractor id string (raw key from overrides map)
+//   - value : per-attractor threshold (already sanitized to the same
+//             [MIN, MAX] range the slider clamps to). Caller can format
+//             as "%" without further work.
+//
+// Returns []:
+//   - non-object / array / null overrides map
+//   - non-string field / not in CLAMP_THRESHOLD_FIELDS
+//   - no attractor has an override for this field
+//
+// Ordering: ID lexicographic via Object.keys (stable across renders so
+// chips don't reshuffle; UI may re-sort by attractor list order in the
+// wire layer if needed). Malformed inner entries / non-finite values
+// silently skipped (same contract as the count projector — never
+// surface a chip we can't actually wipe).
+//
+// Pure / no mutation of input.
+export function listClampWarnFieldOverridesAcross(attractorOverrides, field) {
+  if (!attractorOverrides || typeof attractorOverrides !== 'object' || Array.isArray(attractorOverrides)) return []
+  if (typeof field !== 'string' || !field) return []
+  if (!CLAMP_THRESHOLD_FIELD_SET.has(field)) return []
+  const out = []
+  for (const attractorId of Object.keys(attractorOverrides)) {
+    const inner = attractorOverrides[attractorId]
+    if (!inner || typeof inner !== 'object' || Array.isArray(inner)) continue
+    if (!Object.prototype.hasOwnProperty.call(inner, field)) continue
+    if (!Number.isFinite(inner[field])) continue
+    out.push({ id: attractorId, value: sanitizeClampWarnThreshold(inner[field]) })
+  }
+  return out
+}
+
 // R26.45 — Strip ONE field from EVERY attractor's per-attractor
 // override map. Drops attractor entries that become empty after the
 // strip (parallel to setClampWarnAttractorFieldOverride's last-cell-
