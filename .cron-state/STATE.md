@@ -110,6 +110,11 @@ Existing capabilities (do not re-ship):
 - Snapshot grid long-press multi-select for bulk delete (R18.06). Long-press (≥450ms) any tile in grid view to enter selection mode; a delete bar surfaces above the grid with Select all / Clear / Delete N (parallels R17.17 attractor multi-select). Tap-at-rest opens lightbox (unchanged); tap-in-select-mode toggles selection. Move guard (LONG_PRESS_SLOP_PX=8) bails out if the user starts to scroll/swipe — long-press only fires on a genuine hold. After firing, the synthetic click is swallowed. validSelectedIds reconciled at render-time via useMemo so externally-removed snapshots drop out of counts without setState-in-effect. Selection clears on gallery close / view-change (grid-only by design). New pure helper `removeSnapshots(items, idSet)` mirrors removeAttractors contract — Set | Array | iterable inputs, ref-equal-on-no-op skip, corrupt-row cleanup. Visual: selected tiles get red border + glow + filled red checkmark; unselected-in-select-mode get an empty ring; hover actions hidden in select mode so a careful tap doesn't fight the toggle. touchAction:'manipulation' + WebkitTouchCallout:'none' prevents iOS native long-press action sheet from intercepting.
 - Spectrum peak trail per-curve tunable parameters (R19.12). Graduates R16.17's fixed-shape curves (t^2 for exp, sqrt(t) for log) with one knob per shape: `exp.exponent` (1..6, default 2 — t^exponent; higher = sharper head bloom; 1.0 degenerates to linear) and `log.base` (2..8, default 4 — log(1+(base-1)*t)/log(base); higher = tail lingers more aggressively). Endpoint anchoring INVARIANT across every (curve, params) combination (0 at t=0, 1 at t=1) so swapping shapes or tweaking params never disturbs the trail's overall MIN/MAX brightness — only the distribution between. New pure helpers in waveform.js: `PEAK_TRAIL_CURVE_PARAMS` schema with min/max/step/default/label/hint per entry; `defaultPeakTrailCurveParams()` returns non-aliased fresh defaults; `sanitizeCurveParamValue(curve, key, raw)` clamps + non-finite-fallback-to-default; `sanitizeCurveParams(raw)` merges partial map with defaults; `setCurveParam(params, curve, key, raw)` ref-equal-on-no-op contract; `isCurveParamsAtDefaults(params)` projector. `applyTrailCurve(t, curve, params)` extended with params arg threaded through both branches. `readPeakTrail(state, barIndex, current, opts)` accepts opts.curveParams passthrough. UI: CurveChipWithLongPress wraps the R16.17 chip with pointer-event-based long-press (≥400ms hold opens the param editor popover); small sky-blue dot next to chip label when curve has non-default params; popover renders one slider per param with reset button (atomic reset across all curves, mirrors the chip overrides IO patterns). Store: spectrumPeakCurveParams persisted to `spectrum-peak-curve-params-v1`; sanitizeCurveParams runs on every read so corrupt persisted values resolve to defaults; setSpectrumPeakCurveParam + resetSpectrumPeakCurveParams actions.
 - Per-attractor MIDI: TYPE row shows live band on tooltip (R19.16). Graduates R18.16's invisible band-hysteresis with a scannable cue: each TYPE row with a bound CC + at least one message seen on that CC wears a tiny coloured tag showing "N/4 typename" (band index + type label) + a `·hold` amber suffix when the live value sits inside the dead-band so the user knows the type is HELD (not about to flip from jitter). New pure projector `describeTypeBand(v01, types?, hysteresis?)` in midiMap.js: returns `{ index, label, total, holdingPrev, distanceToEdge01 }` using the SAME band-width + hysteresis math as pickAttractorTypeForCC so the tag never lies about the picker's actual decision. holdingPrev is true only when v01 is inside the symmetric hysteresis window around a TRUE boundary (extremes 0/1 never hold since there's no neighbouring boundary). MidiPanel wires per-CC lastCCByNumber state cache (functional setState with same-value-skip + bound-CC-only filter so chatty controllers pumping unbound CCs don't trigger 60Hz re-renders). Badge wears the type's accent colour via attractorTypeStyle (parallels R14.05 indigo/red/violet/amber palette).
+- Bias import preview header surfaces total-fields-touched count across all chip rows (R27.41, graduates R26.41). New pure projector `summarizeImportTotalFieldImpact(rows, mode)` in biasOverridesIO.js: sums summarizeFieldDiffCounts across every row. Mode-aware — in MERGE mode, skip-action rows are excluded (their live override stays untouched; counting would mislead a user planning a non-destructive append); in REPLACE mode every row counts. Defensive contract mirrors summarizeFieldDiffCounts (non-array → zeros, null/non-object rows skipped). UI: new pip in BiasOverridesImportPreview header next to "Preview: N chips" label showing "Touching X of Y"; mode-aware tooltip explains the counting difference. Colour cycles indigo → amber when changed >= 10 (meaningful scope) so two imports side-by-side surface relative reach in peripheral vision. Only renders when total > 0 so empty-import / all-default-equal previews stay tight.
+- Note filter history bulk-unpin footer button when 2+ entries pinned (R27.42, graduates R26.42). New pure helpers in presetThumbnails.js: `countPinnedNoteFilterHistoryEntries(list)` strict-true filter so non-bool truthy (string "true", number 1) don't lie about the count; defensive null/non-array/non-object → 0; `bulkUnpinNoteFilterHistoryEntries(list)` flips pinned → false on every entry via sanitize-and-rewrite, returns input REF unchanged when nothing is pinned (ref-equal-on-no-op for the persistence layer to skip redundant saves); MRU order preserved (sortForDisplay is the render-time re-flow); corrupt rows dropped on same path that add/togglePin already use. UI: new "Unpin (N)" amber button in recent-patterns dropdown footer alongside red "Clear" wipe. Only renders when countPinned >= 2 (with 1 pinned, per-row star toggle suffices). Footer flex-row groups the two destructive actions; dropdown stays open after wipe so user sees every star flip back to hollow.
+- Hotkey UNDO chain badge colour fades over 1s window (R27.43, graduates R26.43). Together with R23.35's window, R24.38's counter, R25.43's glyph, and R26.43's direction colour, the chain UI now carries 5 parallel cues: window (functional), counter (depth), glyph (direction), colour-by-direction (peripheral direction at any instant), colour-by-time (peripheral urgency over time). New pure helper `fadeDirectionColor(baseColor, elapsedMs, windowMs)` in midiPresets.js: pure RGB lerp from baseColor → HOTKEY_CHAIN_COLOR_FADED ('#5a5a70'). Endpoint anchoring guaranteed (baseColor at elapsed=0, FADED at elapsed===windowMs, FADED past windowMs). Channel zero-pad guards against single-digit hex output. Case-insensitive parse. Full defensive contract: non-string base / non-#RRGGBB hex pattern / non-finite-negative elapsed / non-finite-zero-negative window all return baseColor unchanged (NEVER returns faded for bad input — corrupt timestamps shouldn't silently say "expired"). Toast.jsx: `badge.fade` is new optional `{ baseColor, windowMs }` shape; Toast.jsx mounts 50ms setInterval + bumps fadeTick state to trigger re-renders; fadeDirectionColor() called fresh each render; interval auto-tears down once elapsed >= windowMs. Static-colour path (badge.color only, no badge.fade) keeps pre-R27.43 behaviour exactly. CSS transition smooths 50ms tick jumps to a breathing fade. mountedAt captured in showToast() so elapsed math is consistent across re-emissions.
+- Per-attractor clamp popover field-wipe surfaces inline preview chips of affected attractors (R27.45, graduates R26.45). Real-world: user has tuned 6 attractors' STRENGTH thresholds, R26.45 count badge ("STRENGTH all (6)") tells them "6 cells wipe" but gives zero hint WHICH 6; R27.45 lists them explicitly as chips so they can sanity-check scope in 2 seconds. New pure projector `listClampWarnFieldOverridesAcross(overrides, field)` in midiMap.js: returns `[{ id, value }, ...]` of attractors with per-attractor override for this field; values sanitized to [MIN, MAX] (parallel to slider clamp); Object.keys lexicographic ordering (stable across renders); per-field isolation guaranteed; defensive same contract as count projector. UI: new violet-tinted preview panel above action button row in ClampThresholdPopover, only renders when fieldOverridesAcross.length >= 2 (matches R26.45's button gating exactly). Each chip shows tiny type-accent colour dot (red/indigo/violet/amber matching R14.05) + attractor name (live) or truncated id (stale, italic muted grey) + current threshold % pip + special tint when chip corresponds to the CURRENT attractor (user can see "yes this would also reset THIS attractor's override"). maxHeight: 64 + overflowY: auto so 12+ chips don't blow up the popover.
+- MidiPanel binding-group DnD adds gap-drop zones for explicit insert-here semantics (R27.20, graduates R25.20 / R26.20). Parallels R19.19's named-attractor gap-drop. Before R27.20: only path was "drop on a SPECIFIC group" with "insert AT that index" semantics — fine for adjacent moves, awkward for inserting between groups you don't want to touch. Gap zones make insert-here EXPLICIT: drop in the gap between A and B and the moved group lands exactly there. UI: each group gets a gap-ABOVE-it zone plus a trailing gap below the LAST group only; renders inert at 4px (gap-above) / 8px (trailing) by default; expands to 18/24px with indigo dashed strip when drag is active AND this gap is the hovered target. Trailing gap only renders DURING active drag so layout stays compact at rest. Single-group lists skip all gap zones. Pure wire layer on dropIndexForGap (R19.19 already pinned in tests) + moveAttractorByIndex (R15.20 already pinned). Wrapped each group in display:contents outer div (key-bearing container) so we can render gap-above + group div + optional trailing gap as siblings without a React.Fragment import (visually identical to pre-R27.20 layout when no drag is active).
 - Spectrum peak-hold trail per-bar frequency-coloured tint PALETTE chip rail (R21.21). Graduates R20.13's single warm→cool ramp with 5 curated palettes selectable via a new chip in the WaveformOverlay header. Chip only renders when the existing tint chip is ON (the palette is meaningless when the trail inherits the bar's hue); warmCool stays first in cycle so an existing tint user's click target unchanged. Palettes: warmCool (R20.13 default, bass red-orange / treble blue-violet), rainbow (full 0→360 sweep), cool (260→180 indigo→teal for twilight presets), warm (0→50 red→amber for fire/embers), mono (215→195 narrow grey band, brightness-only map). New lib helpers in waveform.js: `PEAK_TRAIL_PALETTES` roster + `PEAK_TRAIL_PALETTE_NAMES` chip-cycle order + `isValidTrailPalette(name)` defensive-against-prototype-pollution + `nextTrailPalette(current)` wraparound + `peakTrailHueForBarIndexPalette(barIndex, totalBars, paletteName)` palette-aware hue projector with identical defensive contract as R20.13. INVARIANT pinned in tests: palette-aware call with 'warmCool' equals legacy peakTrailHueForBarIndex for every bar, so users with tint ON who never touch the chip see zero behavioural change. Store: spectrumPeakTrailPalette persisted to `spectrum-peak-trail-palette-v1`, default 'warmCool', corrupt values resolve via isValidTrailPalette. UI: tiny palette chip at left:188 in WaveformOverlay header wears the active palette's 3-stop linear-gradient as its own background so the chip visually previews the palette it controls.
 - Per-attractor MIDI clamp-proximity meter on STRENGTH / RADIUS / RADIUS·log / X / Y / Z rows (R21.22). Graduates R20.16's TYPE-row proximity meter to continuous fields. ENABLED rows skip (1-bit toggle — meter redundant); TYPE rows skip (R20.16 already drew the band-boundary meter). Semantic differs by field shape: TYPE = proximity to nearest FLIP BOUNDARY inside a band; continuous = proximity to nearest CLAMP EDGE of the slider. For continuous fields the safe zone is the middle of the sweep — knob at v01=0.5 reads MAX SAFE (max headroom both ways), knob at v01=0 or v01=1 reads MIN SAFE (the knob is at the rail — twisting further does nothing). New pure helpers in midiMap.js: `clampProximity01(v01)` symmetric inverted-V projector (returns 1 at centre, 0 at clamps; non-finite resolves to 1 = max-safe first-paint default) + `describeClampProximity(v01)` structured projector matching describeTypeBand's null-on-bad-input contract returning `{ kind: 'clamp', v01, proximityToBoundary01, atLow, atHigh }`. atLow / atHigh booleans fire only at the rails (v ≤ 0.001 / v ≥ 0.999) so the UI can colour the meter red specifically when knob is dead-against a clamp. UI: monospace tag between the existing typeBand tag and the CC badge, shows v01 as "87%" + a 26×4 horizontal bar; three-tier intent matches R20.16 (red at rail, amber close to clamp prox<0.25, green when safe prox≥0.25); 80ms width + 120ms colour transitions. Reuses R19.16 lastCCByNumber state cache as-is.
 - Smash bias overrides EXPORT / IMPORT as portable JSON file (R21.23). Graduates R20.07's per-chip bias editor with a portable share path. Parallels wind chip overrides IO (R12.17) + crossfade chip overrides IO (R13.14) — same envelope shape, same merge-vs-replace prompt, same MAX-bytes guard. New lib module `src/lib/biasOverridesIO.js`: kind=`ai-particle-simulator/bias-overrides`, v=1, MAX_IMPORT_BYTES=16 KB; exportableBiasIds() pulls from SCENE_BIASES so adding chips later auto-extends the IO; sanitizeBiasOverridesMap drops unknown chip ids + empty per-chip overrides; buildExportPayload / serialize / makeFilename ('particle-bias-YYYY-MM-DD.json'); parseImport handles full envelope + bare-items shorthand, rejects wrong-kind / unsupported-version / missing-items / all-invalid / invalid-JSON / non-string / top-level non-object / oversized; mergeImport with merge/replace semantics; summarizeImportImpact dry-run preview with conflicts + resultIds. UI: Export + Import buttons join the existing "Edit bias JSON" link above the chip rail in RightSidebar.jsx. Export disabled when no chip has overrides; replace-mode import also resets any chip the import didn't touch so a clean swap genuinely wipes prior state.
@@ -485,12 +490,19 @@ padding.
 - [x] R26.45 Clamp popover bulk-clear: also surface a "Clear all (M) for THIS FIELD across every attractor" companion button — a898502
 - [x] R26.20 MidiPanel binding-group DnD: touch / long-press support for mobile users (parallels R22.12 camera path touch DnD) — f25f073
 
-### Batch 27 — refilled queue (graduations of THIS batch's slices)
-- [ ] R27.41 Bias import preview chip-row counts: also surface a TOTAL-fields-touched count across the whole preview ("Touching 12 of 30 fields total") so users picking between many imports can compare scope at a glance — graduates R26.41
-- [ ] R27.42 Note filter history pin: bulk-unpin button in the dropdown footer when ≥2 entries are pinned (parallels Clear footer behaviour) — graduates R26.42
-- [ ] R27.43 UNDO chain direction colour: also fade the colour intensity over the 1s window (cyan/amber → grey as window expires) so the colour visually warns "click soon to flip back" — graduates R26.43
-- [ ] R27.45 Clamp popover field-wipe: also surface inline preview chips listing the N attractors that will be affected before commit (parallels R26.41's chip-row counts UX) — graduates R26.45
-- [ ] R27.20 MidiPanel binding-group DnD: gap-drop zones between groups for explicit insert-here semantics (parallels R19.19 named-attractor gap-drop) — graduates R26.20
+### Batch 27 — refilled queue (graduations of THIS batch's slices)  (SHIPPED)
+- [x] R27.41 Bias import preview chip-row counts: also surface a TOTAL-fields-touched count across the whole preview ("Touching 12 of 30 fields total") so users picking between many imports can compare scope at a glance — graduates R26.41 — 3e35ffa
+- [x] R27.42 Note filter history pin: bulk-unpin button in the dropdown footer when ≥2 entries are pinned (parallels Clear footer behaviour) — graduates R26.42 — 94efdf9
+- [x] R27.43 UNDO chain direction colour: also fade the colour intensity over the 1s window (cyan/amber → grey as window expires) so the colour visually warns "click soon to flip back" — graduates R26.43 — 04ed08f
+- [x] R27.45 Clamp popover field-wipe: also surface inline preview chips listing the N attractors that will be affected before commit (parallels R26.41's chip-row counts UX) — graduates R26.45 — d4f55fe
+- [x] R27.20 MidiPanel binding-group DnD: gap-drop zones between groups for explicit insert-here semantics (parallels R19.19 named-attractor gap-drop) — graduates R26.20 — 09966f3
+
+### Batch 28 — refilled queue (graduations of THIS batch's slices)
+- [ ] R28.41 Bias import preview header total: also colour-fades from indigo → red when changed > 20 fields (THREE-tier intensity instead of just indigo/amber 10+ threshold) so very-wide-scope imports register as urgent at a glance — graduates R27.41
+- [ ] R28.42 Note filter history bulk-unpin: undo button on the toast that fires after bulk-unpin (parallels R22.30 hotkey undo) so a misclick doesn't discard hours of pin tagging — graduates R27.42
+- [ ] R28.43 UNDO chain badge fade: pulse subtly faster as it approaches the window expiration (fade slower in the first 500ms, faster in the last 500ms — non-linear curve) — graduates R27.43
+- [ ] R28.45 Clamp popover field-wipe preview chips: click an individual chip to clear JUST that one attractor's per-attractor override (per-cell wipe from the preview without leaving the popover) — graduates R27.45
+- [ ] R28.20 MidiPanel binding-group gap-drop: also work on touch via long-press-then-drag-into-gap (graduates R26.20 + R27.20 combined) — touch users currently can't reach the gap zones
 
 ### Future queue carried from Batch 24 (refill on next batch)
 
@@ -1592,3 +1604,91 @@ padding.
     tests) + moveAttractorByIndex (R15.20, already pinned in
     namedAttractors tests) + the sibling-enter-before-leave guard
     (R17.07 / R18.19 wire-layer pattern, no test surface to add).
+
+- 2026-06-23 18:41 PT — Batch 27 (5/5).
+  Commits: 3e35ffa (R27.41 bias import preview total-fields-touched
+  count — summarizeImportTotalFieldImpact projector with mode-aware
+  skip-row exclusion in merge / counted in replace + defensive contract
+  mirroring summarizeFieldDiffCounts; UI "Touching X of Y" pip in
+  preview header with indigo→amber colour at 10+ scope threshold),
+  94efdf9 (R27.42 note filter history bulk-unpin — countPinnedNote
+  FilterHistoryEntries + bulkUnpinNoteFilterHistoryEntries with strict-
+  true filter + ref-equal-on-no-op + sanitize-and-rewrite drops corrupt
+  rows + MRU order preserved; UI "Unpin (N)" amber button alongside
+  red Clear, only when 2+ pinned, dropdown stays open after wipe for
+  visual confirmation), 04ed08f (R27.43 hotkey UNDO chain badge fade
+  — fadeDirectionColor pure RGB lerp from cyan/amber → faded grey
+  over UNDO_CHAIN_MS, endpoint anchoring guaranteed at 0/window/past,
+  channel zero-pad, case-insensitive parse, full defensive matrix;
+  Toast.jsx badge.fade { baseColor, windowMs } config triggers 50ms
+  setInterval re-render tick that auto-tears-down at endpoint; MidiPanel
+  packs fade config into the chain badge; CSS transition smooths the
+  50ms jumps), d4f55fe (R27.45 clamp popover field-wipe preview chips
+  — listClampWarnFieldOverridesAcross projector returning [{id, value}]
+  with sanitization + per-field isolation + same defensive contract as
+  count projector; UI violet-tinted preview panel above action button
+  row, only when 2+ cells, type-accent colour dot per chip + stale-attr
+  fallback to truncated id + current-attractor tint + threshold % pip),
+  09966f3 (R27.20 MidiPanel binding-group gap-drop zones — pure wire
+  layer on dropIndexForGap (R19.19 already pinned) + moveAttractorByIndex
+  (R15.20 already pinned); each group gets gap-above-it zone + trailing
+  gap below last only; renders 4/8px inert by default, expands to 18/24px
+  with indigo dashed strip on drag-hover; display:contents outer wrapper
+  avoids React.Fragment import; gap state cleared on every drag-end/
+  drop path).
+  Substituted R27.41, R27.42, R27.43, R27.45, R27.20 from the pre-refilled
+  Batch 27 queue (every slice graduates a Batch 26 feature, tight
+  thematic spine: Batch 26 → Batch 27 iteration loop without padding).
+  R27.01-R27.05 (render-pipeline / r3f-gizmo / backend runtime) deferred
+  again — same as Batches 14-26.
+  Gates: lint 23 errors / 3 warnings — exactly matches baseline (zero
+  new errors in any of the 6 modified .js/.jsx files + 3 modified
+  .test.mjs files; the Toast.jsx Date.now() call wrapped in the existing
+  react-hooks/purity eslint-disable pattern that MidiPanel already uses
+  for issuedAt — same impurity-boundary semantics).
+  Build: 1.07 s green (1.85 MB bundle, gzip 545 KB — +1 KB vs Batch 26
+  for the new lib helpers + 4 new UI elements (header pip, bulk-unpin
+  button, fade-tick interval + transition, preview chips panel, gap-zone
+  divs)).
+  Unit tests: 40/40 files pass (~135 fresh asserts this batch):
+  - extended biasOverridesIO with ~30 R27.41 asserts (summarizeImport
+    TotalFieldImpact happy multi-row sum, overwrite-row contributes in
+    both modes, skip-row excluded in merge / counted in replace,
+    live-only counted in replace, rows without fieldDiff contribute
+    zero, default mode = merge, full defensive matrix null/string/
+    number/object/non-array → zeros, null/non-object rows silently
+    skipped, rows with bad fieldDiff skipped via summarize defensive,
+    integration through buildBiasImportPreviewRows in merge + replace
+    showing the skip-row exclusion behaviour, purity invariant)
+  - extended presetThumbnails with ~30 R27.42 asserts (countPinned happy
+    0→1→2→1 traversal + defensive null/string/number/object/empty +
+    strict-true filter (string/number truthy not counted) + corrupt-row
+    skip; bulkUnpin happy all-pinned → all-false + length-preserved +
+    order-preserved + partial-pinned wipes all + ref-equal-on-no-op when
+    nothing pinned + ref-equal on empty list + defensive null/undefined/
+    object/string/number returns input ref + purity + corrupt-row drop
+    in sanitize pass + storage round-trip)
+  - extended midiPresets with ~50 R27.43 asserts (endpoint anchoring at
+    elapsed=0 + elapsed===windowMs, past-window pin to faded, exact
+    midpoint RGB lerp for cyan→grey, monotonicity across 10 sampled
+    points, valid #RRGGBB output for every 50ms-step sweep, channel
+    zero-pad with low-channel base, case-insensitive parse, full
+    defensive matrix non-string-base / rgb/hsl/named/3-digit/invalid-hex/
+    empty base → input; non-finite/negative elapsed → base; Infinity/
+    NaN/string/null/undefined window → base; zero window → base
+    no-denominator, FADED constant validity, FADED distinct from
+    REVERSE + FORWARD)
+  - extended midiMap with ~25 R27.45 asserts (listClampWarnFieldOverrides
+    Across happy 3-attractor listing + value sanitization + clamp
+    behaviour out-of-range up/down + per-field isolation other fields
+    not surfaced + non-finite skip NaN/Infinity/-Infinity + malformed
+    inner skip null/array/string/number/missing-key + empty map → []
+    + full defensive matrix null/undefined/string/number/array overrides
+    → []; empty/null/undefined/number/unknown/non-CLAMP field → [] +
+    integration with count projector list.length===count + integration
+    with clear projector after-wipe-list-empty + other-fields-preserved
+    + purity)
+  - R27.20 ships zero new lib helpers / tests — pure wire layer on
+    dropIndexForGap (R19.19, already pinned in namedAttractors tests)
+    + moveAttractorByIndex (R15.20, already pinned in namedAttractors
+    tests).
