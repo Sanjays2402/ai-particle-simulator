@@ -21,6 +21,11 @@ import {
   summarizeFieldDiffCounts,
   // R27.41 — total-fields-touched projector for the preview-header pip
   summarizeImportTotalFieldImpact,
+  // R28.41 — three-tier intensity (low/medium/high) for the same pip
+  // so very-wide-scope imports register as urgent at a glance instead
+  // of plateauing at amber past 10 changed fields.
+  getImportImpactIntensity, getImportImpactStyle,
+  IMPORT_IMPACT_AMBER_AT, IMPORT_IMPACT_RED_AT,
 } from '../lib/biasOverridesIO'
 import {
   loadCameraViews, saveCameraViews, appendView, moveView, moveViewUp, moveViewDown,
@@ -2209,8 +2214,17 @@ function BiasOverridesImportPreview({ pending, existing, onModeChange, onCancel,
   // updates the count live (replace mode pulls in skip-rows that
   // merge mode excludes — the surface jumps to reflect the wider
   // scope).
+  //
+  // R28.41 — Three-tier intensity (low/medium/high) graduates the
+  // original two-tier indigo/amber surface with a red "wide scope"
+  // band for imports past IMPORT_IMPACT_RED_AT (20) changed fields.
+  // Style bundle drives the entire pip (bg/border/color/accent) so
+  // a single intensity flip restyles atomically — no chance of
+  // mismatched colours between text + border.
   const totalImpact = summarizeImportTotalFieldImpact(rows, mode)
   const showTotalImpact = totalImpact.total > 0
+  const impactIntensity = getImportImpactIntensity(totalImpact.changed)
+  const impactStyle = getImportImpactStyle(impactIntensity)
   return (
     <div style={{
       marginTop: 8, padding: 10, borderRadius: 8,
@@ -2230,29 +2244,30 @@ function BiasOverridesImportPreview({ pending, existing, onModeChange, onCancel,
           <span>Preview: {rows.length} bias chip{rows.length === 1 ? '' : 's'} in import</span>
           {/* R27.41 — total-fields-touched pip. Mode-aware: Merge mode
               excludes skip-rows (the live override stays untouched);
-              Replace mode counts every row. Colour cycles indigo (low
-              scope) → amber (>= 10 fields, meaningful scope) so users
-              eyeballing two imports side-by-side can see at a glance
-              which has the broader reach. */}
+              Replace mode counts every row.
+              R28.41 — Three-tier intensity drives bg/border/color so
+              the pip cycles indigo (< 10) → amber (10..19) → red
+              (>= 20). Single style bundle keeps the colour swap atomic
+              — no chance of half-amber-half-red mid-render. */}
           {showTotalImpact && (
             <span
-              title={`This import will touch ${totalImpact.total} field${totalImpact.total === 1 ? '' : 's'} total: ${totalImpact.changed} changed, ${totalImpact.unchanged} unchanged.${mode === 'merge' ? ' (Merge mode excludes existing chips the import would skip; flip to Replace to count them too.)' : ' (Replace mode counts every field across every chip.)'}`}
+              title={`This import will touch ${totalImpact.total} field${totalImpact.total === 1 ? '' : 's'} total: ${totalImpact.changed} changed, ${totalImpact.unchanged} unchanged (${impactStyle.label}).${mode === 'merge' ? ' (Merge mode excludes existing chips the import would skip; flip to Replace to count them too.)' : ' (Replace mode counts every field across every chip.)'} Thresholds: amber at ${IMPORT_IMPACT_AMBER_AT}+, red at ${IMPORT_IMPACT_RED_AT}+.`}
               style={{
                 fontFamily: 'Geist Mono, JetBrains Mono, monospace',
                 fontSize: 9, padding: '1px 6px', borderRadius: 4,
-                background: totalImpact.changed >= 10
-                  ? 'rgba(245,158,11,0.10)'
-                  : 'rgba(99,102,241,0.10)',
-                color: totalImpact.changed >= 10 ? '#fde68a' : '#c7d2fe',
-                border: totalImpact.changed >= 10
-                  ? '1px solid rgba(245,158,11,0.30)'
-                  : '1px solid rgba(99,102,241,0.30)',
+                background: impactStyle.bg,
+                color: impactStyle.color,
+                border: impactStyle.border,
                 letterSpacing: '0.04em',
                 display: 'inline-flex', alignItems: 'center', gap: 4,
                 fontWeight: 600,
+                // Soft transition so swapping intensity mid-preview (e.g.
+                // user flips Merge → Replace and crosses a threshold)
+                // breathes into the new colour instead of snapping.
+                transition: 'color 0.16s ease-out, background 0.16s ease-out, border-color 0.16s ease-out',
               }}>
               <span>Touching</span>
-              <span style={{ color: totalImpact.changed >= 10 ? '#fbbf24' : '#a5b4fc', fontWeight: 700 }}>
+              <span style={{ color: impactStyle.accent, fontWeight: 700 }}>
                 {totalImpact.changed}
               </span>
               <span style={{ color: '#5a5a70' }}>of</span>

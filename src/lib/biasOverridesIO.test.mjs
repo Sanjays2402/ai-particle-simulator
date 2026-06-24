@@ -20,6 +20,9 @@ import {
   summarizeFieldDiffCounts,
   // R27.41 — total-impact projector for the preview-header pip
   summarizeImportTotalFieldImpact,
+  // R28.41 — three-tier intensity (low/medium/high) + CSS bundle
+  getImportImpactIntensity, getImportImpactStyle,
+  IMPORT_IMPACT_AMBER_AT, IMPORT_IMPACT_RED_AT,
 } from './biasOverridesIO.js'
 import { SCENE_BIASES, SCENE_BIAS_RANGE_FIELDS, SCENE_BIAS_CHANCE_FIELDS } from './randomScene.js'
 
@@ -1018,4 +1021,116 @@ const r = (id, action, fieldDiff) => ({ id, action, fieldDiff })
 
 console.log('PASS: summarizeImportTotalFieldImpact — preview-header total (R27.41, ~30 asserts)')
 
-console.log(`PASS: biasOverridesIO — envelope build/parse, merge/replace, summarize, defensive, multi-file combine, R24.36 preview rows, R25.41 per-field diff, R26.41 summary counts, R27.41 total-impact projector (${SCENE_BIASES.length} chip ids, ${SCENE_BIAS_RANGE_FIELDS.length} ranges + ${SCENE_BIAS_CHANCE_FIELDS.length} chances per chip)`)
+// =====================================================================
+// R28.41 — Three-tier intensity (low/medium/high) for the same pip.
+// Graduates R27.41's two-tier indigo/amber surface with a red "wide
+// scope" band. We test the threshold function PURELY (no DOM), the
+// CSS bundle shape, and the defensive contract.
+// =====================================================================
+
+// getImportImpactIntensity — three-tier thresholds.
+{
+  // Constants exposed.
+  eq(IMPORT_IMPACT_AMBER_AT, 10, 'IMPORT_IMPACT_AMBER_AT exposed as 10')
+  eq(IMPORT_IMPACT_RED_AT,   20, 'IMPORT_IMPACT_RED_AT exposed as 20')
+  ok(IMPORT_IMPACT_AMBER_AT < IMPORT_IMPACT_RED_AT, 'amber threshold lives strictly below red')
+
+  // LOW tier: below amber threshold.
+  eq(getImportImpactIntensity(0),  'low', '0 changed → low')
+  eq(getImportImpactIntensity(1),  'low', '1 changed → low')
+  eq(getImportImpactIntensity(5),  'low', '5 changed → low (mid-low)')
+  eq(getImportImpactIntensity(9),  'low', '9 changed → low (just below amber)')
+
+  // MEDIUM tier: amber threshold to just below red.
+  eq(getImportImpactIntensity(10), 'medium', '10 changed → medium (amber boundary)')
+  eq(getImportImpactIntensity(15), 'medium', '15 changed → medium (mid-amber)')
+  eq(getImportImpactIntensity(19), 'medium', '19 changed → medium (just below red)')
+
+  // HIGH tier: red threshold and above.
+  eq(getImportImpactIntensity(20), 'high', '20 changed → high (red boundary)')
+  eq(getImportImpactIntensity(30), 'high', '30 changed → high (well past red)')
+  eq(getImportImpactIntensity(999), 'high', '999 changed → high (clamp safe)')
+
+  // Defensive — non-finite / negative → 'low' (corrupt count shouldn't paint as urgent).
+  eq(getImportImpactIntensity(-1),        'low', 'negative → low')
+  eq(getImportImpactIntensity(-100),      'low', 'large negative → low')
+  eq(getImportImpactIntensity(NaN),       'low', 'NaN → low')
+  eq(getImportImpactIntensity(Infinity),  'low', 'Infinity → low (non-finite)')
+  eq(getImportImpactIntensity(-Infinity), 'low', '-Infinity → low')
+  eq(getImportImpactIntensity('15'),      'low', 'string → low (non-finite)')
+  eq(getImportImpactIntensity(null),      'low', 'null → low')
+  eq(getImportImpactIntensity(undefined), 'low', 'undefined → low')
+}
+
+// Boundary exact semantics — equal-to-threshold should be the HIGHER tier.
+// (User scoping "20 fields touched" should see red because it's AT the
+// urgent threshold, not 19-still-just-amber.)
+{
+  eq(getImportImpactIntensity(IMPORT_IMPACT_AMBER_AT),     'medium', 'changed === amber threshold → medium')
+  eq(getImportImpactIntensity(IMPORT_IMPACT_AMBER_AT - 1), 'low',    'changed === amber-1 → low')
+  eq(getImportImpactIntensity(IMPORT_IMPACT_RED_AT),       'high',   'changed === red threshold → high')
+  eq(getImportImpactIntensity(IMPORT_IMPACT_RED_AT - 1),   'medium', 'changed === red-1 → medium')
+}
+
+// getImportImpactStyle — CSS bundle shape + per-tier distinctness.
+{
+  const low    = getImportImpactStyle('low')
+  const medium = getImportImpactStyle('medium')
+  const high   = getImportImpactStyle('high')
+
+  // Each bundle has the same required fields.
+  for (const [name, b] of [['low', low], ['medium', medium], ['high', high]]) {
+    ok(typeof b.bg     === 'string' && b.bg.length > 0,     `${name}.bg is non-empty string`)
+    ok(typeof b.border === 'string' && b.border.length > 0, `${name}.border is non-empty string`)
+    ok(typeof b.color  === 'string' && b.color.length > 0,  `${name}.color is non-empty string`)
+    ok(typeof b.accent === 'string' && b.accent.length > 0, `${name}.accent is non-empty string`)
+    ok(typeof b.label  === 'string' && b.label.length > 0,  `${name}.label is non-empty string`)
+  }
+
+  // Each tier's accent must be visually distinct (no two tiers share a colour).
+  ok(low.accent  !== medium.accent, 'low.accent !== medium.accent')
+  ok(low.accent  !== high.accent,   'low.accent !== high.accent')
+  ok(medium.accent !== high.accent, 'medium.accent !== high.accent')
+  ok(low.color  !== medium.color,   'low.color !== medium.color')
+  ok(low.color  !== high.color,     'low.color !== high.color')
+  ok(medium.color !== high.color,   'medium.color !== high.color')
+
+  // Defensive — unknown intensity falls back to 'low' style.
+  eq(getImportImpactStyle('gibberish'), low, 'unknown intensity → low style')
+  eq(getImportImpactStyle(undefined),   low, 'undefined intensity → low style')
+  eq(getImportImpactStyle(null),        low, 'null intensity → low style')
+  eq(getImportImpactStyle(42),          low, 'number intensity → low style')
+  eq(getImportImpactStyle(''),          low, 'empty string → low style')
+}
+
+// Integration — pipeline from summarizeImportTotalFieldImpact through
+// getImportImpactIntensity to getImportImpactStyle. Simulates what the
+// UI does each render.
+{
+  const lo = []   // 0 changed
+  for (let i = 0; i < 3; i++) lo.push(r(`a${i}`, 'add', [{ field: 'f', action: 'unchanged' }]))
+  const md = []   // ~12 changed
+  for (let i = 0; i < 6; i++) md.push(r(`b${i}`, 'add', [{ field: 'f1', action: 'add' }, { field: 'f2', action: 'change' }]))
+  const hi = []   // ~30 changed
+  for (let i = 0; i < 10; i++) hi.push(r(`c${i}`, 'add', [{ field: 'f1', action: 'add' }, { field: 'f2', action: 'change' }, { field: 'f3', action: 'change' }]))
+
+  const loTot = summarizeImportTotalFieldImpact(lo, 'merge')
+  const mdTot = summarizeImportTotalFieldImpact(md, 'merge')
+  const hiTot = summarizeImportTotalFieldImpact(hi, 'merge')
+
+  eq(getImportImpactIntensity(loTot.changed), 'low',    'integration: 0 changed → low')
+  eq(getImportImpactIntensity(mdTot.changed), 'medium', `integration: ${mdTot.changed} changed → medium`)
+  eq(getImportImpactIntensity(hiTot.changed), 'high',   `integration: ${hiTot.changed} changed → high`)
+
+  // And each maps to a unique style bundle.
+  const loStyle = getImportImpactStyle(getImportImpactIntensity(loTot.changed))
+  const mdStyle = getImportImpactStyle(getImportImpactIntensity(mdTot.changed))
+  const hiStyle = getImportImpactStyle(getImportImpactIntensity(hiTot.changed))
+  ok(loStyle.accent !== mdStyle.accent, 'integration: low accent !== medium accent')
+  ok(mdStyle.accent !== hiStyle.accent, 'integration: medium accent !== high accent')
+  ok(loStyle.label  !== hiStyle.label,  'integration: low label !== high label')
+}
+
+console.log('PASS: getImportImpactIntensity + getImportImpactStyle — three-tier preview-header intensity (R28.41, ~50 asserts)')
+
+console.log(`PASS: biasOverridesIO — envelope build/parse, merge/replace, summarize, defensive, multi-file combine, R24.36 preview rows, R25.41 per-field diff, R26.41 summary counts, R27.41 total-impact projector, R28.41 three-tier intensity (${SCENE_BIASES.length} chip ids, ${SCENE_BIAS_RANGE_FIELDS.length} ranges + ${SCENE_BIAS_CHANCE_FIELDS.length} chances per chip)`)

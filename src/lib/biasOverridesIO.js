@@ -492,6 +492,79 @@ export function summarizeImportTotalFieldImpact(rows, mode = 'merge') {
   return { changed, unchanged, total: changed + unchanged }
 }
 
+// R28.41 — Three-tier intensity thresholds for the import preview header
+// pip. Graduates R27.41's two-tier indigo/amber surface with a third
+// "urgent" red band so very-wide-scope imports register at a glance.
+//
+// Tiers:
+//   - 'low'     : changed <  IMPORT_IMPACT_AMBER_AT (10)  → indigo
+//   - 'medium'  : changed >= 10 and < IMPORT_IMPACT_RED_AT (20) → amber
+//   - 'high'    : changed >= 20                          → red
+//
+// Threshold semantics:
+//   - LOW means "tweaking a small handful of fields" — the user is
+//     probably importing a focused override pack, no need to highlight.
+//   - MEDIUM (10+) means "this is a meaningful scope import — worth
+//     scanning before clicking Apply".
+//   - HIGH (20+) means "this import touches a LOT of fields — almost
+//     certainly a full preset bundle or a destructive replace; warrants
+//     a 2-second double-check before commit".
+//
+// Constants exported so the UI can mention the cutoffs in tooltips
+// without hard-coding them.
+export const IMPORT_IMPACT_AMBER_AT = 10
+export const IMPORT_IMPACT_RED_AT = 20
+
+// Returns one of 'low' | 'medium' | 'high'. Defensive: non-finite /
+// negative input → 'low' (a corrupt count shouldn't paint as urgent).
+export function getImportImpactIntensity(changed) {
+  if (!Number.isFinite(changed) || changed < 0) return 'low'
+  if (changed >= IMPORT_IMPACT_RED_AT)   return 'high'
+  if (changed >= IMPORT_IMPACT_AMBER_AT) return 'medium'
+  return 'low'
+}
+
+// CSS-ready bundle for each intensity. Keeps the UI declarative —
+// the chip background / border / accent / text colours all flow from
+// this single source of truth. Parallels attractorTypeStyle (R14.05)
+// and userPresetColorStyle (R16.19) in shape so a future visual
+// refresh changes the palette in one file.
+//
+// Pip colour pairs (matches the existing R27.41 indigo/amber pip
+// styling exactly so a low-scope import looks unchanged):
+//   - low    (< 10  changed) : indigo  #c7d2fe text / #a5b4fc accent
+//   - medium (>= 10 changed) : amber   #fde68a text / #fbbf24 accent
+//   - high   (>= 20 changed) : red     #fecaca text / #f87171 accent
+const IMPORT_IMPACT_STYLES = {
+  low: {
+    bg:       'rgba(99,102,241,0.10)',
+    border:   '1px solid rgba(99,102,241,0.30)',
+    color:    '#c7d2fe',
+    accent:   '#a5b4fc',
+    label:    'low scope',
+  },
+  medium: {
+    bg:       'rgba(245,158,11,0.10)',
+    border:   '1px solid rgba(245,158,11,0.30)',
+    color:    '#fde68a',
+    accent:   '#fbbf24',
+    label:    'meaningful scope',
+  },
+  high: {
+    bg:       'rgba(239,68,68,0.12)',
+    border:   '1px solid rgba(239,68,68,0.42)',
+    color:    '#fecaca',
+    accent:   '#f87171',
+    label:    'wide scope',
+  },
+}
+
+// Returns the style bundle for the given intensity (or 'low' if the
+// arg is unrecognised — defensive against typos / corrupt input).
+export function getImportImpactStyle(intensity) {
+  return IMPORT_IMPACT_STYLES[intensity] || IMPORT_IMPACT_STYLES.low
+}
+
 // Pure equality check for bias-override field values. Routes by kind:
 //   - range fields (4): two-element numeric array, element-wise eq
 //   - chance fields (10): numeric eq
