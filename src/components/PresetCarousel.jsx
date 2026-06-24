@@ -27,7 +27,14 @@ import {
   togglePinNoteFilterHistoryEntry, sortNoteFilterHistoryForDisplay,
   // R27.42 — bulk-unpin footer button when 2+ entries are pinned
   countPinnedNoteFilterHistoryEntries, bulkUnpinNoteFilterHistoryEntries,
+  // R28.42 — Undo restore action for the bulk-unpin toast.
+  // snapshot... captures the (query, mode) keys of every pinned entry
+  // BEFORE the wipe; restore... re-pins those entries against whatever
+  // list is live when the user clicks Undo (so concurrent edits between
+  // unpin + restore compose safely).
+  snapshotPinnedNoteFilterHistoryKeys, restorePinnedNoteFilterHistoryEntries,
 } from '../lib/presetThumbnails'
+import { showToast } from './Toast'
 
 export default function PresetCarousel() {
   const { loadPreset, currentPreset, favoritedPresets, recentPresets, toggleFavorite } = useStore()
@@ -136,10 +143,55 @@ export default function PresetCarousel() {
   // persist call is a true no-op when the user spam-clicks an empty
   // surface. We keep the dropdown open after the wipe so the user can
   // see the visual confirmation (every star flips back to hollow).
+  //
+  // R28.42 — Toast with an Undo action chip lets the user revert a
+  // misclick without losing hours of pin tagging. Pattern parallels
+  // MidiPanel's R22.30 hotkey-transfer undo chip:
+  //   1. Snapshot the pinned KEYS (not the whole list) BEFORE the wipe.
+  //   2. Run the wipe + persist as before.
+  //   3. Surface a toast with an Undo button whose onClick restores
+  //      the snapshot against whatever list is live at click-time.
+  // The snapshot is minimal (just query+mode) so concurrent edits
+  // between unpin + restore compose safely. restorePinned... has a
+  // ref-equal-on-no-op guard so an Undo on a list that no longer
+  // contains any of the snapshotted entries is a graceful zero-cost
+  // no-op (e.g. the user deleted every restored entry already).
   const bulkUnpinHistory = () => {
+    // Snapshot BEFORE we wipe so we can re-pin on Undo. We capture
+    // from the LIVE state value (not the staged 'next') because the
+    // snapshot's job is to remember what was pinned PRE-wipe.
+    const pinnedKeys = snapshotPinnedNoteFilterHistoryKeys(noteFilterHistory)
     const next = bulkUnpinNoteFilterHistoryEntries(noteFilterHistory)
     if (next === noteFilterHistory) return
     persistNoteFilterHistory(next)
+    // No toast if somehow the snapshot is empty (shouldn't happen —
+    // the button only renders when >= 2 entries pinned). Defensive
+    // skip keeps the surface tidy.
+    if (pinnedKeys.length === 0) return
+    const undoUnpin = () => {
+      // Functional read: compute restoration against the LIVE
+      // history (may have changed via concurrent edits between
+      // unpin + undo click — adds, removes, individual pins).
+      // restorePinned... is ref-equal-on-no-op so this is cheap
+      // when nothing's actually different.
+      setNoteFilterHistory(curr => {
+        const restored = restorePinnedNoteFilterHistoryEntries(curr, pinnedKeys)
+        if (restored === curr) return curr
+        // Persist outside React's setState so the storage write is
+        // tied to the actual state transition (parallels every other
+        // persist call in this component).
+        try { saveNoteFilterHistory(restored) } catch { /* quota */ }
+        return restored
+      })
+    }
+    showToast(
+      `Unpinned ${pinnedKeys.length} pattern${pinnedKeys.length === 1 ? '' : 's'}`,
+      // Unicode pin glyph (📌-equivalent monochrome ★ to match the
+      // existing R26.42 star aesthetic — lucide 1.8 doesn't ship Pin).
+      // The icon span receives a string; Toast.jsx wraps it.
+      <span style={{ fontSize: 11, color: '#fbbf24', fontWeight: 700 }}>{'\u2605'}</span>,
+      { label: 'Undo', onClick: undoUnpin },
+    )
   }
   // Close dropdown when input collapses entirely.
   useEffect(() => {

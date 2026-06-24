@@ -1016,6 +1016,103 @@ export function bulkUnpinNoteFilterHistoryEntries(list) {
   return next
 }
 
+// R28.42 — Snapshot the keys (query, mode) of every currently-pinned
+// entry. Used by the bulk-unpin Undo flow to remember "these are the
+// entries I just unpinned" so the toast's restore-action can re-pin
+// them later.
+//
+// Returns an array of { query, mode } objects in the same order as the
+// input list. Mode is normalised through isValidNoteFilterMode so a
+// corrupt persisted value can't end up in the snapshot. Defensive:
+// non-array → []; corrupt/non-object entries silently skipped; only
+// strict-true pinned counted (non-bool truthy doesn't lie).
+//
+// Pure / no mutation. The snapshot is intentionally MINIMAL (just
+// the identifying keys) so it survives non-trivial gaps between
+// unpin + restore: a user can edit / add / remove other entries and
+// the restore still works by matching on (query, mode) at apply-time
+// against whatever list is live then.
+export function snapshotPinnedNoteFilterHistoryKeys(list) {
+  if (!Array.isArray(list)) return []
+  const keys = []
+  for (const e of list) {
+    if (!e || typeof e !== 'object') continue
+    if (e.pinned !== true) continue
+    if (typeof e.query !== 'string') continue
+    const query = e.query.trim()
+    if (!query) continue
+    const mode = isValidNoteFilterMode(e.mode) ? e.mode : NOTE_FILTER_MODE_SUBSTRING
+    keys.push({ query, mode })
+  }
+  return keys
+}
+
+// R28.42 — Re-pin every entry in `list` whose (query, mode) matches any
+// pair in `keys`. Used by the bulk-unpin Undo flow to surgically
+// restore pinned state without overwriting anything else the user may
+// have changed since the unpin (added a new search, deleted an old
+// one, etc.).
+//
+// Returns a NEW list when at least one entry was re-pinned; the INPUT
+// REF unchanged when no matching keys are found in the current list
+// (ref-equal-on-no-op contract so the persistence layer can short-
+// circuit). Pure / no mutation of input.
+//
+// Edge cases:
+//   - keys is non-array / empty → input ref (nothing to restore)
+//   - list is non-array → input ref
+//   - keys references entries that no longer exist (user deleted them
+//     between unpin + undo): silently skipped (best-effort restore;
+//     never resurrects deleted entries)
+//   - entry already pinned: skipped (no double-pin); doesn't disturb
+//     existing pins the user explicitly added back after the unpin
+//   - corrupt rows in list: dropped during sanitize pass (parallel
+//     to bulkUnpin contract)
+//
+// Mode normalisation matches togglePin / addEntry contracts.
+export function restorePinnedNoteFilterHistoryEntries(list, keys) {
+  if (!Array.isArray(list)) return list
+  if (!Array.isArray(keys) || keys.length === 0) return list
+  // Build a Set of normalized "query|mode" strings for O(1) lookups.
+  // Skip corrupt key objects silently.
+  const keySet = new Set()
+  for (const k of keys) {
+    if (!k || typeof k !== 'object') continue
+    if (typeof k.query !== 'string') continue
+    const query = k.query.trim()
+    if (!query) continue
+    const mode = isValidNoteFilterMode(k.mode) ? k.mode : NOTE_FILTER_MODE_SUBSTRING
+    keySet.add(`${query}|${mode}`)
+  }
+  if (keySet.size === 0) return list
+  // Scan list for entries to re-pin. Bail early (ref-equal-on-no-op)
+  // if no entry matches AND no rebuild needed — we use the same trick
+  // as bulkUnpin: scan first, then rebuild only on a hit.
+  let anyChange = false
+  for (const e of list) {
+    if (!e || typeof e !== 'object') continue
+    if (e.pinned === true) continue   // already pinned — no work needed
+    if (typeof e.query !== 'string') continue
+    const query = e.query.trim()
+    if (!query) continue
+    const mode = isValidNoteFilterMode(e.mode) ? e.mode : NOTE_FILTER_MODE_SUBSTRING
+    if (keySet.has(`${query}|${mode}`)) { anyChange = true; break }
+  }
+  if (!anyChange) return list
+  const next = []
+  for (const e of list) {
+    const sanitized = sanitizeHistoryEntry(e)
+    if (!sanitized) continue
+    const key = `${sanitized.query}|${sanitized.mode}`
+    if (keySet.has(key) && !sanitized.pinned) {
+      next.push({ ...sanitized, pinned: true })
+    } else {
+      next.push(sanitized)
+    }
+  }
+  return next
+}
+
 // Remove one entry from the list by (query, mode). Returns the input
 // ref unchanged when nothing matches (no-op) so the persistence layer
 // can short-circuit.

@@ -26,6 +26,8 @@ import {
   togglePinNoteFilterHistoryEntry, sortNoteFilterHistoryForDisplay,
   // R27.42 — bulk-unpin: footer button when >= 2 entries are pinned
   countPinnedNoteFilterHistoryEntries, bulkUnpinNoteFilterHistoryEntries,
+  // R28.42 — Undo restore action for the bulk-unpin toast
+  snapshotPinnedNoteFilterHistoryKeys, restorePinnedNoteFilterHistoryEntries,
   THUMB_WIDTH, THUMB_HEIGHT,
 } from './presetThumbnails.js'
 
@@ -1777,3 +1779,314 @@ console.log('PASS: note-filter pattern PIN — togglePinEntry + sortForDisplay +
 }
 
 console.log('PASS: note-filter pattern BULK UNPIN — countPinned + bulkUnpin (R27.42, ~30 asserts)')
+
+// =====================================================================
+// R28.42 — Undo restore for the bulk-unpin toast.
+// snapshot...Keys + restorePinned... let the toast's Undo chip recover
+// from a misclick. The snapshot is minimal (query+mode keys, not the
+// whole list) so concurrent edits between unpin + restore compose
+// safely. restore is ref-equal-on-no-op so a "nothing to do" Undo
+// click costs nothing.
+// =====================================================================
+
+// snapshotPinnedNoteFilterHistoryKeys — happy: 3 pinned + 2 unpinned.
+{
+  const list = [
+    { query: 'demo',  mode: 'substring', addedAt: 5, pinned: true },
+    { query: 'orbit', mode: 'substring', addedAt: 4, pinned: false },
+    { query: '^test', mode: 'regex',     addedAt: 3, pinned: true },
+    { query: 'wow',   mode: 'substring', addedAt: 2, pinned: false },
+    { query: 'foo',   mode: 'regex',     addedAt: 1, pinned: true },
+  ]
+  const keys = snapshotPinnedNoteFilterHistoryKeys(list)
+  eq(keys.length, 3, '3 pinned keys captured')
+  eq(keys[0].query, 'demo',  'first key: demo')
+  eq(keys[0].mode,  'substring', 'first key mode: substring')
+  eq(keys[1].query, '^test', 'second key: ^test')
+  eq(keys[1].mode,  'regex', 'second key mode: regex')
+  eq(keys[2].query, 'foo',   'third key: foo')
+  eq(keys[2].mode,  'regex', 'third key mode: regex')
+}
+
+// snapshotPinned — order preserved (mirrors list order, not MRU re-flow).
+{
+  const list = [
+    { query: 'z', mode: 'substring', addedAt: 1, pinned: true },
+    { query: 'a', mode: 'substring', addedAt: 2, pinned: true },
+    { query: 'm', mode: 'substring', addedAt: 3, pinned: true },
+  ]
+  const keys = snapshotPinnedNoteFilterHistoryKeys(list)
+  eq(keys.map(k => k.query).join(','), 'z,a,m', 'snapshot preserves list order')
+}
+
+// snapshotPinned — none pinned → empty array.
+{
+  const list = [
+    { query: 'a', mode: 'substring', addedAt: 1, pinned: false },
+    { query: 'b', mode: 'substring', addedAt: 2, pinned: false },
+  ]
+  const keys = snapshotPinnedNoteFilterHistoryKeys(list)
+  eq(keys.length, 0, 'no pinned → empty snapshot')
+}
+
+// snapshotPinned — empty list → empty array.
+{
+  eq(snapshotPinnedNoteFilterHistoryKeys([]).length, 0, 'empty list → empty snapshot')
+}
+
+// snapshotPinned — strict-true filter (non-bool truthy doesn't lie).
+{
+  const list = [
+    { query: 'a', mode: 'substring', addedAt: 1, pinned: 'true' },  // string truthy — not counted
+    { query: 'b', mode: 'substring', addedAt: 2, pinned: 1 },       // number truthy — not counted
+    { query: 'c', mode: 'substring', addedAt: 3, pinned: true },    // strict true — counted
+  ]
+  const keys = snapshotPinnedNoteFilterHistoryKeys(list)
+  eq(keys.length, 1, 'only strict-true pinned counted')
+  eq(keys[0].query, 'c', 'strict-true entry captured')
+}
+
+// snapshotPinned — corrupt rows skipped silently.
+{
+  const list = [
+    null,
+    'corrupt',
+    42,
+    { query: 'a', mode: 'substring', addedAt: 1, pinned: true },   // valid
+    { /* missing query */ mode: 'substring', addedAt: 2, pinned: true },
+    { query: '',  mode: 'substring', addedAt: 3, pinned: true },   // empty trim
+    { query: '   ', mode: 'substring', addedAt: 4, pinned: true }, // whitespace-only
+    { query: 'b', mode: 'gibberish-mode', addedAt: 5, pinned: true }, // bad mode → coerced
+  ]
+  const keys = snapshotPinnedNoteFilterHistoryKeys(list)
+  eq(keys.length, 2, 'valid pinned entries captured (corrupts skipped)')
+  eq(keys[0].query, 'a', 'first valid: a')
+  eq(keys[1].query, 'b', 'second valid: b (bad mode coerced)')
+  eq(keys[1].mode, 'substring', 'bad mode → coerced to substring')
+}
+
+// snapshotPinned — defensive matrix: non-array → [].
+{
+  eq(snapshotPinnedNoteFilterHistoryKeys(null).length,      0, 'null → []')
+  eq(snapshotPinnedNoteFilterHistoryKeys(undefined).length, 0, 'undefined → []')
+  eq(snapshotPinnedNoteFilterHistoryKeys('s').length,       0, 'string → []')
+  eq(snapshotPinnedNoteFilterHistoryKeys(42).length,        0, 'number → []')
+  eq(snapshotPinnedNoteFilterHistoryKeys({a:1}).length,     0, 'object → []')
+}
+
+// snapshotPinned — purity: input not mutated.
+{
+  const list = [
+    { query: 'a', mode: 'substring', addedAt: 1, pinned: true },
+    { query: 'b', mode: 'substring', addedAt: 2, pinned: false },
+  ]
+  const snap = JSON.stringify(list)
+  snapshotPinnedNoteFilterHistoryKeys(list)
+  eq(JSON.stringify(list), snap, 'input list not mutated')
+}
+
+// restorePinnedNoteFilterHistoryEntries — happy: full restore of a wiped list.
+{
+  // Simulate: 3 entries pinned → snapshot → wipe → restore.
+  const before = [
+    { query: 'demo',  mode: 'substring', addedAt: 5, pinned: true },
+    { query: '^test', mode: 'regex',     addedAt: 4, pinned: true },
+    { query: 'foo',   mode: 'regex',     addedAt: 3, pinned: false },
+  ]
+  const keys  = snapshotPinnedNoteFilterHistoryKeys(before)
+  const wiped = bulkUnpinNoteFilterHistoryEntries(before)
+  truthy(wiped.every(e => e.pinned === false), 'wipe sanity: all unpinned')
+  const restored = restorePinnedNoteFilterHistoryEntries(wiped, keys)
+  eq(restored.length, 3, 'restore: length preserved')
+  eq(restored[0].pinned, true,  'demo re-pinned')
+  eq(restored[1].pinned, true,  '^test re-pinned')
+  eq(restored[2].pinned, false, 'foo NOT re-pinned (was not pinned before)')
+}
+
+// restorePinned — surgical: only re-pins entries whose keys match.
+{
+  const wiped = [
+    { query: 'a', mode: 'substring', addedAt: 1, pinned: false },
+    { query: 'b', mode: 'substring', addedAt: 2, pinned: false },
+    { query: 'c', mode: 'substring', addedAt: 3, pinned: false },
+  ]
+  const keys = [{ query: 'b', mode: 'substring' }]
+  const restored = restorePinnedNoteFilterHistoryEntries(wiped, keys)
+  eq(restored[0].pinned, false, 'a NOT re-pinned (not in keys)')
+  eq(restored[1].pinned, true,  'b re-pinned')
+  eq(restored[2].pinned, false, 'c NOT re-pinned (not in keys)')
+}
+
+// restorePinned — mode disambiguation (same query, different modes).
+{
+  const wiped = [
+    { query: 'pattern', mode: 'substring', addedAt: 1, pinned: false },
+    { query: 'pattern', mode: 'regex',     addedAt: 2, pinned: false },
+  ]
+  // Only the regex variant was pinned.
+  const keys = [{ query: 'pattern', mode: 'regex' }]
+  const restored = restorePinnedNoteFilterHistoryEntries(wiped, keys)
+  eq(restored[0].pinned, false, 'substring "pattern" NOT re-pinned')
+  eq(restored[1].pinned, true,  'regex "pattern" re-pinned (mode-specific)')
+}
+
+// restorePinned — entries that no longer exist are silently skipped
+// (user deleted them between unpin + undo; best-effort restore).
+{
+  const wiped = [
+    { query: 'a', mode: 'substring', addedAt: 1, pinned: false },
+    // 'b' has been deleted since the unpin
+  ]
+  const keys = [
+    { query: 'a', mode: 'substring' },
+    { query: 'b', mode: 'substring' },   // ghost — no longer in list
+  ]
+  const restored = restorePinnedNoteFilterHistoryEntries(wiped, keys)
+  eq(restored.length, 1, 'length unchanged (ghost not resurrected)')
+  eq(restored[0].pinned, true, 'a re-pinned')
+  truthy(!restored.some(e => e.query === 'b'), 'b not resurrected')
+}
+
+// restorePinned — already-pinned entries left alone (no double-pin).
+{
+  const list = [
+    { query: 'a', mode: 'substring', addedAt: 1, pinned: true },   // already pinned
+    { query: 'b', mode: 'substring', addedAt: 2, pinned: false },
+  ]
+  const keys = [
+    { query: 'a', mode: 'substring' },   // already pinned → skip
+    { query: 'b', mode: 'substring' },   // re-pin
+  ]
+  const restored = restorePinnedNoteFilterHistoryEntries(list, keys)
+  eq(restored[0].pinned, true, 'a still pinned (idempotent)')
+  eq(restored[1].pinned, true, 'b re-pinned')
+}
+
+// restorePinned — ref-equal-on-no-op contract.
+{
+  // No matching entries in list → input ref unchanged.
+  const list = [
+    { query: 'a', mode: 'substring', addedAt: 1, pinned: false },
+  ]
+  const keys = [{ query: 'z', mode: 'substring' }]   // 'z' not in list
+  const same = restorePinnedNoteFilterHistoryEntries(list, keys)
+  eq(same, list, 'no matches → input ref unchanged')
+}
+
+// restorePinned — ref-equal-on-no-op when every targeted entry is
+// already pinned (no work to do).
+{
+  const list = [
+    { query: 'a', mode: 'substring', addedAt: 1, pinned: true },
+  ]
+  const keys = [{ query: 'a', mode: 'substring' }]
+  const same = restorePinnedNoteFilterHistoryEntries(list, keys)
+  eq(same, list, 'already-pinned target → input ref unchanged')
+}
+
+// restorePinned — empty / non-array keys → input ref.
+{
+  const list = [{ query: 'a', mode: 'substring', addedAt: 1, pinned: false }]
+  eq(restorePinnedNoteFilterHistoryEntries(list, []),         list, 'empty keys → input ref')
+  eq(restorePinnedNoteFilterHistoryEntries(list, null),       list, 'null keys → input ref')
+  eq(restorePinnedNoteFilterHistoryEntries(list, undefined),  list, 'undefined keys → input ref')
+  eq(restorePinnedNoteFilterHistoryEntries(list, 'gibberish'), list, 'string keys → input ref')
+  eq(restorePinnedNoteFilterHistoryEntries(list, 42),         list, 'number keys → input ref')
+}
+
+// restorePinned — corrupt key objects skipped silently.
+{
+  const list = [
+    { query: 'a', mode: 'substring', addedAt: 1, pinned: false },
+    { query: 'b', mode: 'substring', addedAt: 2, pinned: false },
+  ]
+  const keys = [
+    null,
+    'gibberish',
+    42,
+    { /* missing query */ mode: 'substring' },
+    { query: 42, mode: 'substring' },        // non-string query
+    { query: '', mode: 'substring' },        // empty
+    { query: '   ', mode: 'substring' },     // whitespace-only
+    { query: 'a', mode: 'substring' },       // valid — re-pin
+  ]
+  const restored = restorePinnedNoteFilterHistoryEntries(list, keys)
+  eq(restored[0].pinned, true,  'a re-pinned (only valid key)')
+  eq(restored[1].pinned, false, 'b NOT re-pinned')
+}
+
+// restorePinned — defensive: non-array list → input ref.
+{
+  eq(restorePinnedNoteFilterHistoryEntries(null, [{query:'a',mode:'substring'}]),      null,      'null list → null')
+  eq(restorePinnedNoteFilterHistoryEntries(undefined, [{query:'a',mode:'substring'}]), undefined, 'undefined list → undefined')
+  eq(restorePinnedNoteFilterHistoryEntries('s', [{query:'a',mode:'substring'}]),       's',       'string list → string')
+  eq(restorePinnedNoteFilterHistoryEntries(42, [{query:'a',mode:'substring'}]),        42,        'number list → number')
+  const obj = { a: 1 }
+  eq(restorePinnedNoteFilterHistoryEntries(obj, [{query:'a',mode:'substring'}]),       obj,       'object list → object')
+}
+
+// restorePinned — purity: input not mutated even when changes happen.
+{
+  const list = [
+    { query: 'a', mode: 'substring', addedAt: 1, pinned: false },
+    { query: 'b', mode: 'substring', addedAt: 2, pinned: false },
+  ]
+  const keys = [{ query: 'a', mode: 'substring' }]
+  const snap = JSON.stringify(list)
+  restorePinnedNoteFilterHistoryEntries(list, keys)
+  eq(JSON.stringify(list), snap, 'input list not mutated')
+}
+
+// restorePinned — round-trip through wipe + storage.
+{
+  const stub = makeFakeStorage()
+  const seed = [
+    { query: 'orbit',  mode: 'substring', addedAt: 5, pinned: true },
+    { query: '^demo', mode: 'regex',     addedAt: 4, pinned: false },
+    { query: 'foo',   mode: 'substring', addedAt: 3, pinned: true },
+  ]
+  saveNoteFilterHistory(seed, stub)
+  const loaded = loadNoteFilterHistory(stub)
+  eq(countPinnedNoteFilterHistoryEntries(loaded), 2, 'loaded: 2 pinned')
+
+  // Snapshot → wipe → save → load.
+  const keys = snapshotPinnedNoteFilterHistoryKeys(loaded)
+  const wiped = bulkUnpinNoteFilterHistoryEntries(loaded)
+  saveNoteFilterHistory(wiped, stub)
+  const afterWipe = loadNoteFilterHistory(stub)
+  eq(countPinnedNoteFilterHistoryEntries(afterWipe), 0, 'after wipe: 0 pinned')
+
+  // Restore (simulating Undo click).
+  const restored = restorePinnedNoteFilterHistoryEntries(afterWipe, keys)
+  saveNoteFilterHistory(restored, stub)
+  const afterRestore = loadNoteFilterHistory(stub)
+  eq(countPinnedNoteFilterHistoryEntries(afterRestore), 2, 'after restore: 2 pinned (recovered)')
+  // Verify the SAME entries are pinned, not just the count.
+  truthy(afterRestore.find(e => e.query === 'orbit').pinned === true, 'orbit re-pinned')
+  truthy(afterRestore.find(e => e.query === 'foo').pinned === true,   'foo re-pinned')
+  truthy(afterRestore.find(e => e.query === '^demo').pinned === false, '^demo still unpinned')
+}
+
+// restorePinned — concurrent-edit scenario: user added a new entry
+// between unpin + undo; the new entry is untouched by the restore.
+{
+  // Unpin happened on a 2-entry list.
+  const before = [
+    { query: 'a', mode: 'substring', addedAt: 1, pinned: true },
+    { query: 'b', mode: 'substring', addedAt: 2, pinned: true },
+  ]
+  const keys = snapshotPinnedNoteFilterHistoryKeys(before)
+  // User then ADDED a new entry to the wiped list before clicking Undo.
+  const wipedThenAdded = [
+    { query: 'a', mode: 'substring', addedAt: 1, pinned: false },
+    { query: 'b', mode: 'substring', addedAt: 2, pinned: false },
+    { query: 'c', mode: 'substring', addedAt: 99, pinned: false }, // NEW
+  ]
+  const restored = restorePinnedNoteFilterHistoryEntries(wipedThenAdded, keys)
+  eq(restored.length, 3, 'length preserved (new entry survives)')
+  eq(restored.find(e => e.query === 'a').pinned, true,  'a re-pinned')
+  eq(restored.find(e => e.query === 'b').pinned, true,  'b re-pinned')
+  eq(restored.find(e => e.query === 'c').pinned, false, 'c NOT pinned (untouched)')
+}
+
+console.log('PASS: note-filter pattern BULK UNPIN UNDO — snapshot + restore (R28.42, ~70 asserts)')
