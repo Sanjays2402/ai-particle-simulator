@@ -5,6 +5,8 @@ import {
   appendView, moveView, moveViewUp, moveViewDown, removeView, CAMERA_VIEWS_MAX,
   // R22.12 — pure helper for touch-drag reorder (graduates R17.07 desktop-only)
   resolveTouchTargetIdx,
+  // R28.20 — gap-aware touch hit-test (returns { kind, idx } discriminator)
+  resolveTouchTargetWithGaps, TOUCH_GAP_TOLERANCE_PX,
 } from './cameraViews.js'
 
 function assertEq(actual, expected, msg) {
@@ -231,3 +233,202 @@ console.log('PASS: cameraViews append/dedupe/cap + moveView reorder + removeView
 }
 
 console.log('PASS: resolveTouchTargetIdx — happy paths + boundary half-open + overflow + defensive (R22.12, ~35 asserts)')
+
+// =====================================================================
+// R28.20 — Gap-aware touch hit-test for binding-group drag-and-drop.
+// Graduates resolveTouchTargetIdx (R22.12) with explicit gap-drop
+// targets so a thumb dragging between rows can land on the
+// "insert here" semantic instead of always resolving to the nearest
+// row. Parallels the desktop gap-drop behaviour (R19.19 + R27.20).
+// =====================================================================
+
+// Helper: build a row-ranges array with adjacent rows so we can
+// pinpoint the gap bands.
+function rows(specs) {
+  return specs.map(([top, bottom]) => ({ top, bottom }))
+}
+
+// resolveTouchTargetWithGaps — happy: row hit-test for touches well
+// inside a row's bounds.
+{
+  // 4 rows, 40px each, 20px gap between them (so adjacent boundaries
+  // are well-separated for the gap-band test to be unambiguous).
+  // row[0] = [100, 140], row[1] = [160, 200], row[2] = [220, 260], row[3] = [280, 320].
+  // Boundaries (midpoints): 150, 210, 270.
+  const r = rows([[100, 140], [160, 200], [220, 260], [280, 320]])
+  // Mid-row touches resolve to row (well outside any gap band).
+  assertEq(resolveTouchTargetWithGaps(120, r), { kind: 'row', idx: 0 }, 'mid row 0 → row 0')
+  assertEq(resolveTouchTargetWithGaps(180, r), { kind: 'row', idx: 1 }, 'mid row 1 → row 1')
+  assertEq(resolveTouchTargetWithGaps(240, r), { kind: 'row', idx: 2 }, 'mid row 2 → row 2')
+  assertEq(resolveTouchTargetWithGaps(300, r), { kind: 'row', idx: 3 }, 'mid row 3 → row 3')
+}
+
+// resolveTouchTargetWithGaps — gap-above-row-0 zone.
+{
+  // Touch ABOVE row 0's top fires the explicit "gap above first row"
+  // target (gap 0), regardless of how far above.
+  const r = rows([[100, 140], [160, 200]])
+  assertEq(resolveTouchTargetWithGaps(50, r),  { kind: 'gap', gapIdx: 0 }, 'touch above row 0 → gap 0')
+  assertEq(resolveTouchTargetWithGaps(0, r),   { kind: 'gap', gapIdx: 0 }, 'touch at y=0 → gap 0')
+  assertEq(resolveTouchTargetWithGaps(99, r),  { kind: 'gap', gapIdx: 0 }, 'just above row 0 → gap 0')
+}
+
+// resolveTouchTargetWithGaps — gap-between-adjacent-rows bands.
+{
+  const r = rows([[100, 140], [160, 200], [220, 260]])
+  // Boundaries: between row0(bottom=140) and row1(top=160) → midpoint 150.
+  // Gap band: [150 - 12, 150 + 12) = [138, 162).
+  assertEq(resolveTouchTargetWithGaps(138, r), { kind: 'gap', gapIdx: 1 }, 'left edge of gap band → gap 1')
+  assertEq(resolveTouchTargetWithGaps(150, r), { kind: 'gap', gapIdx: 1 }, 'midpoint between row0 and row1 → gap 1')
+  assertEq(resolveTouchTargetWithGaps(161, r), { kind: 'gap', gapIdx: 1 }, 'just inside upper edge → gap 1')
+  // Just OUTSIDE the gap band returns to row hit-test.
+  assertEq(resolveTouchTargetWithGaps(137, r), { kind: 'row', idx: 0 }, '1px below gap band → row 0')
+  assertEq(resolveTouchTargetWithGaps(165, r), { kind: 'row', idx: 1 }, '3px above row 1 top, just outside gap band → row 1')
+
+  // Boundary between row1 and row2: midpoint 210.
+  assertEq(resolveTouchTargetWithGaps(210, r), { kind: 'gap', gapIdx: 2 }, 'midpoint between row1 and row2 → gap 2')
+}
+
+// resolveTouchTargetWithGaps — trailing gap below last row.
+{
+  const r = rows([[100, 140], [160, 200]])
+  // last row's bottom = 200, tolerance = 12, double tolerance = 24.
+  // [200, 224) is the trailing gap zone (gapIdx = ranges.length = 2).
+  // Note: at y=200 exactly, we're at the bottom edge so it counts as
+  // overflow-below per resolveTouchTargetIdx semantics + falls into
+  // the trailing gap with this helper.
+  assertEq(resolveTouchTargetWithGaps(200, r), { kind: 'gap', gapIdx: 2 }, 'at last row bottom → trailing gap')
+  assertEq(resolveTouchTargetWithGaps(210, r), { kind: 'gap', gapIdx: 2 }, 'within trailing tolerance → trailing gap')
+  assertEq(resolveTouchTargetWithGaps(223, r), { kind: 'gap', gapIdx: 2 }, 'just inside trailing zone → trailing gap')
+  // Past the trailing tolerance: snap back to last row (consistent
+  // with overflow semantics).
+  assertEq(resolveTouchTargetWithGaps(224, r), { kind: 'row', idx: 1 }, 'past trailing zone → row 1 (overflow-below)')
+  assertEq(resolveTouchTargetWithGaps(500, r), { kind: 'row', idx: 1 }, 'far overflow below → row 1')
+}
+
+// resolveTouchTargetWithGaps — single-row list: gap 0 above + trailing
+// gap below; row hits inside.
+{
+  const r = rows([[100, 140]])
+  assertEq(resolveTouchTargetWithGaps(50, r),  { kind: 'gap', gapIdx: 0 }, 'above single row → gap 0')
+  assertEq(resolveTouchTargetWithGaps(120, r), { kind: 'row', idx: 0 },  'inside single row → row 0')
+  assertEq(resolveTouchTargetWithGaps(150, r), { kind: 'gap', gapIdx: 1 }, 'below single row (trailing) → gap 1')
+}
+
+// resolveTouchTargetWithGaps — defensive matrix.
+{
+  const r = rows([[100, 140]])
+  assertEq(resolveTouchTargetWithGaps(NaN, r), null,       'NaN y → null')
+  assertEq(resolveTouchTargetWithGaps(Infinity, r),  null, 'Infinity y → null')
+  assertEq(resolveTouchTargetWithGaps(-Infinity, r), null, '-Infinity y → null')
+  assertEq(resolveTouchTargetWithGaps('150', r),     null, 'string y → null')
+  assertEq(resolveTouchTargetWithGaps(null, r),      null, 'null y → null')
+  assertEq(resolveTouchTargetWithGaps(undefined, r), null, 'undefined y → null')
+
+  // Empty / non-array ranges.
+  assertEq(resolveTouchTargetWithGaps(120, null),         null, 'null ranges → null')
+  assertEq(resolveTouchTargetWithGaps(120, undefined),    null, 'undefined ranges → null')
+  assertEq(resolveTouchTargetWithGaps(120, 'not-array'),  null, 'string ranges → null')
+  assertEq(resolveTouchTargetWithGaps(120, []),           null, 'empty ranges → null')
+  // All-corrupt ranges.
+  assertEq(resolveTouchTargetWithGaps(120, [null, null]), null, 'all-corrupt ranges → null')
+  assertEq(resolveTouchTargetWithGaps(120, ['s', 42, null]), null, 'mixed-corrupt ranges → null')
+}
+
+// resolveTouchTargetWithGaps — partial-corrupt list: skips corrupt
+// entries but still finds valid rows + computes gap boundaries
+// between non-adjacent valid entries.
+{
+  const r = [
+    { top: 100, bottom: 140 },  // row 0 valid
+    null,                        // corrupt
+    { top: 200, bottom: 240 },  // row 2 valid (non-adjacent to row 0)
+    { top: NaN, bottom: 260 },  // corrupt (non-finite top)
+    { top: 280, bottom: 320 },  // row 4 valid
+  ]
+  // Boundary between row 0 (bottom=140) and row 2 (top=200) → midpoint 170.
+  // Gap band [158, 182). gapIdx = 2 (the index of row 2 in the list).
+  assertEq(resolveTouchTargetWithGaps(170, r), { kind: 'gap', gapIdx: 2 }, 'corrupt-between: gap at midpoint of two valid rows')
+  assertEq(resolveTouchTargetWithGaps(120, r), { kind: 'row', idx: 0 },  'corrupt-between: row 0 still hits')
+  assertEq(resolveTouchTargetWithGaps(220, r), { kind: 'row', idx: 2 },  'corrupt-between: row 2 still hits')
+  assertEq(resolveTouchTargetWithGaps(300, r), { kind: 'row', idx: 4 },  'corrupt-between: row 4 still hits')
+}
+
+// resolveTouchTargetWithGaps — custom tolerance arg.
+{
+  // Use rows ADJACENT so there's no "natural gap" pixel-space between
+  // them (row1.top === row0.bottom + 1 effectively). That makes the
+  // tolerance arg the SOLE driver of gap-band width.
+  const r = rows([[100, 150], [150, 200]])
+  // Boundary = (150 + 150) / 2 = 150 (rows touching).
+  // With tolerance 4: gap band [146, 154).
+  assertEq(resolveTouchTargetWithGaps(146, r, { tolerancePx: 4 }), { kind: 'gap', gapIdx: 1 }, 'custom tolerance 4: left edge of narrow band → gap')
+  assertEq(resolveTouchTargetWithGaps(150, r, { tolerancePx: 4 }), { kind: 'gap', gapIdx: 1 }, 'custom tolerance 4: at boundary → gap')
+  assertEq(resolveTouchTargetWithGaps(153, r, { tolerancePx: 4 }), { kind: 'gap', gapIdx: 1 }, 'custom tolerance 4: inside narrow band → gap')
+  // Just OUTSIDE the gap band returns to row hit-test.
+  assertEq(resolveTouchTargetWithGaps(155, r, { tolerancePx: 4 }), { kind: 'row', idx: 1 }, 'custom tolerance 4: just above narrow band → row 1')
+  assertEq(resolveTouchTargetWithGaps(145, r, { tolerancePx: 4 }), { kind: 'row', idx: 0 }, 'custom tolerance 4: just below narrow band → row 0')
+
+  // Defensive: non-finite tolerance falls back to default.
+  assertEq(resolveTouchTargetWithGaps(150, r, { tolerancePx: NaN }),       { kind: 'gap', gapIdx: 1 }, 'NaN tolerance → default')
+  assertEq(resolveTouchTargetWithGaps(150, r, { tolerancePx: Infinity }),  { kind: 'gap', gapIdx: 1 }, 'Infinity tolerance → default')
+  assertEq(resolveTouchTargetWithGaps(150, r, { tolerancePx: -5 }),        { kind: 'gap', gapIdx: 1 }, 'negative tolerance → default')
+  assertEq(resolveTouchTargetWithGaps(150, r, { tolerancePx: '8' }),       { kind: 'gap', gapIdx: 1 }, 'string tolerance → default')
+
+  // Zero tolerance: gap band collapses to exactly [boundary, boundary)
+  // = empty range. Every in-range touch falls to row hit-test. At the
+  // exact boundary the half-open row range [top, bottom) means a
+  // touch at y === boundary lands on row 1 (since row 1 starts at
+  // boundary).
+  assertEq(resolveTouchTargetWithGaps(150, r, { tolerancePx: 0 }), { kind: 'row', idx: 1 }, 'zero tolerance: no gap (boundary falls to row above)')
+}
+
+// resolveTouchTargetWithGaps — TOUCH_GAP_TOLERANCE_PX exposed constant
+// is a positive finite number.
+{
+  if (!Number.isFinite(TOUCH_GAP_TOLERANCE_PX) || TOUCH_GAP_TOLERANCE_PX <= 0) {
+    console.error(`FAIL: TOUCH_GAP_TOLERANCE_PX exposed as finite positive (got ${TOUCH_GAP_TOLERANCE_PX})`)
+    process.exit(1)
+  }
+}
+
+// resolveTouchTargetWithGaps — purity: input not mutated.
+{
+  const r = rows([[100, 140], [160, 200], [220, 260]])
+  const snap = JSON.stringify(r)
+  resolveTouchTargetWithGaps(150, r)
+  resolveTouchTargetWithGaps(120, r, { tolerancePx: 4 })
+  resolveTouchTargetWithGaps(NaN, r)
+  assertEq(JSON.stringify(r), snap, 'resolveTouchTargetWithGaps does not mutate input ranges')
+}
+
+// resolveTouchTargetWithGaps — sequential walk through a 3-row list
+// mimicking a touch dragging down through every position. Verifies
+// the discriminator transitions cleanly: row 0 → gap 1 → row 1 →
+// gap 2 → row 2 → trailing gap 3.
+{
+  const r = rows([[100, 140], [160, 200], [220, 260]])
+  const transitions = [
+    [110, { kind: 'row', idx: 0 }],
+    [120, { kind: 'row', idx: 0 }],
+    [138, { kind: 'gap', gapIdx: 1 }],   // upper edge of gap band [138, 162)
+    [150, { kind: 'gap', gapIdx: 1 }],
+    [161, { kind: 'gap', gapIdx: 1 }],
+    [165, { kind: 'row', idx: 1 }],
+    [180, { kind: 'row', idx: 1 }],
+    [199, { kind: 'gap', gapIdx: 2 }],   // gap band [198, 222), 199 inside
+    [210, { kind: 'gap', gapIdx: 2 }],
+    [221, { kind: 'gap', gapIdx: 2 }],
+    [230, { kind: 'row', idx: 2 }],
+    [255, { kind: 'row', idx: 2 }],
+    [261, { kind: 'gap', gapIdx: 3 }],   // trailing zone [260, 284)
+    [275, { kind: 'gap', gapIdx: 3 }],
+    [283, { kind: 'gap', gapIdx: 3 }],
+    [285, { kind: 'row', idx: 2 }],      // past trailing tolerance → snap to last row
+  ]
+  for (const [y, expected] of transitions) {
+    assertEq(resolveTouchTargetWithGaps(y, r), expected, `sequential walk y=${y}`)
+  }
+}
+
+console.log('PASS: resolveTouchTargetWithGaps — gap-aware touch hit-test (R28.20, ~60 asserts)')

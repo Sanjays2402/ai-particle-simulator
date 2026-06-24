@@ -142,3 +142,124 @@ export function resolveTouchTargetIdx(y, ranges) {
   // the last valid index so the caller still has SOMETHING to act on.
   return lastValid
 }
+
+// R28.20 — Touch hit-test that distinguishes GAP-DROP targets from
+// ROW-DROP targets. Graduates resolveTouchTargetIdx (R22.12) with
+// gap-zone awareness for explicit "insert here" semantics.
+//
+// Returns one of:
+//   - { kind: 'gap', gapIdx: i }   — touch is over the gap ABOVE row i
+//                                     (or the TRAILING gap when gapIdx === ranges.length)
+//   - { kind: 'row', idx: i }      — touch is over row i (use existing
+//                                     reorder-onto-row semantics)
+//   - null                          — no valid target (non-finite y,
+//                                     empty ranges, etc.)
+//
+// Gap-zone detection uses a tolerance band of TOUCH_GAP_TOLERANCE_PX
+// (default 12px) around row boundaries:
+//   - Gap above row[0]: y < firstValidTop (no overflow snap; gap 0 is
+//     the explicit gap-above-first-row drop zone).
+//   - Gap above row[i] (for i > 0): y is within tolerance of the
+//     boundary between row[i-1].bottom and row[i].top. The boundary
+//     band straddles BOTH rows: [boundary - tolerance, boundary + tolerance]
+//     where boundary = (row[i-1].bottom + row[i].top) / 2 — the
+//     midpoint between adjacent rows. Catches both small gaps
+//     (rows nearly touching) and large gaps (rows with explicit
+//     padding between them) symmetrically.
+//   - Trailing gap (gapIdx === ranges.length): y > lastValid.bottom +
+//     tolerance. The trailing zone gets DOUBLE tolerance below the
+//     last row's bottom so a user trying to drop "at the end" doesn't
+//     have to land on a pixel-precise margin. Past that, no target
+//     (overflow far below should be no-op, not "drop at end").
+//
+// When the touch is NOT in a gap band, falls through to row hit-test
+// via the same logic as resolveTouchTargetIdx.
+//
+// Defensive: same matrix as resolveTouchTargetIdx (non-finite y,
+// empty / corrupt ranges → null). Tolerance arg validated; non-finite
+// / negative falls back to default. Pure / no mutation.
+export const TOUCH_GAP_TOLERANCE_PX = 12
+
+export function resolveTouchTargetWithGaps(y, ranges, opts) {
+  if (!Number.isFinite(y)) return null
+  if (!Array.isArray(ranges) || ranges.length === 0) return null
+  const tolerance = (opts && Number.isFinite(opts.tolerancePx) && opts.tolerancePx >= 0)
+    ? opts.tolerancePx
+    : TOUCH_GAP_TOLERANCE_PX
+  // Find valid range bounds (mirrors resolveTouchTargetIdx).
+  let firstValid = -1
+  let lastValid = -1
+  for (let i = 0; i < ranges.length; i++) {
+    const r = ranges[i]
+    if (r && Number.isFinite(r.top) && Number.isFinite(r.bottom)) {
+      if (firstValid === -1) firstValid = i
+      lastValid = i
+    }
+  }
+  if (firstValid === -1) return null
+
+  // Gap above row 0 (firstValid): y BELOW firstValid.top is the
+  // explicit "insert at top" gap zone. Includes overflow above.
+  if (y < ranges[firstValid].top) {
+    return { kind: 'gap', gapIdx: firstValid }
+  }
+
+  // Trailing gap: y past lastValid.bottom (within DOUBLE tolerance for
+  // a generous landing zone — matches the desktop drop zone which has
+  // a larger trailing strip than between-rows gaps). Past 2*tolerance,
+  // the touch overflows so far below the list that the user probably
+  // means "abort" — return null (resolveTouchTargetIdx would snap to
+  // the last row but for GAP-AWARE hit-testing we want a tighter
+  // contract).
+  if (y >= ranges[lastValid].bottom) {
+    if (y < ranges[lastValid].bottom + tolerance * 2) {
+      // Trailing gap index is one past the last valid row's index
+      // (ranges.length when every row is valid; lastValid + 1
+      // otherwise — same as the desktop trailing zone semantic).
+      return { kind: 'gap', gapIdx: lastValid + 1 }
+    }
+    // Beyond trailing tolerance → snap to last row (consistent with
+    // resolveTouchTargetIdx's overflow semantics for very-far-below).
+    return { kind: 'row', idx: lastValid }
+  }
+
+  // In-range: scan gap bands BETWEEN consecutive valid rows FIRST so a
+  // touch sitting at a row's edge resolves to the gap (insert-here
+  // intent) instead of being claimed by the row hit-test. Build a
+  // (prevValidIdx, validIdx) pair list, compute each pair's midpoint
+  // boundary + tolerance band, then check the touch y against every
+  // band. If no gap band matches, fall through to row hit-test.
+  //
+  // Why two passes: with a single pass, a touch at y=row[i-1].bottom +
+  // small_offset still falls INSIDE row[i-1]'s bounds (since rows can
+  // touch each other) and the loop's row-hit check would claim it
+  // before the gap check on the next iteration. Pre-computing gap
+  // bands and checking ALL of them first preserves the "gap takes
+  // precedence at boundaries" contract regardless of row geometry.
+  const validIdxs = []
+  for (let i = 0; i < ranges.length; i++) {
+    const r = ranges[i]
+    if (r && Number.isFinite(r.top) && Number.isFinite(r.bottom)) validIdxs.push(i)
+  }
+  for (let p = 1; p < validIdxs.length; p++) {
+    const prevValidIdx = validIdxs[p - 1]
+    const currValidIdx = validIdxs[p]
+    const boundary = (ranges[prevValidIdx].bottom + ranges[currValidIdx].top) / 2
+    if (y >= boundary - tolerance && y < boundary + tolerance) {
+      return { kind: 'gap', gapIdx: currValidIdx }
+    }
+  }
+  // No gap band matched — fall back to row hit-test.
+  for (let i = 0; i < ranges.length; i++) {
+    const r = ranges[i]
+    if (!r || !Number.isFinite(r.top) || !Number.isFinite(r.bottom)) continue
+    if (y >= r.top && y < r.bottom) {
+      return { kind: 'row', idx: i }
+    }
+  }
+
+  // Fallthrough: malformed ranges (e.g. all rows have top === bottom).
+  // Mirror resolveTouchTargetIdx's safety net — return last valid as
+  // a row drop.
+  return { kind: 'row', idx: lastValid }
+}

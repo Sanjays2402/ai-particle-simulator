@@ -34,7 +34,7 @@ import { ATTRACTOR_TYPES } from '../lib/namedAttractors'
 // path R22.12 / R23.31 touch DnD uses; lifting it here keeps the
 // MidiPanel binding-group DnD logic symmetric with the camera-path
 // pattern without duplicating the half-open-interval math.
-import { resolveTouchTargetIdx } from '../lib/cameraViews'
+import { resolveTouchTargetWithGaps } from '../lib/cameraViews'
 import {
   MIDI_PRESETS, applyPresetToMap, detectPresetForInput, presetBindingCount,
   // R13.05 — user preset bundle editor
@@ -350,13 +350,36 @@ export default function MidiPanel({ open, onClose }) {
       const r = el.getBoundingClientRect()
       ranges.push({ top: r.top, bottom: r.bottom })
     }
-    const target = resolveTouchTargetIdx(t.clientY, ranges)
-    if (target !== null && target !== idx) {
-      setDragOverGroupIdx(prev => (prev === target ? prev : target))
-    } else if (target === idx) {
-      // Over the row being dragged — clear hint so we don't paint
-      // a misleading "drop here" indicator on the source row itself.
+    // R28.20 — Use the gap-aware hit-test so a thumb dragging between
+    // rows can land on the explicit gap-drop target instead of always
+    // resolving to the nearest row. Result is { kind, ...} discriminated
+    // by 'row' (existing dragOverGroupIdx semantic) vs 'gap' (new
+    // gapOverGroupIdx semantic — parallels the desktop gap-drop from
+    // R27.20). Falls back to row hit-test when the touch isn't near
+    // a boundary.
+    const target = resolveTouchTargetWithGaps(t.clientY, ranges)
+    if (target && target.kind === 'gap') {
+      // Gap mode: clear the row hint + set the gap hint. We accept
+      // gap-above-self (gapIdx === idx) and gap-below-self
+      // (gapIdx === idx + 1) for visual highlighting BUT the drop
+      // handler will short-circuit them as no-op (dropIndexForGap
+      // returns null for those cases — already pinned in R19.19's
+      // tests).
       setDragOverGroupIdx(prev => (prev === null ? prev : null))
+      setGapOverGroupIdx(prev => (prev === target.gapIdx ? prev : target.gapIdx))
+    } else if (target && target.kind === 'row') {
+      // Row mode: clear the gap hint + set the row hint (skip self
+      // since dropping a row onto itself is a no-op).
+      setGapOverGroupIdx(prev => (prev === null ? prev : null))
+      if (target.idx !== idx) {
+        setDragOverGroupIdx(prev => (prev === target.idx ? prev : target.idx))
+      } else {
+        setDragOverGroupIdx(prev => (prev === null ? prev : null))
+      }
+    } else {
+      // No target — clear both hints. Drop will be a no-op.
+      setDragOverGroupIdx(prev => (prev === null ? prev : null))
+      setGapOverGroupIdx(prev => (prev === null ? prev : null))
     }
   }
   const onGroupTouchEnd = () => {
@@ -371,11 +394,29 @@ export default function MidiPanel({ open, onClose }) {
     // path's suppressNextClickRef).
     suppressNextGroupClickRef.current = true
     const from = draggingGroupIdx
-    const to = dragOverGroupIdx
+    // R28.20 — Two drop modes: GAP (insert-here) wins when the user's
+    // touch ended over a gap zone, ROW (reorder-onto-row) otherwise.
+    // Gap mode uses dropIndexForGap for the splice-bookkeeping;
+    // row mode uses the existing direct moveAttractorByIndex(from, to).
+    // Both modes reset their hint state before exit.
+    const gapTarget = gapOverGroupIdx
+    const rowTarget = dragOverGroupIdx
     setDraggingGroupIdx(null)
     setDragOverGroupIdx(null)
-    if (from === null || to === null || from === to) return
-    moveNamedAttractorByIndex(from, to)
+    setGapOverGroupIdx(null)
+    if (from === null) return
+    if (gapTarget !== null) {
+      // Gap mode: insert at the gap position via dropIndexForGap which
+      // handles the splice-bookkeeping + self-gap no-op cases (R19.19,
+      // already pinned in namedAttractors.test.mjs).
+      const insertIdx = dropIndexForGap(from, gapTarget, (namedAttractors || []).length)
+      if (insertIdx == null) return
+      moveNamedAttractorByIndex(from, insertIdx)
+      return
+    }
+    // Row mode (R26.20 baseline).
+    if (rowTarget === null || rowTarget === from) return
+    moveNamedAttractorByIndex(from, rowTarget)
   }
   const onGroupTouchCancel = () => {
     cancelGroupTouchTimer()
@@ -383,6 +424,10 @@ export default function MidiPanel({ open, onClose }) {
       touchActiveRef.current = false
       setDraggingGroupIdx(null)
       setDragOverGroupIdx(null)
+      // R28.20 — clear gap hint on touch-cancel too (e.g. user lifts
+      // finger off-screen mid-drag) so we don't leave a stale gap
+      // indicator painted on the panel.
+      setGapOverGroupIdx(null)
     }
   }
   // Click-side counterpart — chain the suppressed click so any nested
