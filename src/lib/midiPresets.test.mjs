@@ -30,6 +30,9 @@ import {
   directionColorForChainStep, HOTKEY_CHAIN_COLOR_REVERSE, HOTKEY_CHAIN_COLOR_FORWARD,
   // R27.43 — direction colour fades over the 1s undo window
   HOTKEY_CHAIN_COLOR_FADED, fadeDirectionColor,
+  // R28.43 — non-linear fade curve presets (slow first 500ms, fast last 500ms)
+  HOTKEY_CHAIN_FADE_CURVES, HOTKEY_CHAIN_FADE_CURVE_DEFAULT,
+  HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED, applyHotkeyChainFadeCurve,
 } from './midiPresets.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -1220,3 +1223,214 @@ console.log('PASS: directionColorForChainStep — direction-coded badge accent (
 }
 
 console.log('PASS: fadeDirectionColor — chain-badge fade over undo window (R27.43, ~50 asserts)')
+
+// =====================================================================
+// R28.43 — Non-linear fade curve (slow first 500ms, fast last 500ms).
+// Graduates R27.43's linear fade with curve presets that change the
+// PERCEIVED urgency over the window. easeOutCubic is the recommended
+// curve for the chain badge specifically (~150ms of "barely faded"
+// before urgency kicks in).
+// =====================================================================
+
+// HOTKEY_CHAIN_FADE_CURVES — roster constants exposed + non-empty.
+{
+  ok(Array.isArray(HOTKEY_CHAIN_FADE_CURVES), 'HOTKEY_CHAIN_FADE_CURVES is an array')
+  ok(HOTKEY_CHAIN_FADE_CURVES.length >= 3, 'roster has >= 3 entries')
+  ok(HOTKEY_CHAIN_FADE_CURVES.includes('linear'),       'roster contains linear')
+  ok(HOTKEY_CHAIN_FADE_CURVES.includes('easeOutCubic'), 'roster contains easeOutCubic')
+  ok(HOTKEY_CHAIN_FADE_CURVES.includes('easeInCubic'),  'roster contains easeInCubic')
+}
+
+// HOTKEY_CHAIN_FADE_CURVE_DEFAULT — must be 'linear' for backwards-compat
+// with R27.43's pinned midpoint test.
+{
+  eq(HOTKEY_CHAIN_FADE_CURVE_DEFAULT, 'linear', 'default curve is linear (R27.43 backwards-compat)')
+  ok(HOTKEY_CHAIN_FADE_CURVES.includes(HOTKEY_CHAIN_FADE_CURVE_DEFAULT), 'default is in roster')
+}
+
+// HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED — the curve MidiPanel passes for
+// the chain-badge fade specifically (slow-then-fast feel for the
+// roadmap's "fade slower in the first 500ms, faster in the last 500ms"
+// requirement).
+{
+  eq(HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED, 'easeInCubic', 'recommended curve is easeInCubic (slow first 500ms, fast last 500ms)')
+  ok(HOTKEY_CHAIN_FADE_CURVES.includes(HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED), 'recommended is in roster')
+  // Recommended is distinct from default — that's the whole point.
+  ok(HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED !== HOTKEY_CHAIN_FADE_CURVE_DEFAULT, 'recommended distinct from default')
+}
+
+// applyHotkeyChainFadeCurve — endpoint anchoring invariant across
+// every curve (f(0)=0, f(1)=1) so swapping curves never disturbs
+// the start/end of the fade.
+{
+  for (const curve of HOTKEY_CHAIN_FADE_CURVES) {
+    eq(applyHotkeyChainFadeCurve(0, curve), 0, `${curve}: f(0) = 0`)
+    eq(applyHotkeyChainFadeCurve(1, curve), 1, `${curve}: f(1) = 1`)
+  }
+}
+
+// applyHotkeyChainFadeCurve — clamp at endpoints (t < 0 → 0; t > 1 → 1).
+{
+  for (const curve of HOTKEY_CHAIN_FADE_CURVES) {
+    eq(applyHotkeyChainFadeCurve(-0.5, curve),  0, `${curve}: negative t clamps to 0`)
+    eq(applyHotkeyChainFadeCurve(-100, curve),  0, `${curve}: very negative t clamps to 0`)
+    eq(applyHotkeyChainFadeCurve(1.5, curve),   1, `${curve}: t > 1 clamps to 1`)
+    eq(applyHotkeyChainFadeCurve(100, curve),   1, `${curve}: huge t clamps to 1`)
+  }
+}
+
+// applyHotkeyChainFadeCurve — defensive non-finite input → 0
+// (treat corrupt timestamps as "just issued" via lerp coefficient = 0).
+{
+  for (const curve of HOTKEY_CHAIN_FADE_CURVES) {
+    eq(applyHotkeyChainFadeCurve(NaN, curve),       0, `${curve}: NaN → 0`)
+    eq(applyHotkeyChainFadeCurve(Infinity, curve),  0, `${curve}: Infinity → 0`)
+    eq(applyHotkeyChainFadeCurve(-Infinity, curve), 0, `${curve}: -Infinity → 0`)
+    eq(applyHotkeyChainFadeCurve(null, curve),      0, `${curve}: null → 0`)
+    eq(applyHotkeyChainFadeCurve(undefined, curve), 0, `${curve}: undefined → 0`)
+    eq(applyHotkeyChainFadeCurve('0.5', curve),     0, `${curve}: string → 0 (non-finite)`)
+  }
+}
+
+// applyHotkeyChainFadeCurve — linear curve: f(t) = t (identity).
+{
+  eq(applyHotkeyChainFadeCurve(0.0,  'linear'), 0.0,  'linear: f(0.0) = 0.0')
+  eq(applyHotkeyChainFadeCurve(0.25, 'linear'), 0.25, 'linear: f(0.25) = 0.25')
+  eq(applyHotkeyChainFadeCurve(0.5,  'linear'), 0.5,  'linear: f(0.5) = 0.5')
+  eq(applyHotkeyChainFadeCurve(0.75, 'linear'), 0.75, 'linear: f(0.75) = 0.75')
+  eq(applyHotkeyChainFadeCurve(1.0,  'linear'), 1.0,  'linear: f(1.0) = 1.0')
+}
+
+// applyHotkeyChainFadeCurve — easeOutCubic: 1 - (1-t)^3.
+// Spot-check the explicit math: f(0.5) = 1 - 0.5^3 = 1 - 0.125 = 0.875.
+{
+  const fnHalf = applyHotkeyChainFadeCurve(0.5, 'easeOutCubic')
+  ok(Math.abs(fnHalf - 0.875) < 1e-9, `easeOutCubic: f(0.5) = ${fnHalf}, expected 0.875`)
+  // f(0.1) = 1 - 0.9^3 = 1 - 0.729 = 0.271
+  const fnLow = applyHotkeyChainFadeCurve(0.1, 'easeOutCubic')
+  ok(Math.abs(fnLow - 0.271) < 1e-9, `easeOutCubic: f(0.1) = ${fnLow}, expected 0.271`)
+  // f(0.9) = 1 - 0.1^3 = 0.999
+  const fnHigh = applyHotkeyChainFadeCurve(0.9, 'easeOutCubic')
+  ok(Math.abs(fnHigh - 0.999) < 1e-9, `easeOutCubic: f(0.9) = ${fnHigh}, expected 0.999`)
+}
+
+// applyHotkeyChainFadeCurve — easeOutCubic semantic: slow start, fast finish.
+// f(t) > t for all t in (0, 1) — the curve is ABOVE the linear diagonal.
+{
+  for (const t of [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]) {
+    const easeOut = applyHotkeyChainFadeCurve(t, 'easeOutCubic')
+    ok(easeOut >= t, `easeOutCubic at t=${t}: ${easeOut} >= ${t} (above diagonal)`)
+  }
+}
+
+// applyHotkeyChainFadeCurve — semantic check: easeInCubic produces
+// SLOWER fade progress in the first half of the window (badge stays
+// bright longer), easeOutCubic produces FASTER fade progress in the
+// first half (badge greys early). The RECOMMENDED curve must read
+// LESS than linear at the midpoint to satisfy the "slow first 500ms"
+// roadmap requirement.
+{
+  const t = 0.5
+  const linear  = applyHotkeyChainFadeCurve(t, 'linear')
+  const easeOut = applyHotkeyChainFadeCurve(t, 'easeOutCubic')
+  const easeIn  = applyHotkeyChainFadeCurve(t, 'easeInCubic')
+  // easeOutCubic at t=0.5 = 0.875 (well above linear 0.5) — colour fades fast early.
+  ok(easeOut > linear, `easeOutCubic at t=0.5 > linear (${easeOut} > ${linear})`)
+  // easeInCubic at t=0.5 = 0.125 (well below linear 0.5) — colour fades slow early.
+  ok(easeIn  < linear, `easeInCubic at t=0.5 < linear (${easeIn} < ${linear})`)
+  // The RECOMMENDED curve must satisfy "slow first 500ms" — i.e.
+  // its t' at t=0.5 must be smaller than linear's 0.5.
+  const recommended = applyHotkeyChainFadeCurve(t, HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED)
+  ok(recommended < linear, `RECOMMENDED at t=0.5 (${recommended}) is below linear (${linear}) — slow first half`)
+}
+
+// applyHotkeyChainFadeCurve — easeInCubic: t^3.
+// Spot-check the explicit math: f(0.5) = 0.5^3 = 0.125.
+{
+  const fnHalf = applyHotkeyChainFadeCurve(0.5, 'easeInCubic')
+  ok(Math.abs(fnHalf - 0.125) < 1e-9, `easeInCubic: f(0.5) = ${fnHalf}, expected 0.125`)
+  const fnLow = applyHotkeyChainFadeCurve(0.1, 'easeInCubic')
+  ok(Math.abs(fnLow - 0.001) < 1e-9, `easeInCubic: f(0.1) = ${fnLow}, expected 0.001`)
+  const fnHigh = applyHotkeyChainFadeCurve(0.9, 'easeInCubic')
+  ok(Math.abs(fnHigh - 0.729) < 1e-9, `easeInCubic: f(0.9) = ${fnHigh}, expected 0.729`)
+}
+
+// applyHotkeyChainFadeCurve — monotonicity: every curve is non-
+// decreasing across [0, 1] so the fade never retreats mid-window.
+{
+  for (const curve of HOTKEY_CHAIN_FADE_CURVES) {
+    let prev = applyHotkeyChainFadeCurve(0, curve)
+    for (let i = 1; i <= 10; i++) {
+      const t = i / 10
+      const v = applyHotkeyChainFadeCurve(t, curve)
+      ok(v >= prev, `${curve}: monotonic at t=${t} (${v} >= ${prev})`)
+      prev = v
+    }
+  }
+}
+
+// applyHotkeyChainFadeCurve — unknown curve falls back to linear.
+{
+  eq(applyHotkeyChainFadeCurve(0.5, 'gibberish'),  0.5, 'unknown curve falls through to linear')
+  eq(applyHotkeyChainFadeCurve(0.5, undefined),    0.5, 'undefined curve → linear (default)')
+  eq(applyHotkeyChainFadeCurve(0.5, null),         0.5, 'null curve → linear (fall-through)')
+  eq(applyHotkeyChainFadeCurve(0.5, 42),           0.5, 'number curve → linear (fall-through)')
+  eq(applyHotkeyChainFadeCurve(0.5),               0.5, 'no curve arg → linear (default)')
+}
+
+// fadeDirectionColor — curve param threading.
+{
+  // Linear path matches R27.43's pinned midpoint (#61a1b5).
+  const linear = fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, 500, 1000, 'linear')
+  eq(linear.toLowerCase(), '#61a1b5', 'fadeDirectionColor linear midpoint matches R27.43 pin')
+
+  // easeInCubic path: t reshapes to 0.125 → colour barely fades.
+  // R = 103 + (90 - 103) * 0.125 = 103 + (-13)(0.125) = 103 - 1.625 = 101.375 ≈ 101 (0x65)
+  // G = 232 + (90 - 232) * 0.125 = 232 + (-142)(0.125) = 232 - 17.75 = 214.25 ≈ 214 (0xd6)
+  // B = 249 + (112 - 249) * 0.125 = 249 + (-137)(0.125) = 249 - 17.125 = 231.875 ≈ 232 (0xe8)
+  const easeIn = fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, 500, 1000, 'easeInCubic')
+  // The badge is still mostly cyan at the midpoint.
+  const baseR = parseInt(HOTKEY_CHAIN_COLOR_REVERSE.slice(1,3), 16)
+  const midR  = parseInt(easeIn.slice(1,3), 16)
+  // R-channel should be MUCH closer to base than to faded endpoint.
+  const fadedR = parseInt(HOTKEY_CHAIN_COLOR_FADED.slice(1,3), 16)
+  const distToBase   = Math.abs(baseR  - midR)
+  const distToFaded  = Math.abs(fadedR - midR)
+  ok(distToBase < distToFaded, `easeInCubic at midpoint: closer to base (${distToBase}) than to faded (${distToFaded})`)
+
+  // easeOutCubic at midpoint: t reshapes to 0.875 → colour mostly grey.
+  const easeOut = fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, 500, 1000, 'easeOutCubic')
+  const midROut = parseInt(easeOut.slice(1,3), 16)
+  const distToBaseOut   = Math.abs(baseR  - midROut)
+  const distToFadedOut  = Math.abs(fadedR - midROut)
+  ok(distToFadedOut < distToBaseOut, `easeOutCubic at midpoint: closer to faded (${distToFadedOut}) than to base (${distToBaseOut})`)
+}
+
+// fadeDirectionColor — endpoint anchoring across every curve.
+{
+  for (const curve of HOTKEY_CHAIN_FADE_CURVES) {
+    // At elapsed=0, every curve returns baseColor exactly.
+    eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, 0, 1000, curve), HOTKEY_CHAIN_COLOR_REVERSE,
+       `${curve}: elapsed=0 returns baseColor`)
+    // At elapsed===windowMs, every curve returns FADED endpoint.
+    eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, 1000, 1000, curve), HOTKEY_CHAIN_COLOR_FADED,
+       `${curve}: elapsed=windowMs returns FADED`)
+  }
+}
+
+// fadeDirectionColor — backwards-compat: omitting curve arg uses the
+// linear default (R27.43 callers untouched).
+{
+  const noCurve = fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, 500, 1000)
+  const linear  = fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, 500, 1000, 'linear')
+  eq(noCurve.toLowerCase(), linear.toLowerCase(), 'omitted curve === linear (R27.43 backwards-compat)')
+}
+
+// fadeDirectionColor — unknown curve string falls back to linear (defensive).
+{
+  const linear     = fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, 500, 1000, 'linear')
+  const gibberish  = fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, 500, 1000, 'gibberish-curve')
+  eq(gibberish.toLowerCase(), linear.toLowerCase(), 'unknown curve falls back to linear')
+}
+
+console.log('PASS: applyHotkeyChainFadeCurve + fadeDirectionColor curve param — non-linear fade (R28.43, ~80 asserts)')

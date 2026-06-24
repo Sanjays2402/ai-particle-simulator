@@ -55,6 +55,9 @@ import {
   UNDO_CHAIN_MS, isWithinUndoWindow,
   // R24.38 — chain-counter badge formatter for the toast pip
   formatHotkeyChainBadge,
+  // R28.43 — non-linear fade curve constant for the chain-badge toast
+  // (slow first 500ms, fast last 500ms; graduates R27.43's linear)
+  HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED,
 } from '../lib/midiPresets'
 import {
   // R14.17 — single-bundle JSON export/import
@@ -696,10 +699,24 @@ export default function MidiPanel({ open, onClose }) {
     // badge from cyan/amber → grey as Date.now() - mountedAt walks
     // 0 → UNDO_CHAIN_MS. Step 1 has no badge so there's nothing to
     // fade; we leave fade undefined on null badges.
+    //
+    // R28.43 — Pass curve='easeInCubic' so the badge holds its
+    // direction colour for ~500ms (well past the human's perceptual
+    // lag) before accelerating to grey in the last 500ms. Linear was
+    // perceptually "already fading" by t=250ms which felt rushed; the
+    // cubic curve gives the user breathing room early then signals
+    // urgency emphatically as the window closes. Specifically the
+    // chosen curve is t' = t^3: at t=0.5 the colour has only walked
+    // 12.5% toward grey, so the badge reads as ~bright through the
+    // first half of the window.
     const formatted = formatHotkeyChainBadge(chainStep, UNDO_CHAIN_MS)
     const badge = formatted
       ? (formatted.color
-        ? { ...formatted, fade: { baseColor: formatted.color, windowMs: UNDO_CHAIN_MS } }
+        ? { ...formatted, fade: {
+            baseColor: formatted.color,
+            windowMs: UNDO_CHAIN_MS,
+            curve: HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED,
+          } }
         : formatted)
       : undefined
     showToast(

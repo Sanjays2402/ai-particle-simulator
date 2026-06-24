@@ -468,6 +468,79 @@ export function directionColorForChainStep(chainStep) {
   return step % 2 === 0 ? HOTKEY_CHAIN_COLOR_REVERSE : HOTKEY_CHAIN_COLOR_FORWARD
 }
 
+// R28.43 — Non-linear fade curve preset for fadeDirectionColor.
+// Graduates R27.43's linear fade with curves that change PERCEIVED
+// urgency over time:
+//
+//   'linear' (R27.43 default, backwards-compat): constant rate
+//     across the window. Colour walks 50% by t=500ms.
+//   'easeInCubic': SLOW start, FAST finish (t' = t^3) — colour barely
+//     moves in the first 500ms (user sees a still-bright badge well
+//     past their perceptual lag), then accelerates to grey in the
+//     last 500ms. The "still time" feel followed by urgency.
+//   'easeOutCubic': FAST start, SLOW finish (t' = 1 - (1-t)^3) —
+//     colour drops quickly to a mid-grey then lingers. Useful if the
+//     UX wants to signal expiration EARLY then hold a soft warning.
+//
+// The chain badge benefits from easeInCubic specifically: the user
+// just clicked Undo and wants to FEEL the colour stay bright while
+// they decide whether to click again. A linear fade reads as
+// "already expiring" by t=250ms which is too soon for the human's
+// decision lag. easeInCubic gives ~500ms of "barely faded" before
+// the urgency kicks in.
+//
+// Endpoint anchoring guaranteed across every curve (f(0)=0, f(1)=1)
+// so swapping curves never disturbs the start/end colours — only the
+// distribution between. Monotonicity preserved (the fade never
+// retreats mid-window — important for the user's mental model).
+//
+// Defensive: unknown curve name falls back to 'linear' so a corrupt
+// caller never crashes the toast renderer.
+//
+// IMPORTANT: the DEFAULT is 'linear' — backwards-compat with R27.43's
+// pinned tests + every existing callsite that doesn't opt into a
+// curve. The new chain-badge call site in MidiPanel passes
+// 'easeInCubic' explicitly to get the slow-then-fast feel; the
+// R27.43 baseline RGB midpoint is still produced by the default
+// curve.
+export const HOTKEY_CHAIN_FADE_CURVES = ['linear', 'easeOutCubic', 'easeInCubic']
+export const HOTKEY_CHAIN_FADE_CURVE_DEFAULT = 'linear'
+// Recommended curve for the chain-badge fade specifically (used by
+// MidiPanel's showHotkeyTransferToast). Pulled out as a named export
+// so the UI doesn't hardcode the string + a future curve swap touches
+// one file. easeInCubic = slow first 500ms, fast last 500ms.
+export const HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED = 'easeInCubic'
+
+// Pure curve projector. Input t ∈ [0, 1] over the window; output
+// t' ∈ [0, 1] used as the lerp coefficient. Non-finite / out-of-range
+// inputs clamp safely (matches the spectrum peak-trail curve helper's
+// defensive shape from R16.17 / R19.12).
+export function applyHotkeyChainFadeCurve(t, curve = HOTKEY_CHAIN_FADE_CURVE_DEFAULT) {
+  if (!Number.isFinite(t)) return 0
+  if (t <= 0) return 0
+  if (t >= 1) return 1
+  switch (curve) {
+    case 'easeOutCubic': {
+      // f(t) = 1 - (1-t)^3 → slow start, fast finish.
+      // f(0)=0, f(0.5)=0.875, f(1)=1. Most of the fade happens in
+      // the last half of the window.
+      const inv = 1 - t
+      return 1 - inv * inv * inv
+    }
+    case 'easeInCubic': {
+      // f(t) = t^3 → fast start, slow finish.
+      // f(0)=0, f(0.5)=0.125, f(1)=1. Most of the fade in the first
+      // half.
+      return t * t * t
+    }
+    case 'linear':
+    default:
+      // Unknown curves fall through to linear (defensive — corrupt
+      // caller never crashes).
+      return t
+  }
+}
+
 // R27.43 — Linearly fade a direction colour toward HOTKEY_CHAIN_COLOR_FADED
 // over the undo window. As elapsedMs walks 0 → windowMs, the returned
 // colour walks baseColor → faded grey. Past windowMs the colour pins
@@ -493,7 +566,13 @@ export function directionColorForChainStep(chainStep) {
 // elapsedMs >= windowMs returns HOTKEY_CHAIN_COLOR_FADED (final
 // endpoint) so the badge doesn't keep lerping past the window's
 // expiration. At elapsedMs===0 returns baseColor exactly.
-export function fadeDirectionColor(baseColor, elapsedMs, windowMs) {
+//
+// R28.43 — Optional `curve` param threads through applyHotkeyChainFadeCurve
+// to reshape the t→t' progression. Defaults to 'easeOutCubic' so
+// chain badges read "still active" for the first ~500ms of the
+// window then accelerate to grey. Pass 'linear' (or any unknown
+// value) for the R27.43 baseline behaviour.
+export function fadeDirectionColor(baseColor, elapsedMs, windowMs, curve = HOTKEY_CHAIN_FADE_CURVE_DEFAULT) {
   if (typeof baseColor !== 'string') return baseColor
   // #RRGGBB hex pattern only — anything else returns baseColor so a
   // caller using rgb()/hsl()/named colours isn't silently broken.
@@ -501,7 +580,11 @@ export function fadeDirectionColor(baseColor, elapsedMs, windowMs) {
   if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return baseColor
   if (!Number.isFinite(windowMs) || windowMs <= 0) return baseColor
   if (elapsedMs >= windowMs) return HOTKEY_CHAIN_COLOR_FADED
-  const t = elapsedMs / windowMs   // 0..1 over the window
+  const tRaw = elapsedMs / windowMs   // 0..1 over the window
+  // R28.43 — reshape through the curve. Endpoint anchoring guaranteed
+  // (f(0)=0, f(1)=1) so the baseColor / faded-grey endpoints stay
+  // pinned regardless of curve choice.
+  const t = applyHotkeyChainFadeCurve(tRaw, curve)
   const baseR = parseInt(baseColor.slice(1, 3), 16)
   const baseG = parseInt(baseColor.slice(3, 5), 16)
   const baseB = parseInt(baseColor.slice(5, 7), 16)

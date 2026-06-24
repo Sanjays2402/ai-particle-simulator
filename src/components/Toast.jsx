@@ -94,6 +94,12 @@ export default function Toast() {
   // re-render). Suppressing is correct here; the worst case if React
   // ever did batch this without the tick would be a stale colour for
   // 50ms, not a crash. Same pattern as MidiPanel's issuedAt.
+  //
+  // R28.43 — Thread the optional fade.curve through so the slow-then-
+  // fast cubic curve reshapes the t→t' progression. Caller (MidiPanel)
+  // passes 'easeOutCubic' for the chain-badge fade; absent / undefined
+  // curve falls through to fadeDirectionColor's 'linear' default
+  // (backwards-compat with R27.43's pinned behaviour).
   let resolvedBadgeColor = toast.badge ? toast.badge.color : undefined
   if (toast.badge && toast.badge.fade) {
     // eslint-disable-next-line react-hooks/purity
@@ -103,6 +109,7 @@ export default function Toast() {
       toast.badge.fade.baseColor,
       elapsed,
       toast.badge.fade.windowMs,
+      toast.badge.fade.curve,
     )
   }
 
