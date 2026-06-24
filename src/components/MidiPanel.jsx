@@ -1776,6 +1776,18 @@ export default function MidiPanel({ open, onClose }) {
                                         }
                                         onChangeAttractor={(v) => setClampWarnAttractorFieldOverrideUI(a.attractor && a.attractor.id, a.field, v)}
                                         onClearAttractor={() => setClampWarnAttractorFieldOverrideUI(a.attractor && a.attractor.id, a.field, null)}
+                                        /* R28.45 — per-cell wipe targeted by
+                                           id (parallels onClearAttractor but
+                                           accepts an arbitrary id, not just
+                                           the current attractor). Lets the
+                                           preview chips below the "STRENGTH
+                                           all (N)" button be clickable: tap
+                                           any chip to clear JUST that
+                                           attractor's override on this field
+                                           without leaving the popover or
+                                           dropping every other attractor's
+                                           override too. */
+                                        onClearAttractorCell={(id) => setClampWarnAttractorFieldOverrideUI(id, a.field, null)}
                                         attractorOverrideCount={countClampWarnAttractorOverridesFor(clampWarnAttractorOverrides, a.attractor && a.attractor.id)}
                                         onClearAllForAttractor={() => clearAllClampWarnOverridesForAttractor(a.attractor && a.attractor.id)}
                                         fieldOverrideCountAcross={countClampWarnFieldOverridesAcross(clampWarnAttractorOverrides, a.field)}
@@ -2627,6 +2639,14 @@ function ClampThresholdPopover({
   // don't hide it behind the button's count badge alone).
   fieldOverridesAcross = [],
   namedAttractors = [],
+  // R28.45 — per-cell wipe handler. Called with the attractor id
+  // when the user clicks a preview chip. Lets the user clear ONE
+  // attractor's override on this field directly from the preview
+  // panel — no need to navigate to that attractor's row, open its
+  // own popover, and click "Clear attr." separately. Graduates the
+  // R27.45 chips from read-only previews to actionable per-cell
+  // wipe buttons.
+  onClearAttractorCell,
   onClose,
 }) {
   const minPct = Math.round(CLAMP_WARN_THRESHOLD_MIN * 100)
@@ -2974,12 +2994,30 @@ function ClampThresholdPopover({
                 const pct = Math.round(value * 100)
                 const isStale = !liveAttr
                 const isCurrent = id === attractorId
+                // R28.45 — Each chip is now an actionable button that
+                // wipes JUST this cell. Without onClearAttractorCell
+                // wired up the chip renders as before (read-only span
+                // semantics preserved via button with no onClick); a
+                // future caller can opt in without breaking existing
+                // visual contract.
+                const handleClick = typeof onClearAttractorCell === 'function'
+                  ? (e) => {
+                    e.stopPropagation()  // don't bubble to outer click handlers
+                    onClearAttractorCell(id)
+                  }
+                  : undefined
+                const clickable = !!handleClick
                 return (
-                  <span
+                  <button
+                    type="button"
                     key={id}
+                    onClick={handleClick}
+                    disabled={!clickable}
                     title={isStale
-                      ? `${id} (stale — attractor deleted) currently at ${pct}%`
-                      : `${liveAttr.name} (id=${id}) currently at ${pct}% \u2014 will reset to per-field threshold`}
+                      ? `${id} (stale \u2014 attractor deleted) currently at ${pct}% \u2014 click to wipe`
+                      : clickable
+                        ? `${liveAttr.name} (id=${id}) currently at ${pct}% \u2014 click to clear THIS cell only`
+                        : `${liveAttr.name} (id=${id}) currently at ${pct}% \u2014 will reset to per-field threshold`}
                     style={{
                       display: 'inline-flex', alignItems: 'center', gap: 3,
                       padding: '2px 6px', borderRadius: 4,
@@ -2996,7 +3034,35 @@ function ClampThresholdPopover({
                           ? '1px solid rgba(255,255,255,0.06)'
                           : '1px solid rgba(99,102,241,0.25)',
                       fontStyle: isStale ? 'italic' : 'normal',
-                    }}>
+                      cursor: clickable ? 'pointer' : 'default',
+                      // Reset native button styling so the chip matches
+                      // the span baseline visually.
+                      font: 'inherit',
+                      lineHeight: 'normal',
+                      WebkitAppearance: 'none',
+                      MozAppearance: 'none',
+                      appearance: 'none',
+                      // Subtle hover affordance on the chip — slight
+                      // background lift signals interactivity without
+                      // crowding the panel.
+                      transition: 'background 0.12s ease-out, border-color 0.12s ease-out',
+                    }}
+                    onMouseEnter={clickable ? (e) => {
+                      // Indigo lift on hover (matches the per-field
+                      // chip palette so the eye groups it with the
+                      // surrounding row).
+                      e.currentTarget.style.background = isCurrent
+                        ? 'rgba(196,181,253,0.30)'
+                        : 'rgba(99,102,241,0.18)'
+                    } : undefined}
+                    onMouseLeave={clickable ? (e) => {
+                      e.currentTarget.style.background = isCurrent
+                        ? 'rgba(196,181,253,0.20)'
+                        : isStale
+                          ? 'rgba(255,255,255,0.04)'
+                          : 'rgba(99,102,241,0.10)'
+                    } : undefined}
+                  >
                     {/* Tiny dot prefix in the type accent — same colour
                         as the attractor's row badge so the chip ties
                         back to the named-attractor list visually. */}
@@ -3017,7 +3083,18 @@ function ClampThresholdPopover({
                       color: isCurrent ? '#c4b5fd' : '#a5b4fc',
                       fontWeight: 700,
                     }}>{pct}%</span>
-                  </span>
+                    {/* R28.45 — small \u00d7 glyph hints at the per-cell
+                        wipe action. Renders only when clickable
+                        (back-compat: read-only callers see no
+                        affordance). Hidden visually inside the chip
+                        but still tab-accessible via the button. */}
+                    {clickable && (
+                      <span aria-hidden="true" style={{
+                        fontSize: 9, color: '#5a5a70',
+                        marginLeft: 1, lineHeight: 1,
+                      }}>{'\u00d7'}</span>
+                    )}
+                  </button>
                 )
               })}
             </div>

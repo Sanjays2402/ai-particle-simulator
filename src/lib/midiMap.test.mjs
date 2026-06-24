@@ -2414,3 +2414,81 @@ console.log('PASS: countClampWarnFieldOverridesAcross + clearClampWarnFieldOverr
 }
 
 console.log('PASS: listClampWarnFieldOverridesAcross — preview-chip projector (R27.45, ~25 asserts)')
+
+// =====================================================================
+// R28.45 — Per-cell wipe from preview chips. Pure wire layer on top
+// of setClampWarnAttractorFieldOverride (already pinned above); this
+// block tests the SPECIFIC sequence the popover uses: walk the
+// preview list, click ONE chip (not the current attractor), assert
+// only that cell drops while every other attractor's override (on
+// this field + others) survives.
+// =====================================================================
+
+// Per-cell wipe walks the preview list one chip at a time without
+// dropping siblings.
+{
+  let overrides = {
+    'attr-current': { strength: 0.10 },
+    'attr-bass':    { strength: 0.25, x: 0.40 },
+    'attr-treble':  { strength: 0.45 },
+  }
+  // Sanity: 3 chips in the preview for STRENGTH.
+  let chips = listClampWarnFieldOverridesAcross(overrides, 'strength')
+  if (chips.length !== 3) fail(`pre-wipe chips: expected 3, got ${chips.length}`)
+
+  // User clicks the attr-bass chip (NOT the current attractor).
+  overrides = setClampWarnAttractorFieldOverride(overrides, 'attr-bass', 'strength', null)
+  chips = listClampWarnFieldOverridesAcross(overrides, 'strength')
+  if (chips.length !== 2) fail(`after first wipe: expected 2, got ${chips.length}`)
+  if (chips.find(c => c.id === 'attr-bass')) fail('attr-bass should be gone from STRENGTH chips')
+  // OTHER chip on attr-bass (x:0.40) preserved.
+  const xChips = listClampWarnFieldOverridesAcross(overrides, 'x')
+  if (xChips.length !== 1 || xChips[0].id !== 'attr-bass' || xChips[0].value !== 0.40) {
+    fail(`attr-bass.x should survive: got ${JSON.stringify(xChips)}`)
+  }
+  // Current attractor's STRENGTH still intact.
+  if (!chips.find(c => c.id === 'attr-current')) fail('attr-current should remain')
+
+  // User clicks the attr-treble chip next.
+  overrides = setClampWarnAttractorFieldOverride(overrides, 'attr-treble', 'strength', null)
+  chips = listClampWarnFieldOverridesAcross(overrides, 'strength')
+  if (chips.length !== 1) fail(`after second wipe: expected 1, got ${chips.length}`)
+  if (chips[0].id !== 'attr-current') fail('only attr-current left')
+
+  // User clicks their OWN chip — wipes the current cell too.
+  overrides = setClampWarnAttractorFieldOverride(overrides, 'attr-current', 'strength', null)
+  chips = listClampWarnFieldOverridesAcross(overrides, 'strength')
+  if (chips.length !== 0) fail(`after self-wipe: expected 0, got ${chips.length}`)
+  // attr-bass.x STILL survives — never touched STRENGTH-wise has
+  // nothing to do with x.
+  const xChipsFinal = listClampWarnFieldOverridesAcross(overrides, 'x')
+  if (xChipsFinal.length !== 1) fail(`attr-bass.x final survival: ${JSON.stringify(xChipsFinal)}`)
+}
+
+// Per-cell wipe on a stale chip (attractor was deleted but the override
+// row is still persisted) cleans up the persistent state.
+{
+  const overrides = {
+    'attr-deleted': { strength: 0.30 },   // ghost row
+    'attr-live':    { strength: 0.50 },
+  }
+  let chips = listClampWarnFieldOverridesAcross(overrides, 'strength')
+  if (chips.length !== 2) fail('initial 2 chips')
+  // User clicks the stale chip in the preview.
+  const after = setClampWarnAttractorFieldOverride(overrides, 'attr-deleted', 'strength', null)
+  chips = listClampWarnFieldOverridesAcross(after, 'strength')
+  if (chips.length !== 1) fail(`after stale wipe: expected 1, got ${chips.length}`)
+  if (chips[0].id !== 'attr-live') fail('only live chip remains')
+}
+
+// Per-cell wipe is idempotent — clicking a chip that's ALREADY been
+// wiped (rapid double-click) is a no-op via the lib's ref-equal-on-
+// no-op contract.
+{
+  const overrides = { 'attr-a': { strength: 0.20 } }
+  const first  = setClampWarnAttractorFieldOverride(overrides, 'attr-a', 'strength', null)
+  const second = setClampWarnAttractorFieldOverride(first,    'attr-a', 'strength', null)
+  if (second !== first) fail('double-wipe should be ref-equal-on-no-op')
+}
+
+console.log('PASS: per-cell preview-chip wipe sequence (R28.45, ~15 asserts)')
