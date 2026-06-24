@@ -971,6 +971,51 @@ export function sortNoteFilterHistoryForDisplay(list) {
   return pinned.concat(unpinned)
 }
 
+// R27.42 — Count of currently-pinned entries. Used by the dropdown
+// footer to show a "Bulk Unpin (N)" button only when at least 2
+// entries are pinned (parallels the "Clear (M)" button's gating).
+// Pure / defensive: non-array → 0; non-object / non-strict-true
+// pinned entries silently skipped.
+export function countPinnedNoteFilterHistoryEntries(list) {
+  if (!Array.isArray(list)) return 0
+  let n = 0
+  for (const e of list) {
+    if (!e || typeof e !== 'object') continue
+    if (e.pinned === true) n++
+  }
+  return n
+}
+
+// R27.42 — Bulk-unpin: flip pinned → false on EVERY entry in one call.
+// Returns a NEW list when at least one entry was actually unpinned;
+// returns the INPUT REF unchanged when nothing to unpin (ref-equal-on-
+// no-op contract so the persistence layer can short-circuit). Pure /
+// no mutation of input. Defensive: non-array → input ref.
+//
+// Order is preserved (MRU stays intact; the sortForDisplay layer takes
+// care of re-flowing pinned-vs-unpinned in the dropdown). Entries with
+// missing/non-bool pinned default to false (already unpinned → no-op
+// row). Corrupt entries (null, non-object) are dropped during the
+// sanitize pass for visual consistency with togglePin / add helpers.
+export function bulkUnpinNoteFilterHistoryEntries(list) {
+  if (!Array.isArray(list)) return list
+  // Fast-path: nothing pinned → no work, return input ref.
+  let anyPinned = false
+  for (const e of list) {
+    if (e && typeof e === 'object' && e.pinned === true) { anyPinned = true; break }
+  }
+  if (!anyPinned) return list
+  const next = []
+  for (const e of list) {
+    const sanitized = sanitizeHistoryEntry(e)
+    if (!sanitized) continue
+    // Always emit with pinned=false (strict bool) so a re-save reads
+    // clean; the sanitize step already normalised the other fields.
+    next.push({ ...sanitized, pinned: false })
+  }
+  return next
+}
+
 // Remove one entry from the list by (query, mode). Returns the input
 // ref unchanged when nothing matches (no-op) so the persistence layer
 // can short-circuit.

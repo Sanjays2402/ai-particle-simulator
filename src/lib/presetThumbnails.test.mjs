@@ -24,6 +24,8 @@ import {
   addNoteFilterHistoryEntry, removeNoteFilterHistoryEntry, clearNoteFilterHistory,
   // R26.42 — pin history entries (graduates R25.42)
   togglePinNoteFilterHistoryEntry, sortNoteFilterHistoryForDisplay,
+  // R27.42 — bulk-unpin: footer button when >= 2 entries are pinned
+  countPinnedNoteFilterHistoryEntries, bulkUnpinNoteFilterHistoryEntries,
   THUMB_WIDTH, THUMB_HEIGHT,
 } from './presetThumbnails.js'
 
@@ -1602,3 +1604,176 @@ console.log('PASS: note-filter pattern history (R25.42, MRU + cap + storage roun
 }
 
 console.log('PASS: note-filter pattern PIN — togglePinEntry + sortForDisplay + cap-respects-pins (R26.42, ~45 asserts)')
+
+// ----------------------------------------------------------------------------
+// R27.42 — bulk-unpin: footer button when >= 2 entries are pinned
+// (graduates R26.42's per-entry pin). Lib helpers cover the COUNT
+// projector (UI gating) and the WIPE setter (ref-equal-on-no-op).
+// ----------------------------------------------------------------------------
+
+// countPinnedNoteFilterHistoryEntries — happy: count varies as entries flip.
+{
+  let list = []
+  list = addNoteFilterHistoryEntry(list, 'a', 'substring', 100)
+  list = addNoteFilterHistoryEntry(list, 'b', 'substring', 200)
+  list = addNoteFilterHistoryEntry(list, 'c', 'substring', 300)
+  eq(countPinnedNoteFilterHistoryEntries(list), 0, 'fresh entries — none pinned')
+  list = togglePinNoteFilterHistoryEntry(list, 'a', 'substring')
+  eq(countPinnedNoteFilterHistoryEntries(list), 1, '1 pinned after toggle')
+  list = togglePinNoteFilterHistoryEntry(list, 'c', 'substring')
+  eq(countPinnedNoteFilterHistoryEntries(list), 2, '2 pinned')
+  list = togglePinNoteFilterHistoryEntry(list, 'a', 'substring')
+  eq(countPinnedNoteFilterHistoryEntries(list), 1, 'back to 1 after un-pin')
+}
+
+// countPinnedNoteFilterHistoryEntries — defensive contract.
+{
+  eq(countPinnedNoteFilterHistoryEntries(null),       0, 'null → 0')
+  eq(countPinnedNoteFilterHistoryEntries(undefined),  0, 'undefined → 0')
+  eq(countPinnedNoteFilterHistoryEntries('not arr'),  0, 'string → 0')
+  eq(countPinnedNoteFilterHistoryEntries(42),         0, 'number → 0')
+  eq(countPinnedNoteFilterHistoryEntries({}),         0, 'plain object → 0')
+  eq(countPinnedNoteFilterHistoryEntries([]),         0, 'empty array → 0')
+}
+
+// countPinnedNoteFilterHistoryEntries — corrupt rows silently skipped,
+// non-strict-true pinned skipped.
+{
+  const list = [
+    { query: 'a', mode: 'substring', pinned: true,  addedAt: 100 },
+    { query: 'b', mode: 'substring', pinned: 'true', addedAt: 200 },  // string truthy not strict-true
+    { query: 'c', mode: 'substring', pinned: 1,     addedAt: 300 },   // 1 truthy not strict-true
+    null,
+    'oops',
+    42,
+    { query: 'd', mode: 'substring', pinned: true, addedAt: 400 },
+  ]
+  eq(countPinnedNoteFilterHistoryEntries(list), 2, 'strict-true filter + corrupt skip → exactly 2')
+}
+
+// bulkUnpinNoteFilterHistoryEntries — happy: all pinned → all flip to false.
+{
+  let list = []
+  list = addNoteFilterHistoryEntry(list, 'a', 'substring', 100)
+  list = addNoteFilterHistoryEntry(list, 'b', 'substring', 200)
+  list = addNoteFilterHistoryEntry(list, 'c', 'regex',     300)
+  list = togglePinNoteFilterHistoryEntry(list, 'a', 'substring')
+  list = togglePinNoteFilterHistoryEntry(list, 'b', 'substring')
+  list = togglePinNoteFilterHistoryEntry(list, 'c', 'regex')
+  eq(countPinnedNoteFilterHistoryEntries(list), 3, 'precondition: 3 pinned')
+  const wiped = bulkUnpinNoteFilterHistoryEntries(list)
+  eq(countPinnedNoteFilterHistoryEntries(wiped), 0, 'all unpinned after bulk')
+  eq(wiped.length, list.length, 'length preserved across bulk-unpin')
+  // Order preserved (MRU stays — sortForDisplay is the render-time
+  // re-flow, not this setter's job).
+  for (let i = 0; i < wiped.length; i++) {
+    eq(wiped[i].query, list[i].query, `order preserved at index ${i}`)
+    eq(wiped[i].mode,  list[i].mode,  `mode preserved at index ${i}`)
+  }
+}
+
+// bulkUnpinNoteFilterHistoryEntries — only some pinned: still flips
+// all of them, leaves already-unpinned untouched.
+{
+  let list = []
+  list = addNoteFilterHistoryEntry(list, 'a', 'substring', 100)
+  list = addNoteFilterHistoryEntry(list, 'b', 'substring', 200)
+  list = addNoteFilterHistoryEntry(list, 'c', 'substring', 300)
+  list = togglePinNoteFilterHistoryEntry(list, 'b', 'substring')
+  const wiped = bulkUnpinNoteFilterHistoryEntries(list)
+  eq(countPinnedNoteFilterHistoryEntries(wiped), 0, 'partial pinned → all unpinned')
+  // every entry has pinned === false (strict bool, normalised from any
+  // missing-pinned source).
+  for (const e of wiped) {
+    eq(e.pinned, false, `entry ${e.query} normalised to pinned=false`)
+  }
+}
+
+// bulkUnpinNoteFilterHistoryEntries — ref-equal-on-no-op when nothing
+// is pinned. Critical for the persistence layer to skip redundant
+// saves (parallels removeNoteFilterHistoryEntry's contract).
+{
+  let list = []
+  list = addNoteFilterHistoryEntry(list, 'a', 'substring', 100)
+  list = addNoteFilterHistoryEntry(list, 'b', 'substring', 200)
+  const same = bulkUnpinNoteFilterHistoryEntries(list)
+  eq(same, list, 'nothing pinned → input ref unchanged')
+}
+
+// bulkUnpinNoteFilterHistoryEntries — empty list → ref-equal-on-no-op
+// (empty is trivially "nothing to wipe").
+{
+  const list = []
+  const same = bulkUnpinNoteFilterHistoryEntries(list)
+  eq(same, list, 'empty list → input ref unchanged')
+}
+
+// bulkUnpinNoteFilterHistoryEntries — defensive contract.
+{
+  eq(bulkUnpinNoteFilterHistoryEntries(null),      null,       'null → null')
+  eq(bulkUnpinNoteFilterHistoryEntries(undefined), undefined,  'undefined → undefined')
+  // Non-array: should return input ref untouched (caller may have a
+  // stable JSON-encoded handle that shouldn't be re-allocated).
+  const obj = { a: 1 }
+  eq(bulkUnpinNoteFilterHistoryEntries(obj), obj, 'object → input ref')
+  eq(bulkUnpinNoteFilterHistoryEntries('s'),  's', 'string → input ref')
+  eq(bulkUnpinNoteFilterHistoryEntries(42),   42,  'number → input ref')
+}
+
+// bulkUnpinNoteFilterHistoryEntries — purity: input not mutated even
+// when a copy is returned.
+{
+  let list = []
+  list = addNoteFilterHistoryEntry(list, 'a', 'substring', 100)
+  list = togglePinNoteFilterHistoryEntry(list, 'a', 'substring')
+  const before = JSON.stringify(list)
+  bulkUnpinNoteFilterHistoryEntries(list)
+  eq(JSON.stringify(list), before, 'input list not mutated')
+}
+
+// bulkUnpinNoteFilterHistoryEntries — corrupt rows dropped during
+// the sanitize-and-rewrite pass (parallels add/togglePin pattern).
+{
+  const list = [
+    { query: 'a', mode: 'substring', pinned: true,  addedAt: 100 },
+    null,
+    { query: 'b', mode: 'substring', pinned: true,  addedAt: 200 },
+    'corrupt',
+    42,
+    { query: '',  mode: 'substring', pinned: true,  addedAt: 300 },  // blank query → drops via sanitize
+  ]
+  const wiped = bulkUnpinNoteFilterHistoryEntries(list)
+  eq(wiped.length, 2, 'corrupt + blank rows dropped, only valid entries kept')
+  eq(wiped[0].query, 'a')
+  eq(wiped[1].query, 'b')
+  for (const e of wiped) eq(e.pinned, false, 'every valid entry flips to false')
+}
+
+// Storage round-trip — bulk-unpin survives save+load via the existing
+// sanitize path.
+{
+  const stub = (() => {
+    let v = null
+    return {
+      getItem: () => v,
+      setItem: (_k, x) => { v = x },
+      removeItem: () => { v = null },
+    }
+  })()
+  let list = []
+  list = addNoteFilterHistoryEntry(list, 'a', 'substring', 100)
+  list = addNoteFilterHistoryEntry(list, 'b', 'regex',     200)
+  list = togglePinNoteFilterHistoryEntry(list, 'a', 'substring')
+  list = togglePinNoteFilterHistoryEntry(list, 'b', 'regex')
+  saveNoteFilterHistory(list, stub)
+  // Simulate the live bulk-unpin path (read from storage → wipe → save → reload).
+  const loaded1 = loadNoteFilterHistory(stub)
+  eq(countPinnedNoteFilterHistoryEntries(loaded1), 2, 'loaded with both pinned')
+  const wiped = bulkUnpinNoteFilterHistoryEntries(loaded1)
+  saveNoteFilterHistory(wiped, stub)
+  const loaded2 = loadNoteFilterHistory(stub)
+  eq(countPinnedNoteFilterHistoryEntries(loaded2), 0, 'round-trip: 0 pinned after wipe')
+  eq(loaded2.length, 2, 'both entries survived (order preserved)')
+}
+
+console.log('PASS: note-filter pattern BULK UNPIN — countPinned + bulkUnpin (R27.42, ~30 asserts)')

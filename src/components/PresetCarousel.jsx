@@ -25,6 +25,8 @@ import {
   clearNoteFilterHistory,
   // R26.42 — pin entries to the top of the dropdown (graduates R25.42)
   togglePinNoteFilterHistoryEntry, sortNoteFilterHistoryForDisplay,
+  // R27.42 — bulk-unpin footer button when 2+ entries are pinned
+  countPinnedNoteFilterHistoryEntries, bulkUnpinNoteFilterHistoryEntries,
 } from '../lib/presetThumbnails'
 
 export default function PresetCarousel() {
@@ -128,6 +130,16 @@ export default function PresetCarousel() {
   const clearHistory = () => {
     persistNoteFilterHistory(clearNoteFilterHistory())
     setHistoryOpen(false)
+  }
+  // R27.42 — bulk-unpin every pinned entry in one click. The lib helper
+  // returns input ref unchanged when nothing is pinned (no-op), so the
+  // persist call is a true no-op when the user spam-clicks an empty
+  // surface. We keep the dropdown open after the wipe so the user can
+  // see the visual confirmation (every star flips back to hollow).
+  const bulkUnpinHistory = () => {
+    const next = bulkUnpinNoteFilterHistoryEntries(noteFilterHistory)
+    if (next === noteFilterHistory) return
+    persistNoteFilterHistory(next)
   }
   // Close dropdown when input collapses entirely.
   useEffect(() => {
@@ -752,24 +764,59 @@ export default function PresetCarousel() {
                       borderTop: '1px solid rgba(255,255,255,0.04)',
                       marginTop: 4, padding: '4px 8px 0',
                       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      gap: 6,
                     }}>
                       <span style={{ fontSize: 8.5, color: '#5a5a70' }}>
                         {'\u2193'} arrow / click {'\u00b7'} right-click to pin
                       </span>
-                      <button
-                        type="button"
-                        onClick={clearHistory}
-                        title="Wipe the whole recent-patterns list"
-                        style={{
-                          padding: '2px 8px',
-                          fontSize: 8.5, fontWeight: 700, letterSpacing: '0.06em',
-                          background: 'rgba(239,68,68,0.10)',
-                          color: '#fca5a5',
-                          border: '1px solid rgba(239,68,68,0.30)',
-                          borderRadius: 4, cursor: 'pointer',
-                          textTransform: 'uppercase',
-                        }}
-                      >Clear</button>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        {/* R27.42 — Bulk-unpin button. Only renders when
+                            at least 2 entries are pinned (with 1 pinned,
+                            unpinning is a single right-click on the row —
+                            the bulk button adds nothing). Amber to match
+                            the pin star colour family; sits next to the
+                            red Clear so the two destructive actions are
+                            grouped. */}
+                        {countPinnedNoteFilterHistoryEntries(noteFilterHistory) >= 2 && (
+                          <button
+                            type="button"
+                            onClick={bulkUnpinHistory}
+                            title={`Unpin all ${countPinnedNoteFilterHistoryEntries(noteFilterHistory)} pinned patterns at once (entries stay in history; just flip back to unpinned).`}
+                            style={{
+                              padding: '2px 8px',
+                              fontSize: 8.5, fontWeight: 700, letterSpacing: '0.06em',
+                              background: 'rgba(245,158,11,0.10)',
+                              color: '#fde68a',
+                              border: '1px solid rgba(245,158,11,0.30)',
+                              borderRadius: 4, cursor: 'pointer',
+                              textTransform: 'uppercase',
+                              display: 'inline-flex', alignItems: 'center', gap: 4,
+                            }}
+                          >
+                            <span>Unpin</span>
+                            <span style={{
+                              fontSize: 8, padding: '0 3px', borderRadius: 2,
+                              background: 'rgba(0,0,0,0.32)', color: '#fde68a',
+                              border: '1px solid rgba(245,158,11,0.45)',
+                              fontWeight: 700,
+                            }}>{countPinnedNoteFilterHistoryEntries(noteFilterHistory)}</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={clearHistory}
+                          title="Wipe the whole recent-patterns list"
+                          style={{
+                            padding: '2px 8px',
+                            fontSize: 8.5, fontWeight: 700, letterSpacing: '0.06em',
+                            background: 'rgba(239,68,68,0.10)',
+                            color: '#fca5a5',
+                            border: '1px solid rgba(239,68,68,0.30)',
+                            borderRadius: 4, cursor: 'pointer',
+                            textTransform: 'uppercase',
+                          }}
+                        >Clear</button>
+                      </div>
                     </div>
                   </div>
                 </>
