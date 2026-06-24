@@ -18,6 +18,8 @@ import {
   buildBiasFieldDiff, biasFieldValuesEqual,
   // R26.41 — chip-row counts projector for the per-row summary tag
   summarizeFieldDiffCounts,
+  // R27.41 — total-impact projector for the preview-header pip
+  summarizeImportTotalFieldImpact,
 } from './biasOverridesIO.js'
 import { SCENE_BIASES, SCENE_BIAS_RANGE_FIELDS, SCENE_BIAS_CHANCE_FIELDS } from './randomScene.js'
 
@@ -841,4 +843,179 @@ ok(SCENE_BIAS_CHANCE_FIELDS.length === 10, 'schema: 10 chance fields')
 
 console.log('PASS: summarizeFieldDiffCounts — per-row chip summary counts (R26.41, ~30 asserts)')
 
-console.log(`PASS: biasOverridesIO — envelope build/parse, merge/replace, summarize, defensive, multi-file combine, R24.36 preview rows, R25.41 per-field diff, R26.41 summary counts (${SCENE_BIASES.length} chip ids, ${SCENE_BIAS_RANGE_FIELDS.length} ranges + ${SCENE_BIAS_CHANCE_FIELDS.length} chances per chip)`)
+// ----- R27.41: summarizeImportTotalFieldImpact — preview-header total --
+// Sums per-row counts across every chip row in a preview into a single
+// total. UI surfaces "Touching N of M fields total" so users can compare
+// the SCOPE of multiple imports at a glance.
+
+// Helper to build a row shape mirroring the live BiasImportPreviewRow:
+//   { id, action, fieldDiff } — other fields not consulted by the
+//   projector are omitted for test brevity.
+const r = (id, action, fieldDiff) => ({ id, action, fieldDiff })
+
+// Happy: two add-rows, sum their changed counts.
+{
+  const rows = [
+    r('calm',     'add', [{ field: 'a', action: 'add' }, { field: 'b', action: 'add' }]),
+    r('surprise', 'add', [{ field: 'c', action: 'change' }, { field: 'd', action: 'unchanged' }]),
+  ]
+  const out = summarizeImportTotalFieldImpact(rows, 'merge')
+  eq(out.changed, 3, 'merge: 2 adds + 1 change = 3 changed')
+  eq(out.unchanged, 1, 'merge: 1 unchanged')
+  eq(out.total, 4, 'merge: total = changed + unchanged')
+}
+
+// Happy: overwrite-action row contributes (overwrite means the live
+// override is about to be replaced; counted in BOTH modes).
+{
+  const rows = [
+    r('calm', 'overwrite', [
+      { field: 'a', action: 'change' },
+      { field: 'b', action: 'change' },
+      { field: 'c', action: 'unchanged' },
+    ]),
+  ]
+  const merge = summarizeImportTotalFieldImpact(rows, 'merge')
+  const replace = summarizeImportTotalFieldImpact(rows, 'replace')
+  eq(merge.changed, 2, 'overwrite in merge: 2 changed counted')
+  eq(merge.unchanged, 1, 'overwrite in merge: 1 unchanged counted')
+  eq(replace.changed, 2, 'overwrite in replace: 2 changed counted')
+  eq(replace.unchanged, 1, 'overwrite in replace: 1 unchanged counted')
+}
+
+// Skip-action rows: skipped entirely in MERGE mode (live override
+// stays untouched; counting them would mislead the user).
+{
+  const rows = [
+    r('add-row',  'add',  [{ field: 'a', action: 'add' }]),
+    r('skip-row', 'skip', [
+      { field: 'b', action: 'change' },
+      { field: 'c', action: 'unchanged' },
+    ]),
+  ]
+  const merge = summarizeImportTotalFieldImpact(rows, 'merge')
+  eq(merge.changed, 1, 'merge: skip-row excluded, only add-row counted')
+  eq(merge.unchanged, 0, 'merge: skip-row unchanged not counted')
+  eq(merge.total, 1, 'merge: total = 1')
+  // In replace mode, every row is in-play (no skips happen under
+  // replace; the action just reflects the merge-mode classification),
+  // so the count INCLUDES the would-be-skipped row.
+  const replace = summarizeImportTotalFieldImpact(rows, 'replace')
+  eq(replace.changed, 2, 'replace: add + change counted')
+  eq(replace.unchanged, 1, 'replace: unchanged counted')
+  eq(replace.total, 3, 'replace: total = 3')
+}
+
+// Replace mode: live-only fields count as changed (under replace, the
+// live override is about to be dropped/overwritten — that IS a change).
+{
+  const rows = [
+    r('row', 'overwrite', [
+      { field: 'a', action: 'live-only' },
+      { field: 'b', action: 'change' },
+      { field: 'c', action: 'live-only' },
+    ]),
+  ]
+  const merge = summarizeImportTotalFieldImpact(rows, 'merge')
+  eq(merge.changed, 1, 'merge: live-only not counted, only 1 change')
+  const replace = summarizeImportTotalFieldImpact(rows, 'replace')
+  eq(replace.changed, 3, 'replace: 2 live-only + 1 change = 3')
+}
+
+// Rows without fieldDiff contribute nothing (no field-level data).
+{
+  const rows = [
+    r('with-diff', 'add', [{ field: 'a', action: 'add' }]),
+    r('no-diff',   'add', null),
+    r('no-diff2',  'add', undefined),
+    r('empty',     'add', []),
+  ]
+  const out = summarizeImportTotalFieldImpact(rows, 'merge')
+  eq(out.changed, 1, 'rows without fieldDiff contribute zero')
+  eq(out.total, 1)
+}
+
+// Default mode is 'merge' (safer default — under-counts rather than
+// over-counts for the most common review flow).
+{
+  const rows = [r('row', 'skip', [{ field: 'a', action: 'change' }])]
+  const out = summarizeImportTotalFieldImpact(rows)   // no mode arg
+  eq(out.changed, 0, 'default mode = merge: skip-row not counted')
+}
+
+// Defensive: non-array rows → zeros, no throw.
+{
+  deepEq(summarizeImportTotalFieldImpact(null),      { changed: 0, unchanged: 0, total: 0 }, 'null → zeros')
+  deepEq(summarizeImportTotalFieldImpact(undefined), { changed: 0, unchanged: 0, total: 0 }, 'undefined → zeros')
+  deepEq(summarizeImportTotalFieldImpact('bad'),     { changed: 0, unchanged: 0, total: 0 }, 'string → zeros')
+  deepEq(summarizeImportTotalFieldImpact(42),        { changed: 0, unchanged: 0, total: 0 }, 'number → zeros')
+  deepEq(summarizeImportTotalFieldImpact({a:1}),     { changed: 0, unchanged: 0, total: 0 }, 'plain object → zeros')
+}
+
+// Defensive: null/non-object rows silently skipped.
+{
+  const rows = [
+    r('ok', 'add', [{ field: 'a', action: 'add' }]),
+    null,
+    undefined,
+    'not a row',
+    42,
+    r('ok2', 'add', [{ field: 'b', action: 'add' }]),
+  ]
+  const out = summarizeImportTotalFieldImpact(rows, 'merge')
+  eq(out.changed, 2, 'bad rows skipped, valid rows summed')
+}
+
+// Defensive: rows with bad fieldDiff (non-array) silently skipped.
+{
+  const rows = [
+    r('ok',   'add', [{ field: 'a', action: 'add' }]),
+    r('bad1', 'add', 'not an array'),
+    r('bad2', 'add', 42),
+    r('bad3', 'add', { not: 'an array' }),
+  ]
+  const out = summarizeImportTotalFieldImpact(rows, 'merge')
+  eq(out.changed, 1, 'rows with bad fieldDiff skipped via summarize defensive')
+  eq(out.total, 1)
+}
+
+// Integration: build real preview rows + buildBiasFieldDiff, then sum.
+{
+  const incoming = {
+    calm: { counts: [10, 20], bgChance: 0.5 },
+    wild: { speedRange: [0.5, 2] },
+  }
+  const existing = {
+    calm: { counts: [10, 20], bgChance: 0.3 },
+    // wild is brand new (add)
+  }
+  const rows = buildBiasImportPreviewRows(incoming, existing, 'merge')
+  const out = summarizeImportTotalFieldImpact(rows, 'merge')
+  // calm: action='skip' (live override exists in merge mode) → excluded
+  //       by our R27.41 contract (skip-rows describe what WOULD have
+  //       happened under Replace; counting in Merge misleads the user).
+  // wild: action='add' → speedRange added (1)
+  eq(out.changed, 1, 'integration merge: skip-row excluded, only wild add counted')
+  eq(out.unchanged, 0, 'integration merge: no unchanged (skip-row excluded)')
+  eq(out.total, 1)
+  // Replace mode: every row in-play. calm is action='overwrite' so its
+  // 1-changed (bgChance) + 1-unchanged (counts) both count; wild adds 1.
+  const replaceRows = buildBiasImportPreviewRows(incoming, existing, 'replace')
+  const replaceOut = summarizeImportTotalFieldImpact(replaceRows, 'replace')
+  eq(replaceOut.changed, 2, 'integration replace: bgChance change + wild add = 2')
+  eq(replaceOut.unchanged, 1, 'integration replace: counts unchanged counted')
+  eq(replaceOut.total, 3)
+}
+
+// Purity — input not mutated.
+{
+  const rows = [r('a', 'add', [{ field: 'f', action: 'add' }])]
+  const before = JSON.stringify(rows)
+  summarizeImportTotalFieldImpact(rows, 'merge')
+  summarizeImportTotalFieldImpact(rows, 'replace')
+  eq(JSON.stringify(rows), before, 'input rows not mutated')
+}
+
+console.log('PASS: summarizeImportTotalFieldImpact — preview-header total (R27.41, ~30 asserts)')
+
+console.log(`PASS: biasOverridesIO — envelope build/parse, merge/replace, summarize, defensive, multi-file combine, R24.36 preview rows, R25.41 per-field diff, R26.41 summary counts, R27.41 total-impact projector (${SCENE_BIASES.length} chip ids, ${SCENE_BIAS_RANGE_FIELDS.length} ranges + ${SCENE_BIAS_CHANCE_FIELDS.length} chances per chip)`)

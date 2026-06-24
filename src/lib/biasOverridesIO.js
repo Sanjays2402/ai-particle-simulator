@@ -444,6 +444,54 @@ export function summarizeFieldDiffCounts(fieldDiff, mode = 'merge') {
   return { changed, unchanged }
 }
 
+// R27.41 — Total-fields-touched projector. Sums summarizeFieldDiffCounts
+// across every chip row in a preview, so the import header can surface
+// a single \"Touching N of M fields total\" pip. Helps users picking
+// between several imports compare scope at a glance without expanding
+// every row.
+//
+// Returns:
+//   { changed, unchanged, total }
+//   - changed   : sum of changed counts across all rows (mode-aware:
+//                 live-only is counted as changed in replace mode only,
+//                 same semantics as summarizeFieldDiffCounts)
+//   - unchanged : sum of unchanged counts across all rows
+//   - total     : changed + unchanged. Convenient denominator for the
+//                 \"N of TOTAL\" UI label.
+//
+// Skipped:
+//   - rows without a fieldDiff (no field-level data → no contribution)
+//   - rows whose fieldDiff is empty (zero changed + zero unchanged →
+//     adds 0 — doesn't distort the ratio)
+//   - rows where the import action is 'skip' AND mode is 'merge' (the
+//     live override stays untouched in merge mode, so its field
+//     diff describes what WOULD have changed under Replace; counting
+//     it as \"touched\" would mislead a Merge-mode user)
+//
+// Defensive: non-array rows → zeros; null/non-object rows silently
+// skipped; bad mode string falls back to 'merge'. Pure / no DOM.
+//
+// Mirrors summarizeFieldDiffCounts's defensive contract so a corrupt
+// row mid-list can never poison the total.
+export function summarizeImportTotalFieldImpact(rows, mode = 'merge') {
+  if (!Array.isArray(rows)) return { changed: 0, unchanged: 0, total: 0 }
+  const isReplace = mode === 'replace'
+  let changed = 0
+  let unchanged = 0
+  for (const r of rows) {
+    if (!r || typeof r !== 'object') continue
+    // Merge mode: skip-action rows describe what WOULD have happened
+    // under Replace. Counting them as "touched" misleads a Merge user
+    // who's planning a non-destructive append. Replace mode counts
+    // them (the live override is about to be overwritten or dropped).
+    if (!isReplace && r.action === 'skip') continue
+    const counts = summarizeFieldDiffCounts(r.fieldDiff, mode)
+    changed += counts.changed
+    unchanged += counts.unchanged
+  }
+  return { changed, unchanged, total: changed + unchanged }
+}
+
 // Pure equality check for bias-override field values. Routes by kind:
 //   - range fields (4): two-element numeric array, element-wise eq
 //   - chance fields (10): numeric eq

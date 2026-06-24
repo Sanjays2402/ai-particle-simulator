@@ -19,6 +19,8 @@ import {
   buildBiasImportPreviewRows,
   // R26.41 — equal-rows count projector for the per-row chip summary
   summarizeFieldDiffCounts,
+  // R27.41 — total-fields-touched projector for the preview-header pip
+  summarizeImportTotalFieldImpact,
 } from '../lib/biasOverridesIO'
 import {
   loadCameraViews, saveCameraViews, appendView, moveView, moveViewUp, moveViewDown,
@@ -2201,6 +2203,14 @@ function BiasOverridesImportPreview({ pending, existing, onModeChange, onCancel,
   const sourceLabel = fileCount > 1
     ? `${fileCount} files`
     : (okFiles[0]?.name || 'file')
+  // R27.41 — Total-fields-touched pip projected ACROSS all rows so
+  // users picking between many imports can compare scope at a glance
+  // without expanding every row. Mode-aware so flipping Merge/Replace
+  // updates the count live (replace mode pulls in skip-rows that
+  // merge mode excludes — the surface jumps to reflect the wider
+  // scope).
+  const totalImpact = summarizeImportTotalFieldImpact(rows, mode)
+  const showTotalImpact = totalImpact.total > 0
   return (
     <div style={{
       marginTop: 8, padding: 10, borderRadius: 8,
@@ -2213,8 +2223,42 @@ function BiasOverridesImportPreview({ pending, existing, onModeChange, onCancel,
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         marginBottom: 8, gap: 6,
       }}>
-        <span style={{ fontSize: 11, color: '#c7d2fe', fontWeight: 600, letterSpacing: '0.02em' }}>
-          Preview: {rows.length} bias chip{rows.length === 1 ? '' : 's'} in import
+        <span style={{
+          fontSize: 11, color: '#c7d2fe', fontWeight: 600, letterSpacing: '0.02em',
+          display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+        }}>
+          <span>Preview: {rows.length} bias chip{rows.length === 1 ? '' : 's'} in import</span>
+          {/* R27.41 — total-fields-touched pip. Mode-aware: Merge mode
+              excludes skip-rows (the live override stays untouched);
+              Replace mode counts every row. Colour cycles indigo (low
+              scope) → amber (>= 10 fields, meaningful scope) so users
+              eyeballing two imports side-by-side can see at a glance
+              which has the broader reach. */}
+          {showTotalImpact && (
+            <span
+              title={`This import will touch ${totalImpact.total} field${totalImpact.total === 1 ? '' : 's'} total: ${totalImpact.changed} changed, ${totalImpact.unchanged} unchanged.${mode === 'merge' ? ' (Merge mode excludes existing chips the import would skip; flip to Replace to count them too.)' : ' (Replace mode counts every field across every chip.)'}`}
+              style={{
+                fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                fontSize: 9, padding: '1px 6px', borderRadius: 4,
+                background: totalImpact.changed >= 10
+                  ? 'rgba(245,158,11,0.10)'
+                  : 'rgba(99,102,241,0.10)',
+                color: totalImpact.changed >= 10 ? '#fde68a' : '#c7d2fe',
+                border: totalImpact.changed >= 10
+                  ? '1px solid rgba(245,158,11,0.30)'
+                  : '1px solid rgba(99,102,241,0.30)',
+                letterSpacing: '0.04em',
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                fontWeight: 600,
+              }}>
+              <span>Touching</span>
+              <span style={{ color: totalImpact.changed >= 10 ? '#fbbf24' : '#a5b4fc', fontWeight: 700 }}>
+                {totalImpact.changed}
+              </span>
+              <span style={{ color: '#5a5a70' }}>of</span>
+              <span>{totalImpact.total}</span>
+            </span>
+          )}
         </span>
         <span style={{
           fontSize: 10, color: '#7a7a90', fontFamily: 'Geist Mono, JetBrains Mono, monospace',
