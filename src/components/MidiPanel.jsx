@@ -683,19 +683,18 @@ export default function MidiPanel({ open, onClose }) {
         return flipped
       })
     }
-    // R24.38 — chain-counter badge. Suppressed on step 1 (the user is
-    // looking at the first warning — no chain to count yet). From step
-    // 2 onward, paint "x2", "x3", ... R26.43 — colour now comes from
-    // the formatter's `color` field (cyan « / amber ») so the direction
-    // is visible at peripheral glance, alternating as the user keeps
-    // clicking Undo. The winner-bundle accent (pre-R26.43 colour) is
-    // already conveyed via the toast's left icon — moving the badge
-    // colour to direction-coded carries more information per pixel.
-    // The formatter returns null on step 1 / non-finite / < 1 — that
-    // null becomes undefined here so showToast's truthy-on-text guard
-    // suppresses the badge cleanly.
+    // R27.43 — Fade the badge colour over the undo window. When a chain
+    // step has a directional colour (step >= 2), pass the fade config
+    // to showToast so Toast.jsx ticks a 50ms interval and lerps the
+    // badge from cyan/amber → grey as Date.now() - mountedAt walks
+    // 0 → UNDO_CHAIN_MS. Step 1 has no badge so there's nothing to
+    // fade; we leave fade undefined on null badges.
     const formatted = formatHotkeyChainBadge(chainStep, UNDO_CHAIN_MS)
-    const badge = formatted || undefined
+    const badge = formatted
+      ? (formatted.color
+        ? { ...formatted, fade: { baseColor: formatted.color, windowMs: UNDO_CHAIN_MS } }
+        : formatted)
+      : undefined
     showToast(
       `Hotkey \u201c${hotkey}\u201d \u2192 \u201c${winner.name}\u201d (stolen from \u201c${loser.name}\u201d)`,
       <AlertCircle size={10} color={winnerColor.accent} strokeWidth={2.4} />,

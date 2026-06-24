@@ -456,10 +456,64 @@ export function isWithinUndoWindow(issuedAtMs, nowMs, windowMs = UNDO_CHAIN_MS) 
 // pinned. Defensive: non-finite / < 2 / non-numeric → null.
 export const HOTKEY_CHAIN_COLOR_REVERSE = '#67e8f9'   // « cyan
 export const HOTKEY_CHAIN_COLOR_FORWARD = '#fbbf24'   // » amber
+// R27.43 — Fade endpoint. As the 1s undo window expires, the badge's
+// direction colour lerps from cyan/amber → this grey so the user gets
+// a visual "click soon or lose the flip" cue at peripheral glance.
+// Same #5a5a70 the rest of the muted-UI elements use so the fade
+// lands on a colour the eye already reads as "inactive".
+export const HOTKEY_CHAIN_COLOR_FADED = '#5a5a70'
 export function directionColorForChainStep(chainStep) {
   if (!Number.isFinite(chainStep) || chainStep < 2) return null
   const step = Math.floor(chainStep)
   return step % 2 === 0 ? HOTKEY_CHAIN_COLOR_REVERSE : HOTKEY_CHAIN_COLOR_FORWARD
+}
+
+// R27.43 — Linearly fade a direction colour toward HOTKEY_CHAIN_COLOR_FADED
+// over the undo window. As elapsedMs walks 0 → windowMs, the returned
+// colour walks baseColor → faded grey. Past windowMs the colour pins
+// at the grey endpoint. The fade is the visual cue that the user is
+// running out of time to click Undo and flip back.
+//
+// Pure helper exposed for tests so the fade math is regression-pinned.
+// Pure RGB lerp (not HSL) so the path through colour-space is straight
+// + predictable; the start and end colours are close enough in hue
+// (cyan/amber → grey) that the RGB midpoint reads naturally.
+//
+// Defensive contract — every bad input returns the baseColor unchanged
+// (NEVER returns the faded grey for bad-input — that would be silently
+// wrong; the user might still be in-window and getting a spurious
+// "expired" cue).
+//   - non-string baseColor → input (returned untouched)
+//   - baseColor not a #RRGGBB hex string → input
+//   - non-finite / negative elapsedMs → baseColor (treat as "just
+//     issued")
+//   - non-finite / zero / negative windowMs → baseColor (no fade math
+//     possible without a denominator > 0)
+//
+// elapsedMs >= windowMs returns HOTKEY_CHAIN_COLOR_FADED (final
+// endpoint) so the badge doesn't keep lerping past the window's
+// expiration. At elapsedMs===0 returns baseColor exactly.
+export function fadeDirectionColor(baseColor, elapsedMs, windowMs) {
+  if (typeof baseColor !== 'string') return baseColor
+  // #RRGGBB hex pattern only — anything else returns baseColor so a
+  // caller using rgb()/hsl()/named colours isn't silently broken.
+  if (!/^#[0-9a-f]{6}$/i.test(baseColor)) return baseColor
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return baseColor
+  if (!Number.isFinite(windowMs) || windowMs <= 0) return baseColor
+  if (elapsedMs >= windowMs) return HOTKEY_CHAIN_COLOR_FADED
+  const t = elapsedMs / windowMs   // 0..1 over the window
+  const baseR = parseInt(baseColor.slice(1, 3), 16)
+  const baseG = parseInt(baseColor.slice(3, 5), 16)
+  const baseB = parseInt(baseColor.slice(5, 7), 16)
+  const endR  = parseInt(HOTKEY_CHAIN_COLOR_FADED.slice(1, 3), 16)
+  const endG  = parseInt(HOTKEY_CHAIN_COLOR_FADED.slice(3, 5), 16)
+  const endB  = parseInt(HOTKEY_CHAIN_COLOR_FADED.slice(5, 7), 16)
+  const r = Math.round(baseR + (endR - baseR) * t)
+  const g = Math.round(baseG + (endG - baseG) * t)
+  const b = Math.round(baseB + (endB - baseB) * t)
+  // 2-digit zero-pad for each channel so 0x0e doesn't collapse to "e".
+  const hex = (n) => n.toString(16).padStart(2, '0')
+  return `#${hex(r)}${hex(g)}${hex(b)}`
 }
 
 export function formatHotkeyChainBadge(chainStep, windowMs = UNDO_CHAIN_MS) {

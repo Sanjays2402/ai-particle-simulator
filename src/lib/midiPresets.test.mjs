@@ -28,6 +28,8 @@ import {
   directionGlyphForChainStep,
   // R26.43 — direction-coded badge accent colour
   directionColorForChainStep, HOTKEY_CHAIN_COLOR_REVERSE, HOTKEY_CHAIN_COLOR_FORWARD,
+  // R27.43 — direction colour fades over the 1s undo window
+  HOTKEY_CHAIN_COLOR_FADED, fadeDirectionColor,
 } from './midiPresets.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -1079,3 +1081,142 @@ console.log('PASS: directionGlyphForChainStep — alternating direction indicato
 }
 
 console.log('PASS: directionColorForChainStep — direction-coded badge accent (R26.43, ~30 asserts)')
+
+// --- R27.43: fadeDirectionColor — colour fades over 1s undo window ----
+// As the 1s undo window expires, the badge's direction colour lerps
+// from cyan/amber → faded grey so the user gets a visual "click soon
+// or lose the flip" cue at peripheral glance.
+
+// Endpoint anchoring — at elapsedMs=0 returns baseColor EXACTLY.
+{
+  eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, 0, 1000), HOTKEY_CHAIN_COLOR_REVERSE,
+    'elapsed=0: cyan returned unchanged (anchor)')
+  eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_FORWARD, 0, 1000), HOTKEY_CHAIN_COLOR_FORWARD,
+    'elapsed=0: amber returned unchanged (anchor)')
+}
+
+// Endpoint anchoring — at elapsedMs===windowMs returns FADED exactly.
+{
+  eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, 1000, 1000), HOTKEY_CHAIN_COLOR_FADED,
+    'elapsed=windowMs: cyan → faded grey')
+  eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_FORWARD, 1000, 1000), HOTKEY_CHAIN_COLOR_FADED,
+    'elapsed=windowMs: amber → faded grey')
+}
+
+// Past window: stays at FADED (no extrapolation past endpoint).
+{
+  eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, 2000, 1000), HOTKEY_CHAIN_COLOR_FADED,
+    'elapsed > windowMs: stays at faded grey')
+  eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, 99999, 1000), HOTKEY_CHAIN_COLOR_FADED,
+    'huge elapsed: stays at faded grey')
+}
+
+// Midpoint (elapsedMs = windowMs/2): each channel lerps halfway.
+{
+  // cyan #67e8f9 (R=103 G=232 B=249) → grey #5a5a70 (R=90 G=90 B=112)
+  // midpoint: R=(103+90)/2=96.5≈97 G=(232+90)/2=161 B=(249+112)/2=180.5≈181
+  const mid = fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, 500, 1000)
+  eq(mid.toLowerCase(), '#61a1b5', 'cyan→grey midpoint exact RGB lerp')
+}
+
+// Monotonicity: as elapsed increases, each channel walks monotonically
+// toward the endpoint (not past it). Sample 10 points across the window.
+{
+  const base = HOTKEY_CHAIN_COLOR_FORWARD  // amber #fbbf24
+  const baseR = parseInt(base.slice(1,3), 16)
+  const endR  = parseInt(HOTKEY_CHAIN_COLOR_FADED.slice(1,3), 16)
+  let prevR = baseR
+  for (let i = 1; i <= 10; i++) {
+    const elapsed = i * 100  // 100, 200, ..., 1000
+    const result = fadeDirectionColor(base, elapsed, 1000)
+    const r = parseInt(result.slice(1,3), 16)
+    // baseR > endR for amber→grey: r should decrease monotonically.
+    ok(r <= prevR, `monotone amber R channel at elapsed=${elapsed}: ${r} <= ${prevR}`)
+    prevR = r
+  }
+  // Final sample reaches endpoint exactly (R channel).
+  eq(prevR, endR, 'final sample reaches endpoint R channel')
+}
+
+// Output is valid #RRGGBB hex string with 2-char per channel.
+{
+  for (let elapsed = 0; elapsed <= 1000; elapsed += 50) {
+    const out = fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, elapsed, 1000)
+    ok(/^#[0-9a-f]{6}$/i.test(out), `valid #RRGGBB at elapsed=${elapsed}: ${out}`)
+  }
+}
+
+// Channel zero-pad: a result with 0x00..0x0f in any channel must still
+// be 2 digits (e.g. "#5a0061" not "#5a061").
+{
+  // Use a base with a low channel that drops to 0 mid-fade.
+  const baseLow = '#10ffff'    // R=16 close to endpoint R≈90; lerp produces single-digit hex
+  const out = fadeDirectionColor(baseLow, 500, 1000)
+  ok(/^#[0-9a-f]{6}$/i.test(out), 'valid zero-padded #RRGGBB across all channels')
+  eq(out.length, 7, 'output length exactly 7 (#ABCDEF format)')
+}
+
+// Defensive — non-string baseColor returns input.
+{
+  eq(fadeDirectionColor(null,      500, 1000), null,      'null base → input ref')
+  eq(fadeDirectionColor(undefined, 500, 1000), undefined, 'undefined base → input ref')
+  eq(fadeDirectionColor(42,        500, 1000), 42,        'number base → input ref')
+  const obj = { a: 1 }
+  eq(fadeDirectionColor(obj,       500, 1000), obj,       'object base → input ref')
+}
+
+// Defensive — baseColor not #RRGGBB → input untouched (never falls
+// to faded grey for a colour that wasn't ours to lerp).
+{
+  eq(fadeDirectionColor('rgb(255,0,0)', 500, 1000), 'rgb(255,0,0)', 'rgb() base → unchanged')
+  eq(fadeDirectionColor('hsl(0,50%,50%)', 500, 1000), 'hsl(0,50%,50%)', 'hsl() base → unchanged')
+  eq(fadeDirectionColor('red',           500, 1000), 'red',           'named base → unchanged')
+  eq(fadeDirectionColor('#abc',          500, 1000), '#abc',          '3-digit base → unchanged')
+  eq(fadeDirectionColor('#zzzzzz',       500, 1000), '#zzzzzz',       'invalid hex chars → unchanged')
+  eq(fadeDirectionColor('not a colour',  500, 1000), 'not a colour',  'gibberish → unchanged')
+  eq(fadeDirectionColor('',              500, 1000), '',              'empty string → unchanged')
+}
+
+// Defensive — non-finite elapsedMs returns baseColor (NEVER faded —
+// Infinity/NaN are corrupt timestamps, the user might still be in-
+// window; we surface the original colour instead of silently saying
+// "expired").
+{
+  eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, NaN,       1000), HOTKEY_CHAIN_COLOR_REVERSE, 'NaN elapsed → base')
+  eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, Infinity,  1000), HOTKEY_CHAIN_COLOR_REVERSE, 'Infinity elapsed → base (non-finite, not past-window)')
+  eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, -Infinity, 1000), HOTKEY_CHAIN_COLOR_REVERSE, '-Infinity elapsed → base')
+  eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, -100,      1000), HOTKEY_CHAIN_COLOR_REVERSE, 'negative elapsed → base')
+  eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, '500',     1000), HOTKEY_CHAIN_COLOR_REVERSE, 'string elapsed → base')
+  eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, null,      1000), HOTKEY_CHAIN_COLOR_REVERSE, 'null elapsed → base')
+  eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, undefined, 1000), HOTKEY_CHAIN_COLOR_REVERSE, 'undefined elapsed → base')
+}
+
+// Defensive — non-finite / zero / negative windowMs returns baseColor.
+{
+  eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, 500, NaN),       HOTKEY_CHAIN_COLOR_REVERSE, 'NaN window → base')
+  eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, 500, Infinity),  HOTKEY_CHAIN_COLOR_REVERSE, 'Infinity window → base')
+  eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, 500, -1000),     HOTKEY_CHAIN_COLOR_REVERSE, 'negative window → base')
+  eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, 500, 0),         HOTKEY_CHAIN_COLOR_REVERSE, 'zero window → base (no denominator)')
+  eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, 500, '1000'),    HOTKEY_CHAIN_COLOR_REVERSE, 'string window → base')
+  eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, 500, null),      HOTKEY_CHAIN_COLOR_REVERSE, 'null window → base')
+  eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, 500, undefined), HOTKEY_CHAIN_COLOR_REVERSE, 'undefined window → base')
+}
+
+// Case-insensitive hex parsing (both #ABCDEF and #abcdef accepted).
+{
+  const lower = fadeDirectionColor('#67e8f9', 500, 1000)
+  const upper = fadeDirectionColor('#67E8F9', 500, 1000)
+  eq(lower.toLowerCase(), upper.toLowerCase(), 'case-insensitive parse: same lerp result')
+}
+
+// Endpoint exposed constant is a valid hex string.
+{
+  ok(/^#[0-9a-f]{6}$/i.test(HOTKEY_CHAIN_COLOR_FADED), 'HOTKEY_CHAIN_COLOR_FADED is valid #RRGGBB')
+  // And distinct from both direction colours so the fade is visible.
+  ok(HOTKEY_CHAIN_COLOR_FADED.toLowerCase() !== HOTKEY_CHAIN_COLOR_REVERSE.toLowerCase(),
+    'FADED distinct from REVERSE (cyan)')
+  ok(HOTKEY_CHAIN_COLOR_FADED.toLowerCase() !== HOTKEY_CHAIN_COLOR_FORWARD.toLowerCase(),
+    'FADED distinct from FORWARD (amber)')
+}
+
+console.log('PASS: fadeDirectionColor — chain-badge fade over undo window (R27.43, ~50 asserts)')
