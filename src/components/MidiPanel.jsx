@@ -68,7 +68,7 @@ import {
   // R19.20 — multi-file drop combiner (pure helper, no DOM)
   combineDroppedBundles,
 } from '../lib/midiUserBundleIO'
-import { attractorTypeStyle } from '../lib/namedAttractors'
+import { attractorTypeStyle, dropIndexForGap } from '../lib/namedAttractors'
 import { Music4, X, CheckCircle2, AlertCircle, Zap, Save, Trash2, Download, Upload } from 'lucide-react'
 import { showToast } from './Toast'
 
@@ -261,6 +261,11 @@ export default function MidiPanel({ open, onClose }) {
   // (R15.20 / R18.19 / R17.07 all use it).
   const [draggingGroupIdx, setDraggingGroupIdx] = useState(null)
   const [dragOverGroupIdx, setDragOverGroupIdx] = useState(null)
+  // R27.20 — gap-drop zones for explicit "insert here" semantics
+  // (graduates R26.20's drop-on-row gesture). Parallels R19.19's
+  // named-attractor gap-drop in LeftSidebar. dropIndexForGap from
+  // namedAttractors.js encapsulates the splice-bookkeeping math.
+  const [gapOverGroupIdx, setGapOverGroupIdx] = useState(null)
   const moveNamedAttractorByIndex = useStore(s => s.moveNamedAttractorByIndex)
   // R26.20 — touch-drag support for the binding-group reorder
   // (graduates R25.20's desktop-only HTML5 native DnD; touch devices
@@ -1198,7 +1203,7 @@ export default function MidiPanel({ open, onClose }) {
                     textTransform: 'none', fontSize: 10,
                   }}>· strength / radius / radius·log / x / y / z / enabled / type</span>
                 </div>
-                {grouped.map(group => {
+                {grouped.map((group, groupIdxInIter) => {
                   // R14.05 — pull the LIVE attractor so the group header
                   // borrows the attractor's type-specific accent. Stale
                   // groups (deleted attractor still has bindings) fall
@@ -1222,8 +1227,78 @@ export default function MidiPanel({ open, onClose }) {
                   // R26.20 — total live groups; used by touch handlers so
                   // single-attractor lists skip the long-press arm.
                   const totalGroups = (namedAttractors || []).length
+                  // R27.20 — gap-drop zone visibility + state. Each
+                  // group has a gap-ABOVE it (index = groupIdxInIter).
+                  // The gap renders inert at 4px height by default
+                  // (subtle spacer) and expands to 18px with an
+                  // indigo dashed strip when a drag is active AND
+                  // this gap is the hovered target. Single-group
+                  // lists skip the gap entirely (nothing to insert
+                  // between).
+                  const showGap = draggable && grouped.length > 1
+                  const isGapTarget = showGap && gapOverGroupIdx === groupIdxInIter
+                                      && draggingGroupIdx != null
                   return (
-                    <div key={group.attractorId}
+                    <div key={group.attractorId} style={{ display: 'contents' }}>
+                      {/* R27.20 — gap-above-this-group drop zone.
+                          Renders inert at 4px tall by default
+                          (visually invisible thin spacer between
+                          groups, matches the 6px marginBottom of the
+                          group divs above) but expands to 18px with
+                          an indigo dashed strip when a drag is active
+                          AND this gap is the hovered target. The
+                          expand-on-hover gives the user a much larger
+                          landing target than a 1px line would while
+                          keeping the at-rest layout tidy. Pure wire
+                          layer on the lib's dropIndexForGap +
+                          moveAttractorByIndex primitives which are
+                          already pinned in namedAttractors.test.mjs
+                          (R19.19's test coverage). */}
+                      {showGap && (
+                        <div
+                          onDragOver={(e) => {
+                            if (draggingGroupIdx == null) return
+                            e.preventDefault()
+                            try { e.dataTransfer.dropEffect = 'move' } catch { /* */ }
+                            if (gapOverGroupIdx !== groupIdxInIter) setGapOverGroupIdx(groupIdxInIter)
+                            if (dragOverGroupIdx !== null) setDragOverGroupIdx(null)
+                          }}
+                          onDragLeave={() => {
+                            if (gapOverGroupIdx === groupIdxInIter) setGapOverGroupIdx(null)
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault()
+                            const from = draggingGroupIdx
+                            setDraggingGroupIdx(null)
+                            setDragOverGroupIdx(null)
+                            setGapOverGroupIdx(null)
+                            if (from == null) return
+                            // R19.19 — dropIndexForGap encapsulates the
+                            // splice-bookkeeping math + the no-op cases
+                            // (dropping into own slot — either gap above
+                            // or gap below the dragged group). Returns
+                            // null on no-op so the store call short-
+                            // circuits cleanly.
+                            const insertIdx = dropIndexForGap(from, groupIdxInIter, (namedAttractors || []).length)
+                            if (insertIdx == null) return
+                            moveNamedAttractorByIndex(from, insertIdx)
+                          }}
+                          style={{
+                            height: isGapTarget ? 18 : 4,
+                            margin: '-2px 0 -1px 0',
+                            borderRadius: 4,
+                            background: isGapTarget
+                              ? 'linear-gradient(90deg, rgba(99,102,241,0.18), rgba(168,85,247,0.12))'
+                              : 'transparent',
+                            border: isGapTarget
+                              ? '1px dashed rgba(99,102,241,0.55)'
+                              : '1px dashed transparent',
+                            transition: 'height 0.12s ease-out, background 0.12s ease-out, border-color 0.12s ease-out',
+                          }}
+                          title={`Drop here to insert this attractor at position ${groupIdxInIter + 1}`}
+                        />
+                      )}
+                      <div
                       ref={draggable ? setGroupRef(liveIdx) : undefined}
                       onDragOver={draggable ? (e) => {
                         // Allow drop only when a group drag is in progress
@@ -1244,6 +1319,7 @@ export default function MidiPanel({ open, onClose }) {
                         const to = liveIdx
                         setDraggingGroupIdx(null)
                         setDragOverGroupIdx(null)
+                        setGapOverGroupIdx(null)
                         if (from == null || from === to) return
                         moveNamedAttractorByIndex(from, to)
                       } : undefined}
@@ -1290,6 +1366,7 @@ export default function MidiPanel({ open, onClose }) {
                             onDragEnd={() => {
                               setDraggingGroupIdx(null)
                               setDragOverGroupIdx(null)
+                              setGapOverGroupIdx(null)
                             }}
                             // R26.20 — touch handlers spread onto the
                             // grab handle so a thumb-down on the ⠇
@@ -1735,6 +1812,51 @@ export default function MidiPanel({ open, onClose }) {
                           </div>
                         )
                       })}
+                    </div>
+                    {/* R27.20 — trailing gap below the LAST group only
+                        (so dropping past the bottom group inserts at the
+                        end). Renders only during an active drag so the
+                        layout stays compact at rest. */}
+                    {showGap && groupIdxInIter === grouped.length - 1 && draggingGroupIdx != null && (
+                      <div
+                        onDragOver={(e) => {
+                          e.preventDefault()
+                          try { e.dataTransfer.dropEffect = 'move' } catch { /* */ }
+                          const trailingIdx = (namedAttractors || []).length
+                          if (gapOverGroupIdx !== trailingIdx) setGapOverGroupIdx(trailingIdx)
+                          if (dragOverGroupIdx !== null) setDragOverGroupIdx(null)
+                        }}
+                        onDragLeave={() => {
+                          const trailingIdx = (namedAttractors || []).length
+                          if (gapOverGroupIdx === trailingIdx) setGapOverGroupIdx(null)
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault()
+                          const from = draggingGroupIdx
+                          setDraggingGroupIdx(null)
+                          setDragOverGroupIdx(null)
+                          setGapOverGroupIdx(null)
+                          if (from == null) return
+                          const trailingIdx = (namedAttractors || []).length
+                          const insertIdx = dropIndexForGap(from, trailingIdx, trailingIdx)
+                          if (insertIdx == null) return
+                          moveNamedAttractorByIndex(from, insertIdx)
+                        }}
+                        style={{
+                          height: gapOverGroupIdx === (namedAttractors || []).length ? 24 : 8,
+                          marginTop: 2,
+                          borderRadius: 4,
+                          background: gapOverGroupIdx === (namedAttractors || []).length
+                            ? 'linear-gradient(90deg, rgba(99,102,241,0.18), rgba(168,85,247,0.12))'
+                            : 'rgba(255,255,255,0.015)',
+                          border: gapOverGroupIdx === (namedAttractors || []).length
+                            ? '1px dashed rgba(99,102,241,0.55)'
+                            : '1px dashed rgba(255,255,255,0.05)',
+                          transition: 'height 0.12s ease-out, background 0.12s ease-out, border-color 0.12s ease-out',
+                        }}
+                        title="Drop here to move this attractor to the end of the list"
+                      />
+                    )}
                     </div>
                   )
                 })}
