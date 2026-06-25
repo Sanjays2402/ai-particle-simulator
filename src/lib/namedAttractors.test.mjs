@@ -20,6 +20,8 @@ import {
   removeAttractors,
   // R19.19 — gap-drop helper for insert-here semantics
   dropIndexForGap,
+  // R29.20 — keyboard gap-cursor stepper for accessible reorder
+  stepKeyboardGapCursor,
 } from './namedAttractors.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -722,3 +724,110 @@ console.log(`PASS: namedAttractors — types/clamps, normalize (full/defaults/en
 }
 
 console.log('PASS: namedAttractors R19.19 dropIndexForGap — gap-drop insert-here semantics, no-op cases, defensive, sweep invariant')
+
+// =====================================================================
+// R29.20 — stepKeyboardGapCursor: keyboard gap-cursor for accessible
+// binding-group reorder (skips the two no-op gaps adjacent to the
+// lifted row; clamps at boundaries; seeds sensibly when unset).
+// =====================================================================
+
+// Length 4, lifting MIDDLE row (from=1). Valid gaps: {0, 3, 4}
+// (gaps 1 and 2 are no-ops adjacent to row 1).
+{
+  const L = 4, from = 1
+  // Unset cursor seeds in the requested direction.
+  eq(stepKeyboardGapCursor(from, null, 1, L), 3, 'middle row, unset+down seeds at gap 3 (from+2)')
+  eq(stepKeyboardGapCursor(from, null, -1, L), 0, 'middle row, unset+up seeds at gap 0 (from-1)')
+  // Stepping down from gap 3 -> gap 4 (end).
+  eq(stepKeyboardGapCursor(from, 3, 1, L), 4, 'down from 3 -> 4')
+  // At the bottom boundary, further down parks (no wrap).
+  eq(stepKeyboardGapCursor(from, 4, 1, L), 4, 'down from 4 parks at 4 (clamp, no wrap)')
+  // Stepping up from gap 3 SKIPS the two no-op gaps (2 and 1) -> gap 0.
+  eq(stepKeyboardGapCursor(from, 3, -1, L), 0, 'up from 3 skips no-op gaps 2,1 -> gap 0')
+  // At the top boundary, further up parks at 0.
+  eq(stepKeyboardGapCursor(from, 0, -1, L), 0, 'up from 0 parks at 0 (clamp)')
+}
+
+// Length 4, lifting TOP row (from=0). Valid gaps: {2, 3, 4}.
+{
+  const L = 4, from = 0
+  eq(stepKeyboardGapCursor(from, null, 1, L), 2, 'top row, unset+down seeds at gap 2 (from+2)')
+  // Arrow-up on the top row is a no-op (nowhere valid above) -> null.
+  eq(stepKeyboardGapCursor(from, null, -1, L), null, 'top row, unset+up -> null (cannot move up)')
+  eq(stepKeyboardGapCursor(from, 2, 1, L), 3, 'down from 2 -> 3')
+  eq(stepKeyboardGapCursor(from, 3, 1, L), 4, 'down from 3 -> 4')
+  // Up from gap 2 -> nowhere valid below (1,0 both no-op-or-not? gap 1
+  // is no-op (from+1), gap 0 is no-op (from)). Parks at 2.
+  eq(stepKeyboardGapCursor(from, 2, -1, L), 2, 'up from 2 parks (gaps 1,0 are no-ops for top row)')
+}
+
+// Length 4, lifting BOTTOM row (from=3). Valid gaps: {0, 1, 2}.
+{
+  const L = 4, from = 3
+  eq(stepKeyboardGapCursor(from, null, -1, L), 2, 'bottom row, unset+up seeds at gap 2 (from-1)')
+  // Arrow-down on the bottom row is a no-op -> null.
+  eq(stepKeyboardGapCursor(from, null, 1, L), null, 'bottom row, unset+down -> null (cannot move down)')
+  eq(stepKeyboardGapCursor(from, 2, -1, L), 1, 'up from 2 -> 1')
+  eq(stepKeyboardGapCursor(from, 1, -1, L), 0, 'up from 1 -> 0')
+  eq(stepKeyboardGapCursor(from, 0, -1, L), 0, 'up from 0 parks (clamp)')
+  // Down from gap 0 -> nowhere valid above (1,2 valid actually). gap 1
+  // is valid -> 1.
+  eq(stepKeyboardGapCursor(from, 0, 1, L), 1, 'down from 0 -> 1 (valid)')
+}
+
+// Length 2 — minimal reorderable list.
+{
+  // from=0: valid gaps {2}. Down seeds to 2; up is null.
+  eq(stepKeyboardGapCursor(0, null, 1, 2), 2, 'len2 from0 down -> gap 2 (move to end)')
+  eq(stepKeyboardGapCursor(0, null, -1, 2), null, 'len2 from0 up -> null')
+  // from=1: valid gaps {0}. Up seeds to 0; down is null.
+  eq(stepKeyboardGapCursor(1, null, -1, 2), 0, 'len2 from1 up -> gap 0 (move to top)')
+  eq(stepKeyboardGapCursor(1, null, 1, 2), null, 'len2 from1 down -> null')
+}
+
+// Defensive contract — bad inputs -> null.
+{
+  eq(stepKeyboardGapCursor(NaN, null, 1, 4), null, 'NaN from -> null')
+  eq(stepKeyboardGapCursor(1, null, 1, NaN), null, 'NaN length -> null')
+  eq(stepKeyboardGapCursor(1, null, 1, 1), null, 'length 1 (nothing to reorder) -> null')
+  eq(stepKeyboardGapCursor(1, null, 1, 0), null, 'length 0 -> null')
+  eq(stepKeyboardGapCursor(-1, null, 1, 4), null, 'negative from -> null')
+  eq(stepKeyboardGapCursor(4, null, 1, 4), null, 'from >= length -> null')
+  eq(stepKeyboardGapCursor(1, null, 0, 4), null, 'dir 0 -> null')
+  eq(stepKeyboardGapCursor(1, null, 2, 4), null, 'dir 2 (not +-1) -> null')
+}
+
+// Integration: lift a row, arrow the cursor to a gap, commit via
+// dropIndexForGap + moveAttractorByIndex — the row lands where the
+// cursor pointed. List [A,B,C,D], lift B (from=1), arrow down to gap 3
+// (between C and D), commit.
+{
+  const list = [{ id: 'A' }, { id: 'B' }, { id: 'C' }, { id: 'D' }]
+  const from = 1
+  // Seed down -> 3.
+  const cursor = stepKeyboardGapCursor(from, null, 1, list.length)
+  eq(cursor, 3, 'integration: cursor seeds at gap 3')
+  const dest = dropIndexForGap(from, cursor, list.length)
+  eq(dest, 2, 'integration: dropIndexForGap(1,3,4) -> dest index 2')
+  const moved = moveAttractorByIndex(list, from, dest)
+  eq(moved.map(a => a.id).join(''), 'ACBD', 'integration: B lands between C and D -> ACBD')
+}
+
+// Integration: lifting row 2 of 4 and arrowing up to gap 0 moves it to
+// the very top.
+{
+  const list = [{ id: 'A' }, { id: 'B' }, { id: 'C' }, { id: 'D' }]
+  const from = 2
+  // from=2 valid gaps: {0,1,4}. Seed up -> from-1 = 1.
+  let cursor = stepKeyboardGapCursor(from, null, -1, list.length)
+  eq(cursor, 1, 'integration: from2 up seeds at gap 1')
+  // Arrow up again -> gap 0.
+  cursor = stepKeyboardGapCursor(from, cursor, -1, list.length)
+  eq(cursor, 0, 'integration: up again -> gap 0')
+  const dest = dropIndexForGap(from, cursor, list.length)  // from>gap -> gap = 0
+  eq(dest, 0, 'integration: dropIndexForGap(2,0,4) -> 0')
+  const moved = moveAttractorByIndex(list, from, dest)
+  eq(moved.map(a => a.id).join(''), 'CABD', 'integration: C jumps to top -> CABD')
+}
+
+console.log('PASS: namedAttractors R29.20 stepKeyboardGapCursor — keyboard gap-cursor reorder (seed/walk/clamp/commit, ~35 asserts)')

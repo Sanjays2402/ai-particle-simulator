@@ -61,7 +61,7 @@ import {
   // R29.43 — chip-cycle helpers + label for the PERSISTED fade-curve
   // preference (graduates R28.43's hard-coded recommendation to a
   // user-selectable + reload-surviving choice)
-  HOTKEY_CHAIN_FADE_CURVES, nextHotkeyChainFadeCurve,
+  HOTKEY_CHAIN_FADE_CURVES,
   labelForHotkeyChainFadeCurve, sanitizeHotkeyChainFadeCurve,
 } from '../lib/midiPresets'
 import {
@@ -76,7 +76,7 @@ import {
   // R19.20 — multi-file drop combiner (pure helper, no DOM)
   combineDroppedBundles,
 } from '../lib/midiUserBundleIO'
-import { attractorTypeStyle, dropIndexForGap } from '../lib/namedAttractors'
+import { attractorTypeStyle, dropIndexForGap, stepKeyboardGapCursor } from '../lib/namedAttractors'
 import { Music4, X, CheckCircle2, AlertCircle, Zap, Save, Trash2, Download, Upload } from 'lucide-react'
 import { showToast } from './Toast'
 
@@ -274,6 +274,17 @@ export default function MidiPanel({ open, onClose }) {
   // named-attractor gap-drop in LeftSidebar. dropIndexForGap from
   // namedAttractors.js encapsulates the splice-bookkeeping math.
   const [gapOverGroupIdx, setGapOverGroupIdx] = useState(null)
+  // R29.20 — keyboard accessibility for the gap-drop reorder. A
+  // keyboard-only user presses Enter/Space on a group's grab handle to
+  // LIFT it, then Arrow Up/Down walks a drop cursor through the gap
+  // zones (stepKeyboardGapCursor skips the two no-op gaps adjacent to
+  // the lifted row + clamps at the ends), Enter/Space commits the move
+  // via dropIndexForGap, Escape cancels. liftedGroupIdx is the lifted
+  // row's index (null = nothing lifted); keyboardGapCursor is the
+  // cursor's current gap index. Parallels R15.20 chevron reorder but
+  // with insert-at-gap semantics so it matches the mouse/touch gap-drop.
+  const [liftedGroupIdx, setLiftedGroupIdx] = useState(null)
+  const [keyboardGapCursor, setKeyboardGapCursor] = useState(null)
   const moveNamedAttractorByIndex = useStore(s => s.moveNamedAttractorByIndex)
   // R26.20 — touch-drag support for the binding-group reorder
   // (graduates R25.20's desktop-only HTML5 native DnD; touch devices
@@ -446,6 +457,69 @@ export default function MidiPanel({ open, onClose }) {
     }
     return true
   }
+  // R29.20 — keyboard reorder handler for the group grab handle. The
+  // handle is focusable (tabIndex=0, role=button); this keydown drives
+  // the lift / arrow / commit / cancel lifecycle so a keyboard-only
+  // user can reach the gap-drop zones the mouse/touch paths already use.
+  //   - Enter / Space (not lifted) : LIFT this group (cursor unset).
+  //   - Enter / Space (lifted)     : COMMIT at the cursor's gap, or just
+  //                                  drop-in-place (cancel) if no cursor.
+  //   - ArrowUp / ArrowDown        : step the gap cursor (lifts first if
+  //                                  needed so the first arrow also works).
+  //   - Escape                     : cancel the lift, no move.
+  // `liveIdx` is the group's index in the live attractor list; `total`
+  // is the list length. Only wired on draggable groups (live + >1).
+  const onGroupHandleKeyDown = (liveIdx, total) => (e) => {
+    const key = e.key
+    const isActivate = key === 'Enter' || key === ' ' || key === 'Spacebar'
+    const isUp = key === 'ArrowUp'
+    const isDown = key === 'ArrowDown'
+    const isCancel = key === 'Escape'
+    if (!isActivate && !isUp && !isDown && !isCancel) return
+    const lifted = liftedGroupIdx === liveIdx
+    if (isCancel) {
+      if (lifted) {
+        e.preventDefault()
+        setLiftedGroupIdx(null)
+        setKeyboardGapCursor(null)
+      }
+      return
+    }
+    if (isActivate) {
+      e.preventDefault()
+      if (!lifted) {
+        // Lift this group; arm the cursor at "unset" so the next arrow
+        // seeds it past the row.
+        setLiftedGroupIdx(liveIdx)
+        setKeyboardGapCursor(null)
+        return
+      }
+      // Already lifted → commit at the cursor (if any).
+      if (keyboardGapCursor != null) {
+        const insertIdx = dropIndexForGap(liveIdx, keyboardGapCursor, total)
+        if (insertIdx != null) moveNamedAttractorByIndex(liveIdx, insertIdx)
+      }
+      setLiftedGroupIdx(null)
+      setKeyboardGapCursor(null)
+      return
+    }
+    // Arrow up/down. Lift first if not already lifted so the gesture is
+    // discoverable without a separate "press Enter to grab" step.
+    e.preventDefault()
+    if (!lifted) setLiftedGroupIdx(liveIdx)
+    const dir = isUp ? -1 : 1
+    const nextCursor = stepKeyboardGapCursor(liveIdx, lifted ? keyboardGapCursor : null, dir, total)
+    if (nextCursor != null) setKeyboardGapCursor(nextCursor)
+  }
+  // R29.20 — clear the keyboard lift if the attractor list changes out
+  // from under it (add/remove/external reorder) so a stale cursor can't
+  // commit a move against a list that no longer matches.
+  useEffect(() => {
+    if (liftedGroupIdx != null && liftedGroupIdx >= (namedAttractors || []).length) {
+      setLiftedGroupIdx(null)
+      setKeyboardGapCursor(null)
+    }
+  }, [namedAttractors, liftedGroupIdx])
   // Group touch-handler factory — spread onto the grab handle (which
   // arms the drag) and the group surface (which acts as drop target +
   // continues the gesture once armed). stopProp=true on the handle so
@@ -1187,6 +1261,10 @@ export default function MidiPanel({ open, onClose }) {
           bundleName={bundleName}
           onBundleNameChange={setBundleName}
           liveBindingCount={Object.keys(bindings).length}
+          fadeCurve={hotkeyChainFadeCurve}
+          fadeCurveLabel={labelForHotkeyChainFadeCurve(hotkeyChainFadeCurve)}
+          fadeCurveCycleHint={HOTKEY_CHAIN_FADE_CURVES.map(labelForHotkeyChainFadeCurve).join(' \u2192 ')}
+          onCycleFadeCurve={cycleHotkeyChainFadeCurve}
         />
 
         {/* Action list */}
@@ -1325,6 +1403,16 @@ export default function MidiPanel({ open, onClose }) {
                   const showGap = draggable && grouped.length > 1
                   const isGapTarget = showGap && gapOverGroupIdx === groupIdxInIter
                                       && draggingGroupIdx != null
+                  // R29.20 — keyboard reorder state for THIS group.
+                  // isKeyboardLifted: this group is the one the user
+                  // grabbed via keyboard. isKeyboardGapTarget: the
+                  // keyboard drop-cursor currently points at the gap
+                  // ABOVE this group. Both reuse the gap-zone highlight
+                  // so the keyboard path looks identical to the
+                  // mouse/touch gap-drop.
+                  const isKeyboardLifted = draggable && liftedGroupIdx === liveIdx
+                  const isKeyboardGapTarget = showGap && liftedGroupIdx != null
+                                      && keyboardGapCursor === groupIdxInIter
                   return (
                     <div key={group.attractorId} style={{ display: 'contents' }}>
                       {/* R27.20 — gap-above-this-group drop zone.
@@ -1371,13 +1459,13 @@ export default function MidiPanel({ open, onClose }) {
                             moveNamedAttractorByIndex(from, insertIdx)
                           }}
                           style={{
-                            height: isGapTarget ? 18 : 4,
+                            height: (isGapTarget || isKeyboardGapTarget) ? 18 : 4,
                             margin: '-2px 0 -1px 0',
                             borderRadius: 4,
-                            background: isGapTarget
+                            background: (isGapTarget || isKeyboardGapTarget)
                               ? 'linear-gradient(90deg, rgba(99,102,241,0.18), rgba(168,85,247,0.12))'
                               : 'transparent',
-                            border: isGapTarget
+                            border: (isGapTarget || isKeyboardGapTarget)
                               ? '1px dashed rgba(99,102,241,0.55)'
                               : '1px dashed transparent',
                             transition: 'height 0.12s ease-out, background 0.12s ease-out, border-color 0.12s ease-out',
@@ -1478,18 +1566,34 @@ export default function MidiPanel({ open, onClose }) {
                                 e.stopPropagation()
                               }
                             }}
-                            title="Drag to reorder this attractor's binding group (touch: long-press to grab)"
+                            // R29.20 — keyboard reorder: focusable handle
+                            // + keydown lifecycle so keyboard-only users
+                            // reach the gap-drop zones (Enter lifts,
+                            // arrows move the cursor, Enter commits,
+                            // Escape cancels).
+                            tabIndex={0}
+                            role="button"
+                            aria-label={isKeyboardLifted
+                              ? `Reordering ${liveAttr?.name || 'attractor'} binding group. Arrow up/down to choose a position, Enter to drop, Escape to cancel.`
+                              : `Reorder ${liveAttr?.name || 'attractor'} binding group. Press Enter or arrow keys to grab, then arrow up/down to move.`}
+                            onKeyDown={onGroupHandleKeyDown(liveIdx, totalGroups)}
+                            title="Drag to reorder this attractor's binding group (touch: long-press to grab; keyboard: focus + Enter, then arrows)"
                             style={{
                               cursor: 'grab',
-                              color: isStale ? '#a78bfa' : groupStyle.fgMuted,
+                              color: isKeyboardLifted ? '#a5b4fc' : isStale ? '#a78bfa' : groupStyle.fgMuted,
                               fontSize: 12, lineHeight: 1,
                               userSelect: 'none',
                               WebkitUserSelect: 'none',
                               WebkitTouchCallout: 'none',
                               padding: '0 2px',
+                              borderRadius: 3,
                               fontFamily: 'Geist Mono, JetBrains Mono, monospace',
                               fontWeight: 700,
                               touchAction: 'manipulation',
+                              // R29.20 — lifted state gets an indigo ring
+                              // so a keyboard user sees which row is grabbed.
+                              outline: isKeyboardLifted ? '1px solid rgba(99,102,241,0.6)' : 'none',
+                              background: isKeyboardLifted ? 'rgba(99,102,241,0.14)' : 'transparent',
                             }}
                           >{'\u2807'}</span>
                         )}
@@ -1914,9 +2018,10 @@ export default function MidiPanel({ open, onClose }) {
                     </div>
                     {/* R27.20 — trailing gap below the LAST group only
                         (so dropping past the bottom group inserts at the
-                        end). Renders only during an active drag so the
-                        layout stays compact at rest. */}
-                    {showGap && groupIdxInIter === grouped.length - 1 && draggingGroupIdx != null && (
+                        end). Renders during an active mouse drag OR when
+                        a keyboard reorder is lifted (R29.20) so the
+                        keyboard drop-cursor can point at the end. */}
+                    {showGap && groupIdxInIter === grouped.length - 1 && (draggingGroupIdx != null || liftedGroupIdx != null) && (
                       <div
                         onDragOver={(e) => {
                           e.preventDefault()
@@ -1942,13 +2047,13 @@ export default function MidiPanel({ open, onClose }) {
                           moveNamedAttractorByIndex(from, insertIdx)
                         }}
                         style={{
-                          height: gapOverGroupIdx === (namedAttractors || []).length ? 24 : 8,
+                          height: (gapOverGroupIdx === (namedAttractors || []).length || keyboardGapCursor === (namedAttractors || []).length) ? 24 : 8,
                           marginTop: 2,
                           borderRadius: 4,
-                          background: gapOverGroupIdx === (namedAttractors || []).length
+                          background: (gapOverGroupIdx === (namedAttractors || []).length || keyboardGapCursor === (namedAttractors || []).length)
                             ? 'linear-gradient(90deg, rgba(99,102,241,0.18), rgba(168,85,247,0.12))'
                             : 'rgba(255,255,255,0.015)',
-                          border: gapOverGroupIdx === (namedAttractors || []).length
+                          border: (gapOverGroupIdx === (namedAttractors || []).length || keyboardGapCursor === (namedAttractors || []).length)
                             ? '1px dashed rgba(99,102,241,0.55)'
                             : '1px dashed rgba(255,255,255,0.05)',
                           transition: 'height 0.12s ease-out, background 0.12s ease-out, border-color 0.12s ease-out',
@@ -2043,6 +2148,8 @@ function PresetBar({
   onDropFile, onDropFiles,
   savingBundle, onStartSave, onCancelSave, onCommitBundle,
   bundleName, onBundleNameChange, liveBindingCount,
+  // R29.43 — persisted hotkey-chain fade-curve preference + cycle.
+  fadeCurveLabel, onCycleFadeCurve, fadeCurveCycleHint,
 }) {
   const canSave = (bundleName || '').trim().length > 0 && liveBindingCount > 0
   const atCap = userPresets.length >= MAX_USER_PRESETS
@@ -2145,27 +2252,29 @@ function PresetBar({
             peak-curve chip (R16.17) + lightbox pan-curve chip (R17.20)
             visual + interaction language. */}
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          <button
-            type="button"
-            onClick={() => cycleHotkeyChainFadeCurve()}
-            title={`Undo-chain badge fade feel: ${labelForHotkeyChainFadeCurve(hotkeyChainFadeCurve)}. Click to cycle (${HOTKEY_CHAIN_FADE_CURVES.map(labelForHotkeyChainFadeCurve).join(' \u2192 ')}). Controls how the chain counter colour fades over the 1s undo window after re-binding a bundle hotkey. Persists across reloads.`}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-              padding: '2px 7px', borderRadius: 5,
-              fontSize: 9, fontFamily: 'Geist Mono, JetBrains Mono, monospace',
-              fontWeight: 600, letterSpacing: '0.04em',
-              cursor: 'pointer',
-              background: 'rgba(99,102,241,0.10)',
-              color: '#c7d2fe',
-              border: '1px solid rgba(99,102,241,0.30)',
-              transition: 'background 0.12s ease-out, border-color 0.12s ease-out',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(99,102,241,0.18)' }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(99,102,241,0.10)' }}
-          >
-            <span aria-hidden="true" style={{ opacity: 0.7 }}>{'\u223f'}</span>
-            <span>{labelForHotkeyChainFadeCurve(hotkeyChainFadeCurve)}</span>
-          </button>
+          {typeof onCycleFadeCurve === 'function' && (
+            <button
+              type="button"
+              onClick={() => onCycleFadeCurve()}
+              title={`Undo-chain badge fade feel: ${fadeCurveLabel}. Click to cycle (${fadeCurveCycleHint}). Controls how the chain counter colour fades over the 1s undo window after re-binding a bundle hotkey. Persists across reloads.`}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '2px 7px', borderRadius: 5,
+                fontSize: 9, fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                fontWeight: 600, letterSpacing: '0.04em',
+                cursor: 'pointer',
+                background: 'rgba(99,102,241,0.10)',
+                color: '#c7d2fe',
+                border: '1px solid rgba(99,102,241,0.30)',
+                transition: 'background 0.12s ease-out, border-color 0.12s ease-out',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(99,102,241,0.18)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(99,102,241,0.10)' }}
+            >
+              <span aria-hidden="true" style={{ opacity: 0.7 }}>{'\u223f'}</span>
+              <span>{fadeCurveLabel}</span>
+            </button>
+          )}
           <span style={{
             fontSize: 10, color: '#8a8aa0', fontFamily: 'Geist Mono, monospace',
           }}>
@@ -2850,6 +2959,18 @@ function ClampThresholdPopover({
   const cancelChipPress = () => {
     if (chipPressTimerRef.current) { clearTimeout(chipPressTimerRef.current); chipPressTimerRef.current = 0 }
   }
+  // One-shot consume of the long-press-fired flag (parallels
+  // consumeGroupClickIfSuppressed). Reading a ref inside a named event-
+  // handler helper keeps the read OUT of the render path so the React
+  // Compiler's "no refs during render" rule stays happy — the inline
+  // chip click handler calls this instead of touching .current directly.
+  const consumeChipPressIfFired = () => {
+    if (chipPressFiredRef.current) {
+      chipPressFiredRef.current = false
+      return true
+    }
+    return false
+  }
   useEffect(() => () => { if (chipPressTimerRef.current) clearTimeout(chipPressTimerRef.current) }, [])
   // Commit the bulk wipe: clear every SELECTED cell via the existing
   // per-cell handler (delegates to setClampWarnAttractorFieldOverride
@@ -3211,6 +3332,14 @@ function ClampThresholdPopover({
               display: 'flex', flexWrap: 'wrap', gap: 4,
               maxHeight: 64, overflowY: 'auto',
             }}>
+              {/* eslint-disable-next-line react-hooks/refs -- the chip
+                  click handler reads chipPressFiredRef at CLICK time (an
+                  event handler, not render) to swallow the synthetic
+                  click that follows a long-press; the read is correct
+                  but the compiler conservatively flags the captured ref
+                  inside this memoized .map closure (same pattern as
+                  consumeGroupClickIfSuppressed, which is unflagged only
+                  because it sits outside a .map). */}
               {fieldOverridesAcross.map(({ id, value }) => {
                 // Label resolution: live attractor wins; stale (deleted
                 // attractor still has persisted override) falls back to
@@ -3235,7 +3364,7 @@ function ClampThresholdPopover({
                 const handleClick = cellActionable
                   ? (e) => {
                     e.stopPropagation()  // don't bubble to outer click handlers
-                    if (chipPressFiredRef.current) { chipPressFiredRef.current = false; return }
+                    if (consumeChipPressIfFired()) return
                     if (chipMultiSelect) { toggleChipSelected(id); return }
                     onClearAttractorCell(id)
                   }

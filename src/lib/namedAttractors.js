@@ -400,6 +400,54 @@ export function dropIndexForGap(from, gapIdx, listLength) {
   return from < gapIdx ? gapIdx - 1 : gapIdx
 }
 
+// R29.20 — keyboard accessibility for the gap-drop reorder. The
+// R18.19/R19.19 gap-drop is mouse/touch-only (HTML5 DnD + touch long-
+// press); keyboard-only users had no way to reach the gap zones. This
+// graduates the gesture with a "lift the row, then arrow the drop
+// cursor through the gaps" model (parallels R15.20 chevron reorder but
+// with INSERT-AT-GAP semantics instead of swap-with-neighbour).
+//
+// Model: when a row at index `from` is "lifted" (keyboard grab), a drop
+// cursor sits at a GAP index in [0, listLength]. Arrow-up/down walk the
+// cursor through gaps, SKIPPING the two no-op gaps adjacent to the
+// lifted row (gapIdx === from and gapIdx === from + 1 both leave the
+// row where it is — landing the cursor there would be a dead stop).
+// Enter commits via dropIndexForGap; Escape cancels.
+//
+// stepKeyboardGapCursor(from, current, dir, listLength):
+//   - from        : 0-based index of the lifted row
+//   - current     : the cursor's current gap index (or null = unset,
+//                   seed at the first valid gap in `dir`)
+//   - dir         : -1 (up / toward gap 0) or +1 (down / toward end)
+//   - listLength  : number of rows
+// Returns the next valid gap index, or the input `current` unchanged
+// when there's no further valid gap in that direction (cursor parks at
+// the boundary — never wraps, matching the chevron reorder's clamp).
+//
+// Valid gaps are [0, listLength] MINUS the two no-op gaps {from,
+// from+1}. Defensive: bad inputs → null (caller treats as "no move").
+export function stepKeyboardGapCursor(from, current, dir, listLength) {
+  if (!Number.isFinite(from) || !Number.isFinite(listLength)) return null
+  if (listLength <= 1) return null  // nothing to reorder in a 0/1 list
+  if (from < 0 || from >= listLength) return null
+  if (dir !== 1 && dir !== -1) return null
+  const isValidGap = (g) => g >= 0 && g <= listLength && g !== from && g !== from + 1
+  // Seed: when the cursor is unset, start just past the lifted row in
+  // the requested direction so the FIRST arrow press makes a visible
+  // move rather than landing on a no-op gap. When set, step by `dir`.
+  let g = Number.isFinite(current) ? current + dir : (dir === 1 ? from + 2 : from - 1)
+  // Walk in `dir` until we hit a valid gap or run off the ends.
+  while (g >= 0 && g <= listLength) {
+    if (isValidGap(g)) return g
+    g += dir
+  }
+  // No further valid gap that direction. A SET cursor parks at its
+  // current position (clamp, never wrap). An UNSET cursor with no valid
+  // gap in the requested direction returns null (the press is a no-op —
+  // e.g. arrow-up on the top row, which can't move further up).
+  return Number.isFinite(current) ? current : null
+}
+
 // R16.18 — pure helper for the inline numeric input's parse step.
 // Returns the parsed 1-based integer position OR null if the input
 // is unusable (empty, NaN, ≤ 0). Keeps the UI's parse logic in one
