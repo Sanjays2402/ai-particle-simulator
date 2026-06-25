@@ -1148,12 +1148,46 @@ function SceneBookmarks() {
   // pushImportScopeHistory re-seeds the head from the live scope so the
   // pip's "Touching N" stays truthful; only the prior-scope dots vanish.
   const clearBiasScopeHistory = (liveChanged, liveTotal) => {
+    // R32.41 — snapshot the FULL prior ring BEFORE we wipe so a mis-click
+    // can be undone (parallels R28.42's note-filter bulk-unpin undo). The
+    // toast's 2.4s lifetime IS the undo window; clicking Undo restores the
+    // entire pre-clear ring (the prior-scope dots + the head) against both
+    // React state and the durable localStorage copy. We read from the live
+    // closure value — it reflects exactly the dots the user was looking at
+    // when they clicked the clear glyph.
+    const beforeClear = Array.isArray(biasScopeHistory) ? biasScopeHistory : []
     try { clearImportScopeHistory() } catch { /* quota */ }
     const seeded = (Number.isFinite(liveChanged) && Number.isFinite(liveTotal) && liveTotal > 0)
       ? pushImportScopeHistory([], liveChanged, liveTotal)
       : []
     if (seeded.length > 0) { try { saveImportScopeHistory(seeded) } catch { /* quota */ } }
     setBiasScopeHistory(seeded)
+    // Only offer Undo when there were genuinely PRIOR scopes to lose. The
+    // head is re-seeded either way (clearing drops the dots, not the live
+    // scope), so the count that matters is everything BEYOND the head. The
+    // clear glyph itself only renders when priorScopeRows.length > 0, so
+    // this is belt-and-suspenders against a future caller wiring it
+    // elsewhere.
+    const priorCount = Math.max(0, beforeClear.length - 1)
+    if (priorCount > 0) {
+      showToast(
+        `Cleared ${priorCount} prior import scope${priorCount === 1 ? '' : 's'}`,
+        // Monochrome x glyph to echo the clear affordance the user just
+        // clicked (Toast.jsx wraps the icon span).
+        <span style={{ fontSize: 11, color: '#fca5a5', fontWeight: 700 }}>{'\u00d7'}</span>,
+        {
+          label: 'Undo',
+          onClick: () => {
+            // Restore against the durable + in-memory copies. saveImport-
+            // ScopeHistory re-sanitises on write, so a snapshot that drifted
+            // can't persist a corrupt ring; setBiasScopeHistory takes the
+            // same array so the dots reappear immediately.
+            if (beforeClear.length > 0) { try { saveImportScopeHistory(beforeClear) } catch { /* quota */ } }
+            setBiasScopeHistory(beforeClear)
+          },
+        },
+      )
+    }
   }
   const onBiasDragEnter = (e) => {
     if (!e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return
