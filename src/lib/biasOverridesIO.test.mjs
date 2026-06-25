@@ -25,6 +25,9 @@ import {
   IMPORT_IMPACT_AMBER_AT, IMPORT_IMPACT_RED_AT,
   // R29.41 — rolling scope-history ring + display projector
   IMPORT_SCOPE_HISTORY_MAX, pushImportScopeHistory, describeImportScopeHistory,
+  // R30.41 — persist the scope-history ring to localStorage
+  IMPORT_SCOPE_HISTORY_KEY,
+  sanitizeImportScopeHistory, loadImportScopeHistory, saveImportScopeHistory,
 } from './biasOverridesIO.js'
 import { SCENE_BIASES, SCENE_BIAS_RANGE_FIELDS, SCENE_BIAS_CHANCE_FIELDS } from './randomScene.js'
 
@@ -1253,5 +1256,99 @@ console.log('PASS: getImportImpactIntensity + getImportImpactStyle — three-tie
 }
 
 console.log('PASS: pushImportScopeHistory + describeImportScopeHistory — preview-header scope history (R29.41, ~45 asserts)')
+
+// R30.41 — persist the scope-history ring to localStorage.
+{
+  function makeFakeStorage() {
+    const m = new Map()
+    return {
+      getItem: (k) => (m.has(k) ? m.get(k) : null),
+      setItem: (k, v) => { m.set(k, String(v)) },
+      removeItem: (k) => { m.delete(k) },
+      _raw: m,
+    }
+  }
+
+  // sanitizeImportScopeHistory — happy path keeps canonical rows.
+  const clean = [
+    { changed: 6, total: 30, intensity: 'low' },
+    { changed: 14, total: 30, intensity: 'medium' },
+    { changed: 25, total: 30, intensity: 'high' },
+  ]
+  deepEq(sanitizeImportScopeHistory(clean), clean, 'sanitize keeps canonical rows verbatim')
+
+  // Non-array / corrupt inputs → [].
+  deepEq(sanitizeImportScopeHistory(null), [], 'sanitize null -> []')
+  deepEq(sanitizeImportScopeHistory('nope'), [], 'sanitize string -> []')
+  deepEq(sanitizeImportScopeHistory({}), [], 'sanitize object -> []')
+
+  // Corrupt rows dropped; total coerced; intensity recomputed.
+  const dirty = [
+    { changed: 12, total: 4 },          // total < changed -> coerced to 12
+    null,                                // dropped
+    { changed: 'bad', total: 5 },        // non-finite changed -> dropped
+    { changed: 30, total: 40 },          // intensity recomputed -> high
+  ]
+  const cleaned = sanitizeImportScopeHistory(dirty)
+  eq(cleaned.length, 2, 'sanitize drops corrupt rows (2 survive)')
+  eq(cleaned[0].changed, 12, 'first valid changed kept')
+  eq(cleaned[0].total, 12, 'total < changed coerced up to changed')
+  eq(cleaned[0].intensity, 'medium', 'intensity recomputed (12 -> medium)')
+  eq(cleaned[1].intensity, 'high', 'intensity recomputed (30 -> high)')
+
+  // Cap enforced at MAX (newest-first; tail dropped).
+  const over = []
+  for (let i = 0; i < IMPORT_SCOPE_HISTORY_MAX + 4; i++) over.push({ changed: i, total: i + 1 })
+  eq(sanitizeImportScopeHistory(over).length, IMPORT_SCOPE_HISTORY_MAX, 'sanitize caps at IMPORT_SCOPE_HISTORY_MAX')
+
+  // Purity — input not mutated.
+  const beforeJson = JSON.stringify(dirty)
+  sanitizeImportScopeHistory(dirty)
+  eq(JSON.stringify(dirty), beforeJson, 'sanitize does not mutate input')
+
+  // load on empty/missing storage → [].
+  deepEq(loadImportScopeHistory(makeFakeStorage()), [], 'load on empty storage -> []')
+  deepEq(loadImportScopeHistory(null), [], 'load with no storage -> []')
+
+  // Round-trip: save then load reproduces the sanitized ring.
+  const s = makeFakeStorage()
+  ok(saveImportScopeHistory(clean, s), 'save returns true')
+  deepEq(loadImportScopeHistory(s), clean, 'save -> load round-trips the ring')
+  // Stored under the documented key + v:1 envelope.
+  const stored = JSON.parse(s.getItem(IMPORT_SCOPE_HISTORY_KEY))
+  eq(stored.v, 1, 'stored envelope is v:1')
+  ok(Array.isArray(stored.items), 'stored envelope has items array')
+
+  // Empty list REMOVES the key (no shell left behind).
+  s.setItem(IMPORT_SCOPE_HISTORY_KEY, JSON.stringify({ v: 1, items: clean }))
+  ok(saveImportScopeHistory([], s), 'save empty returns true')
+  eq(s.getItem(IMPORT_SCOPE_HISTORY_KEY), null, 'empty save removes the key')
+
+  // Corrupt persisted JSON / wrong version / non-array items → [].
+  const c1 = makeFakeStorage(); c1.setItem(IMPORT_SCOPE_HISTORY_KEY, '{not-json')
+  deepEq(loadImportScopeHistory(c1), [], 'load corrupt JSON -> []')
+  const c2 = makeFakeStorage(); c2.setItem(IMPORT_SCOPE_HISTORY_KEY, JSON.stringify({ v: 2, items: clean }))
+  deepEq(loadImportScopeHistory(c2), [], 'load wrong version -> []')
+  const c3 = makeFakeStorage(); c3.setItem(IMPORT_SCOPE_HISTORY_KEY, JSON.stringify({ v: 1, items: 'x' }))
+  deepEq(loadImportScopeHistory(c3), [], 'load non-array items -> []')
+
+  // Save no-op when storage unavailable.
+  eq(saveImportScopeHistory(clean, null), false, 'save with no storage -> false')
+
+  // Integration: push then persist then reload survives a "remount".
+  const sess = makeFakeStorage()
+  let ring = loadImportScopeHistory(sess)             // fresh: []
+  ring = pushImportScopeHistory(ring, 6, 30)          // low
+  saveImportScopeHistory(ring, sess)
+  ring = pushImportScopeHistory(ring, 25, 30)         // high
+  saveImportScopeHistory(ring, sess)
+  const reloaded = loadImportScopeHistory(sess)        // simulate reload
+  eq(reloaded.length, 2, 'reload after two pushes keeps both scopes')
+  eq(reloaded[0].changed, 25, 'reload preserves newest-first order (head = 25)')
+  eq(reloaded[0].intensity, 'high', 'reload preserves tier of newest')
+  eq(reloaded[1].changed, 6, 'reload preserves older scope (6)')
+}
+
+console.log('PASS: persist scope-history ring — sanitize/load/save round-trip (R30.41, ~30 asserts)')
 
 console.log(`PASS: biasOverridesIO — envelope build/parse, merge/replace, summarize, defensive, multi-file combine, R24.36 preview rows, R25.41 per-field diff, R26.41 summary counts, R27.41 total-impact projector, R28.41 three-tier intensity (${SCENE_BIASES.length} chip ids, ${SCENE_BIAS_RANGE_FIELDS.length} ranges + ${SCENE_BIAS_CHANCE_FIELDS.length} chances per chip)`)

@@ -28,7 +28,9 @@ import {
   IMPORT_IMPACT_AMBER_AT, IMPORT_IMPACT_RED_AT,
   // R29.41 — rolling scope history for the pip tooltip (compare the
   // last few previewed import scopes by tier)
+  // R30.41 — load/sanitize/save helpers so the ring survives reload.
   pushImportScopeHistory, describeImportScopeHistory,
+  loadImportScopeHistory, saveImportScopeHistory,
 } from '../lib/biasOverridesIO'
 import {
   loadCameraViews, saveCameraViews, appendView, moveView, moveViewUp, moveViewDown,
@@ -1126,9 +1128,16 @@ function SceneBookmarks() {
   // unmounting between separate import attempts. Each entry is
   // { changed, total, intensity }; capped + deduped by the pure
   // pushImportScopeHistory helper.
-  const [biasScopeHistory, setBiasScopeHistory] = useState([])
+  // R30.41 — lazy-init from localStorage so the ring survives reload /
+  // panel close (R29.41 reset it on every remount); every push persists
+  // through saveImportScopeHistory so the comparison is durable.
+  const [biasScopeHistory, setBiasScopeHistory] = useState(() => loadImportScopeHistory())
   const recordBiasScope = (changed, total) => {
-    setBiasScopeHistory(prev => pushImportScopeHistory(prev, changed, total))
+    setBiasScopeHistory(prev => {
+      const next = pushImportScopeHistory(prev, changed, total)
+      if (next !== prev) { try { saveImportScopeHistory(next) } catch { /* quota */ } }
+      return next
+    })
   }
   const onBiasDragEnter = (e) => {
     if (!e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return

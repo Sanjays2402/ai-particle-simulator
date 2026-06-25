@@ -660,6 +660,79 @@ export function describeImportScopeHistory(history) {
   return out
 }
 
+// R30.41 — PERSIST the scope-history ring to localStorage so the
+// comparison survives reload + panel close. R29.41 kept the ring in
+// React state at the RightSidebar level, which meant it reset the
+// moment the page reloaded (or the component remounted): a user who
+// previewed a "big" pack last session lost the ability to compare it
+// against today's import. R30.41 graduates the in-memory ring to a
+// reload-surviving preference, mirroring loadNoteFilterHistory's
+// load/sanitize/save shape so the contract stays symmetric across the
+// app's persisted lists.
+//
+// Storage shape (localStorage key 'bias-import-scope-history-v1'):
+//   { v: 1, items: [{ changed, total, intensity }, ...] }   (newest first)
+export const IMPORT_SCOPE_HISTORY_KEY = 'bias-import-scope-history-v1'
+
+// Sanitize a raw (possibly hand-edited / corrupt) scope-history array
+// into the canonical [{ changed, total, intensity }] shape. Drops bad
+// rows silently; caps to IMPORT_SCOPE_HISTORY_MAX (newest-first, so the
+// oldest are trimmed off the tail). Pure — input not mutated.
+//
+// Per-row repair (parallels describeImportScopeHistory's tolerance so
+// the persisted list and the rendered list never disagree):
+//   - non-object / non-finite `changed` row → dropped
+//   - `total` < changed or non-finite → coerced to `changed`
+//   - missing / invalid `intensity` → recomputed from `changed`
+export function sanitizeImportScopeHistory(raw) {
+  if (!Array.isArray(raw)) return []
+  const out = []
+  for (const h of raw) {
+    if (!h || typeof h !== 'object') continue
+    if (!Number.isFinite(h.changed) || h.changed < 0) continue
+    const changed = Math.floor(h.changed)
+    const total = Number.isFinite(h.total) && h.total >= changed ? Math.floor(h.total) : changed
+    const intensity = (h.intensity === 'low' || h.intensity === 'medium' || h.intensity === 'high')
+      ? h.intensity
+      : getImportImpactIntensity(changed)
+    out.push({ changed, total, intensity })
+    if (out.length >= IMPORT_SCOPE_HISTORY_MAX) break
+  }
+  return out
+}
+
+// Load the persisted scope history. Returns [] on missing / corrupt /
+// no-storage so a fresh install (or a wiped key) starts clean. The
+// `storage` arg is injectable for tests; falls back to localStorage.
+export function loadImportScopeHistory(storage) {
+  const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null)
+  if (!store) return []
+  try {
+    const raw = store.getItem(IMPORT_SCOPE_HISTORY_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!parsed || parsed.v !== 1 || !Array.isArray(parsed.items)) return []
+    return sanitizeImportScopeHistory(parsed.items)
+  } catch { return [] }
+}
+
+// Persist the list. No-op (returns false) when storage is unavailable.
+// An empty list REMOVES the key so we don't litter the store with a
+// `{ items: [] }` shell (matches saveNoteFilterHistory's contract).
+export function saveImportScopeHistory(list, storage) {
+  const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null)
+  if (!store) return false
+  try {
+    const safe = sanitizeImportScopeHistory(list)
+    if (safe.length === 0) {
+      store.removeItem(IMPORT_SCOPE_HISTORY_KEY)
+      return true
+    }
+    store.setItem(IMPORT_SCOPE_HISTORY_KEY, JSON.stringify({ v: 1, items: safe }))
+    return true
+  } catch { return false }
+}
+
 // Pure equality check for bias-override field values. Routes by kind:
 //   - range fields (4): two-element numeric array, element-wise eq
 //   - chance fields (10): numeric eq
