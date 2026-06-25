@@ -163,6 +163,11 @@ Existing capabilities (do not re-ship):
 - Bulk-unpin undo CHAIN across rapid successive sweeps (R29.42). Graduates R28.42's single-level bulk-unpin undo into a multi-level chain (parallels R23.35 hotkey chain). Two cleanup sweeps within a 6s window stack into a 2-level undo; each Undo click pops the newest frame, restores its pinned keys against the live history, then re-surfaces the toast for the remaining depth (x3 → x2 → plain). A settled chain (>6s gap) resets to a single fresh frame. New pure helpers in presetThumbnails.js: `pushBulkUnpinChainFrame` (window-gated chain vs reset, empty-keys no-op ref, negative-delta clock-jump reset, BULK_UNPIN_CHAIN_MAX=8 FIFO cap), `popBulkUnpinChainFrame` ({frame,rest} step-back, null on empty), `formatBulkUnpinChainBadge` (xN depth badge, null below 2 frames). Carousel holds the stack in a ref (survives toast dismissal) + threads the depth badge into the toast. ~50 fresh asserts.
 - Clamp preview-chip multi-select bulk-clear via long-press (R29.45). Graduates R28.45's single-tap-to-wipe into a mobile-friendly multi-select (parallels R17.17 attractor multi-select). Long-press any chip in the clamp popover's "resets N attractors" preview to enter selection mode; subsequent taps toggle chips; a Clear N / Cancel bar commits a bulk per-cell wipe. Selected chips wear a red fill + check glyph; unselected show a hollow ring. Escape exits selection before closing the popover. Pure UI state in ClampThresholdPopover (chipMultiSelect + selection Set + a long-press timer with move-to-cancel + synthetic-click swallow via consumeChipPressIfFired helper); commit loop delegates to the already-pinned setClampWarnAttractorFieldOverride(..., null) per-cell path (no new lib surface). Selection auto-reconciles against the live override list + auto-exits below 2 chips. ~12 fresh asserts pinning the lib commit sequence.
 - Keyboard-accessible gap-drop reorder for MIDI binding groups (R29.20). Graduates the touch/mouse-only gap-drop (R18.19/R19.19/R28.20) with a keyboard path (parallels R15.20 chevron reorder but with insert-at-gap semantics). The group grab handle is focusable (tabIndex=0, role=button, aria-label): Enter/Space lifts, Arrow Up/Down walks a drop cursor through the gaps, Enter commits, Escape cancels. Lifted row gets an indigo ring; cursor reuses the existing gap-zone highlight; trailing end-gap renders during a keyboard lift too. Lift auto-clears if the list changes underneath. New pure helper `stepKeyboardGapCursor(from, current, dir, listLength)` in namedAttractors.js: seeds past the lifted row, skips the two no-op gaps adjacent to it, clamps at the ends (never wraps), null on dead-end / bad input. Commit reuses dropIndexForGap + moveAttractorByIndex. ~35 fresh asserts.
+- Bias import scope-history ring PERSISTS across reload (R30.41). Graduates R29.41's in-memory ring (which reset on every RightSidebar remount / page reload) to a localStorage-backed preference so the preview-header pip's "compare this import vs recent ones" tooltip survives sessions. New pure helpers in biasOverridesIO.js mirroring loadNoteFilterHistory's shape: `IMPORT_SCOPE_HISTORY_KEY` ('bias-import-scope-history-v1'), `sanitizeImportScopeHistory` (per-row repair: drop non-finite changed, coerce total>=changed, recompute intensity, MAX cap, pure), `loadImportScopeHistory` ([]-on-missing/corrupt/wrong-version/non-array), `saveImportScopeHistory` (empty list removes key, no-storage no-op). RightSidebar lazy-inits biasScopeHistory from storage + persists on every push (ref-equal skip on no-op). ~30 fresh asserts.
+- Bulk-unpin undo depth pip on the dropdown footer button (R30.42). Graduates R29.42's multi-level bulk-unpin chain — the "x2 / x3" depth previously lived ONLY on the 2.4s-auto-dismiss toast; now a persistent indigo pip on the Unpin footer button keeps a mid-cleanup user aware of how many undo levels are banked. The chain stack was a non-reactive ref; added a setBulkUnpinChain wrapper that updates the ref (handler source-of-truth) AND a mirrored bulkUnpinChainDepth render state atomically (can't drift). Pip gated at depth >= 2 (parallels formatBulkUnpinChainBadge); tooltip gains "N undo levels banked". Pure UI on the already-pinned R29.42 helpers.
+- Live fade-preview swatch next to the chain fade-curve chip (R30.43). Graduates R29.43's persisted hotkey UNDO-chain fade curve with a small animated dot in the cycle chip that continuously replays the EXACT badge fade over the 1s window so users feel linear / fast-slow / slow-fast before triggering a real chain. New FadeCurvePreviewSwatch component: 50ms tick walks elapsed 0->1000ms + 360ms hold-then-loop; colour via the SAME fadeDirectionColor + sanitizeHotkeyChainFadeCurve the live badge uses (distinct mid-window colours per curve — linear #b39246 / easeOut #756b63 / easeIn #ecb62b — identical #fbbf24->#5a5a70 endpoints); box-shadow glow tracks remaining brightness for peripheral read; reduced-motion paints a static ~45%-window sample (no interval). fadeCurve threaded through PresetBar props.
+- Clamp preview-chip multi-select "Select all / none" toggle (R30.45). Graduates R29.45's long-press multi-select — wiping every cell for a field no longer needs N individual taps. A single toggle button in the multi-select bar selects EVERY live chip when some-or-none are picked, clears back to none when all are selected. allChipsSelected derives from validSelectedChipIds vs fieldOverridesAcross length (externally-vanished cells never fake "all"); All<->None label flip + indigo active state; disabled when no cells exist. Bulk clear still routes the R29.45 commitChipBulkClear path (order-independence pinned in midiMap.test). Pure UI toggle.
+- Keyboard gap-drop reorder narrated via aria-live region (R30.20). Graduates R29.20's keyboard binding-group reorder — the lift/arrow/commit gesture was SILENT to screen readers. New pure phraser `describeGapReorderAnnouncement(phase, opts)` in namedAttractors.js covers lift ("Grabbed Eye, position 3 of 5. Use up and down arrow keys..."), move ("Drop position 3 of 5" — feeds the gap cursor through dropIndexForGap so the spoken slot is the TRUE landing index, no-op gaps report resting pos, null gap reports resting), commit ("Moved Eye to position 1 of 5"), cancel; blank/missing name -> "item"; bad total / OOR from / unknown phase -> ''. MidiPanel pushes phrasings into a clip-rect aria-live="polite" aria-atomic region at each keyboard transition (including implicit lift on first arrow). ~25 fresh asserts incl. lift->arrow->commit integration pinned against R29.20's CABD move.
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -521,12 +526,19 @@ padding.
 - [x] R29.45 Clamp popover preview-chip per-cell wipe: long-press a chip (mobile) to enter a multi-select state that lets the user pick N chips before committing a bulk clear (parallels R17.17 attractor multi-select) — graduates R28.45 — 6a1474e
 - [x] R29.20 MidiPanel binding-group gap-drop: "drop at exact gap N" keyboard shortcut for accessibility (focus handle + Enter lifts, arrows walk the drop cursor, Enter commits; parallels R15.20 chevron reorder) — graduates R28.20 — 37a57f1
 
-### Batch 30 — refilled queue (graduations of Batch 29 slices)
-- [ ] R30.41 Bias import scope-history tooltip: also PERSIST the last-3-scopes ring to localStorage so the comparison survives reload (today the history resets when the panel closes / page reloads) — graduates R29.41
-- [ ] R30.42 Bulk-unpin undo chain: surface a small "x2 / x3" depth pip on the dropdown's Unpin footer button itself (not just the toast) so a user mid-cleanup sees how many undo levels are stacked even after the toast auto-dismisses — graduates R29.42
-- [ ] R30.43 Hotkey-chain fade curve: add a tiny live PREVIEW swatch next to the cycle chip that animates the actual fade over the 1s window so users see the feel before they trigger a real chain — graduates R29.43
-- [ ] R30.45 Clamp preview-chip multi-select: add a "Select all / none" toggle to the multi-select bar (parallels R17.17's attractor select-all) so wiping every cell for a field doesn't require N taps — graduates R29.45
-- [ ] R30.20 Keyboard gap-drop reorder: announce the drop position via an aria-live region ("moved to position 3 of 5") so screen-reader users get spoken feedback on each arrow step + on commit — graduates R29.20
+### Batch 30 — refilled queue (graduations of Batch 29 slices)  (SHIPPED)
+- [x] R30.41 Bias import scope-history tooltip: also PERSIST the last-3-scopes ring to localStorage so the comparison survives reload (today the history resets when the panel closes / page reloads) — graduates R29.41 — 52afdce
+- [x] R30.42 Bulk-unpin undo chain: surface a small "x2 / x3" depth pip on the dropdown's Unpin footer button itself (not just the toast) so a user mid-cleanup sees how many undo levels are stacked even after the toast auto-dismisses — graduates R29.42 — b7d491c
+- [x] R30.43 Hotkey-chain fade curve: add a tiny live PREVIEW swatch next to the cycle chip that animates the actual fade over the 1s window so users see the feel before they trigger a real chain — graduates R29.43 — d524de2
+- [x] R30.45 Clamp preview-chip multi-select: add a "Select all / none" toggle to the multi-select bar (parallels R17.17's attractor select-all) so wiping every cell for a field doesn't require N taps — graduates R29.45 — 0b00d33
+- [x] R30.20 Keyboard gap-drop reorder: announce the drop position via an aria-live region ("moved to position 3 of 5") so screen-reader users get spoken feedback on each arrow step + on commit — graduates R29.20 — 380262a
+
+### Batch 31 — refilled queue (graduations of Batch 30 slices)
+- [ ] R31.41 Bias scope-history persist: also surface a small "clear history" affordance on the pip tooltip (now that the ring survives reload, a user who wants a clean comparison slate needs a way to wipe it without clearing localStorage by hand) — graduates R30.41
+- [ ] R31.42 Bulk-unpin depth pip: animate the pip's count change with a brief scale/colour pulse when it increments (x2 -> x3) so a user banking a fresh undo level gets a peripheral confirmation the level registered — graduates R30.42
+- [ ] R31.43 Fade-preview swatch: make the swatch INTERACTIVE — click it (not the whole chip) to replay the fade once on demand (single-shot) instead of only the ambient loop, so a user can trigger the exact feel at will — graduates R30.43
+- [ ] R31.45 Clamp multi-select Select-all: add an indeterminate tri-state visual (none / some / all) to the All/None toggle so a partial selection is distinguishable at a glance from empty — graduates R30.45
+- [ ] R31.20 Reorder aria-live narration: extend the same describeGapReorderAnnouncement narration to the LeftSidebar named-attractor keyboard reorder (R29.20 only wired MidiPanel's binding-group reorder; the attractor-list reorder has the same silent-to-SR gap) — graduates R30.20
 
 ### Future queue carried from Batch 24 (refill on next batch)
 
@@ -1836,3 +1848,54 @@ padding.
   EXACTLY baseline (23/3). Frontend-focus override honoured — all 5
   slices are FRONTEND/UX (persisted prefs, comparison UI, undo chain,
   mobile multi-select, keyboard a11y).
+- 2026-06-25 04:43 PT — Batch 30 (5/5). All 5 slices shipped + pushed.
+  Commits: 52afdce (R30.41 persist bias scope-history ring), b7d491c
+  (R30.42 bulk-unpin undo depth pip on footer button), d524de2 (R30.43
+  live fade-preview swatch next to chain fade-curve chip), 0b00d33
+  (R30.45 clamp multi-select Select-all/none toggle), 380262a (R30.20
+  aria-live narration for keyboard gap-drop reorder).
+  Pushed 6a68f2d..380262a -> origin/main (verified fast-forward, 0
+  ahead / 0 behind).
+  Gates: lint 23 errors / 3 warnings — EXACTLY baseline (all pre-
+  existing in ParticleCanvas/vite.config; all 5 touched files lint
+  100% clean). Build: green (~1.0s, 1.87 MB bundle / 549 KB gzip).
+  Unit tests: ALL 40 test files pass; ~55 fresh asserts this batch.
+  - extended biasOverridesIO with ~30 R30.41 asserts (sanitizeImport
+    ScopeHistory happy/dirty/cap/purity — drop non-finite changed,
+    coerce total>=changed, recompute intensity, MAX cap, no input
+    mutation; load []-on-empty/corrupt-JSON/wrong-version/non-array;
+    save round-trip + empty-removes-key + no-storage-false + v:1
+    envelope; push+persist+reload integration preserves newest-first
+    order + tiers). New IMPORT_SCOPE_HISTORY_KEY + sanitize/load/save
+    mirror loadNoteFilterHistory's shape. RightSidebar lazy-inits from
+    storage + persists each push.
+  - R30.42 pure UI on R29.42 chain helpers (already pinned). Surfaced
+    the non-reactive chain ref's DEPTH into render state via a
+    setBulkUnpinChain wrapper (updates ref + depth atomically so they
+    can't drift); routed push + pop through it. Indigo xN pip on the
+    Unpin footer button gated at depth >= 2 (parallels formatBulkUnpin
+    ChainBadge); outlives the 2.4s toast.
+  - R30.43 new FadeCurvePreviewSwatch component. 50ms-tick loop walks
+    elapsed 0->1000ms + 360ms hold, colour via the SAME fadeDirection
+    Color + sanitizeHotkeyChainFadeCurve the live badge uses (verified
+    distinct mid-window colours per curve: linear #b39246 / easeOut
+    #756b63 / easeIn #ecb62b; identical endpoints). box-shadow glow
+    tracks remaining brightness. Reduced-motion: static ~45%-window
+    sample, no interval. Threaded fadeCurve through PresetBar props.
+  - R30.45 pure UI toggle. allChipsSelected derives from validSelected
+    ChipIds vs fieldOverridesAcross length (vanished cells never fake
+    "all"); toggleSelectAllChips swaps the Set in one setState. All<->
+    None label flip + indigo active state. Bulk clear still routes the
+    R29.45 commitChipBulkClear path (order-independence pinned in
+    midiMap.test).
+  - extended namedAttractors with ~25 R30.20 asserts (describeGap
+    ReorderAnnouncement lift/move/commit/cancel; landing math via
+    dropIndexForGap — gap 0 from idx2 -> pos1, trailing gap -> last,
+    no-op gaps report resting pos, null gap reports resting; blank/
+    missing name -> "item"; defensive total-0/from-OOR/NaN/unknown-
+    phase -> ''; lift->arrow->commit integration pinned against
+    R29.20's CABD move). MidiPanel pushes phrasings into a clip-rect
+    aria-live="polite" aria-atomic region at each keyboard transition.
+  Frontend-focus override honoured — all 5 slices are FRONTEND/UX
+  (persisted comparison ring, peripheral undo-depth cue, live curve
+  preview, bulk-select ergonomics, screen-reader a11y narration).
