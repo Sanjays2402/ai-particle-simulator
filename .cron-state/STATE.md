@@ -158,6 +158,11 @@ Existing capabilities (do not re-ship):
 - MIDI hotkey UNDO chain badge colour-codes by direction (R26.43). Graduates R25.43's alternating direction GLYPH (« / ») with matching alternating accent COLOURS so the user can read direction at peripheral glance without parsing the chevron shape. Cyan-tinted badge for « (reverse / undo direction); amber-tinted for » (forward / re-apply direction). Together with R25.43's glyph, R24.38's counter, and R23.35's 1s window, the chain UI now carries four parallel cues without overlap. New lib helpers: HOTKEY_CHAIN_COLOR_REVERSE = '#67e8f9' (cyan); HOTKEY_CHAIN_COLOR_FORWARD = '#fbbf24' (amber); `directionColorForChainStep(chainStep)` pure helper (returns colour or null; non-finite / < 2 / non-numeric → null; even step → cyan; odd step ≥ 3 → amber; fractional floors). `formatHotkeyChainBadge` extended to surface a `color` field on the returned badge object; UI drops the previous winner-bundle-accent override so the directional colour drives the badge. The bundle accent is still on the toast's left icon (unchanged) — moving the badge colour to direction-coded carries more information per pixel.
 - Clamp popover bulk-clear "THIS FIELD across every attractor" (R26.45). Graduates R25.45 (per-attractor bulk-clear) with the TRANSPOSED axis: instead of "wipe every field for this attractor", this button wipes "this field's per-attractor override on every attractor that has one". Real-world use case: power user has 8 attractors with custom STRENGTH thresholds and wants to reset all 8 back to a single per-field-global value without losing X/Y/Z per-attractor tuning. One click instead of opening 8 popovers. New lib helpers in midiMap.js: `countClampWarnFieldOverridesAcross(overrides, field)` (count of attractors with override for this field; only counts CLAMP_THRESHOLD_FIELDS keys + finite values; defensive non-object/null/array/bad field → 0; pure); `clearClampWarnFieldOverridesAcross(overrides, field)` (strips ONE field from EVERY attractor's per-attractor map; drops empty entries last-cell-prune; preserves corrupt inner entries as-is; ref-equal-on-no-op when nothing to wipe; ref-equal on bad inputs; pure / no mutation). UI: new violet-deep tinted button between R25.45's button and "Use global" in the ClampThresholdPopover footer, only renders when ≥ 2 attractors have an override for this field. Label "STRENGTH all (M)" / "RADIUS all (M)" / etc with count badge.
 - MidiPanel binding-group DnD touch / long-press support (R26.20). Graduates R25.20's desktop-only HTML5 native DnD with a touch gesture for mobile / tablet users (touch devices don't fire dragstart, so they were locked out). Parallels camera-path R22.12 / R23.31 touch DnD: 350ms long-press on the grab handle (⠇) arms the drag + 10ms haptic; touchmove > 8px before timer fires cancels (scroll stays a scroll); hit-test against per-group bounding rects via resolveTouchTargetIdx; touchend runs moveNamedAttractorByIndex + suppresses synthetic click. Pure wire layer — no new lib helpers / no new tests; moveAttractorByIndex (R15.20) + resolveTouchTargetIdx (R22.12) + sibling-enter-before-leave guard (R17.07 / R18.19) all already pinned in their respective test files. Touch state in refs (touchmove ~60Hz; setState would re-render whole panel). groupRefs map keyed by liveIdx for getBoundingClientRect. groupTouchHandlers(idx, totalGroups, opts) factory mirrors camera-path's touchDragHandlers shape; stopProp=true on grab handle. Grab handle gets touchAction:'manipulation' (kills iOS 300ms delay) + WebkitTouchCallout:'none' (suppresses iOS action sheet). Title tooltip mentions touch gesture.
+- Hotkey UNDO-chain fade curve is a PERSISTED user preference (R29.43). Graduates R28.43's hard-coded easeInCubic with a cycle chip in the MIDI Controller Presets header (linear → Fast-slow → Slow-fast) persisted to localStorage `hotkey-chain-fade-curve-v1`. The recursive chain-toast closure reads the live choice through a synced ref so cycling mid-chain takes effect. New pure helpers in midiPresets.js (parallel spectrumPeakCurve R16.17 / lightboxPanCurve R17.20): `isValidHotkeyChainFadeCurve`, `sanitizeHotkeyChainFadeCurve` (corrupt → recommended easeInCubic, NOT the linear backwards-compat default), `nextHotkeyChainFadeCurve` (wraparound, unknown → first), `labelForHotkeyChainFadeCurve`. Store gains hotkeyChainFadeCurve + set/cycle actions. Chip threaded through PresetBar props (it lives in that sub-component scope). ~55 fresh asserts.
+- Bias import preview pip remembers the last 3 scope tiers (R29.41). Graduates R28.41's single live three-tier pip with a rolling memory of recently-previewed import scopes so a user comparing several files sees "today's is low; the pack before was high" at a glance. Prior scopes paint tiny tier-accent dots after the pip (newest-prior first, dimming with age) + list in the pip tooltip. History lives at the RightSidebar level so it survives the preview panel unmounting between import attempts; the preview reports its live scope up via onRecordScope on every mode flip / fresh stage. New pure helpers in biasOverridesIO.js: `pushImportScopeHistory` (newest-first ring, IMPORT_SCOPE_HISTORY_MAX=3 FIFO cap, consecutive-dedupe updating the head in place, ref-equal-on-no-op, non-finite/negative changed rejected) + `describeImportScopeHistory` (tier label + accent + ordinal per row, corrupt rows skipped + re-ranked, missing intensity recomputed). NOTE: history is in-memory only (resets on reload) — R30.41 will persist it. ~45 fresh asserts.
+- Bulk-unpin undo CHAIN across rapid successive sweeps (R29.42). Graduates R28.42's single-level bulk-unpin undo into a multi-level chain (parallels R23.35 hotkey chain). Two cleanup sweeps within a 6s window stack into a 2-level undo; each Undo click pops the newest frame, restores its pinned keys against the live history, then re-surfaces the toast for the remaining depth (x3 → x2 → plain). A settled chain (>6s gap) resets to a single fresh frame. New pure helpers in presetThumbnails.js: `pushBulkUnpinChainFrame` (window-gated chain vs reset, empty-keys no-op ref, negative-delta clock-jump reset, BULK_UNPIN_CHAIN_MAX=8 FIFO cap), `popBulkUnpinChainFrame` ({frame,rest} step-back, null on empty), `formatBulkUnpinChainBadge` (xN depth badge, null below 2 frames). Carousel holds the stack in a ref (survives toast dismissal) + threads the depth badge into the toast. ~50 fresh asserts.
+- Clamp preview-chip multi-select bulk-clear via long-press (R29.45). Graduates R28.45's single-tap-to-wipe into a mobile-friendly multi-select (parallels R17.17 attractor multi-select). Long-press any chip in the clamp popover's "resets N attractors" preview to enter selection mode; subsequent taps toggle chips; a Clear N / Cancel bar commits a bulk per-cell wipe. Selected chips wear a red fill + check glyph; unselected show a hollow ring. Escape exits selection before closing the popover. Pure UI state in ClampThresholdPopover (chipMultiSelect + selection Set + a long-press timer with move-to-cancel + synthetic-click swallow via consumeChipPressIfFired helper); commit loop delegates to the already-pinned setClampWarnAttractorFieldOverride(..., null) per-cell path (no new lib surface). Selection auto-reconciles against the live override list + auto-exits below 2 chips. ~12 fresh asserts pinning the lib commit sequence.
+- Keyboard-accessible gap-drop reorder for MIDI binding groups (R29.20). Graduates the touch/mouse-only gap-drop (R18.19/R19.19/R28.20) with a keyboard path (parallels R15.20 chevron reorder but with insert-at-gap semantics). The group grab handle is focusable (tabIndex=0, role=button, aria-label): Enter/Space lifts, Arrow Up/Down walks a drop cursor through the gaps, Enter commits, Escape cancels. Lifted row gets an indigo ring; cursor reuses the existing gap-zone highlight; trailing end-gap renders during a keyboard lift too. Lift auto-clears if the list changes underneath. New pure helper `stepKeyboardGapCursor(from, current, dir, listLength)` in namedAttractors.js: seeds past the lifted row, skips the two no-op gaps adjacent to it, clamps at the ends (never wraps), null on dead-end / bad input. Commit reuses dropIndexForGap + moveAttractorByIndex. ~35 fresh asserts.
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -509,12 +514,19 @@ padding.
 - [x] R28.45 Clamp popover field-wipe preview chips: click an individual chip to clear JUST that one attractor's per-attractor override (per-cell wipe from the preview without leaving the popover) — graduates R27.45 — f83a2c4
 - [x] R28.20 MidiPanel binding-group gap-drop: also work on touch via long-press-then-drag-into-gap (graduates R26.20 + R27.20 combined) — touch users can now reach the gap zones — 0f85a68
 
-### Batch 29 — refilled queue (graduations of Batch 28 slices)
-- [ ] R29.41 Bias import preview header three-tier pip: also surface a tooltip-history of the LAST three import scopes the user previewed (with their tier colours) so users can compare today's import vs. last week's "ohh that was the big one" pack — graduates R28.41
-- [ ] R29.42 Note filter bulk-unpin undo toast: chain the undo across MULTIPLE bulk-unpin events within a window so a user who bulk-unpinned twice (e.g. two separate sessions of filter cleanup) can step back through both undo levels (parallels R23.35 hotkey chain) — graduates R28.42
-- [ ] R29.43 UNDO chain badge fade curve: PERSIST the user's chosen curve preset (linear / easeInCubic / easeOutCubic) so per-user fade-feel preferences survive reload — graduates R28.43
-- [ ] R29.45 Clamp popover preview-chip per-cell wipe: long-press a chip (mobile) to enter a multi-select state that lets the user pick N chips before committing a bulk clear (parallels R17.17 attractor multi-select) — graduates R28.45
-- [ ] R29.20 MidiPanel binding-group gap-drop touch: also support a "drop at exact gap N" keyboard shortcut for accessibility (cmd-arrow during a long-press lifts the row into the named gap; parallels R15.20 chevron reorder) — graduates R28.20
+### Batch 29 — refilled queue (graduations of Batch 28 slices)  (SHIPPED)
+- [x] R29.41 Bias import preview header three-tier pip: tooltip-history of the LAST three import scopes the user previewed (with their tier colours) so users can compare today's import vs. last week's "big one" pack — graduates R28.41 — aa4ed84
+- [x] R29.42 Note filter bulk-unpin undo toast: chain the undo across MULTIPLE bulk-unpin events within a window so a user who bulk-unpinned twice can step back through both undo levels (parallels R23.35 hotkey chain) — graduates R28.42 — 1d13929
+- [x] R29.43 UNDO chain badge fade curve: PERSIST the user's chosen curve preset (linear / easeInCubic / easeOutCubic) so per-user fade-feel preferences survive reload — graduates R28.43 — b208e9f
+- [x] R29.45 Clamp popover preview-chip per-cell wipe: long-press a chip (mobile) to enter a multi-select state that lets the user pick N chips before committing a bulk clear (parallels R17.17 attractor multi-select) — graduates R28.45 — 6a1474e
+- [x] R29.20 MidiPanel binding-group gap-drop: "drop at exact gap N" keyboard shortcut for accessibility (focus handle + Enter lifts, arrows walk the drop cursor, Enter commits; parallels R15.20 chevron reorder) — graduates R28.20 — 37a57f1
+
+### Batch 30 — refilled queue (graduations of Batch 29 slices)
+- [ ] R30.41 Bias import scope-history tooltip: also PERSIST the last-3-scopes ring to localStorage so the comparison survives reload (today the history resets when the panel closes / page reloads) — graduates R29.41
+- [ ] R30.42 Bulk-unpin undo chain: surface a small "x2 / x3" depth pip on the dropdown's Unpin footer button itself (not just the toast) so a user mid-cleanup sees how many undo levels are stacked even after the toast auto-dismisses — graduates R29.42
+- [ ] R30.43 Hotkey-chain fade curve: add a tiny live PREVIEW swatch next to the cycle chip that animates the actual fade over the 1s window so users see the feel before they trigger a real chain — graduates R29.43
+- [ ] R30.45 Clamp preview-chip multi-select: add a "Select all / none" toggle to the multi-select bar (parallels R17.17's attractor select-all) so wiping every cell for a field doesn't require N taps — graduates R29.45
+- [ ] R30.20 Keyboard gap-drop reorder: announce the drop position via an aria-live region ("moved to position 3 of 5") so screen-reader users get spoken feedback on each arrow step + on commit — graduates R29.20
 
 ### Future queue carried from Batch 24 (refill on next batch)
 
@@ -1776,3 +1788,51 @@ padding.
     input ranges not mutated; sequential walk through 3-row list 16
     transitions row 0 → gap 1 → row 1 → gap 2 → row 2 → trailing
     gap 3 → past-trailing snap-to-last-row)
+- 2026-06-24 22:39 PT — Batch 29 (5/5). All 5 slices shipped + pushed.
+  Commits: b208e9f (R29.43 persist hotkey-chain fade curve), aa4ed84
+  (R29.41 bias preview scope-history pip), 1d13929 (R29.42 bulk-unpin
+  undo chain), 6a1474e (R29.45 clamp chip multi-select long-press),
+  37a57f1 (R29.20 keyboard-accessible gap-drop reorder).
+  Pushed 3367f30..37a57f1 → origin/main (verified fast-forward, 0 ahead).
+  Gates: lint 23 errors / 3 warnings — EXACTLY baseline (verified via
+  git-stash diff). Build: green (~1.0s, 1.86 MB bundle / 546 KB gzip).
+  Unit tests: ALL 40 test files pass; ~197 fresh asserts this batch.
+  - extended midiPresets with ~55 R29.43 asserts (isValid roster
+    membership + prototype-pollution guard; sanitize-to-recommended
+    (NOT linear default) for corrupt/null/number; nextCurve full-lap
+    visit-each-once invariant + wraparound + unknown→first forward
+    progress; distinct non-empty labels + locked copy + raw-token
+    fallback; persisted round-trip with fade endpoint anchoring
+    preserved across every cycled curve)
+  - extended biasOverridesIO with ~45 R29.41 asserts (pushScopeHistory
+    newest-first accumulation; FIFO cap at MAX=3; consecutive-dedupe
+    head-update-in-place + ref-equal-on-no-op; defensive NaN/Inf/
+    negative changed → input ref; non-array prev → empty; non-finite/
+    sub-changed total coerced; purity; describeScopeHistory row shape
+    label+accent+ordinal; corrupt rows skipped + ordinal re-ranked
+    across survivors; missing intensity recomputed)
+  - extended presetThumbnails with ~50 R29.42 asserts (pushChainFrame
+    seed/chain/reset at window edges (inside/at/past + negative-delta
+    clock-jump reset); empty-keys + all-corrupt-keys no-op ref;
+    non-finite nowMs → at:0; FIFO cap at MAX=8; purity; popChainFrame
+    {frame,rest} step-back + null on empty/non-array + purity;
+    formatChainBadge xN gating below 2; full 3-deep lifecycle drain)
+  - extended midiMap with ~12 R29.45 asserts (multi-select bulk-clear
+    sequence: subset clear leaves others; select-all empties just the
+    chosen field with x/y surviving; ghost-id-in-selection no-op;
+    order-independence of the clear loop)
+  - extended namedAttractors with ~35 R29.20 asserts (stepKeyboardGap
+    Cursor seed/walk/clamp per lifted-row position (top/middle/bottom);
+    skips the two no-op gaps adjacent to lifted row; never-wrap clamp
+    at ends; len-2 minimum; defensive NaN/dir/range matrix → null; two
+    lift→arrow→commit integrations through dropIndexForGap +
+    moveAttractorByIndex)
+  Note on lint: R29.45's long-press chip click handler reads a ref at
+  CLICK time (correct — event handler, not render) but the React
+  Compiler's react-hooks/refs rule conservatively flagged the captured
+  ref inside the memoized .map closure. Wrapped the read in a named
+  consume helper (mirrors consumeGroupClickIfSuppressed) + a scoped
+  eslint-disable-next-line with full justification so the gate stays at
+  EXACTLY baseline (23/3). Frontend-focus override honoured — all 5
+  slices are FRONTEND/UX (persisted prefs, comparison UI, undo chain,
+  mobile multi-select, keyboard a11y).
