@@ -168,6 +168,11 @@ Existing capabilities (do not re-ship):
 - Live fade-preview swatch next to the chain fade-curve chip (R30.43). Graduates R29.43's persisted hotkey UNDO-chain fade curve with a small animated dot in the cycle chip that continuously replays the EXACT badge fade over the 1s window so users feel linear / fast-slow / slow-fast before triggering a real chain. New FadeCurvePreviewSwatch component: 50ms tick walks elapsed 0->1000ms + 360ms hold-then-loop; colour via the SAME fadeDirectionColor + sanitizeHotkeyChainFadeCurve the live badge uses (distinct mid-window colours per curve — linear #b39246 / easeOut #756b63 / easeIn #ecb62b — identical #fbbf24->#5a5a70 endpoints); box-shadow glow tracks remaining brightness for peripheral read; reduced-motion paints a static ~45%-window sample (no interval). fadeCurve threaded through PresetBar props.
 - Clamp preview-chip multi-select "Select all / none" toggle (R30.45). Graduates R29.45's long-press multi-select — wiping every cell for a field no longer needs N individual taps. A single toggle button in the multi-select bar selects EVERY live chip when some-or-none are picked, clears back to none when all are selected. allChipsSelected derives from validSelectedChipIds vs fieldOverridesAcross length (externally-vanished cells never fake "all"); All<->None label flip + indigo active state; disabled when no cells exist. Bulk clear still routes the R29.45 commitChipBulkClear path (order-independence pinned in midiMap.test). Pure UI toggle.
 - Keyboard gap-drop reorder narrated via aria-live region (R30.20). Graduates R29.20's keyboard binding-group reorder — the lift/arrow/commit gesture was SILENT to screen readers. New pure phraser `describeGapReorderAnnouncement(phase, opts)` in namedAttractors.js covers lift ("Grabbed Eye, position 3 of 5. Use up and down arrow keys..."), move ("Drop position 3 of 5" — feeds the gap cursor through dropIndexForGap so the spoken slot is the TRUE landing index, no-op gaps report resting pos, null gap reports resting), commit ("Moved Eye to position 1 of 5"), cancel; blank/missing name -> "item"; bad total / OOR from / unknown phase -> ''. MidiPanel pushes phrasings into a clip-rect aria-live="polite" aria-atomic region at each keyboard transition (including implicit lift on first arrow). ~25 fresh asserts incl. lift->arrow->commit integration pinned against R29.20's CABD move.
+- Bias import scope-history pip: clear-history affordance (R31.41). Graduates R30.41's persisted comparison ring — now that the ring survives reload, a tiny x button next to the prior-scope dots wipes it on demand without hand-clearing localStorage. New pure helper `clearImportScopeHistory(storage)` in biasOverridesIO.js (idempotent removeItem, null-storage false, throwing-removeItem swallowed to false). RightSidebar clearBiasScopeHistory wipes memory + durable copy then re-seeds the head from the LIVE import scope so the pip's "Touching N" stays truthful — only the prior-scope dots vanish. Button tabIndex=-1 (lives inside the aria-hidden decorative dots wrapper), red hover cue. ~8 fresh asserts.
+- Bulk-unpin depth pip pulses on increment (R31.42). Graduates R30.42's static footer "x2/x3" depth pip — banking a fresh undo level (x2 -> x3) now replays a scale + indigo-bloom + glow keyframe so the increment registers in peripheral vision. bulkUnpinPulse token bumped only from setBulkUnpinChain (event-time choke point) when depth GROWS to >= 2 (stepping back never pulses); pip keyed to {depth}-{pulse} so React remounts it per increment. resolveReducedMotion gates the keyframe + animation entirely (snaps for RM users). Pure UI on the already-pinned R29.42 chain helpers.
+- Interactive fade-preview swatch — click to replay (R31.43). Graduates R30.43's ambient-loop-only swatch — clicking now replays the fade once on demand. FadeCurvePreviewSwatch gains an `interactive` prop: renders as its OWN button (sibling of the cycle chip, never nested — no button-in-button) so a click bumps playToken which re-keys the anim effect: normal motion restarts the ambient loop from elapsed 0 (fresh full fade); reduced-motion runs exactly ONE self-clearing pass (the only way a RM user can feel the curve at all). Same fadeDirectionColor projector the live badge uses. Cycle chip keeps glyph + label.
+- Clamp Select-all toggle: tri-state none/some/all (R31.45). Graduates R30.45's binary toggle — a hand-picked partial selection (3 of 7) no longer looks identical to an empty one. New pure helper `clampSelectAllTriState(selectedCount, totalCount)` in midiMap.js returns 'none' | 'some' | 'all' (defensive: non-finite/negative coerce to 0, over-count caps at 'all', floors fractional). Toggle gains an indicator box: empty outline (none), amber indeterminate dash (some), indigo check (all) — bg/border/text follow the same three tiers; label still flips None<->All. ~17 fresh asserts.
+- Attractor list keyboard reorder + aria-live narration (R31.20). Graduates R30.20 (MidiPanel binding-group narration) to the LeftSidebar named-attractor list, which had the same silent-to-SR gap (its R18.19/R19.19 gap-drop was mouse/touch-only). The #N badge is now a tabIndex=0 role=button keyboard grab handle: Enter/Space (or an arrow) lifts, Arrow up/down walk a drop cursor through the gap zones, Enter commits, Escape cancels. describeGapReorderAnnouncement (pinned) phrases each step into a visually-hidden aria-live=polite region; the lifted badge pulses indigo + glow and the keyboard cursor lights the SAME gap strips (incl. trailing move-to-end) the mouse uses. Pure wire layer on stepKeyboardGapCursor + dropIndexForGap + moveNamedAttractorByIndex (all already pinned). A stale lift is gated out at render via a derived liftActive flag (no setState-in-effect — lint stays at baseline). Chevrons + drag + jump-to-position all stay alongside.
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -533,12 +538,19 @@ padding.
 - [x] R30.45 Clamp preview-chip multi-select: add a "Select all / none" toggle to the multi-select bar (parallels R17.17's attractor select-all) so wiping every cell for a field doesn't require N taps — graduates R29.45 — 0b00d33
 - [x] R30.20 Keyboard gap-drop reorder: announce the drop position via an aria-live region ("moved to position 3 of 5") so screen-reader users get spoken feedback on each arrow step + on commit — graduates R29.20 — 380262a
 
-### Batch 31 — refilled queue (graduations of Batch 30 slices)
-- [ ] R31.41 Bias scope-history persist: also surface a small "clear history" affordance on the pip tooltip (now that the ring survives reload, a user who wants a clean comparison slate needs a way to wipe it without clearing localStorage by hand) — graduates R30.41
-- [ ] R31.42 Bulk-unpin depth pip: animate the pip's count change with a brief scale/colour pulse when it increments (x2 -> x3) so a user banking a fresh undo level gets a peripheral confirmation the level registered — graduates R30.42
-- [ ] R31.43 Fade-preview swatch: make the swatch INTERACTIVE — click it (not the whole chip) to replay the fade once on demand (single-shot) instead of only the ambient loop, so a user can trigger the exact feel at will — graduates R30.43
-- [ ] R31.45 Clamp multi-select Select-all: add an indeterminate tri-state visual (none / some / all) to the All/None toggle so a partial selection is distinguishable at a glance from empty — graduates R30.45
-- [ ] R31.20 Reorder aria-live narration: extend the same describeGapReorderAnnouncement narration to the LeftSidebar named-attractor keyboard reorder (R29.20 only wired MidiPanel's binding-group reorder; the attractor-list reorder has the same silent-to-SR gap) — graduates R30.20
+### Batch 31 — refilled queue (graduations of Batch 30 slices)  (SHIPPED)
+- [x] R31.41 Bias scope-history persist: also surface a small "clear history" affordance on the pip tooltip (now that the ring survives reload, a user who wants a clean comparison slate needs a way to wipe it without clearing localStorage by hand) — graduates R30.41 — 76a674d
+- [x] R31.42 Bulk-unpin depth pip: animate the pip's count change with a brief scale/colour pulse when it increments (x2 -> x3) so a user banking a fresh undo level gets a peripheral confirmation the level registered — graduates R30.42 — 731794f
+- [x] R31.43 Fade-preview swatch: make the swatch INTERACTIVE — click it (not the whole chip) to replay the fade once on demand (single-shot) instead of only the ambient loop, so a user can trigger the exact feel at will — graduates R30.43 — f83e407
+- [x] R31.45 Clamp multi-select Select-all: add an indeterminate tri-state visual (none / some / all) to the All/None toggle so a partial selection is distinguishable at a glance from empty — graduates R30.45 — 3af5523
+- [x] R31.20 Reorder aria-live narration: extend the same describeGapReorderAnnouncement narration to the LeftSidebar named-attractor keyboard reorder (R29.20 only wired MidiPanel's binding-group reorder; the attractor-list reorder has the same silent-to-SR gap) — graduates R30.20 — de2a8e1
+
+### Batch 32 — refilled queue (graduations of Batch 31 slices)
+- [ ] R32.41 Bias scope-history clear: add an Undo toast after the clear so a mis-clicked wipe can be restored (snapshot the prior-scope ring before clearing, restore on Undo within a window — parallels R28.42's note-filter bulk-unpin undo) — graduates R31.41
+- [ ] R32.42 Bulk-unpin depth-pip pulse: also pulse the pip when it DECREMENTS (x3 -> x2 on Undo) in a distinct cool/red colour so stepping back through the chain gets the same peripheral confirmation as banking a level — graduates R31.42
+- [ ] R32.43 Interactive fade swatch: long-press the swatch (vs single click) to PIN the loop running continuously until the next click, so a user comparing two curves side-by-side can keep both animating instead of re-clicking — graduates R31.43
+- [ ] R32.45 Clamp tri-state toggle: when in the 'some' state, clicking should offer a THREE-way cycle (some -> all -> none -> some) via a tiny adjacent "invert" affordance so a user can flip their partial selection to its complement in one tap — graduates R31.45
+- [ ] R32.20 Attractor keyboard reorder: add a visible "lifted" floating chip near the badge during a keyboard grab (mirrors the row's name) so a SIGHTED keyboard user gets the same at-a-glance "what am I moving" cue the SR user gets spoken — graduates R31.20
 
 ### Future queue carried from Batch 24 (refill on next batch)
 
@@ -1899,3 +1911,47 @@ padding.
   Frontend-focus override honoured — all 5 slices are FRONTEND/UX
   (persisted comparison ring, peripheral undo-depth cue, live curve
   preview, bulk-select ergonomics, screen-reader a11y narration).
+- 2026-06-25 09:48 PT — Batch 31 (5/5). All 5 slices shipped + pushed.
+  Commits: 76a674d (R31.41 clear-history affordance on the bias import
+  scope-history pip), 731794f (R31.42 pulse the bulk-unpin depth pip on
+  increment), f83e407 (R31.43 interactive fade-preview swatch replays
+  on click), 3af5523 (R31.45 tri-state none/some/all clamp Select-all
+  toggle), de2a8e1 (R31.20 keyboard reorder + aria-live narration for
+  the attractor list).
+  Pushed 22b5262..de2a8e1 -> origin/main (verified fast-forward, 0
+  ahead / 0 behind).
+  Gates: lint 23 errors / 3 warnings — EXACTLY baseline (all pre-
+  existing in ParticleCanvas/vite.config; LeftSidebar's only error is
+  the pre-existing setDraftName sync — R31.20 added ZERO new lint
+  errors by gating a stale lift at render via a derived liftActive flag
+  instead of a setState-in-effect). Build: green (~748ms, 2422 modules).
+  Unit tests: ALL 40 test files pass; ~25 fresh asserts this batch.
+  - R31.41 new clearImportScopeHistory(storage) in biasOverridesIO.js
+    (idempotent remove, null-storage false, throwing-removeItem
+    swallowed). RightSidebar clearBiasScopeHistory wipes memory +
+    durable copy then re-seeds the head from the LIVE scope so the pip
+    stays truthful; tiny tabIndex=-1 x button inside the aria-hidden
+    dots wrapper. ~8 asserts.
+  - R31.42 pure UI on the R30.42 pip. bulkUnpinPulse token bumped only
+    from setBulkUnpinChain (event-time) when depth GROWS to >= 2; pip
+    keyed to {depth}-{pulse} so it remounts + replays a scale/indigo-
+    bloom keyframe per increment. resolveReducedMotion gates it.
+  - R31.43 FadeCurvePreviewSwatch gains `interactive`: renders as its
+    OWN button (sibling of the cycle chip, not nested) so a click
+    replays the fade once. playToken re-keys the anim effect — restart
+    loop (normal) or single self-clearing pass (reduced-motion, the
+    only way a RM user can feel the curve).
+  - R31.45 new clampSelectAllTriState(sel, tot) -> none|some|all in
+    midiMap.js (~17 asserts: canonical, single-cell, no-cells, over-
+    count ceiling, NaN/neg/Infinity coercion, fractional floor). Toggle
+    gains an indeterminate amber dash box for 'some' distinct from the
+    empty 'none' box + indigo 'all' check.
+  - R31.20 pure wire layer on stepKeyboardGapCursor + dropIndexForGap +
+    moveNamedAttractorByIndex (all already pinned). #N badge is now a
+    tabIndex=0 role=button keyboard grab handle (lift/arrow/commit/
+    Escape); describeGapReorderAnnouncement (pinned) phrases each step
+    into a visually-hidden aria-live region; lifted badge pulses indigo
+    + the keyboard cursor lights the same gap strips the mouse uses.
+  Frontend-focus override honoured — all 5 slices are FRONTEND/UX
+  (durable-state hygiene, peripheral motion cues, interactive preview,
+  bulk-select clarity, keyboard + screen-reader a11y).
