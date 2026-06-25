@@ -23,6 +23,8 @@ import {
   // R28.41 — three-tier intensity (low/medium/high) + CSS bundle
   getImportImpactIntensity, getImportImpactStyle,
   IMPORT_IMPACT_AMBER_AT, IMPORT_IMPACT_RED_AT,
+  // R29.41 — rolling scope-history ring + display projector
+  IMPORT_SCOPE_HISTORY_MAX, pushImportScopeHistory, describeImportScopeHistory,
 } from './biasOverridesIO.js'
 import { SCENE_BIASES, SCENE_BIAS_RANGE_FIELDS, SCENE_BIAS_CHANCE_FIELDS } from './randomScene.js'
 
@@ -1132,5 +1134,124 @@ console.log('PASS: summarizeImportTotalFieldImpact — preview-header total (R27
 }
 
 console.log('PASS: getImportImpactIntensity + getImportImpactStyle — three-tier preview-header intensity (R28.41, ~50 asserts)')
+
+// =====================================================================
+// R29.41 — rolling import-scope history ring + display projector
+// =====================================================================
+
+// pushImportScopeHistory — basic accumulation, newest-first.
+{
+  let h = []
+  h = pushImportScopeHistory(h, 5, 12)
+  eq(h.length, 1, 'first push -> 1 entry')
+  eq(h[0].changed, 5, 'head changed recorded')
+  eq(h[0].total, 12, 'head total recorded')
+  eq(h[0].intensity, 'low', 'head intensity derived (5 < 10 -> low)')
+  h = pushImportScopeHistory(h, 14, 20)
+  eq(h.length, 2, 'distinct push -> 2 entries')
+  eq(h[0].changed, 14, 'newest is at front')
+  eq(h[1].changed, 5, 'older slides back')
+  eq(h[0].intensity, 'medium', '14 -> medium tier')
+  h = pushImportScopeHistory(h, 30, 40)
+  eq(h[0].intensity, 'high', '30 -> high tier')
+  eq(h.length, 3, 'three distinct -> 3 entries')
+}
+
+// pushImportScopeHistory — cap at IMPORT_SCOPE_HISTORY_MAX (FIFO drop).
+{
+  let h = []
+  for (const c of [3, 11, 22, 7]) h = pushImportScopeHistory(h, c, c + 5)
+  eq(h.length, IMPORT_SCOPE_HISTORY_MAX, 'history capped at MAX')
+  eq(h[0].changed, 7, 'newest retained at head')
+  eq(h[2].changed, 11, 'oldest-kept is the (MAX-1)th newest; first push dropped')
+  // The very first (changed=3) push must have been FIFO-dropped.
+  ok(!h.some(e => e.changed === 3), 'oldest entry FIFO-dropped past cap')
+}
+
+// pushImportScopeHistory — consecutive-dedupe on identical changed.
+{
+  let h = pushImportScopeHistory([], 8, 10)
+  // Same changed, same total, same intensity -> ref-equal-on-no-op.
+  const same = pushImportScopeHistory(h, 8, 10)
+  ok(same === h, 'identical re-push returns input ref (no-op)')
+  // Same changed, DIFFERENT total (mode flip) -> head updated in place,
+  // length unchanged (no stacking).
+  const moved = pushImportScopeHistory(h, 8, 14)
+  eq(moved.length, 1, 'same-changed different-total updates head in place (no stack)')
+  eq(moved[0].total, 14, 'head total updated')
+  ok(moved !== h, 'updated head returns NEW array (immutable)')
+}
+
+// pushImportScopeHistory — defensive contract.
+{
+  const base = pushImportScopeHistory([], 5, 10)
+  // Non-finite / negative changed -> input ref unchanged.
+  ok(pushImportScopeHistory(base, NaN, 10) === base, 'NaN changed -> input ref')
+  ok(pushImportScopeHistory(base, Infinity, 10) === base, 'Infinity changed -> input ref')
+  ok(pushImportScopeHistory(base, -3, 10) === base, 'negative changed -> input ref')
+  // Non-array prev treated as empty.
+  const fromNull = pushImportScopeHistory(null, 6, 9)
+  eq(fromNull.length, 1, 'non-array prev treated as empty history')
+  eq(fromNull[0].changed, 6, 'records onto empty')
+  // Non-finite total coerced to changed (denominator >= changed).
+  const badTotal = pushImportScopeHistory([], 7, NaN)
+  eq(badTotal[0].total, 7, 'non-finite total coerced to changed')
+  // total < changed is suspicious -> coerced up to changed.
+  const lowTotal = pushImportScopeHistory([], 9, 4)
+  eq(lowTotal[0].total, 9, 'total < changed coerced to changed')
+  // Purity: input array not mutated.
+  const orig = pushImportScopeHistory([], 2, 5)
+  const snapshot = JSON.stringify(orig)
+  pushImportScopeHistory(orig, 19, 25)
+  eq(JSON.stringify(orig), snapshot, 'push does not mutate input array')
+}
+
+// describeImportScopeHistory — display rows with tier label + accent +
+// ordinal.
+{
+  let h = []
+  h = pushImportScopeHistory(h, 4, 8)    // low
+  h = pushImportScopeHistory(h, 15, 22)  // medium
+  h = pushImportScopeHistory(h, 25, 30)  // high
+  const rows = describeImportScopeHistory(h)
+  eq(rows.length, 3, 'describe returns one row per entry')
+  eq(rows[0].ordinal, 'current', 'newest row labelled current')
+  eq(rows[1].ordinal, '1 ago', 'second row labelled 1 ago')
+  eq(rows[2].ordinal, '2 ago', 'third row labelled 2 ago')
+  // Each row carries the matching tier label + accent from the style bundle.
+  eq(rows[0].intensity, 'high', 'newest is high (25)')
+  eq(rows[0].label, getImportImpactStyle('high').label, 'high label matches style bundle')
+  eq(rows[0].accent, getImportImpactStyle('high').accent, 'high accent matches style bundle')
+  eq(rows[2].intensity, 'low', 'oldest is low (4)')
+  // total carried through.
+  eq(rows[1].total, 22, 'total preserved in describe row')
+}
+
+// describeImportScopeHistory — defensive: non-array -> [], corrupt rows
+// silently skipped without blanking the whole list.
+{
+  deepEq(describeImportScopeHistory(null), [], 'null -> []')
+  deepEq(describeImportScopeHistory('nope'), [], 'string -> []')
+  deepEq(describeImportScopeHistory({}), [], 'object -> []')
+  // Mixed valid + corrupt: only valid rows survive; ordinals re-rank
+  // across the SURVIVING rows in order.
+  const mixed = [
+    { changed: 12, total: 18, intensity: 'medium' },
+    null,
+    { changed: 'bad', total: 5 },
+    { changed: 3, total: 6, intensity: 'low' },
+  ]
+  const rows = describeImportScopeHistory(mixed)
+  eq(rows.length, 2, 'corrupt rows skipped, valid survive')
+  eq(rows[0].changed, 12, 'first valid row kept')
+  eq(rows[0].ordinal, 'current', 'first valid -> current')
+  eq(rows[1].changed, 3, 'second valid row kept')
+  eq(rows[1].ordinal, '1 ago', 'second valid -> 1 ago (re-ranked across survivors)')
+  // Missing/invalid intensity recomputed from changed.
+  const recompute = describeImportScopeHistory([{ changed: 25, total: 30 }])
+  eq(recompute[0].intensity, 'high', 'missing intensity recomputed from changed (25 -> high)')
+}
+
+console.log('PASS: pushImportScopeHistory + describeImportScopeHistory — preview-header scope history (R29.41, ~45 asserts)')
 
 console.log(`PASS: biasOverridesIO — envelope build/parse, merge/replace, summarize, defensive, multi-file combine, R24.36 preview rows, R25.41 per-field diff, R26.41 summary counts, R27.41 total-impact projector, R28.41 three-tier intensity (${SCENE_BIASES.length} chip ids, ${SCENE_BIAS_RANGE_FIELDS.length} ranges + ${SCENE_BIAS_CHANCE_FIELDS.length} chances per chip)`)

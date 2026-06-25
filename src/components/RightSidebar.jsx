@@ -26,6 +26,9 @@ import {
   // of plateauing at amber past 10 changed fields.
   getImportImpactIntensity, getImportImpactStyle,
   IMPORT_IMPACT_AMBER_AT, IMPORT_IMPACT_RED_AT,
+  // R29.41 — rolling scope history for the pip tooltip (compare the
+  // last few previewed import scopes by tier)
+  pushImportScopeHistory, describeImportScopeHistory,
 } from '../lib/biasOverridesIO'
 import {
   loadCameraViews, saveCameraViews, appendView, moveView, moveViewUp, moveViewDown,
@@ -1115,6 +1118,18 @@ function SceneBookmarks() {
   // import is pending. Apply commits + clears; Cancel clears without
   // touching the live overrides.
   const [biasImportPending, setBiasImportPending] = useState(null)
+  // R29.41 — rolling history of the last few previewed import SCOPES so
+  // the preview-header pip's tooltip can let users compare today's
+  // import against recent ones ("this one is low; the pack I looked at
+  // before was high"). Lives at the RightSidebar level (NOT inside
+  // BiasOverridesImportPreview) so it survives the preview panel
+  // unmounting between separate import attempts. Each entry is
+  // { changed, total, intensity }; capped + deduped by the pure
+  // pushImportScopeHistory helper.
+  const [biasScopeHistory, setBiasScopeHistory] = useState([])
+  const recordBiasScope = (changed, total) => {
+    setBiasScopeHistory(prev => pushImportScopeHistory(prev, changed, total))
+  }
   const onBiasDragEnter = (e) => {
     if (!e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return
     e.preventDefault()
@@ -1524,6 +1539,8 @@ function SceneBookmarks() {
           onModeChange={(mode) => setBiasImportPending(p => p ? { ...p, mode } : p)}
           onCancel={() => setBiasImportPending(null)}
           onCommit={commitBiasImport}
+          scopeHistory={biasScopeHistory}
+          onRecordScope={recordBiasScope}
         />
       )}
       </div>{/* R22.28 — close bias drop-zone wrapper */}
@@ -2173,7 +2190,7 @@ function formatCompactNum(v) {
   return v.toFixed(2)
 }
 
-function BiasOverridesImportPreview({ pending, existing, onModeChange, onCancel, onCommit }) {
+function BiasOverridesImportPreview({ pending, existing, onModeChange, onCancel, onCommit, scopeHistory = [], onRecordScope }) {
   const mode = pending.mode === 'replace' ? 'replace' : 'merge'
   const rows = buildBiasImportPreviewRows(pending.items, existing, mode)
   // R25.41 — expanded-row tracker. Click a chip row to expand it
@@ -2225,6 +2242,24 @@ function BiasOverridesImportPreview({ pending, existing, onModeChange, onCancel,
   const showTotalImpact = totalImpact.total > 0
   const impactIntensity = getImportImpactIntensity(totalImpact.changed)
   const impactStyle = getImportImpactStyle(impactIntensity)
+  // R29.41 — record the current scope into the rolling history whenever
+  // it changes (mode flip or a fresh import staged). The pure
+  // pushImportScopeHistory helper dedupes consecutive-identical scopes
+  // so flipping Merge/Replace back to the same changed count won't spam
+  // the 3-slot ring. We only record once there's a real scope to
+  // compare (total > 0) so an empty/all-default import doesn't seed a
+  // meaningless "0 fields" history row.
+  useEffect(() => {
+    if (showTotalImpact && typeof onRecordScope === 'function') {
+      onRecordScope(totalImpact.changed, totalImpact.total)
+    }
+  }, [showTotalImpact, totalImpact.changed, totalImpact.total, onRecordScope])
+  // R29.41 — the history's NEWEST entry is the live scope we just
+  // recorded; the tooltip compares against the PRIOR entries so the
+  // user reads "vs. the last N imports". describeImportScopeHistory
+  // formats each remembered scope with its tier label + accent.
+  const scopeRows = describeImportScopeHistory(scopeHistory)
+  const priorScopeRows = scopeRows.slice(1)   // drop the current/live head
   return (
     <div style={{
       marginTop: 8, padding: 10, borderRadius: 8,
@@ -2251,7 +2286,7 @@ function BiasOverridesImportPreview({ pending, existing, onModeChange, onCancel,
               — no chance of half-amber-half-red mid-render. */}
           {showTotalImpact && (
             <span
-              title={`This import will touch ${totalImpact.total} field${totalImpact.total === 1 ? '' : 's'} total: ${totalImpact.changed} changed, ${totalImpact.unchanged} unchanged (${impactStyle.label}).${mode === 'merge' ? ' (Merge mode excludes existing chips the import would skip; flip to Replace to count them too.)' : ' (Replace mode counts every field across every chip.)'} Thresholds: amber at ${IMPORT_IMPACT_AMBER_AT}+, red at ${IMPORT_IMPACT_RED_AT}+.`}
+              title={`This import will touch ${totalImpact.total} field${totalImpact.total === 1 ? '' : 's'} total: ${totalImpact.changed} changed, ${totalImpact.unchanged} unchanged (${impactStyle.label}).${mode === 'merge' ? ' (Merge mode excludes existing chips the import would skip; flip to Replace to count them too.)' : ' (Replace mode counts every field across every chip.)'} Thresholds: amber at ${IMPORT_IMPACT_AMBER_AT}+, red at ${IMPORT_IMPACT_RED_AT}+.${priorScopeRows.length > 0 ? `\nRecent previews: ${priorScopeRows.map(s => `${s.ordinal} = ${s.changed} (${s.label})`).join(', ')}.` : ''}`}
               style={{
                 fontFamily: 'Geist Mono, JetBrains Mono, monospace',
                 fontSize: 9, padding: '1px 6px', borderRadius: 4,
@@ -2272,6 +2307,35 @@ function BiasOverridesImportPreview({ pending, existing, onModeChange, onCancel,
               </span>
               <span style={{ color: '#5a5a70' }}>of</span>
               <span>{totalImpact.total}</span>
+              {/* R29.41 — prior-scope tier dots. Each prior previewed
+                  import scope paints a tiny dot in its tier accent so
+                  the user gets a peripheral-vision history ("the last
+                  three packs I looked at were: red, indigo, amber").
+                  Newest-prior first. Only renders when there's at least
+                  one prior scope to compare against. */}
+              {priorScopeRows.length > 0 && (
+                <span
+                  aria-hidden="true"
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 2,
+                    marginLeft: 3, paddingLeft: 4,
+                    borderLeft: '1px solid rgba(255,255,255,0.12)',
+                  }}>
+                  {priorScopeRows.map((s, i) => (
+                    <span
+                      key={i}
+                      title={`${s.ordinal}: ${s.changed} of ${s.total} (${s.label})`}
+                      style={{
+                        width: 5, height: 5, borderRadius: '50%',
+                        background: s.accent,
+                        display: 'inline-block',
+                        // Older entries dim slightly so recency reads
+                        // left-to-right without needing labels.
+                        opacity: 1 - i * 0.22,
+                      }} />
+                  ))}
+                </span>
+              )}
             </span>
           )}
         </span>

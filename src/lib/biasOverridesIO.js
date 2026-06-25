@@ -565,6 +565,101 @@ export function getImportImpactStyle(intensity) {
   return IMPORT_IMPACT_STYLES[intensity] || IMPORT_IMPACT_STYLES.low
 }
 
+// R29.41 — Scope-history ring for the import-preview header pip.
+// Graduates R28.41's single live three-tier pip with a short memory of
+// the user's LAST FEW previewed import scopes (each tagged with its
+// tier colour), so someone comparing several import files can see
+// "today's import touches 6 fields (low) vs. last week's pack that was
+// 34 (high)" at a glance via the pip's tooltip — without re-opening
+// every file.
+//
+// The ring is MOST-RECENT-FIRST, deduped on consecutive identical
+// scopes (a user flipping Merge/Replace back and forth on the SAME
+// import shouldn't spam the history with near-duplicate entries — only
+// a genuinely-different changed count records), and capped at
+// IMPORT_SCOPE_HISTORY_MAX entries (oldest dropped FIFO).
+export const IMPORT_SCOPE_HISTORY_MAX = 3
+
+// Push a new scope reading onto the history ring. Pure — returns a NEW
+// array; never mutates the input. Each entry is
+//   { changed, total, intensity }
+// where intensity is derived via getImportImpactIntensity so the
+// stored tier can never drift from the live pip's tier for the same
+// count.
+//
+// Dedupe rule: if the incoming `changed` equals the most-recent
+// entry's `changed`, we REPLACE that head entry in place (updating its
+// total, which can legitimately shift when the user flips mode) rather
+// than stacking a second near-identical row. This keeps the 3-slot
+// history meaningful — three DISTINCT scopes, not three readings of
+// the same hover.
+//
+// Defensive:
+//   - non-array prev → treated as empty history
+//   - non-finite / negative `changed` → returns prev unchanged (a
+//     corrupt count must never pollute the comparison history)
+//   - non-finite `total` → coerced to `changed` (the pip's denominator
+//     is always >= changed; a bad total shouldn't NaN the tooltip)
+export function pushImportScopeHistory(prev, changed, total) {
+  const list = Array.isArray(prev) ? prev : []
+  if (!Number.isFinite(changed) || changed < 0) return list
+  const safeChanged = Math.floor(changed)
+  const safeTotal = Number.isFinite(total) && total >= safeChanged
+    ? Math.floor(total)
+    : safeChanged
+  const intensity = getImportImpactIntensity(safeChanged)
+  const entry = { changed: safeChanged, total: safeTotal, intensity }
+  const head = list[0]
+  // Consecutive-dedupe: same changed count as the current head → update
+  // the head in place (total may have moved) instead of stacking.
+  if (head && head.changed === safeChanged) {
+    // No-op skip when the head is already byte-identical (ref-equal-on-
+    // no-op so the React state setter can short-circuit a re-render).
+    if (head.total === safeTotal && head.intensity === intensity) return list
+    const next = list.slice()
+    next[0] = entry
+    return next
+  }
+  // Genuinely new scope → unshift to front, cap at MAX (FIFO drop tail).
+  const next = [entry, ...list]
+  if (next.length > IMPORT_SCOPE_HISTORY_MAX) next.length = IMPORT_SCOPE_HISTORY_MAX
+  return next
+}
+
+// Format the scope history into display rows for the pip tooltip.
+// Pure projector. Returns one row per remembered scope, newest first:
+//   { changed, total, intensity, label, accent, ordinal }
+// where:
+//   - label   : the tier's friendly label (from getImportImpactStyle)
+//   - accent  : the tier's accent colour (so the UI can paint a dot)
+//   - ordinal : 'current' for the newest, then '1 ago', '2 ago', ...
+// Defensive: non-array → []; corrupt rows (missing/non-finite changed)
+// silently skipped so a single bad entry never blanks the whole list.
+export function describeImportScopeHistory(history) {
+  if (!Array.isArray(history)) return []
+  const out = []
+  let rank = 0
+  for (const h of history) {
+    if (!h || typeof h !== 'object') continue
+    if (!Number.isFinite(h.changed)) continue
+    const intensity = (h.intensity === 'low' || h.intensity === 'medium' || h.intensity === 'high')
+      ? h.intensity
+      : getImportImpactIntensity(h.changed)
+    const style = getImportImpactStyle(intensity)
+    const total = Number.isFinite(h.total) && h.total >= h.changed ? h.total : h.changed
+    out.push({
+      changed: h.changed,
+      total,
+      intensity,
+      label: style.label,
+      accent: style.accent,
+      ordinal: rank === 0 ? 'current' : `${rank} ago`,
+    })
+    rank++
+  }
+  return out
+}
+
 // Pure equality check for bias-override field values. Routes by kind:
 //   - range fields (4): two-element numeric array, element-wise eq
 //   - chance fields (10): numeric eq
