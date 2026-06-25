@@ -2182,55 +2182,108 @@ function Banner({ color, icon, children }) {
 // the feel. The dot's box-shadow glow scales with remaining brightness
 // so the "urgency" reads even in peripheral vision.
 //
-// Reduced-motion: when the user prefers reduced motion we DON'T animate
-// — the swatch paints a static mid-window sample of the curve so the
-// chip still previews a representative colour without a pulsing dot.
-function FadeCurvePreviewSwatch({ curve, windowMs = UNDO_CHAIN_MS, baseColor = HOTKEY_CHAIN_COLOR_FORWARD }) {
+// Reduced-motion: when the user prefers reduced motion we DON'T run the
+// ambient loop — the swatch paints a static mid-window sample of the
+// curve so the chip still previews a representative colour without a
+// pulsing dot.
+//
+// R31.43 — INTERACTIVE single-shot. When `interactive` is set the swatch
+// renders as its own button (a SIBLING of the cycle chip, never nested
+// inside it) so a user can CLICK it to replay the fade once on demand —
+// a deterministic, full play-through from the bright start — instead of
+// having to catch the ambient loop mid-cycle. This is the only way a
+// reduced-motion user can FEEL the curve at all (their ambient loop is
+// suppressed); a single user-initiated play is acceptable under
+// reduced-motion because it's explicit opt-in, not auto-playing chrome.
+// Each click bumps `playToken`:
+//   - not reduced : restarts the ambient loop from elapsed 0 so the
+//                   user sees a fresh full fade on demand.
+//   - reduced     : runs ONE pass (0 -> window, brief hold) then settles
+//                   back to the static mid-window sample.
+function FadeCurvePreviewSwatch({ curve, windowMs = UNDO_CHAIN_MS, baseColor = HOTKEY_CHAIN_COLOR_FORWARD, interactive = false }) {
   const reducedMotionMode = useStore(s => s.reducedMotionMode)
   const osPrefersReducedMotion = useStore(s => s.osPrefersReducedMotion)
   const reduced = resolveReducedMotion(reducedMotionMode, osPrefersReducedMotion)
   // elapsed within the loop: [0, windowMs] fade, then a HOLD_MS pause at
   // the grey endpoint before restarting so the loop reads as discrete
-  // "chains" rather than a seamless throb.
+  // "chains" rather than a seamless throb. elapsed === -1 is the
+  // "settled / static" sentinel (reduced mode after a one-shot).
   const HOLD_MS = 360
   const TICK_MS = 50
-  const [elapsed, setElapsed] = useState(0)
+  const [elapsed, setElapsed] = useState(-1)
+  // Bumped on each interactive click. Re-keys the animation effect so a
+  // click restarts the loop (not reduced) or fires a one-shot (reduced).
+  const [playToken, setPlayToken] = useState(0)
   const startRef = useRef(0)
   useEffect(() => {
-    if (reduced) return
-    startRef.current = (typeof performance !== 'undefined' ? performance.now() : Date.now())
+    const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
+    // Pure static (no interval) when reduced AND no one-shot is pending.
+    // Render falls back to the mid-window sample in that case.
+    if (reduced && playToken === 0) return
+    startRef.current = now()
     const id = setInterval(() => {
-      const now = (typeof performance !== 'undefined' ? performance.now() : Date.now())
-      const dt = now - startRef.current
-      const period = windowMs + HOLD_MS
-      const phase = dt % period
-      setElapsed(phase > windowMs ? windowMs : phase)
+      const dt = now() - startRef.current
+      if (reduced) {
+        // One-shot: walk 0 -> window, hold, then settle back to static
+        // (sentinel -1) and stop. Self-clears so we don't spin an idle
+        // interval after the single pass completes.
+        if (dt >= windowMs + HOLD_MS) { setElapsed(-1); clearInterval(id); return }
+        setElapsed(dt > windowMs ? windowMs : dt)
+      } else {
+        // Ambient continuous loop. A click bumps playToken which re-runs
+        // this effect, resetting startRef so the visible fade restarts
+        // from the bright start on demand.
+        const period = windowMs + HOLD_MS
+        const phase = dt % period
+        setElapsed(phase > windowMs ? windowMs : phase)
+      }
     }, TICK_MS)
     return () => clearInterval(id)
-  }, [reduced, windowMs])
-  // Static sample at ~45% of the window when reduced (representative of
-  // the curve's mid-shape without motion).
-  const sampleElapsed = reduced ? windowMs * 0.45 : elapsed
+  }, [reduced, windowMs, playToken])
+  // Static sample at ~45% of the window when reduced + idle (sentinel),
+  // representative of the curve's mid-shape without motion.
+  const isStatic = (reduced && (playToken === 0 || elapsed < 0)) || elapsed < 0
+  const sampleElapsed = isStatic ? windowMs * 0.45 : elapsed
   const color = fadeDirectionColor(baseColor, sampleElapsed, windowMs, sanitizeHotkeyChainFadeCurve(curve))
   // Brightness proxy: how far through the window (0 = fresh, 1 = faded).
   const t = windowMs > 0 ? Math.min(1, sampleElapsed / windowMs) : 1
   const glow = Math.max(0, 1 - t)
+  const dot = (
+    <span style={{
+      width: 9, height: 9, borderRadius: '50%',
+      background: color,
+      boxShadow: `0 0 ${2 + glow * 6}px ${color}`,
+      transition: reduced ? 'none' : 'background 50ms linear, box-shadow 50ms linear',
+    }} />
+  )
+  if (!interactive) {
+    return (
+      <span
+        aria-hidden="true"
+        title="Live preview of the chain-badge fade over the 1s undo window"
+        style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 14, height: 14, flex: '0 0 auto',
+        }}
+      >{dot}</span>
+    )
+  }
   return (
-    <span
-      aria-hidden="true"
-      title="Live preview of the chain-badge fade over the 1s undo window"
+    <button
+      type="button"
+      aria-label="Replay the chain-badge fade preview"
+      title="Click to replay the fade once over the 1s undo window."
+      onClick={(e) => { e.stopPropagation(); setPlayToken(p => p + 1) }}
       style={{
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        width: 14, height: 14, flex: '0 0 auto',
+        width: 16, height: 16, flex: '0 0 auto', padding: 0,
+        borderRadius: '50%', cursor: 'pointer',
+        background: 'transparent', border: '1px solid rgba(99,102,241,0.28)',
+        transition: 'border-color 0.12s ease-out',
       }}
-    >
-      <span style={{
-        width: 9, height: 9, borderRadius: '50%',
-        background: color,
-        boxShadow: `0 0 ${2 + glow * 6}px ${color}`,
-        transition: reduced ? 'none' : 'background 50ms linear, box-shadow 50ms linear',
-      }} />
-    </span>
+      onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgba(99,102,241,0.55)' }}
+      onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(99,102,241,0.28)' }}
+    >{dot}</button>
   )
 }
 
@@ -2365,32 +2418,39 @@ function PresetBar({
             visual + interaction language. */}
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           {typeof onCycleFadeCurve === 'function' && (
-            <button
-              type="button"
-              onClick={() => onCycleFadeCurve()}
-              title={`Undo-chain badge fade feel: ${fadeCurveLabel}. Click to cycle (${fadeCurveCycleHint}). Controls how the chain counter colour fades over the 1s undo window after re-binding a bundle hotkey. Persists across reloads.`}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                padding: '2px 7px', borderRadius: 5,
-                fontSize: 9, fontFamily: 'Geist Mono, JetBrains Mono, monospace',
-                fontWeight: 600, letterSpacing: '0.04em',
-                cursor: 'pointer',
-                background: 'rgba(99,102,241,0.10)',
-                color: '#c7d2fe',
-                border: '1px solid rgba(99,102,241,0.30)',
-                transition: 'background 0.12s ease-out, border-color 0.12s ease-out',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(99,102,241,0.18)' }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(99,102,241,0.10)' }}
-            >
-              <span aria-hidden="true" style={{ opacity: 0.7 }}>{'\u223f'}</span>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <button
+                type="button"
+                onClick={() => onCycleFadeCurve()}
+                title={`Undo-chain badge fade feel: ${fadeCurveLabel}. Click to cycle (${fadeCurveCycleHint}). Controls how the chain counter colour fades over the 1s undo window after re-binding a bundle hotkey. Persists across reloads.`}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '2px 7px', borderRadius: 5,
+                  fontSize: 9, fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                  fontWeight: 600, letterSpacing: '0.04em',
+                  cursor: 'pointer',
+                  background: 'rgba(99,102,241,0.10)',
+                  color: '#c7d2fe',
+                  border: '1px solid rgba(99,102,241,0.30)',
+                  transition: 'background 0.12s ease-out, border-color 0.12s ease-out',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(99,102,241,0.18)' }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(99,102,241,0.10)' }}
+              >
+                <span aria-hidden="true" style={{ opacity: 0.7 }}>{'\u223f'}</span>
+                <span>{fadeCurveLabel}</span>
+              </button>
               {/* R30.43 — live fade preview: animates the actual badge
                   fade over the 1s window so the user feels the curve
                   before triggering a chain. Static mid-window sample
-                  under reduced-motion. */}
-              <FadeCurvePreviewSwatch curve={fadeCurve} />
-              <span>{fadeCurveLabel}</span>
-            </button>
+                  under reduced-motion.
+                  R31.43 — now its OWN button (sibling of the cycle chip,
+                  not nested) so a click replays the fade once on demand
+                  (single-shot) rather than only the ambient loop — and
+                  it's the only way a reduced-motion user can feel the
+                  curve at all. */}
+              <FadeCurvePreviewSwatch curve={fadeCurve} interactive />
+            </div>
           )}
           <span style={{
             fontSize: 10, color: '#8a8aa0', fontFamily: 'Geist Mono, monospace',
