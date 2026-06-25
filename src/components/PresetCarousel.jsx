@@ -93,6 +93,18 @@ export default function PresetCarousel() {
   // FIFO cap. Survives toast dismissals so a user mid-cleanup can keep
   // stepping back.
   const bulkUnpinChainRef = useRef([])
+  // R30.42 — mirror the chain DEPTH into render state so the dropdown's
+  // Unpin footer button can show a persistent "x2 / x3" pip (the toast
+  // badge from R29.42 vanishes after 2.4s; the pip on the button lets a
+  // user mid-cleanup still see how many undo levels are banked). The ref
+  // stays the source of truth for the handlers; this just shadows its
+  // length for the render path. Updated through setBulkUnpinChain so the
+  // two never drift.
+  const [bulkUnpinChainDepth, setBulkUnpinChainDepth] = useState(0)
+  const setBulkUnpinChain = (next) => {
+    bulkUnpinChainRef.current = next
+    setBulkUnpinChainDepth(Array.isArray(next) ? next.length : 0)
+  }
   // Save the history to localStorage with the ref-equal-on-no-op
   // contract preserved from the lib (no redundant writes when nothing
   // changed).
@@ -184,10 +196,11 @@ export default function PresetCarousel() {
     // unpin within BULK_UNPIN_CHAIN_MS of the previous one CHAINS (so
     // two cleanup sweeps stack into a 2-level undo); a settled chain
     // resets to a single frame. The pure helper owns the windowing +
-    // FIFO cap. We mutate the ref in place (it's not render state).
-    bulkUnpinChainRef.current = pushBulkUnpinChainFrame(
+    // FIFO cap. setBulkUnpinChain updates both the ref (source of truth
+    // for handlers) and the depth state (R30.42 footer pip) atomically.
+    setBulkUnpinChain(pushBulkUnpinChainFrame(
       bulkUnpinChainRef.current, pinnedKeys, Date.now(),
-    )
+    ))
     showBulkUnpinToast()
   }
   // R29.42 — render the bulk-unpin toast for the CURRENT chain depth.
@@ -205,7 +218,7 @@ export default function PresetCarousel() {
       // chain). The remaining stack stays so the next Undo steps back
       // another level.
       const { frame, rest } = popBulkUnpinChainFrame(bulkUnpinChainRef.current)
-      bulkUnpinChainRef.current = rest
+      setBulkUnpinChain(rest)
       if (!frame) return
       // Functional read: compute restoration against the LIVE history
       // (may have changed via concurrent edits between unpin + undo —
@@ -878,7 +891,7 @@ export default function PresetCarousel() {
                           <button
                             type="button"
                             onClick={bulkUnpinHistory}
-                            title={`Unpin all ${countPinnedNoteFilterHistoryEntries(noteFilterHistory)} pinned patterns at once (entries stay in history; just flip back to unpinned).`}
+                            title={`Unpin all ${countPinnedNoteFilterHistoryEntries(noteFilterHistory)} pinned patterns at once (entries stay in history; just flip back to unpinned).${bulkUnpinChainDepth >= 2 ? ` ${bulkUnpinChainDepth} undo levels banked from recent sweeps.` : ''}`}
                             style={{
                               padding: '2px 8px',
                               fontSize: 8.5, fontWeight: 700, letterSpacing: '0.06em',
@@ -897,6 +910,22 @@ export default function PresetCarousel() {
                               border: '1px solid rgba(245,158,11,0.45)',
                               fontWeight: 700,
                             }}>{countPinnedNoteFilterHistoryEntries(noteFilterHistory)}</span>
+                            {/* R30.42 — undo-depth pip. Surfaces the banked
+                                bulk-unpin chain depth ("x2" / "x3") right on
+                                the button so a user mid-cleanup keeps that
+                                awareness after the R29.42 toast (which carried
+                                the same badge) auto-dismisses at 2.4s. Only
+                                renders at depth >= 2 (a single level needs no
+                                badge — parallels formatBulkUnpinChainBadge). */}
+                            {bulkUnpinChainDepth >= 2 && (
+                              <span style={{
+                                fontSize: 8, padding: '0 3px', borderRadius: 2,
+                                background: 'rgba(99,102,241,0.22)', color: '#c7d2fe',
+                                border: '1px solid rgba(99,102,241,0.45)',
+                                fontWeight: 700, letterSpacing: 0,
+                                fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                              }}>{`x${bulkUnpinChainDepth}`}</span>
+                            )}
                           </button>
                         )}
                         <button
