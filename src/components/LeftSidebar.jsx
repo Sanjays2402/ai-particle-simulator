@@ -3601,6 +3601,11 @@ function NamedAttractorRow({
                 ? 'grab'
                 : (total > 1 && onJumpToPosition ? 'pointer' : 'default'),
               userSelect: 'none',
+              // R32.20 — containing block for the floating "lifted" chip
+              // (absolutely positioned child) so a sighted keyboard user
+              // gets the same at-a-glance "what am I moving" cue the SR
+              // user already gets spoken via the aria-live region.
+              position: 'relative',
             }}
             title={onDragStart
               ? `Type: ${TYPE_LABELS[attractor.type] || attractor.type} (${typeStyle.label}) — drag the row to reorder, click to jump to a numbered position, or focus + Enter/arrows to reorder by keyboard`
@@ -3608,6 +3613,39 @@ function NamedAttractorRow({
                 ? `Type: ${TYPE_LABELS[attractor.type] || attractor.type} (${typeStyle.label}) — click to jump this row to a numbered position`
                 : `Type: ${TYPE_LABELS[attractor.type] || attractor.type} (${typeStyle.label})`)}>
             #{index + 1}
+            {/* R32.20 — floating "lifted" chip. While this row is grabbed
+                via keyboard, a small chip carrying the attractor's name
+                floats just above the #N badge so a SIGHTED keyboard user
+                gets the same at-a-glance "what am I moving" cue the SR
+                user gets spoken (R31.20 aria-live). aria-hidden so the
+                live region stays the single source of spoken truth (no
+                double announcement). pointerEvents:none so it never
+                intercepts the badge's own keyboard focus / clicks. */}
+            {isKeyboardLifted && (
+              <span
+                aria-hidden="true"
+                style={{
+                  position: 'absolute',
+                  left: '50%',
+                  bottom: 'calc(100% + 5px)',
+                  transform: 'translateX(-50%)',
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '2px 7px', borderRadius: 5,
+                  whiteSpace: 'nowrap', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis',
+                  background: 'rgba(67,56,202,0.95)',
+                  color: '#eef2ff',
+                  border: '1px solid rgba(129,140,248,0.85)',
+                  boxShadow: '0 4px 14px rgba(49,46,129,0.55)',
+                  fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',
+                  textTransform: 'none',
+                  fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                  pointerEvents: 'none',
+                  zIndex: 5,
+                }}>
+                <span aria-hidden="true" style={{ opacity: 0.85 }}>{'\u2725'}</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{attractor.name}</span>
+              </span>
+            )}
           </span>
         )}
         {editing ? (
