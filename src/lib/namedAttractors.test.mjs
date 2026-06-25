@@ -22,6 +22,8 @@ import {
   dropIndexForGap,
   // R29.20 — keyboard gap-cursor stepper for accessible reorder
   stepKeyboardGapCursor,
+  // R30.20 — aria-live announcement phraser for the keyboard reorder
+  describeGapReorderAnnouncement,
 } from './namedAttractors.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -831,3 +833,67 @@ console.log('PASS: namedAttractors R19.19 dropIndexForGap — gap-drop insert-he
 }
 
 console.log('PASS: namedAttractors R29.20 stepKeyboardGapCursor — keyboard gap-cursor reorder (seed/walk/clamp/commit, ~35 asserts)')
+
+// R30.20 — aria-live announcement phraser for the keyboard reorder.
+{
+  // Lift: announces resting position (1-based) + driving instructions.
+  const lift = describeGapReorderAnnouncement('lift', { from: 2, total: 5, name: 'Eye' })
+  ok(lift.includes('Grabbed Eye'), 'lift names the attractor')
+  ok(lift.includes('position 3 of 5'), 'lift reports 1-based resting position (idx 2 -> 3 of 5)')
+  ok(/arrow/i.test(lift), 'lift mentions arrow-key driving')
+
+  // Move: 'Drop position N of M' uses dropIndexForGap landing math.
+  // from=2, gap=0 -> dropIndexForGap(2,0,5)=0 -> 1-based position 1.
+  eq(describeGapReorderAnnouncement('move', { from: 2, gapIdx: 0, total: 5, name: 'Eye' }),
+     'Drop position 1 of 5', 'move: gap 0 from idx 2 lands at position 1')
+  // from=2, gap=5 (trailing) -> dropIndexForGap(2,5,5)=4 -> position 5.
+  eq(describeGapReorderAnnouncement('move', { from: 2, gapIdx: 5, total: 5, name: 'Eye' }),
+     'Drop position 5 of 5', 'move: trailing gap lands at last position')
+  // No-op gap (gap === from or from+1) reports the RESTING position.
+  eq(describeGapReorderAnnouncement('move', { from: 2, gapIdx: 2, total: 5, name: 'Eye' }),
+     'Drop position 3 of 5', 'move: no-op gap (=from) reports resting position')
+  eq(describeGapReorderAnnouncement('move', { from: 2, gapIdx: 3, total: 5, name: 'Eye' }),
+     'Drop position 3 of 5', 'move: no-op gap (=from+1) reports resting position')
+
+  // Commit: 'Moved <name> to position N of M'.
+  eq(describeGapReorderAnnouncement('commit', { from: 2, gapIdx: 0, total: 5, name: 'Eye' }),
+     'Moved Eye to position 1 of 5', 'commit: announces final landing position')
+  // Commit with null gap (lifted then committed without arrowing) keeps
+  // the row where it was.
+  eq(describeGapReorderAnnouncement('commit', { from: 1, gapIdx: null, total: 4, name: 'Vortex' }),
+     'Moved Vortex to position 2 of 4', 'commit: null gap reports resting position')
+
+  // Cancel: confirms the row stayed put.
+  ok(describeGapReorderAnnouncement('cancel', { from: 0, total: 3, name: 'Eye' }).includes('stays at position 1 of 3'),
+     'cancel: confirms unchanged resting position')
+
+  // Missing/blank name falls back to 'item'.
+  ok(describeGapReorderAnnouncement('commit', { from: 0, gapIdx: 2, total: 3 }).startsWith('Moved item to'),
+     'missing name -> "item" fallback')
+  ok(describeGapReorderAnnouncement('lift', { from: 0, total: 3, name: '   ' }).includes('Grabbed item'),
+     'blank name -> "item" fallback')
+
+  // Defensive: bad total / out-of-range from / unknown phase -> '' so
+  // the caller skips speaking a nonsensical position.
+  eq(describeGapReorderAnnouncement('move', { from: 0, gapIdx: 1, total: 0, name: 'x' }), '', 'total 0 -> empty')
+  eq(describeGapReorderAnnouncement('move', { from: 5, gapIdx: 1, total: 3, name: 'x' }), '', 'from out of range -> empty')
+  eq(describeGapReorderAnnouncement('move', { from: -1, gapIdx: 1, total: 3, name: 'x' }), '', 'negative from -> empty')
+  eq(describeGapReorderAnnouncement('move', { from: 0, gapIdx: 1, total: NaN, name: 'x' }), '', 'NaN total -> empty')
+  eq(describeGapReorderAnnouncement('bogus', { from: 0, gapIdx: 1, total: 3, name: 'x' }), '', 'unknown phase -> empty')
+
+  // Integration: lift -> arrow up -> commit narration matches the
+  // CABD reorder from the R29.20 integration above (from=2 -> position 1).
+  const list = [{ id: 'A' }, { id: 'B' }, { id: 'C' }, { id: 'D' }]
+  const from = 2
+  let cursor = stepKeyboardGapCursor(from, null, -1, list.length)        // gap 1
+  let say = describeGapReorderAnnouncement('move', { from, gapIdx: cursor, total: list.length, name: 'C' })
+  eq(say, 'Drop position 2 of 4', 'integration: first arrow-up narrates Drop position 2 of 4')
+  cursor = stepKeyboardGapCursor(from, cursor, -1, list.length)          // gap 0
+  say = describeGapReorderAnnouncement('move', { from, gapIdx: cursor, total: list.length, name: 'C' })
+  eq(say, 'Drop position 1 of 4', 'integration: second arrow-up narrates Drop position 1 of 4')
+  const commit = describeGapReorderAnnouncement('commit', { from, gapIdx: cursor, total: list.length, name: 'C' })
+  eq(commit, 'Moved C to position 1 of 4', 'integration: commit narrates final position 1 (matches CABD move)')
+}
+
+console.log('PASS: namedAttractors R30.20 describeGapReorderAnnouncement — aria-live reorder narration (~25 asserts)')
+

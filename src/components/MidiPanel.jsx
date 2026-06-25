@@ -83,7 +83,7 @@ import {
   // R19.20 — multi-file drop combiner (pure helper, no DOM)
   combineDroppedBundles,
 } from '../lib/midiUserBundleIO'
-import { attractorTypeStyle, dropIndexForGap, stepKeyboardGapCursor } from '../lib/namedAttractors'
+import { attractorTypeStyle, dropIndexForGap, stepKeyboardGapCursor, describeGapReorderAnnouncement } from '../lib/namedAttractors'
 import { Music4, X, CheckCircle2, AlertCircle, Zap, Save, Trash2, Download, Upload } from 'lucide-react'
 import { showToast } from './Toast'
 
@@ -292,6 +292,13 @@ export default function MidiPanel({ open, onClose }) {
   // with insert-at-gap semantics so it matches the mouse/touch gap-drop.
   const [liftedGroupIdx, setLiftedGroupIdx] = useState(null)
   const [keyboardGapCursor, setKeyboardGapCursor] = useState(null)
+  // R30.20 — aria-live announcement text for the keyboard reorder.
+  // R29.20's lift/arrow/commit gesture was SILENT to screen readers;
+  // this state feeds a visually-hidden role="status" region so each
+  // step ("Drop position 3 of 5", "Moved Eye to position 2 of 5") is
+  // spoken. describeGapReorderAnnouncement (pure, in namedAttractors.js)
+  // phrases every transition; we just push its output here.
+  const [gapReorderAnnounce, setGapReorderAnnounce] = useState('')
   const moveNamedAttractorByIndex = useStore(s => s.moveNamedAttractorByIndex)
   // R26.20 — touch-drag support for the binding-group reorder
   // (graduates R25.20's desktop-only HTML5 native DnD; touch devices
@@ -484,11 +491,15 @@ export default function MidiPanel({ open, onClose }) {
     const isCancel = key === 'Escape'
     if (!isActivate && !isUp && !isDown && !isCancel) return
     const lifted = liftedGroupIdx === liveIdx
+    // R30.20 — resolve the lifted row's name so announcements name the
+    // actual attractor ("Moved Eye to position 2 of 5").
+    const liftedName = ((namedAttractors || [])[liveIdx] || {}).name
     if (isCancel) {
       if (lifted) {
         e.preventDefault()
         setLiftedGroupIdx(null)
         setKeyboardGapCursor(null)
+        setGapReorderAnnounce(describeGapReorderAnnouncement('cancel', { from: liveIdx, total, name: liftedName }))
       }
       return
     }
@@ -499,6 +510,7 @@ export default function MidiPanel({ open, onClose }) {
         // seeds it past the row.
         setLiftedGroupIdx(liveIdx)
         setKeyboardGapCursor(null)
+        setGapReorderAnnounce(describeGapReorderAnnouncement('lift', { from: liveIdx, total, name: liftedName }))
         return
       }
       // Already lifted → commit at the cursor (if any).
@@ -506,6 +518,7 @@ export default function MidiPanel({ open, onClose }) {
         const insertIdx = dropIndexForGap(liveIdx, keyboardGapCursor, total)
         if (insertIdx != null) moveNamedAttractorByIndex(liveIdx, insertIdx)
       }
+      setGapReorderAnnounce(describeGapReorderAnnouncement('commit', { from: liveIdx, gapIdx: keyboardGapCursor, total, name: liftedName }))
       setLiftedGroupIdx(null)
       setKeyboardGapCursor(null)
       return
@@ -513,10 +526,18 @@ export default function MidiPanel({ open, onClose }) {
     // Arrow up/down. Lift first if not already lifted so the gesture is
     // discoverable without a separate "press Enter to grab" step.
     e.preventDefault()
-    if (!lifted) setLiftedGroupIdx(liveIdx)
+    if (!lifted) {
+      setLiftedGroupIdx(liveIdx)
+      // Announce the implicit lift so the first arrow press is narrated
+      // even when the user skipped the explicit Enter-to-grab step.
+      setGapReorderAnnounce(describeGapReorderAnnouncement('lift', { from: liveIdx, total, name: liftedName }))
+    }
     const dir = isUp ? -1 : 1
     const nextCursor = stepKeyboardGapCursor(liveIdx, lifted ? keyboardGapCursor : null, dir, total)
-    if (nextCursor != null) setKeyboardGapCursor(nextCursor)
+    if (nextCursor != null) {
+      setKeyboardGapCursor(nextCursor)
+      setGapReorderAnnounce(describeGapReorderAnnouncement('move', { from: liveIdx, gapIdx: nextCursor, total, name: liftedName }))
+    }
   }
   // R29.20 — clear the keyboard lift if the attractor list changes out
   // from under it (add/remove/external reorder) so a stale cursor can't
@@ -1218,6 +1239,22 @@ export default function MidiPanel({ open, onClose }) {
         boxShadow: '0 30px 80px rgba(0,0,0,0.6), 0 0 40px rgba(99,102,241,0.18)',
         padding: '20px 22px 18px',
       }}>
+        {/* R30.20 — visually-hidden aria-live region for the keyboard
+            gap-drop reorder. Screen readers announce each lift / cursor
+            move / commit / cancel as the user drives the gesture with
+            Enter + arrows. Kept persistently mounted (only the text
+            changes) so assistive tech reliably picks up updates; the
+            clip/0-size pattern hides it visually without display:none
+            (which SRs skip). aria-atomic so the whole phrase is re-read,
+            not just the diff. */}
+        <div
+          aria-live="polite"
+          aria-atomic="true"
+          style={{
+            position: 'absolute', width: 1, height: 1, padding: 0, margin: -1,
+            overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap', border: 0,
+          }}
+        >{gapReorderAnnounce}</div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
             <span style={{

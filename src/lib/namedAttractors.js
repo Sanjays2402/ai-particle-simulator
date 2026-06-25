@@ -462,3 +462,50 @@ export function parsePositionInput(raw) {
   if (rounded <= 0) return null
   return rounded
 }
+
+// R30.20 — pure phraser for the keyboard gap-drop reorder's aria-live
+// announcements. The R29.20 keyboard reorder (lift a row, arrow the
+// drop cursor through the gaps, Enter to commit) was SILENT to screen
+// readers — a blind user got no spoken feedback on where the cursor
+// landed or where the row ended up. This helper turns each step into a
+// short spoken string so the gesture is fully narrated.
+//
+// Phases:
+//   'lift'   — row just grabbed: announces its current resting slot +
+//              how to drive the gesture.
+//   'move'   — drop cursor stepped to a gap: announces the 1-based slot
+//              the row WOULD land in if committed now ("Drop position
+//              3 of 5").
+//   'commit' — move committed: announces the row's final resting slot.
+//   'cancel' — lift abandoned: confirms the row stayed put.
+//
+// Position math: for 'move' / 'commit' we feed the gap cursor through
+// dropIndexForGap to get the 0-based landing index, then report it
+// 1-based. A null gap cursor (lift-then-commit with no arrow press) or
+// a no-op gap reports the row's RESTING position (from + 1) so the
+// announcement is always truthful about where the row actually is.
+//
+// Defensive: bad total / out-of-range from → '' (caller skips the
+// announcement rather than speaking a nonsensical position).
+export function describeGapReorderAnnouncement(phase, opts = {}) {
+  const { from, gapIdx, total, name } = opts
+  if (!Number.isFinite(total) || total <= 0) return ''
+  if (!Number.isFinite(from) || from < 0 || from >= total) return ''
+  const label = (typeof name === 'string' && name.trim()) ? name.trim() : 'item'
+  const landingPos = () => {
+    const target = (gapIdx == null) ? null : dropIndexForGap(from, gapIdx, total)
+    return (target == null) ? from + 1 : target + 1
+  }
+  switch (phase) {
+    case 'lift':
+      return `Grabbed ${label}, position ${from + 1} of ${total}. Use up and down arrow keys to choose a new position, Enter to drop, Escape to cancel.`
+    case 'move':
+      return `Drop position ${landingPos()} of ${total}`
+    case 'commit':
+      return `Moved ${label} to position ${landingPos()} of ${total}`
+    case 'cancel':
+      return `Reorder cancelled. ${label} stays at position ${from + 1} of ${total}.`
+    default:
+      return ''
+  }
+}
