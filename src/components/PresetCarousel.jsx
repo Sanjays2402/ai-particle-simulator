@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store'
+import { resolveReducedMotion } from '../lib/reducedMotion'
 import { presets } from '../presets'
 import {
   recaptureThumbnail, clearAllThumbnails, summarizeBulkRebuild,
@@ -42,6 +43,12 @@ import { showToast } from './Toast'
 
 export default function PresetCarousel() {
   const { loadPreset, currentPreset, favoritedPresets, recentPresets, toggleFavorite } = useStore()
+  // R31.42 — reduced-motion gate for the bulk-unpin pip pulse (and any
+  // future tile micro-interaction). When the user prefers reduced
+  // motion we skip the scale/colour keyframe and just snap the pip.
+  const reducedMotionMode = useStore(s => s.reducedMotionMode)
+  const osPrefersReducedMotion = useStore(s => s.osPrefersReducedMotion)
+  const reducedMotion = resolveReducedMotion(reducedMotionMode, osPrefersReducedMotion)
   const [thumbs, setThumbs] = useState({})
   // R19.13 — per-preset metadata cache (capturedAt + width/height +
   // source). Refreshed alongside thumbs whenever a particle:thumbnail-
@@ -101,9 +108,25 @@ export default function PresetCarousel() {
   // length for the render path. Updated through setBulkUnpinChain so the
   // two never drift.
   const [bulkUnpinChainDepth, setBulkUnpinChainDepth] = useState(0)
+  // R31.42 — pulse token. The R30.42 footer pip ("x2/x3") shows the
+  // banked undo depth but stays visually static when it INCREMENTS, so
+  // a user banking a fresh level (x2 -> x3) got no peripheral
+  // confirmation the level registered. We bump a token whenever the
+  // depth grows; the pip span is keyed to {depth}-{token} so React
+  // remounts it on each increment, replaying a brief scale/colour CSS
+  // pulse. Token only advances on a genuine INCREASE (not on pop/reset)
+  // so stepping back through the chain doesn't flash. Updated only from
+  // setBulkUnpinChain (an event-time choke point — never during render).
+  const [bulkUnpinPulse, setBulkUnpinPulse] = useState(0)
   const setBulkUnpinChain = (next) => {
+    const prevLen = Array.isArray(bulkUnpinChainRef.current) ? bulkUnpinChainRef.current.length : 0
+    const nextLen = Array.isArray(next) ? next.length : 0
     bulkUnpinChainRef.current = next
-    setBulkUnpinChainDepth(Array.isArray(next) ? next.length : 0)
+    setBulkUnpinChainDepth(nextLen)
+    // Pulse only when the depth grew AND lands at a badge-worthy level
+    // (>= 2, matching the pip's own render gate) so the very first
+    // unpin (depth 1, no pip) doesn't queue a pulse for a hidden badge.
+    if (nextLen > prevLen && nextLen >= 2) setBulkUnpinPulse(p => p + 1)
   }
   // Save the history to localStorage with the ref-equal-on-no-op
   // contract preserved from the lib (no redundant writes when nothing
@@ -916,15 +939,33 @@ export default function PresetCarousel() {
                                 awareness after the R29.42 toast (which carried
                                 the same badge) auto-dismisses at 2.4s. Only
                                 renders at depth >= 2 (a single level needs no
-                                badge — parallels formatBulkUnpinChainBadge). */}
+                                badge — parallels formatBulkUnpinChainBadge).
+                                R31.42 — keyed to {depth}-{pulse} so the span
+                                REMOUNTS each time a fresh level is banked,
+                                replaying a brief scale/colour pulse so the
+                                increment registers in peripheral vision.
+                                Skipped under reduced-motion (snaps instead). */}
                             {bulkUnpinChainDepth >= 2 && (
-                              <span style={{
-                                fontSize: 8, padding: '0 3px', borderRadius: 2,
-                                background: 'rgba(99,102,241,0.22)', color: '#c7d2fe',
-                                border: '1px solid rgba(99,102,241,0.45)',
-                                fontWeight: 700, letterSpacing: 0,
-                                fontFamily: 'Geist Mono, JetBrains Mono, monospace',
-                              }}>{`x${bulkUnpinChainDepth}`}</span>
+                              <>
+                                {!reducedMotion && (
+                                  <style>{`@keyframes bulk-unpin-pip-pulse {
+                                    0%   { transform: scale(1);    background: rgba(99,102,241,0.22); box-shadow: 0 0 0 0 rgba(99,102,241,0); }
+                                    35%  { transform: scale(1.42); background: rgba(129,140,248,0.55); box-shadow: 0 0 8px 1px rgba(129,140,248,0.55); }
+                                    100% { transform: scale(1);    background: rgba(99,102,241,0.22); box-shadow: 0 0 0 0 rgba(99,102,241,0); }
+                                  }`}</style>
+                                )}
+                                <span
+                                  key={`${bulkUnpinChainDepth}-${bulkUnpinPulse}`}
+                                  style={{
+                                    fontSize: 8, padding: '0 3px', borderRadius: 2,
+                                    background: 'rgba(99,102,241,0.22)', color: '#c7d2fe',
+                                    border: '1px solid rgba(99,102,241,0.45)',
+                                    fontWeight: 700, letterSpacing: 0,
+                                    fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                                    display: 'inline-block',
+                                    animation: reducedMotion ? 'none' : 'bulk-unpin-pip-pulse 0.42s cubic-bezier(0.2,0.9,0.25,1)',
+                                  }}>{`x${bulkUnpinChainDepth}`}</span>
+                              </>
                             )}
                           </button>
                         )}
