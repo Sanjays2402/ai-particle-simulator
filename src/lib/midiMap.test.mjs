@@ -2492,3 +2492,85 @@ console.log('PASS: listClampWarnFieldOverridesAcross — preview-chip projector 
 }
 
 console.log('PASS: per-cell preview-chip wipe sequence (R28.45, ~15 asserts)')
+
+// =====================================================================
+// R29.45 — multi-select bulk-clear of preview chips. The UI lets the
+// user long-press to enter multi-select, tap N chips, then "Clear N"
+// fires setClampWarnAttractorFieldOverride(..., null) for each selected
+// id. These tests pin the LIB sequence the UI's commitChipBulkClear
+// loop runs so the bulk wipe stays correct + isolated to the chosen
+// field.
+// =====================================================================
+
+// Selecting + clearing a SUBSET leaves the unselected cells intact.
+{
+  let overrides = {
+    'attr-a': { strength: 0.10 },
+    'attr-b': { strength: 0.20 },
+    'attr-c': { strength: 0.30 },
+    'attr-d': { strength: 0.40 },
+  }
+  // User selects a, c (a Set in the UI). commitChipBulkClear iterates
+  // the selection clearing each cell for the current field.
+  const selected = ['attr-a', 'attr-c']
+  for (const id of selected) {
+    overrides = setClampWarnAttractorFieldOverride(overrides, id, 'strength', null)
+  }
+  const chips = listClampWarnFieldOverridesAcross(overrides, 'strength')
+  if (chips.length !== 2) fail(`bulk-clear subset: expected 2 left, got ${chips.length}`)
+  const ids = chips.map(c => c.id).sort()
+  if (ids[0] !== 'attr-b' || ids[1] !== 'attr-d') fail(`bulk-clear left wrong cells: ${JSON.stringify(ids)}`)
+}
+
+// Clearing the WHOLE selection empties the field's chip list; other
+// fields on the same attractors are untouched (field isolation).
+{
+  let overrides = {
+    'attr-a': { strength: 0.10, x: 0.55 },
+    'attr-b': { strength: 0.20, y: 0.45 },
+  }
+  for (const id of ['attr-a', 'attr-b']) {
+    overrides = setClampWarnAttractorFieldOverride(overrides, id, 'strength', null)
+  }
+  if (listClampWarnFieldOverridesAcross(overrides, 'strength').length !== 0) fail('select-all strength wiped')
+  // x + y per-attractor overrides survive — only STRENGTH was selected.
+  if (listClampWarnFieldOverridesAcross(overrides, 'x').length !== 1) fail('attr-a.x survives strength bulk-clear')
+  if (listClampWarnFieldOverridesAcross(overrides, 'y').length !== 1) fail('attr-b.y survives strength bulk-clear')
+}
+
+// Selection reconciliation: a selected id that no longer has an override
+// (cleared externally between select + commit) is a no-op in the loop —
+// the remaining selected cells still clear. Mirrors the UI's
+// validSelectedChipIds filter PLUS the lib's ref-equal-on-no-op safety.
+{
+  let overrides = {
+    'attr-a': { strength: 0.10 },
+    'attr-b': { strength: 0.20 },
+  }
+  // Selection captured as [a, b, ghost]. 'attr-ghost' was never (or no
+  // longer) in the overrides. The loop clears a + b; ghost is a no-op.
+  for (const id of ['attr-a', 'attr-ghost', 'attr-b']) {
+    overrides = setClampWarnAttractorFieldOverride(overrides, id, 'strength', null)
+  }
+  if (listClampWarnFieldOverridesAcross(overrides, 'strength').length !== 0) fail('bulk-clear with ghost id still clears real cells')
+}
+
+// Bulk-clear is order-independent: clearing [b, a] equals clearing
+// [a, b] (the final override map is the same regardless of selection
+// iteration order).
+{
+  const seed = {
+    'attr-a': { strength: 0.10 },
+    'attr-b': { strength: 0.20 },
+    'attr-c': { strength: 0.30 },
+  }
+  let fwd = seed
+  for (const id of ['attr-a', 'attr-b']) fwd = setClampWarnAttractorFieldOverride(fwd, id, 'strength', null)
+  let rev = seed
+  for (const id of ['attr-b', 'attr-a']) rev = setClampWarnAttractorFieldOverride(rev, id, 'strength', null)
+  if (JSON.stringify(fwd) !== JSON.stringify(rev)) fail(`bulk-clear order-dependent: fwd=${JSON.stringify(fwd)} rev=${JSON.stringify(rev)}`)
+  // attr-c (unselected) survives in both.
+  if (listClampWarnFieldOverridesAcross(fwd, 'strength').length !== 1) fail('attr-c survives order-independent bulk-clear')
+}
+
+console.log('PASS: multi-select bulk-clear of preview chips (R29.45, ~12 asserts)')

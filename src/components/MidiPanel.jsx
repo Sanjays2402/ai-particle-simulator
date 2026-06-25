@@ -2788,11 +2788,91 @@ function ClampThresholdPopover({
   // Escape key closes — paired with onClose so the user has a
   // keyboard-only path (the popover is small enough that mouse-out
   // would be too fiddly; explicit dismissal is friendlier).
+  // R29.45 — multi-select mode for the per-cell preview chips (mobile-
+  // friendly graduation of R28.45's single-tap-to-wipe). Long-press a
+  // chip to ENTER multi-select; subsequent taps toggle chips in/out of
+  // the selection; a "Clear N / Cancel" bar commits a bulk per-cell
+  // wipe (parallels R17.17 attractor multi-select). Desktop users can
+  // still single-tap to wipe one cell when NOT in multi-select mode.
+  const [chipMultiSelect, setChipMultiSelect] = useState(false)
+  const [selectedChipIds, setSelectedChipIds] = useState(() => new Set())
+  // Long-press timer + the moved-too-far guard share these refs so a
+  // scroll/drag doesn't fire the long-press (matches R18.06 snapshot
+  // long-press semantics).
+  const chipPressTimerRef = useRef(0)
+  const chipPressFiredRef = useRef(false)
+  const CHIP_LONG_PRESS_MS = 450
+  // Reconcile the selection against the live override list: ids that
+  // vanish externally (the cell got wiped by another path, or the
+  // attractor was deleted) drop out of the selection so the "Clear N"
+  // count never lies. Computed at render via useMemo-free derivation
+  // since fieldOverridesAcross is already a cheap array.
+  const liveChipIds = new Set(fieldOverridesAcross.map(c => c.id))
+  const validSelectedChipIds = [...selectedChipIds].filter(id => liveChipIds.has(id))
+  // Exit multi-select automatically when there are fewer than 2 chips
+  // left to act on (the whole feature only makes sense with a list).
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    if (chipMultiSelect && fieldOverridesAcross.length < 2) {
+      setChipMultiSelect(false)
+      setSelectedChipIds(new Set())
+    }
+  }, [chipMultiSelect, fieldOverridesAcross.length])
+  const exitChipMultiSelect = () => {
+    setChipMultiSelect(false)
+    setSelectedChipIds(new Set())
+  }
+  const toggleChipSelected = (id) => {
+    setSelectedChipIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+  // Long-press lifecycle for a chip. On touchstart/mousedown, arm a
+  // timer; if it fires before release (and the pointer didn't move far)
+  // we ENTER multi-select with this chip pre-selected. The click
+  // handler checks chipPressFiredRef to swallow the synthetic click so
+  // the long-press doesn't ALSO wipe the cell.
+  const startChipPress = (id) => {
+    chipPressFiredRef.current = false
+    if (chipPressTimerRef.current) clearTimeout(chipPressTimerRef.current)
+    chipPressTimerRef.current = setTimeout(() => {
+      chipPressFiredRef.current = true
+      setChipMultiSelect(true)
+      setSelectedChipIds(prev => {
+        const next = new Set(prev)
+        next.add(id)
+        return next
+      })
+      try { navigator.vibrate?.(10) } catch { /* unsupported */ }
+    }, CHIP_LONG_PRESS_MS)
+  }
+  const cancelChipPress = () => {
+    if (chipPressTimerRef.current) { clearTimeout(chipPressTimerRef.current); chipPressTimerRef.current = 0 }
+  }
+  useEffect(() => () => { if (chipPressTimerRef.current) clearTimeout(chipPressTimerRef.current) }, [])
+  // Commit the bulk wipe: clear every SELECTED cell via the existing
+  // per-cell handler (delegates to setClampWarnAttractorFieldOverride
+  // with value=null — same path R28.45 single-tap uses, so no new lib
+  // surface). Then exit multi-select.
+  const commitChipBulkClear = () => {
+    if (typeof onClearAttractorCell === 'function') {
+      for (const id of validSelectedChipIds) onClearAttractorCell(id)
+    }
+    exitChipMultiSelect()
+  }
+  // Escape key closes the popover (or exits multi-select first if it's
+  // active, so a single Escape doesn't blow away the whole popover when
+  // the user just wanted out of selection mode).
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return
+      if (chipMultiSelect) { exitChipMultiSelect(); return }
+      onClose()
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [onClose, chipMultiSelect])
   // R24.40 — show the per-attractor row only when we have a live
   // attractor id (every continuous attractor meter does, but the
   // back-compat path passes null/undefined for non-attractor meters).
@@ -3073,12 +3153,59 @@ function ClampThresholdPopover({
             border: '1px solid rgba(139,92,246,0.20)',
           }}>
             <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               fontSize: 8.5, fontWeight: 700, letterSpacing: '0.10em',
               color: '#8a8aa0', textTransform: 'uppercase',
               fontFamily: 'Geist Mono, JetBrains Mono, monospace',
-              marginBottom: 4,
+              marginBottom: 4, gap: 6,
             }}>
-              {fieldLabel} resets {fieldOverridesAcross.length} attractor{fieldOverridesAcross.length === 1 ? '' : 's'}
+              <span>
+                {chipMultiSelect
+                  ? `Select cells \u00b7 ${validSelectedChipIds.length} picked`
+                  : `${fieldLabel} resets ${fieldOverridesAcross.length} attractor${fieldOverridesAcross.length === 1 ? '' : 's'}`}
+              </span>
+              {/* R29.45 — multi-select action bar. In select mode shows
+                  Clear N + Cancel; out of mode shows a subtle hint that
+                  long-press opens multi-select (only when a per-cell
+                  wipe handler is wired). */}
+              {chipMultiSelect ? (
+                <span style={{ display: 'inline-flex', gap: 4, textTransform: 'none', letterSpacing: 0 }}>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); commitChipBulkClear() }}
+                    disabled={validSelectedChipIds.length === 0}
+                    title={`Clear ${validSelectedChipIds.length} selected ${fieldLabel} cell${validSelectedChipIds.length === 1 ? '' : 's'} in one action.`}
+                    style={{
+                      padding: '1px 7px', borderRadius: 4, fontSize: 9, fontWeight: 700,
+                      cursor: validSelectedChipIds.length === 0 ? 'not-allowed' : 'pointer',
+                      background: validSelectedChipIds.length === 0 ? 'rgba(255,255,255,0.04)' : 'rgba(239,68,68,0.18)',
+                      color: validSelectedChipIds.length === 0 ? '#5a5a70' : '#fca5a5',
+                      border: validSelectedChipIds.length === 0 ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(239,68,68,0.42)',
+                      fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                      opacity: validSelectedChipIds.length === 0 ? 0.6 : 1,
+                    }}
+                  >Clear {validSelectedChipIds.length}</button>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); exitChipMultiSelect() }}
+                    title="Exit multi-select without clearing anything."
+                    style={{
+                      padding: '1px 7px', borderRadius: 4, fontSize: 9, fontWeight: 600,
+                      cursor: 'pointer',
+                      background: 'rgba(255,255,255,0.05)', color: '#a8a8b8',
+                      border: '1px solid rgba(255,255,255,0.10)',
+                      fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                    }}
+                  >Cancel</button>
+                </span>
+              ) : (typeof onClearAttractorCell === 'function' && fieldOverridesAcross.length >= 2 && (
+                <span style={{
+                  textTransform: 'none', letterSpacing: 0, fontWeight: 500,
+                  color: '#5a5a70', fontSize: 8,
+                }} title="Long-press a chip to select several, then clear them together.">
+                  hold to multi-select
+                </span>
+              ))}
             </div>
             <div style={{
               display: 'flex', flexWrap: 'wrap', gap: 4,
@@ -3095,47 +3222,74 @@ function ClampThresholdPopover({
                 const pct = Math.round(value * 100)
                 const isStale = !liveAttr
                 const isCurrent = id === attractorId
-                // R28.45 — Each chip is now an actionable button that
-                // wipes JUST this cell. Without onClearAttractorCell
-                // wired up the chip renders as before (read-only span
-                // semantics preserved via button with no onClick); a
-                // future caller can opt in without breaking existing
-                // visual contract.
-                const handleClick = typeof onClearAttractorCell === 'function'
+                const cellActionable = typeof onClearAttractorCell === 'function'
+                const isSelected = chipMultiSelect && selectedChipIds.has(id)
+                // R28.45 / R29.45 — click behaviour depends on mode:
+                //   - multi-select mode: tap TOGGLES this chip's
+                //     membership in the selection set (no wipe yet).
+                //   - normal mode: tap wipes JUST this cell (R28.45).
+                // Either way the long-press handlers below can flip into
+                // multi-select. chipPressFiredRef swallows the synthetic
+                // click that fires after a long-press so the hold doesn't
+                // ALSO wipe / toggle.
+                const handleClick = cellActionable
                   ? (e) => {
                     e.stopPropagation()  // don't bubble to outer click handlers
+                    if (chipPressFiredRef.current) { chipPressFiredRef.current = false; return }
+                    if (chipMultiSelect) { toggleChipSelected(id); return }
                     onClearAttractorCell(id)
                   }
                   : undefined
                 const clickable = !!handleClick
+                const pressHandlers = cellActionable ? {
+                  onMouseDown: () => startChipPress(id),
+                  onMouseUp: cancelChipPress,
+                  onMouseLeave: cancelChipPress,
+                  onTouchStart: () => startChipPress(id),
+                  onTouchEnd: cancelChipPress,
+                  onTouchMove: cancelChipPress,
+                  onTouchCancel: cancelChipPress,
+                } : {}
                 return (
                   <button
                     type="button"
                     key={id}
                     onClick={handleClick}
                     disabled={!clickable}
+                    {...pressHandlers}
                     title={isStale
-                      ? `${id} (stale \u2014 attractor deleted) currently at ${pct}% \u2014 click to wipe`
+                      ? `${id} (stale \u2014 attractor deleted) currently at ${pct}% \u2014 ${chipMultiSelect ? 'tap to select' : 'click to wipe (hold to multi-select)'}`
                       : clickable
-                        ? `${liveAttr.name} (id=${id}) currently at ${pct}% \u2014 click to clear THIS cell only`
+                        ? `${liveAttr.name} (id=${id}) currently at ${pct}% \u2014 ${chipMultiSelect ? 'tap to select/deselect' : 'click to clear THIS cell only (hold to multi-select)'}`
                         : `${liveAttr.name} (id=${id}) currently at ${pct}% \u2014 will reset to per-field threshold`}
                     style={{
                       display: 'inline-flex', alignItems: 'center', gap: 3,
                       padding: '2px 6px', borderRadius: 4,
                       fontSize: 9.5, fontFamily: 'Geist Mono, JetBrains Mono, monospace',
-                      background: isCurrent
-                        ? 'rgba(196,181,253,0.20)'
-                        : isStale
-                          ? 'rgba(255,255,255,0.04)'
-                          : 'rgba(99,102,241,0.10)',
-                      color: isCurrent ? '#ddd6fe' : isStale ? '#7a7a90' : '#c7d2fe',
-                      border: isCurrent
-                        ? '1px solid rgba(167,139,250,0.55)'
-                        : isStale
-                          ? '1px solid rgba(255,255,255,0.06)'
-                          : '1px solid rgba(99,102,241,0.25)',
+                      background: isSelected
+                        ? 'rgba(239,68,68,0.18)'
+                        : isCurrent
+                          ? 'rgba(196,181,253,0.20)'
+                          : isStale
+                            ? 'rgba(255,255,255,0.04)'
+                            : 'rgba(99,102,241,0.10)',
+                      color: isSelected ? '#fca5a5' : isCurrent ? '#ddd6fe' : isStale ? '#7a7a90' : '#c7d2fe',
+                      border: isSelected
+                        ? '1px solid rgba(239,68,68,0.55)'
+                        : isCurrent
+                          ? '1px solid rgba(167,139,250,0.55)'
+                          : isStale
+                            ? '1px solid rgba(255,255,255,0.06)'
+                            : '1px solid rgba(99,102,241,0.25)',
                       fontStyle: isStale ? 'italic' : 'normal',
                       cursor: clickable ? 'pointer' : 'default',
+                      // R29.45 — block the native long-press callout +
+                      // text-selection on mobile so the hold reads as a
+                      // gesture, not a copy action.
+                      userSelect: 'none',
+                      WebkitUserSelect: 'none',
+                      WebkitTouchCallout: 'none',
+                      touchAction: 'manipulation',
                       // Reset native button styling so the chip matches
                       // the span baseline visually.
                       font: 'inherit',
@@ -3151,17 +3305,25 @@ function ClampThresholdPopover({
                     onMouseEnter={clickable ? (e) => {
                       // Indigo lift on hover (matches the per-field
                       // chip palette so the eye groups it with the
-                      // surrounding row).
+                      // surrounding row). Selected chips keep their red
+                      // fill so the hover doesn't mask the selection.
+                      if (isSelected) return
                       e.currentTarget.style.background = isCurrent
                         ? 'rgba(196,181,253,0.30)'
                         : 'rgba(99,102,241,0.18)'
                     } : undefined}
                     onMouseLeave={clickable ? (e) => {
-                      e.currentTarget.style.background = isCurrent
-                        ? 'rgba(196,181,253,0.20)'
-                        : isStale
-                          ? 'rgba(255,255,255,0.04)'
-                          : 'rgba(99,102,241,0.10)'
+                      // Also cancel any armed long-press (mouse left the
+                      // chip mid-hold). Selected chips restore their red
+                      // fill rather than the indigo/idle baseline.
+                      cancelChipPress()
+                      e.currentTarget.style.background = isSelected
+                        ? 'rgba(239,68,68,0.18)'
+                        : isCurrent
+                          ? 'rgba(196,181,253,0.20)'
+                          : isStale
+                            ? 'rgba(255,255,255,0.04)'
+                            : 'rgba(99,102,241,0.10)'
                     } : undefined}
                   >
                     {/* Tiny dot prefix in the type accent — same colour
@@ -3184,16 +3346,16 @@ function ClampThresholdPopover({
                       color: isCurrent ? '#c4b5fd' : '#a5b4fc',
                       fontWeight: 700,
                     }}>{pct}%</span>
-                    {/* R28.45 — small \u00d7 glyph hints at the per-cell
-                        wipe action. Renders only when clickable
-                        (back-compat: read-only callers see no
-                        affordance). Hidden visually inside the chip
-                        but still tab-accessible via the button. */}
+                    {/* R28.45 / R29.45 — trailing glyph adapts to mode:
+                        normal = wipe hint (x); multi-select selected =
+                        filled check; multi-select unselected = hollow
+                        ring. Renders only when clickable (back-compat:
+                        read-only callers see no affordance). */}
                     {clickable && (
                       <span aria-hidden="true" style={{
-                        fontSize: 9, color: '#5a5a70',
-                        marginLeft: 1, lineHeight: 1,
-                      }}>{'\u00d7'}</span>
+                        fontSize: 9, color: isSelected ? '#fca5a5' : '#5a5a70',
+                        marginLeft: 1, lineHeight: 1, fontWeight: isSelected ? 700 : 400,
+                      }}>{chipMultiSelect ? (isSelected ? '\u2713' : '\u25cb') : '\u00d7'}</span>
                     )}
                   </button>
                 )
