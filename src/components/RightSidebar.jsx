@@ -29,8 +29,9 @@ import {
   // R29.41 — rolling scope history for the pip tooltip (compare the
   // last few previewed import scopes by tier)
   // R30.41 — load/sanitize/save helpers so the ring survives reload.
+  // R31.41 — clearImportScopeHistory wipes the durable ring on demand.
   pushImportScopeHistory, describeImportScopeHistory,
-  loadImportScopeHistory, saveImportScopeHistory,
+  loadImportScopeHistory, saveImportScopeHistory, clearImportScopeHistory,
 } from '../lib/biasOverridesIO'
 import {
   loadCameraViews, saveCameraViews, appendView, moveView, moveViewUp, moveViewDown,
@@ -1139,6 +1140,21 @@ function SceneBookmarks() {
       return next
     })
   }
+  // R31.41 — wipe the scope-history ring (memory + durable copy) so the
+  // user can start a clean comparison slate. We KEEP the current live
+  // scope as the sole entry by re-recording it right after the wipe —
+  // clearing "history" means dropping the PRIOR previews (the dots), not
+  // forgetting what the user is looking at this moment. The pure
+  // pushImportScopeHistory re-seeds the head from the live scope so the
+  // pip's "Touching N" stays truthful; only the prior-scope dots vanish.
+  const clearBiasScopeHistory = (liveChanged, liveTotal) => {
+    try { clearImportScopeHistory() } catch { /* quota */ }
+    const seeded = (Number.isFinite(liveChanged) && Number.isFinite(liveTotal) && liveTotal > 0)
+      ? pushImportScopeHistory([], liveChanged, liveTotal)
+      : []
+    if (seeded.length > 0) { try { saveImportScopeHistory(seeded) } catch { /* quota */ } }
+    setBiasScopeHistory(seeded)
+  }
   const onBiasDragEnter = (e) => {
     if (!e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return
     e.preventDefault()
@@ -1550,6 +1566,7 @@ function SceneBookmarks() {
           onCommit={commitBiasImport}
           scopeHistory={biasScopeHistory}
           onRecordScope={recordBiasScope}
+          onClearScope={clearBiasScopeHistory}
         />
       )}
       </div>{/* R22.28 — close bias drop-zone wrapper */}
@@ -2199,7 +2216,7 @@ function formatCompactNum(v) {
   return v.toFixed(2)
 }
 
-function BiasOverridesImportPreview({ pending, existing, onModeChange, onCancel, onCommit, scopeHistory = [], onRecordScope }) {
+function BiasOverridesImportPreview({ pending, existing, onModeChange, onCancel, onCommit, scopeHistory = [], onRecordScope, onClearScope }) {
   const mode = pending.mode === 'replace' ? 'replace' : 'merge'
   const rows = buildBiasImportPreviewRows(pending.items, existing, mode)
   // R25.41 — expanded-row tracker. Click a chip row to expand it
@@ -2343,6 +2360,37 @@ function BiasOverridesImportPreview({ pending, existing, onModeChange, onCancel,
                         opacity: 1 - i * 0.22,
                       }} />
                   ))}
+                  {/* R31.41 — clear-history affordance. Now that R30.41
+                      made the ring survive reload, this is the only
+                      in-UI way to reset the prior-scope comparison
+                      (the dots) without hand-clearing localStorage.
+                      Only rendered when there's history to clear AND a
+                      handler is wired. Tiny monochrome glyph keeps the
+                      pip compact; stopPropagation so clicking it doesn't
+                      bubble into any parent row toggle. */}
+                  {typeof onClearScope === 'function' && (
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onClearScope(totalImpact.changed, totalImpact.total)
+                      }}
+                      title="Clear the recent-preview history (resets the comparison dots; keeps this import's live scope)"
+                      style={{
+                        marginLeft: 3, padding: 0, width: 11, height: 11,
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        borderRadius: 3, cursor: 'pointer',
+                        background: 'transparent', color: '#7a7a90',
+                        border: '1px solid rgba(255,255,255,0.14)',
+                        fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                        fontSize: 9, lineHeight: 1, fontWeight: 700,
+                        transition: 'color 0.12s ease-out, border-color 0.12s ease-out',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.color = '#fca5a5'; e.currentTarget.style.borderColor = 'rgba(239,68,68,0.4)' }}
+                      onMouseLeave={(e) => { e.currentTarget.style.color = '#7a7a90'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)' }}
+                    >{'\u00d7'}</button>
+                  )}
                 </span>
               )}
             </span>

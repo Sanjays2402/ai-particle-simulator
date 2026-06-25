@@ -28,6 +28,8 @@ import {
   // R30.41 — persist the scope-history ring to localStorage
   IMPORT_SCOPE_HISTORY_KEY,
   sanitizeImportScopeHistory, loadImportScopeHistory, saveImportScopeHistory,
+  // R31.41 — clear the persisted ring on demand
+  clearImportScopeHistory,
 } from './biasOverridesIO.js'
 import { SCENE_BIASES, SCENE_BIAS_RANGE_FIELDS, SCENE_BIAS_CHANCE_FIELDS } from './randomScene.js'
 
@@ -1350,5 +1352,42 @@ console.log('PASS: pushImportScopeHistory + describeImportScopeHistory — previ
 }
 
 console.log('PASS: persist scope-history ring — sanitize/load/save round-trip (R30.41, ~30 asserts)')
+
+// R31.41 — clearImportScopeHistory wipes the persisted ring.
+{
+  function makeFakeStorage() {
+    const m = new Map()
+    return {
+      getItem: (k) => (m.has(k) ? m.get(k) : null),
+      setItem: (k, v) => { m.set(k, String(v)) },
+      removeItem: (k) => { m.delete(k) },
+      _raw: m,
+    }
+  }
+  // Seed a ring, persist it, then clear: load must come back empty.
+  const sess = makeFakeStorage()
+  let ring = pushImportScopeHistory([], 6, 30)
+  ring = pushImportScopeHistory(ring, 25, 30)
+  saveImportScopeHistory(ring, sess)
+  ok(sess._raw.has(IMPORT_SCOPE_HISTORY_KEY), 'precondition: key present after save')
+  eq(loadImportScopeHistory(sess).length, 2, 'precondition: two scopes loaded')
+  eq(clearImportScopeHistory(sess), true, 'clear returns true when storage available')
+  ok(!sess._raw.has(IMPORT_SCOPE_HISTORY_KEY), 'clear removes the key')
+  deepEq(loadImportScopeHistory(sess), [], 'load after clear is empty (reload-safe wipe)')
+  // Idempotent: clearing an already-clear store still succeeds.
+  eq(clearImportScopeHistory(sess), true, 'clear is idempotent (already absent)')
+  ok(!sess._raw.has(IMPORT_SCOPE_HISTORY_KEY), 'still absent after second clear')
+  // No storage available → false (never throws).
+  eq(clearImportScopeHistory(null), false, 'clear with null storage → false')
+  // Defensive: a throwing removeItem is swallowed → false.
+  const boom = {
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => { throw new Error('quota') },
+  }
+  eq(clearImportScopeHistory(boom), false, 'clear swallows storage error → false')
+}
+
+console.log('PASS: clearImportScopeHistory — wipe the persisted scope-history ring (R31.41, ~8 asserts)')
 
 console.log(`PASS: biasOverridesIO — envelope build/parse, merge/replace, summarize, defensive, multi-file combine, R24.36 preview rows, R25.41 per-field diff, R26.41 summary counts, R27.41 total-impact projector, R28.41 three-tier intensity (${SCENE_BIASES.length} chip ids, ${SCENE_BIAS_RANGE_FIELDS.length} ranges + ${SCENE_BIAS_CHANCE_FIELDS.length} chances per chip)`)

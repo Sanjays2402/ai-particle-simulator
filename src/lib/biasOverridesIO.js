@@ -733,6 +733,26 @@ export function saveImportScopeHistory(list, storage) {
   } catch { return false }
 }
 
+// R31.41 — wipe the persisted scope-history ring. Now that R30.41 made
+// the comparison ring survive reload, a user who wants a CLEAN
+// comparison slate (e.g. they imported a one-off oddball pack that's
+// skewing the "vs. recent" dots) had no way to reset it short of
+// clearing localStorage by hand. This pairs with a small "clear" glyph
+// on the pip tooltip so the reset is one click.
+//
+// Returns true when storage was available (key removed, or already
+// absent — idempotent), false when there's no storage to act on. The
+// in-memory React ring is reset by the caller; this just clears the
+// durable copy so a reload doesn't resurrect the wiped scopes.
+export function clearImportScopeHistory(storage) {
+  const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null)
+  if (!store) return false
+  try {
+    store.removeItem(IMPORT_SCOPE_HISTORY_KEY)
+    return true
+  } catch { return false }
+}
+
 // Pure equality check for bias-override field values. Routes by kind:
 //   - range fields (4): two-element numeric array, element-wise eq
 //   - chance fields (10): numeric eq
