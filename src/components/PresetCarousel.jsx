@@ -118,15 +118,29 @@ export default function PresetCarousel() {
   // so stepping back through the chain doesn't flash. Updated only from
   // setBulkUnpinChain (an event-time choke point — never during render).
   const [bulkUnpinPulse, setBulkUnpinPulse] = useState(0)
+  // R32.42 — direction of the most recent pip pulse. 'up' when a level
+  // is banked (x2 -> x3), 'down' when the user steps back via Undo
+  // (x3 -> x2 while the chain still has 2+ frames). R31.42 only pulsed
+  // on the bank, so stepping back through the chain got no peripheral
+  // confirmation the level popped. The direction picks which keyframe +
+  // colour the pip replays: indigo BLOOM on bank, rose CONTRACT on
+  // step-back, so the two read distinctly at a glance.
+  const [bulkUnpinPulseDir, setBulkUnpinPulseDir] = useState('up')
   const setBulkUnpinChain = (next) => {
     const prevLen = Array.isArray(bulkUnpinChainRef.current) ? bulkUnpinChainRef.current.length : 0
     const nextLen = Array.isArray(next) ? next.length : 0
     bulkUnpinChainRef.current = next
     setBulkUnpinChainDepth(nextLen)
-    // Pulse only when the depth grew AND lands at a badge-worthy level
-    // (>= 2, matching the pip's own render gate) so the very first
-    // unpin (depth 1, no pip) doesn't queue a pulse for a hidden badge.
-    if (nextLen > prevLen && nextLen >= 2) setBulkUnpinPulse(p => p + 1)
+    // Pulse on ANY depth change while the pip stays badge-worthy (>= 2).
+    // R31.42 gated on `nextLen > prevLen` (bank only); R32.42 widens to
+    // `nextLen !== prevLen` so a step-back ALSO pulses, and records the
+    // direction. The >= 2 floor covers both ways symmetrically: a drop
+    // to depth 1/0 unmounts the pip entirely (nothing to pulse), and the
+    // very first unpin (0 -> 1) still queues no pulse for a hidden badge.
+    if (nextLen >= 2 && nextLen !== prevLen) {
+      setBulkUnpinPulseDir(nextLen > prevLen ? 'up' : 'down')
+      setBulkUnpinPulse(p => p + 1)
+    }
   }
   // Save the history to localStorage with the ref-equal-on-no-op
   // contract preserved from the lib (no redundant writes when nothing
@@ -944,14 +958,24 @@ export default function PresetCarousel() {
                                 REMOUNTS each time a fresh level is banked,
                                 replaying a brief scale/colour pulse so the
                                 increment registers in peripheral vision.
-                                Skipped under reduced-motion (snaps instead). */}
+                                Skipped under reduced-motion (snaps instead).
+                                R32.42 — the pulse now also fires on Undo
+                                (step-back), in a distinct rose CONTRACT
+                                keyframe (vs the indigo BLOOM on bank) so
+                                walking back through the chain gets the same
+                                peripheral confirmation as banking a level. */}
                             {bulkUnpinChainDepth >= 2 && (
                               <>
                                 {!reducedMotion && (
-                                  <style>{`@keyframes bulk-unpin-pip-pulse {
+                                  <style>{`@keyframes bulk-unpin-pip-pulse-up {
                                     0%   { transform: scale(1);    background: rgba(99,102,241,0.22); box-shadow: 0 0 0 0 rgba(99,102,241,0); }
                                     35%  { transform: scale(1.42); background: rgba(129,140,248,0.55); box-shadow: 0 0 8px 1px rgba(129,140,248,0.55); }
                                     100% { transform: scale(1);    background: rgba(99,102,241,0.22); box-shadow: 0 0 0 0 rgba(99,102,241,0); }
+                                  }
+                                  @keyframes bulk-unpin-pip-pulse-down {
+                                    0%   { transform: scale(1);    background: rgba(99,102,241,0.22); box-shadow: 0 0 0 0 rgba(244,63,94,0); }
+                                    35%  { transform: scale(0.7);  background: rgba(244,63,94,0.45); box-shadow: 0 0 7px 1px rgba(244,63,94,0.5); }
+                                    100% { transform: scale(1);    background: rgba(99,102,241,0.22); box-shadow: 0 0 0 0 rgba(244,63,94,0); }
                                   }`}</style>
                                 )}
                                 <span
@@ -963,7 +987,9 @@ export default function PresetCarousel() {
                                     fontWeight: 700, letterSpacing: 0,
                                     fontFamily: 'Geist Mono, JetBrains Mono, monospace',
                                     display: 'inline-block',
-                                    animation: reducedMotion ? 'none' : 'bulk-unpin-pip-pulse 0.42s cubic-bezier(0.2,0.9,0.25,1)',
+                                    animation: reducedMotion
+                                      ? 'none'
+                                      : `bulk-unpin-pip-pulse-${bulkUnpinPulseDir} 0.42s cubic-bezier(0.2,0.9,0.25,1)`,
                                   }}>{`x${bulkUnpinChainDepth}`}</span>
                               </>
                             )}
