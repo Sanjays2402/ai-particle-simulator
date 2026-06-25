@@ -35,6 +35,11 @@ import {
   removeAttractors as removeNamedAttractorsHelper,
 } from './lib/namedAttractors'
 import { clampHueReactiveStrength as clampBgGradientStrength, normalizeReactiveCurve as normalizeBgGradientCurve } from './lib/bgGradient'
+// R29.43 — persisted hotkey-chain fade curve preference helpers.
+import {
+  sanitizeHotkeyChainFadeCurve as sanitizeHotkeyChainFadeCurveHelper,
+  nextHotkeyChainFadeCurve as nextHotkeyChainFadeCurveHelper,
+} from './lib/midiPresets'
 
 // Lightweight settings persistence: a subset of user-tweakable values
 // is read once on store init and written back whenever it changes.
@@ -751,6 +756,34 @@ export const useStore = create((set, get) => {
     const next = (v === 'exp' || v === 'log' || v === 'off') ? v : 'linear'
     try { if (typeof localStorage !== 'undefined') localStorage.setItem('lightbox-pan-curve-v1', next) } catch { /* */ }
     set({ lightboxPanCurve: next })
+  },
+
+  // R29.43 — persisted hotkey UNDO-chain fade curve preference. The
+  // chain badge (R23.35..R28.43) fades its direction colour toward
+  // grey over the 1s undo window; R28.43 hard-coded the recommended
+  // easeInCubic curve. R29.43 graduates that to a user preference so
+  // the slow-then-fast / fast-then-slow / linear feel survives reload.
+  // Parallels spectrumPeakCurve (R16.17) + lightboxPanCurve (R17.20):
+  // a single string token persisted across sessions, validated on read
+  // via sanitizeHotkeyChainFadeCurve. A fresh user (no persisted value)
+  // resolves to the curated easeInCubic default — only an explicit
+  // prior choice overrides it. Corrupt persisted values resolve to the
+  // same default.
+  hotkeyChainFadeCurve: (() => {
+    try {
+      const v = typeof localStorage !== 'undefined' ? localStorage.getItem('hotkey-chain-fade-curve-v1') : null
+      return sanitizeHotkeyChainFadeCurveHelper(v)
+    } catch { return sanitizeHotkeyChainFadeCurveHelper(undefined) }
+  })(),
+  setHotkeyChainFadeCurve: (v) => {
+    const next = sanitizeHotkeyChainFadeCurveHelper(v)
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem('hotkey-chain-fade-curve-v1', next) } catch { /* */ }
+    set({ hotkeyChainFadeCurve: next })
+  },
+  cycleHotkeyChainFadeCurve: () => {
+    const next = nextHotkeyChainFadeCurveHelper(get().hotkeyChainFadeCurve)
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem('hotkey-chain-fade-curve-v1', next) } catch { /* */ }
+    set({ hotkeyChainFadeCurve: next })
   },
 
   setMouseAttract: (v) => set({ mouseAttract: v }),

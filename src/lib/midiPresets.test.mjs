@@ -30,9 +30,12 @@ import {
   directionColorForChainStep, HOTKEY_CHAIN_COLOR_REVERSE, HOTKEY_CHAIN_COLOR_FORWARD,
   // R27.43 — direction colour fades over the 1s undo window
   HOTKEY_CHAIN_COLOR_FADED, fadeDirectionColor,
-  // R28.43 — non-linear fade curve presets (slow first 500ms, fast last 500ms)
+  // R28.43 — non-linear fade curve preset + curve-param threading
   HOTKEY_CHAIN_FADE_CURVES, HOTKEY_CHAIN_FADE_CURVE_DEFAULT,
   HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED, applyHotkeyChainFadeCurve,
+  // R29.43 — persisted fade-curve preference helpers
+  isValidHotkeyChainFadeCurve, sanitizeHotkeyChainFadeCurve,
+  nextHotkeyChainFadeCurve, labelForHotkeyChainFadeCurve,
 } from './midiPresets.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -1434,3 +1437,107 @@ console.log('PASS: fadeDirectionColor — chain-badge fade over undo window (R27
 }
 
 console.log('PASS: applyHotkeyChainFadeCurve + fadeDirectionColor curve param — non-linear fade (R28.43, ~80 asserts)')
+
+// =====================================================================
+// R29.43 — persisted hotkey-chain fade curve preference helpers
+// =====================================================================
+
+// isValidHotkeyChainFadeCurve — membership against the shipped roster.
+{
+  for (const c of HOTKEY_CHAIN_FADE_CURVES) {
+    ok(isValidHotkeyChainFadeCurve(c), `isValid accepts shipped curve ${c}`)
+  }
+  // Non-members + junk → false (never throws).
+  ok(!isValidHotkeyChainFadeCurve('gibberish'), 'isValid rejects unknown string')
+  ok(!isValidHotkeyChainFadeCurve(''), 'isValid rejects empty string')
+  ok(!isValidHotkeyChainFadeCurve(null), 'isValid rejects null')
+  ok(!isValidHotkeyChainFadeCurve(undefined), 'isValid rejects undefined')
+  ok(!isValidHotkeyChainFadeCurve(42), 'isValid rejects number')
+  ok(!isValidHotkeyChainFadeCurve({}), 'isValid rejects object')
+  ok(!isValidHotkeyChainFadeCurve([]), 'isValid rejects array')
+  // Prototype-pollution guard: 'constructor' / 'toString' are object
+  // props but NOT in the roster array, so membership is false.
+  ok(!isValidHotkeyChainFadeCurve('constructor'), 'isValid rejects prototype key constructor')
+  ok(!isValidHotkeyChainFadeCurve('toString'), 'isValid rejects prototype key toString')
+  ok(!isValidHotkeyChainFadeCurve('__proto__'), 'isValid rejects __proto__')
+}
+
+// sanitizeHotkeyChainFadeCurve — valid passes through, junk → the
+// RECOMMENDED default (easeInCubic), NOT the linear backwards-compat
+// default of applyHotkeyChainFadeCurve.
+{
+  for (const c of HOTKEY_CHAIN_FADE_CURVES) {
+    eq(sanitizeHotkeyChainFadeCurve(c), c, `sanitize passes through valid ${c}`)
+  }
+  eq(sanitizeHotkeyChainFadeCurve('gibberish'), HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED, 'sanitize coerces unknown → RECOMMENDED')
+  eq(sanitizeHotkeyChainFadeCurve(null), HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED, 'sanitize coerces null → RECOMMENDED')
+  eq(sanitizeHotkeyChainFadeCurve(undefined), HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED, 'sanitize coerces undefined → RECOMMENDED')
+  eq(sanitizeHotkeyChainFadeCurve(''), HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED, 'sanitize coerces empty → RECOMMENDED')
+  eq(sanitizeHotkeyChainFadeCurve(123), HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED, 'sanitize coerces number → RECOMMENDED')
+  // The recommended default must itself be a valid curve (no self-
+  // inconsistency between the constant + the roster).
+  ok(isValidHotkeyChainFadeCurve(HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED), 'RECOMMENDED is itself a valid curve')
+  ok(HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED !== HOTKEY_CHAIN_FADE_CURVE_DEFAULT, 'RECOMMENDED differs from backwards-compat DEFAULT')
+}
+
+// nextHotkeyChainFadeCurve — chip-cycle wraparound through the roster.
+{
+  // Walk the whole roster: each step lands on the NEXT entry, and a
+  // full lap returns to the start (every entry visited exactly once).
+  const seen = new Set()
+  let cur = HOTKEY_CHAIN_FADE_CURVES[0]
+  for (let i = 0; i < HOTKEY_CHAIN_FADE_CURVES.length; i++) {
+    ok(isValidHotkeyChainFadeCurve(cur), `cycle step ${i} is valid`)
+    ok(!seen.has(cur), `cycle step ${i} not yet seen (no early repeat)`)
+    seen.add(cur)
+    cur = nextHotkeyChainFadeCurve(cur)
+  }
+  eq(seen.size, HOTKEY_CHAIN_FADE_CURVES.length, 'cycle visits every curve in one lap')
+  eq(cur, HOTKEY_CHAIN_FADE_CURVES[0], 'cycle wraps back to first after a full lap')
+  // Explicit adjacency: last entry wraps to first.
+  const last = HOTKEY_CHAIN_FADE_CURVES[HOTKEY_CHAIN_FADE_CURVES.length - 1]
+  eq(nextHotkeyChainFadeCurve(last), HOTKEY_CHAIN_FADE_CURVES[0], 'last cycles to first')
+  // Unknown / corrupt current → first entry (forward progress, never sticks).
+  eq(nextHotkeyChainFadeCurve('gibberish'), HOTKEY_CHAIN_FADE_CURVES[0], 'unknown current → first')
+  eq(nextHotkeyChainFadeCurve(null), HOTKEY_CHAIN_FADE_CURVES[0], 'null current → first')
+  eq(nextHotkeyChainFadeCurve(undefined), HOTKEY_CHAIN_FADE_CURVES[0], 'undefined current → first')
+}
+
+// labelForHotkeyChainFadeCurve — friendly copy; every shipped curve
+// has a distinct non-empty label; unknown → raw token / fallback.
+{
+  const labels = HOTKEY_CHAIN_FADE_CURVES.map(labelForHotkeyChainFadeCurve)
+  for (const l of labels) {
+    ok(typeof l === 'string' && l.length > 0, `label is non-empty string (${l})`)
+  }
+  eq(new Set(labels).size, labels.length, 'every shipped curve has a DISTINCT label')
+  // Specific copy locked so a UI refactor can't silently swap meanings.
+  eq(labelForHotkeyChainFadeCurve('linear'), 'Linear', 'linear label')
+  eq(labelForHotkeyChainFadeCurve('easeInCubic'), 'Slow-fast', 'easeInCubic label (slow first then fast)')
+  eq(labelForHotkeyChainFadeCurve('easeOutCubic'), 'Fast-slow', 'easeOutCubic label (fast first then slow)')
+  // Unknown string → the raw token (never throws / never blanks chip).
+  eq(labelForHotkeyChainFadeCurve('weird'), 'weird', 'unknown string label → raw token')
+  // Non-string / empty → a safe non-empty fallback.
+  ok(labelForHotkeyChainFadeCurve(null).length > 0, 'null label → non-empty fallback')
+  ok(labelForHotkeyChainFadeCurve('').length > 0, 'empty label → non-empty fallback')
+}
+
+// Integration: a persisted-preference round-trip. sanitize on read +
+// the cycle path together produce only valid curves the badge can use.
+{
+  // Simulate: corrupt persisted value resolves to a usable curve, then
+  // each cycle keeps it valid + the recommended curve feeds fade math.
+  let pref = sanitizeHotkeyChainFadeCurve('corrupt-from-storage')
+  ok(isValidHotkeyChainFadeCurve(pref), 'persisted-corrupt resolves to valid curve')
+  for (let i = 0; i < 7; i++) {
+    pref = nextHotkeyChainFadeCurve(pref)
+    ok(isValidHotkeyChainFadeCurve(pref), `cycled pref step ${i} stays valid`)
+    // The badge fade endpoint anchoring holds for the cycled curve too.
+    eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, 0, 1000, pref), HOTKEY_CHAIN_COLOR_REVERSE,
+       `cycled pref ${pref}: elapsed=0 returns baseColor`)
+    eq(fadeDirectionColor(HOTKEY_CHAIN_COLOR_REVERSE, 1000, 1000, pref), HOTKEY_CHAIN_COLOR_FADED,
+       `cycled pref ${pref}: elapsed=windowMs returns FADED`)
+  }
+}
+
+console.log('PASS: hotkey-chain fade curve PERSISTED preference helpers (R29.43, ~55 asserts)')

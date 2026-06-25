@@ -58,6 +58,11 @@ import {
   // R28.43 — non-linear fade curve constant for the chain-badge toast
   // (slow first 500ms, fast last 500ms; graduates R27.43's linear)
   HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED,
+  // R29.43 — chip-cycle helpers + label for the PERSISTED fade-curve
+  // preference (graduates R28.43's hard-coded recommendation to a
+  // user-selectable + reload-surviving choice)
+  HOTKEY_CHAIN_FADE_CURVES, nextHotkeyChainFadeCurve,
+  labelForHotkeyChainFadeCurve, sanitizeHotkeyChainFadeCurve,
 } from '../lib/midiPresets'
 import {
   // R14.17 — single-bundle JSON export/import
@@ -471,6 +476,19 @@ export default function MidiPanel({ open, onClose }) {
   // (id + label + range), so this is cheap to re-derive each render.
   const namedAttractors = useStore(s => s.namedAttractors)
   const attractorRows = attractorActions({ namedAttractors })
+  // R29.43 — live persisted fade-curve preference for the hotkey UNDO
+  // chain badge. Read from the store so the chip's selection survives
+  // reload + the toast closure (showHotkeyTransferToast) captures the
+  // latest value each render. cycle advances + persists in one call.
+  const hotkeyChainFadeCurve = useStore(s => s.hotkeyChainFadeCurve)
+  const cycleHotkeyChainFadeCurve = useStore(s => s.cycleHotkeyChainFadeCurve)
+  // R29.43 — keep the latest persisted fade-curve in a ref so the
+  // recursive chain-toast closure (showHotkeyTransferToast) reads the
+  // CURRENT preference even if the user cycles the chip mid-chain.
+  // Synced via effect (not read during render) to satisfy the
+  // react-hooks ref rules.
+  const hotkeyChainFadeCurveRef = useRef(hotkeyChainFadeCurve)
+  useEffect(() => { hotkeyChainFadeCurveRef.current = hotkeyChainFadeCurve }, [hotkeyChainFadeCurve])
   // R24.40 — GC orphan per-attractor overrides when an attractor is
   // deleted. Without this pass, persisted overrides accumulate cruft:
   // delete attractor A, recreate B with attr-2 id, B inherits A's
@@ -754,13 +772,20 @@ export default function MidiPanel({ open, onClose }) {
     // chosen curve is t' = t^3: at t=0.5 the colour has only walked
     // 12.5% toward grey, so the badge reads as ~bright through the
     // first half of the window.
+    //
+    // R29.43 — the curve is now the user's PERSISTED preference (read
+    // from the synced ref so deep recursive chain steps pick up a
+    // mid-chain chip change). sanitize guards a corrupt persisted value
+    // back to the recommended easeInCubic so the badge always fades
+    // sensibly; HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED stays the fallback.
+    const fadeCurve = sanitizeHotkeyChainFadeCurve(hotkeyChainFadeCurveRef.current)
     const formatted = formatHotkeyChainBadge(chainStep, UNDO_CHAIN_MS)
     const badge = formatted
       ? (formatted.color
         ? { ...formatted, fade: {
             baseColor: formatted.color,
             windowMs: UNDO_CHAIN_MS,
-            curve: HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED,
+            curve: fadeCurve,
           } }
         : formatted)
       : undefined
@@ -2111,11 +2136,42 @@ function PresetBar({
           <Zap size={11} strokeWidth={2.4} />
           Controller Presets
         </span>
-        <span style={{
-          fontSize: 10, color: '#8a8aa0', fontFamily: 'Geist Mono, monospace',
-        }}>
-          shift-click to merge
-        </span>
+        {/* R29.43 — hotkey UNDO-chain fade-curve cycle chip. Lives in
+            the Controller Presets header (next to the merge hint)
+            because the chain badge it tunes only appears when a bundle
+            hotkey is re-bound — same surface the user is working in.
+            Clicking cycles linear → fast-slow → slow-fast and persists;
+            the label shows the active feel. Parallels the spectrum
+            peak-curve chip (R16.17) + lightbox pan-curve chip (R17.20)
+            visual + interaction language. */}
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <button
+            type="button"
+            onClick={() => cycleHotkeyChainFadeCurve()}
+            title={`Undo-chain badge fade feel: ${labelForHotkeyChainFadeCurve(hotkeyChainFadeCurve)}. Click to cycle (${HOTKEY_CHAIN_FADE_CURVES.map(labelForHotkeyChainFadeCurve).join(' \u2192 ')}). Controls how the chain counter colour fades over the 1s undo window after re-binding a bundle hotkey. Persists across reloads.`}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: '2px 7px', borderRadius: 5,
+              fontSize: 9, fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+              fontWeight: 600, letterSpacing: '0.04em',
+              cursor: 'pointer',
+              background: 'rgba(99,102,241,0.10)',
+              color: '#c7d2fe',
+              border: '1px solid rgba(99,102,241,0.30)',
+              transition: 'background 0.12s ease-out, border-color 0.12s ease-out',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(99,102,241,0.18)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(99,102,241,0.10)' }}
+          >
+            <span aria-hidden="true" style={{ opacity: 0.7 }}>{'\u223f'}</span>
+            <span>{labelForHotkeyChainFadeCurve(hotkeyChainFadeCurve)}</span>
+          </button>
+          <span style={{
+            fontSize: 10, color: '#8a8aa0', fontFamily: 'Geist Mono, monospace',
+          }}>
+            shift-click to merge
+          </span>
+        </div>
       </div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         {presets.map(p => {

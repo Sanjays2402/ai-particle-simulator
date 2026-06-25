@@ -541,6 +541,64 @@ export function applyHotkeyChainFadeCurve(t, curve = HOTKEY_CHAIN_FADE_CURVE_DEF
   }
 }
 
+// R29.43 — Persist the user's chosen fade curve so per-user fade-feel
+// preferences survive reload. R28.43 hard-coded the recommended curve
+// (easeInCubic) on every chain badge; R29.43 graduates that to a
+// user-selectable + persisted preference so someone who prefers the
+// R27.43 linear feel (or the early-warning easeOutCubic) can pin it.
+//
+// These three helpers parallel the spectrum-peak-curve (R16.17) +
+// lightbox-pan-curve (R17.20) persistence shape so the store wiring +
+// the chip-cycle UX stay consistent across the app:
+//   - isValidHotkeyChainFadeCurve(name)  — membership guard
+//   - sanitizeHotkeyChainFadeCurve(name) — coerce to a valid token
+//   - nextHotkeyChainFadeCurve(current)  — chip-cycle wraparound
+//
+// The DEFAULT used by sanitize is HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED
+// (easeInCubic) — NOT the backwards-compat 'linear' default of
+// applyHotkeyChainFadeCurve. Rationale: a brand-new user (no persisted
+// preference) should get the curated slow-then-fast feel R28.43
+// shipped; only an EXISTING explicit choice overrides it. The pure
+// curve math keeps 'linear' as its own default for the pinned R27.43
+// tests + every non-opting caller.
+
+// True when `name` is one of the shipped curves. Defensive against
+// prototype-pollution (own-enumerable check via indexOf, never a bare
+// `in`). Non-string → false.
+export function isValidHotkeyChainFadeCurve(name) {
+  if (typeof name !== 'string') return false
+  return HOTKEY_CHAIN_FADE_CURVES.indexOf(name) !== -1
+}
+
+// Coerce any input to a valid curve token. Valid input passes through;
+// everything else (corrupt persisted value, typo, null) resolves to
+// the recommended default so the badge always has a sane curve.
+export function sanitizeHotkeyChainFadeCurve(name) {
+  return isValidHotkeyChainFadeCurve(name) ? name : HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED
+}
+
+// Chip-cycle: advance to the next curve in HOTKEY_CHAIN_FADE_CURVES,
+// wrapping at the end. Unknown / corrupt current → first entry (so a
+// click on a chip backed by a bad value still makes forward progress
+// instead of sticking). Pure / no allocation.
+export function nextHotkeyChainFadeCurve(current) {
+  const idx = HOTKEY_CHAIN_FADE_CURVES.indexOf(current)
+  if (idx === -1) return HOTKEY_CHAIN_FADE_CURVES[0]
+  return HOTKEY_CHAIN_FADE_CURVES[(idx + 1) % HOTKEY_CHAIN_FADE_CURVES.length]
+}
+
+// Human-friendly label for a curve token — used by the cycle chip +
+// its tooltip so the UI doesn't hard-code the copy. Unknown → the raw
+// token (defensive: never throws, never blanks the chip).
+export function labelForHotkeyChainFadeCurve(name) {
+  switch (name) {
+    case 'linear':       return 'Linear'
+    case 'easeInCubic':  return 'Slow-fast'
+    case 'easeOutCubic': return 'Fast-slow'
+    default:             return typeof name === 'string' && name ? name : 'Linear'
+  }
+}
+
 // R27.43 — Linearly fade a direction colour toward HOTKEY_CHAIN_COLOR_FADED
 // over the undo window. As elapsedMs walks 0 → windowMs, the returned
 // colour walks baseColor → faded grey. Past windowMs the colour pins
