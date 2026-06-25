@@ -545,16 +545,35 @@ padding.
 - [x] R31.45 Clamp multi-select Select-all: add an indeterminate tri-state visual (none / some / all) to the All/None toggle so a partial selection is distinguishable at a glance from empty — graduates R30.45 — 3af5523
 - [x] R31.20 Reorder aria-live narration: extend the same describeGapReorderAnnouncement narration to the LeftSidebar named-attractor keyboard reorder (R29.20 only wired MidiPanel's binding-group reorder; the attractor-list reorder has the same silent-to-SR gap) — graduates R30.20 — de2a8e1
 
-### Batch 32 — refilled queue (graduations of Batch 31 slices)
-- [ ] R32.41 Bias scope-history clear: add an Undo toast after the clear so a mis-clicked wipe can be restored (snapshot the prior-scope ring before clearing, restore on Undo within a window — parallels R28.42's note-filter bulk-unpin undo) — graduates R31.41
-- [ ] R32.42 Bulk-unpin depth-pip pulse: also pulse the pip when it DECREMENTS (x3 -> x2 on Undo) in a distinct cool/red colour so stepping back through the chain gets the same peripheral confirmation as banking a level — graduates R31.42
-- [ ] R32.43 Interactive fade swatch: long-press the swatch (vs single click) to PIN the loop running continuously until the next click, so a user comparing two curves side-by-side can keep both animating instead of re-clicking — graduates R31.43
-- [ ] R32.45 Clamp tri-state toggle: when in the 'some' state, clicking should offer a THREE-way cycle (some -> all -> none -> some) via a tiny adjacent "invert" affordance so a user can flip their partial selection to its complement in one tap — graduates R31.45
-- [ ] R32.20 Attractor keyboard reorder: add a visible "lifted" floating chip near the badge during a keyboard grab (mirrors the row's name) so a SIGHTED keyboard user gets the same at-a-glance "what am I moving" cue the SR user gets spoken — graduates R31.20
+### Batch 32 — refilled queue (graduations of Batch 31 slices)  (SHIPPED)
+- [x] R32.41 Bias scope-history clear: add an Undo toast after the clear so a mis-clicked wipe can be restored (snapshot the prior-scope ring before clearing, restore on Undo within a window — parallels R28.42's note-filter bulk-unpin undo) — graduates R31.41 — 7a02856
+- [x] R32.42 Bulk-unpin depth-pip pulse: also pulse the pip when it DECREMENTS (x3 -> x2 on Undo) in a distinct cool/red colour so stepping back through the chain gets the same peripheral confirmation as banking a level — graduates R31.42 — a06801f
+- [x] R32.43 Interactive fade swatch: long-press the swatch (vs single click) to PIN the loop running continuously until the next click, so a user comparing two curves side-by-side can keep both animating instead of re-clicking — graduates R31.43 — 79fda0c
+- [x] R32.45 Clamp tri-state toggle: when in the 'some' state, clicking should offer a THREE-way cycle (some -> all -> none -> some) via a tiny adjacent "invert" affordance so a user can flip their partial selection to its complement in one tap — graduates R31.45 — f9b40e4
+- [x] R32.20 Attractor keyboard reorder: add a visible "lifted" floating chip near the badge during a keyboard grab (mirrors the row's name) so a SIGHTED keyboard user gets the same at-a-glance "what am I moving" cue the SR user gets spoken — graduates R31.20 — 198b525
+
+### Batch 33 — refilled queue (graduations of Batch 32 slices)
+- [ ] R33.41 Bias scope-history clear undo: extend the single-shot Undo into a multi-level CHAIN — clearing twice within a window should let the user step back through BOTH clears (snapshot stack + window-gated, parallels R29.42's note-filter bulk-unpin chain) — graduates R32.41
+- [ ] R33.42 Bulk-unpin pip pulse direction: surface a tiny directional glyph on the pip during the pulse (up-caret on bank, down-caret on step-back) so the direction reads even for a user who can't distinguish the indigo-bloom vs rose-contract colour cue (colour-blind safe) — graduates R32.42
+- [ ] R33.43 Fade swatch pin: persist the PINNED state across panel collapse / reopen (today re-opening the MIDI panel resets the loop to idle) so a user who pinned it to study a curve doesn't lose the loop on an accidental collapse — graduates R32.43
+- [ ] R33.45 Clamp invert affordance: also offer the invert as a keyboard shortcut (focus the multi-select bar, press 'i') + an aria-live announcement of the resulting count ("inverted: 4 of 7 cells selected") so keyboard + SR users reach it — graduates R32.45
+- [ ] R33.20 Attractor lifted floating chip: also show the chip during a MOUSE/touch drag (not just keyboard) so a pointer user dragging a row gets the same name-carrying "what am I moving" cue — graduates R32.20
 
 ### Future queue carried from Batch 24 (refill on next batch)
 
 ## TICK LOG
+- 2026-06-25 14:54 PT — Batch 32 (5/5). Tick 32. Frontend-focus override active.
+  Commits: 7a02856 (R32.41 bias scope-history clear undo toast),
+  a06801f (R32.42 bulk-unpin pip pulses on Undo step-back, rose contract),
+  79fda0c (R32.43 long-press the fade swatch to PIN the loop),
+  f9b40e4 (R32.45 invert affordance for the clamp 'some' multi-select),
+  198b525 (R32.20 floating lifted name-chip during keyboard reorder grab).
+  Gates: lint EXACTLY at baseline (23 errors / 3 warnings, all pre-existing);
+  build green 742ms; tests 40/40 files pass (midiMap +22 asserts for the new
+  invertChipSelection projector — complement-against-live, double-invert
+  round-trip, full defensive contract). Pushed 398f99c..198b525 to origin/main,
+  verified landed + in sync (0/0). All 5 were FRONTEND/UX graduations of
+  Batch 31. dist/ is gitignored — no build artifacts pushed.
 - 2026-06-19 23:41 PT — Bootstrap + Batch 1 (5/5).
   Commits: b66f8e7 (bootstrap), 2514538 (R1.01 categories), 4699716 (R1.02 kaleidoscope),
   c63ab97 (R1.05 hue cycle), b3418a5 (R1.04 camera views), 2dc8c73 (R1.03 place-field).
