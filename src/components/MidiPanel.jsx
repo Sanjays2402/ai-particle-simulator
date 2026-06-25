@@ -3017,6 +3017,19 @@ function ClampThresholdPopover({
       return next
     })
   }
+  // R30.45 — "Select all / none" toggle for the multi-select bar
+  // (parallels R17.17's attractor select-all). Wiping every cell for a
+  // field shouldn't require N individual taps. When some-or-none are
+  // selected, the toggle selects EVERY live chip; when all are already
+  // selected, it clears back to none. allChipsSelected drives the label
+  // + action so the single button covers both directions.
+  const allChipsSelected = fieldOverridesAcross.length > 0
+    && validSelectedChipIds.length === fieldOverridesAcross.length
+  const toggleSelectAllChips = () => {
+    setSelectedChipIds(allChipsSelected
+      ? new Set()
+      : new Set(fieldOverridesAcross.map(c => c.id)))
+  }
   // Long-press lifecycle for a chip. On touchstart/mousedown, arm a
   // timer; if it fires before release (and the pointer didn't move far)
   // we ENTER multi-select with this chip pre-selected. The click
@@ -3371,6 +3384,26 @@ function ClampThresholdPopover({
                   wipe handler is wired). */}
               {chipMultiSelect ? (
                 <span style={{ display: 'inline-flex', gap: 4, textTransform: 'none', letterSpacing: 0 }}>
+                  {/* R30.45 — Select all / none toggle. One button covers
+                      both directions (label flips on allChipsSelected) so
+                      wiping every cell for a field is a single tap rather
+                      than N. Parallels R17.17's attractor select-all. */}
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); toggleSelectAllChips() }}
+                    disabled={fieldOverridesAcross.length === 0}
+                    title={allChipsSelected
+                      ? 'Deselect every cell.'
+                      : `Select all ${fieldOverridesAcross.length} ${fieldLabel} cells at once.`}
+                    style={{
+                      padding: '1px 7px', borderRadius: 4, fontSize: 9, fontWeight: 600,
+                      cursor: fieldOverridesAcross.length === 0 ? 'not-allowed' : 'pointer',
+                      background: allChipsSelected ? 'rgba(99,102,241,0.18)' : 'rgba(255,255,255,0.05)',
+                      color: allChipsSelected ? '#c7d2fe' : '#a8a8b8',
+                      border: allChipsSelected ? '1px solid rgba(99,102,241,0.42)' : '1px solid rgba(255,255,255,0.10)',
+                      fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                    }}
+                  >{allChipsSelected ? 'None' : 'All'}</button>
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); commitChipBulkClear() }}
