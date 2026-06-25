@@ -933,6 +933,49 @@ export function clampSelectAllTriState(selectedCount, totalCount) {
   return 'some'
 }
 
+// R32.45 — invert a chip selection to its COMPLEMENT against the live
+// chip ids. R31.45's tri-state toggle made a partial ('some') selection
+// distinguishable, but flipping "I want everything EXCEPT these 3" still
+// meant clearing + re-picking the other N-3 by hand. This computes the
+// complement in one step so the caller can offer a tiny "Invert"
+// affordance when a partial selection is staged.
+//
+// Returns a NEW Set containing every live id that is NOT currently
+// selected. Restricting to LIVE ids is deliberate + self-healing: any
+// stale selected id that outlived its cell simply vanishes from the
+// result (it isn't in liveIds, so it can't carry into the complement),
+// exactly mirroring how validSelectedChipIds already reconciles counts.
+//
+// Defensive:
+//   - non-array liveIds            → empty Set
+//   - null / undefined liveIds      → empty Set
+//   - selectedIds as Set | array | iterable (NOT string) → normalised
+//   - selectedIds null / string / non-iterable → treated as empty
+//     selection, so invert returns EVERY (deduped, non-null) live id
+//   - duplicate / null entries in liveIds are deduped / skipped (Set)
+// Pure — neither input is mutated.
+export function invertChipSelection(liveIds, selectedIds) {
+  const ids = Array.isArray(liveIds) ? liveIds : []
+  let sel
+  if (selectedIds instanceof Set) {
+    sel = selectedIds
+  } else if (
+    selectedIds != null
+    && typeof selectedIds !== 'string'
+    && typeof selectedIds[Symbol.iterator] === 'function'
+  ) {
+    sel = new Set(selectedIds)
+  } else {
+    sel = new Set()
+  }
+  const out = new Set()
+  for (const id of ids) {
+    if (id == null) continue
+    if (!sel.has(id)) out.add(id)
+  }
+  return out
+}
+
 // R26.45 — Strip ONE field from EVERY attractor's per-attractor
 // override map. Drops attractor entries that become empty after the
 // strip (parallel to setClampWarnAttractorFieldOverride's last-cell-

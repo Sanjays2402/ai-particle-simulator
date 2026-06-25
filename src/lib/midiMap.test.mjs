@@ -43,6 +43,8 @@ import {
   listClampWarnFieldOverridesAcross,
   // R31.45 — tri-state projector for the multi-select All/None toggle
   clampSelectAllTriState,
+  // R32.45 — invert a chip selection to its complement against live ids
+  invertChipSelection,
   hasClampWarnAttractorFieldOverride,
   pruneClampWarnAttractorOverrides,
 } from './midiMap.js'
@@ -2607,3 +2609,61 @@ console.log('PASS: multi-select bulk-clear of preview chips (R29.45, ~12 asserts
 }
 
 console.log('PASS: clampSelectAllTriState — none/some/all toggle projector (R31.45, ~17 asserts)')
+
+// --- R32.45: invertChipSelection — complement against live ids --------
+{
+  const eq = (a, b, m) => { if (a !== b) fail(`${m}: expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`) }
+  const sortedArr = (set) => [...set].sort()
+  const eqArr = (set, expected, m) => {
+    const got = sortedArr(set)
+    const want = [...expected].sort()
+    if (got.length !== want.length || got.some((v, i) => v !== want[i])) {
+      fail(`${m}: expected ${JSON.stringify(want)}, got ${JSON.stringify(got)}`)
+    }
+  }
+  const live = ['a', 'b', 'c', 'd', 'e']
+  // Canonical complement of a partial selection.
+  eqArr(invertChipSelection(live, new Set(['a', 'b', 'c'])), ['d', 'e'], 'complement of {a,b,c} -> {d,e}')
+  eqArr(invertChipSelection(live, new Set(['b', 'd'])), ['a', 'c', 'e'], 'complement of {b,d} -> {a,c,e}')
+  // Empty selection -> all live ids; full selection -> empty.
+  eqArr(invertChipSelection(live, new Set()), live, 'empty selection inverts to ALL live')
+  eq(invertChipSelection(live, new Set(live)).size, 0, 'full selection inverts to EMPTY')
+  // Result is always a fresh Set instance (never an input ref).
+  {
+    const selIn = new Set(['a'])
+    const out = invertChipSelection(live, selIn)
+    ok(out instanceof Set, 'returns a Set')
+    ok(out !== selIn, 'returns a NEW set, not the input ref')
+    // Input not mutated.
+    eq(selIn.size, 1, 'input selection not mutated')
+  }
+  // Stale selected ids that are not live simply vanish (self-healing).
+  eqArr(invertChipSelection(live, new Set(['a', 'zzz', 'qqq'])), ['b', 'c', 'd', 'e'],
+    'stale ids ignored; complement computed against live only')
+  // Array / iterable selectedIds accepted (not just Set).
+  eqArr(invertChipSelection(live, ['a', 'b']), ['c', 'd', 'e'], 'array selectedIds normalised')
+  eqArr(invertChipSelection(live, (function* () { yield 'c'; yield 'e' })()), ['a', 'b', 'd'],
+    'generator selectedIds normalised')
+  // Defensive: non-array / null liveIds -> empty set.
+  eq(invertChipSelection(null, new Set(['a'])).size, 0, 'null liveIds -> empty')
+  eq(invertChipSelection(undefined, new Set(['a'])).size, 0, 'undefined liveIds -> empty')
+  eq(invertChipSelection('abc', new Set()).size, 0, 'string liveIds -> empty (not iterated as chars)')
+  eq(invertChipSelection(42, new Set()).size, 0, 'number liveIds -> empty')
+  // Defensive: null / string / non-iterable selectedIds -> treated empty
+  // (so invert returns every live id).
+  eqArr(invertChipSelection(live, null), live, 'null selectedIds -> treated empty -> all live')
+  eqArr(invertChipSelection(live, undefined), live, 'undefined selectedIds -> all live')
+  eqArr(invertChipSelection(live, 'ab'), live, 'string selectedIds NOT iterated as chars -> all live')
+  // Duplicate + null entries in liveIds are deduped / skipped.
+  eqArr(invertChipSelection(['a', 'a', 'b', null, 'b', undefined], new Set(['a'])), ['b'],
+    'liveIds deduped + null entries skipped')
+  // Double-invert round-trip restores the original (set equality).
+  {
+    const sel0 = new Set(['b', 'd'])
+    const inv1 = invertChipSelection(live, sel0)
+    const inv2 = invertChipSelection(live, inv1)
+    eqArr(inv2, [...sel0], 'double-invert returns to the original selection')
+  }
+}
+
+console.log('PASS: invertChipSelection — complement-against-live projector (R32.45, ~22 asserts)')

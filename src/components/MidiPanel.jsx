@@ -31,6 +31,8 @@ import {
   listClampWarnFieldOverridesAcross,
   // R31.45 — tri-state projector for the multi-select All/None toggle
   clampSelectAllTriState,
+  // R32.45 — invert a chip selection to its complement against live ids
+  invertChipSelection,
 } from '../lib/midiMap'
 import { ATTRACTOR_TYPES } from '../lib/namedAttractors'
 // R26.20 — touch-drag hit-test helper. Same pure projector the camera-
@@ -3194,6 +3196,17 @@ function ClampThresholdPopover({
       ? new Set()
       : new Set(fieldOverridesAcross.map(c => c.id)))
   }
+  // R32.45 — flip a PARTIAL selection to its complement in one tap. When
+  // the tri-state is 'some' (a hand-picked subset), the user may actually
+  // want "everything EXCEPT these" — R31.45 made the partial state
+  // distinguishable but flipping it still meant Clear + re-pick the other
+  // N-k by hand. invertChipSelection computes the complement against the
+  // LIVE chip ids (stale selected ids self-heal out), so this is a pure
+  // one-step toggle. Only surfaced in the 'some' state (none/all already
+  // have the All/None toggle as their natural complement).
+  const invertChipSelectionSet = () => {
+    setSelectedChipIds(prev => invertChipSelection(fieldOverridesAcross.map(c => c.id), prev))
+  }
   // Long-press lifecycle for a chip. On touchstart/mousedown, arm a
   // timer; if it fires before release (and the pointer didn't move far)
   // we ENTER multi-select with this chip pre-selected. The click
@@ -3611,6 +3624,35 @@ function ClampThresholdPopover({
                     </span>
                     <span>{chipSelectTriState === 'all' ? 'None' : 'All'}</span>
                   </button>
+                  {/* R32.45 — Invert affordance. Only surfaces in the
+                      'some' (partial) state: flip the hand-picked subset
+                      to its complement in one tap ("everything EXCEPT
+                      these"). In none/all the All/None toggle already IS
+                      the natural complement, so the extra button would be
+                      redundant there. Amber-keyed to match the 'some'
+                      indeterminate accent. */}
+                  {chipSelectTriState === 'some' && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); invertChipSelectionSet() }}
+                      title={`Invert: select the ${fieldOverridesAcross.length - validSelectedChipIds.length} ${fieldLabel} cell${(fieldOverridesAcross.length - validSelectedChipIds.length) === 1 ? '' : 's'} you DIDN'T pick (and deselect the ${validSelectedChipIds.length} you did).`}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 3,
+                        padding: '1px 7px', borderRadius: 4, fontSize: 9, fontWeight: 600,
+                        cursor: 'pointer',
+                        background: 'rgba(245,158,11,0.10)',
+                        color: '#fcd34d',
+                        border: '1px solid rgba(245,158,11,0.34)',
+                        fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                        transition: 'background 0.12s ease-out, border-color 0.12s ease-out',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(245,158,11,0.18)'; e.currentTarget.style.borderColor = 'rgba(245,158,11,0.5)' }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(245,158,11,0.10)'; e.currentTarget.style.borderColor = 'rgba(245,158,11,0.34)' }}
+                    >
+                      <span aria-hidden="true" style={{ fontSize: 10, lineHeight: 1 }}>{'\u21c4'}</span>
+                      <span>Invert</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); commitChipBulkClear() }}
