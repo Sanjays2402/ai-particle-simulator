@@ -28,6 +28,9 @@ import {
   countPinnedNoteFilterHistoryEntries, bulkUnpinNoteFilterHistoryEntries,
   // R28.42 — Undo restore action for the bulk-unpin toast
   snapshotPinnedNoteFilterHistoryKeys, restorePinnedNoteFilterHistoryEntries,
+  // R29.42 — multi-level bulk-unpin undo chain
+  BULK_UNPIN_CHAIN_MS, BULK_UNPIN_CHAIN_MAX,
+  pushBulkUnpinChainFrame, popBulkUnpinChainFrame, formatBulkUnpinChainBadge,
   THUMB_WIDTH, THUMB_HEIGHT,
 } from './presetThumbnails.js'
 
@@ -2090,3 +2093,146 @@ console.log('PASS: note-filter pattern BULK UNPIN — countPinned + bulkUnpin (R
 }
 
 console.log('PASS: note-filter pattern BULK UNPIN UNDO — snapshot + restore (R28.42, ~70 asserts)')
+
+// =====================================================================
+// R29.42 — multi-level bulk-unpin undo CHAIN
+// =====================================================================
+
+const K = (q, m = NOTE_FILTER_MODE_SUBSTRING) => ({ query: q, mode: m })
+
+// pushBulkUnpinChainFrame — first frame seeds a single-frame stack.
+{
+  const s1 = pushBulkUnpinChainFrame([], [K('a'), K('b')], 1000)
+  eq(s1.length, 1, 'first push -> 1 frame')
+  eq(s1[0].keys.length, 2, 'frame carries the snapshot keys')
+  eq(s1[0].at, 1000, 'frame records timestamp')
+  // Non-array stack treated as empty.
+  const fromNull = pushBulkUnpinChainFrame(null, [K('x')], 500)
+  eq(fromNull.length, 1, 'non-array stack -> fresh single frame')
+}
+
+// pushBulkUnpinChainFrame — within window CHAINS (stacks newest-last).
+{
+  let s = pushBulkUnpinChainFrame([], [K('a')], 1000)
+  s = pushBulkUnpinChainFrame(s, [K('b')], 1000 + BULK_UNPIN_CHAIN_MS - 1)  // just inside
+  eq(s.length, 2, 'within window -> chained to 2 frames')
+  eq(s[1].keys[0].query, 'b', 'newest frame at the END (stack tail)')
+  eq(s[0].keys[0].query, 'a', 'older frame stays at front')
+  // Exactly AT the window edge still chains (<=).
+  let s2 = pushBulkUnpinChainFrame([], [K('a')], 0)
+  s2 = pushBulkUnpinChainFrame(s2, [K('b')], BULK_UNPIN_CHAIN_MS)
+  eq(s2.length, 2, 'exactly at window edge still chains')
+}
+
+// pushBulkUnpinChainFrame — outside window RESETS to a single frame.
+{
+  let s = pushBulkUnpinChainFrame([], [K('a')], 1000)
+  s = pushBulkUnpinChainFrame(s, [K('b')], 1000 + BULK_UNPIN_CHAIN_MS + 1)  // just past
+  eq(s.length, 1, 'outside window -> reset to single frame')
+  eq(s[0].keys[0].query, 'b', 'reset frame is the new unpin')
+  // Backwards clock jump (negative delta) -> reset (suspicious).
+  let s3 = pushBulkUnpinChainFrame([], [K('a')], 5000)
+  s3 = pushBulkUnpinChainFrame(s3, [K('b')], 4000)
+  eq(s3.length, 1, 'negative delta (clock jump back) -> reset')
+}
+
+// pushBulkUnpinChainFrame — empty keys is a no-op (ref-equal).
+{
+  const s = pushBulkUnpinChainFrame([], [K('a')], 1000)
+  const same = pushBulkUnpinChainFrame(s, [], 1500)
+  truthy(same === s, 'empty keys -> input ref unchanged (no frame earned)')
+  // Keys with only corrupt entries collapse to empty -> no-op.
+  const same2 = pushBulkUnpinChainFrame(s, [null, 42, {}], 1500)
+  truthy(same2 === s, 'all-corrupt keys -> input ref (no frame)')
+  // non-finite nowMs with empty stack still records (treated as at:0).
+  const seeded = pushBulkUnpinChainFrame([], [K('a')], NaN)
+  eq(seeded.length, 1, 'non-finite nowMs still seeds a frame')
+  eq(seeded[0].at, 0, 'non-finite nowMs recorded as at:0')
+}
+
+// pushBulkUnpinChainFrame — FIFO cap at BULK_UNPIN_CHAIN_MAX.
+{
+  let s = []
+  // Push MAX+3 frames, each within window so they all chain.
+  for (let i = 0; i < BULK_UNPIN_CHAIN_MAX + 3; i++) {
+    s = pushBulkUnpinChainFrame(s, [K(`q${i}`)], i * 10)  // tiny deltas, all chain
+  }
+  eq(s.length, BULK_UNPIN_CHAIN_MAX, 'stack capped at MAX')
+  // Newest retained at the tail; oldest dropped.
+  eq(s[s.length - 1].keys[0].query, `q${BULK_UNPIN_CHAIN_MAX + 2}`, 'newest frame retained at tail')
+  truthy(!s.some(f => f.keys[0].query === 'q0'), 'oldest frames FIFO-dropped past cap')
+}
+
+// pushBulkUnpinChainFrame — purity: input not mutated.
+{
+  const s = pushBulkUnpinChainFrame([], [K('a')], 100)
+  const snap = JSON.stringify(s)
+  pushBulkUnpinChainFrame(s, [K('b')], 200)
+  eq(JSON.stringify(s), snap, 'push does not mutate the input stack')
+}
+
+// popBulkUnpinChainFrame — pops newest, returns remaining.
+{
+  let s = pushBulkUnpinChainFrame([], [K('a')], 0)
+  s = pushBulkUnpinChainFrame(s, [K('b')], 100)
+  s = pushBulkUnpinChainFrame(s, [K('c')], 200)
+  const { frame, rest } = popBulkUnpinChainFrame(s)
+  eq(frame.keys[0].query, 'c', 'pop returns the NEWEST frame')
+  eq(rest.length, 2, 'rest drops the popped frame')
+  eq(rest[rest.length - 1].keys[0].query, 'b', 'new tail is the next-newest')
+  // Pop again steps back another level.
+  const r2 = popBulkUnpinChainFrame(rest)
+  eq(r2.frame.keys[0].query, 'b', 'second pop -> next level back')
+  eq(r2.rest.length, 1, 'rest shrinks again')
+  // Empty / invalid stack -> null frame.
+  const empty = popBulkUnpinChainFrame([])
+  eq(empty.frame, null, 'pop empty stack -> null frame')
+  eq(empty.rest.length, 0, 'pop empty stack -> empty rest')
+  const bad = popBulkUnpinChainFrame(null)
+  eq(bad.frame, null, 'pop non-array -> null frame')
+  // Purity: input not mutated by pop.
+  const before = JSON.stringify(s)
+  popBulkUnpinChainFrame(s)
+  eq(JSON.stringify(s), before, 'pop does not mutate input stack')
+}
+
+// formatBulkUnpinChainBadge — depth badge only at 2+ frames.
+{
+  eq(formatBulkUnpinChainBadge([]), null, 'empty stack -> no badge')
+  eq(formatBulkUnpinChainBadge([{ keys: [K('a')], at: 0 }]), null, 'single frame -> no badge')
+  const two = formatBulkUnpinChainBadge([{ keys: [], at: 0 }, { keys: [], at: 1 }])
+  eq(two.text, 'x2', 'two frames -> x2 badge')
+  eq(two.count, 2, 'badge carries count')
+  const three = formatBulkUnpinChainBadge([{}, {}, {}])
+  eq(three.text, 'x3', 'three frames -> x3 badge')
+  eq(formatBulkUnpinChainBadge(null), null, 'non-array -> null badge')
+  eq(formatBulkUnpinChainBadge('nope'), null, 'string -> null badge')
+}
+
+// Integration: a full chain lifecycle — 3 rapid unpins, then 3 undos
+// step back through every level, restoring each frame's keys in turn.
+{
+  let stack = []
+  stack = pushBulkUnpinChainFrame(stack, [K('first')], 0)
+  stack = pushBulkUnpinChainFrame(stack, [K('second')], 100)
+  stack = pushBulkUnpinChainFrame(stack, [K('third')], 200)
+  eq(stack.length, 3, '3 rapid unpins -> depth 3')
+  eq(formatBulkUnpinChainBadge(stack).text, 'x3', 'depth-3 badge')
+  // Undo 1: restores 'third'.
+  let p = popBulkUnpinChainFrame(stack)
+  eq(p.frame.keys[0].query, 'third', 'undo 1 restores newest (third)')
+  stack = p.rest
+  eq(formatBulkUnpinChainBadge(stack).text, 'x2', 'after 1 undo -> x2')
+  // Undo 2: restores 'second'.
+  p = popBulkUnpinChainFrame(stack)
+  eq(p.frame.keys[0].query, 'second', 'undo 2 restores second')
+  stack = p.rest
+  eq(formatBulkUnpinChainBadge(stack), null, 'after 2 undos -> 1 frame, no badge')
+  // Undo 3: restores 'first', chain empties.
+  p = popBulkUnpinChainFrame(stack)
+  eq(p.frame.keys[0].query, 'first', 'undo 3 restores first (oldest)')
+  stack = p.rest
+  eq(stack.length, 0, 'chain fully drained')
+}
+
+console.log('PASS: bulk-unpin undo CHAIN — push/pop/badge across rapid unpins (R29.42, ~50 asserts)')

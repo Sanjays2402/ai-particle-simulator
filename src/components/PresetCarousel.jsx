@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store'
 import { presets } from '../presets'
 import {
@@ -33,6 +33,10 @@ import {
   // list is live when the user clicks Undo (so concurrent edits between
   // unpin + restore compose safely).
   snapshotPinnedNoteFilterHistoryKeys, restorePinnedNoteFilterHistoryEntries,
+  // R29.42 — multi-level undo CHAIN across rapid successive bulk-unpins
+  // (parallels R23.35 hotkey chain). Stack of unpin frames; window-gated
+  // chaining; pop+restore steps back one level per Undo click.
+  pushBulkUnpinChainFrame, popBulkUnpinChainFrame, formatBulkUnpinChainBadge,
 } from '../lib/presetThumbnails'
 import { showToast } from './Toast'
 
@@ -81,6 +85,14 @@ export default function PresetCarousel() {
   // (especially when the input has a draft query — the dropdown is
   // about RECENT, not CURRENT).
   const [historyOpen, setHistoryOpen] = useState(false)
+  // R29.42 — multi-level bulk-unpin undo chain stack. A ref (not state)
+  // because it's read/written from event handlers + toast closures and
+  // never drives a render directly; the toast's own Undo chip carries
+  // the visible chain depth. Each frame is { keys, at }; the pure
+  // pushBulkUnpinChainFrame helper handles window-gated chaining + the
+  // FIFO cap. Survives toast dismissals so a user mid-cleanup can keep
+  // stepping back.
+  const bulkUnpinChainRef = useRef([])
   // Save the history to localStorage with the ref-equal-on-no-op
   // contract preserved from the lib (no redundant writes when nothing
   // changed).
@@ -168,14 +180,39 @@ export default function PresetCarousel() {
     // the button only renders when >= 2 entries pinned). Defensive
     // skip keeps the surface tidy.
     if (pinnedKeys.length === 0) return
+    // R29.42 — push this unpin onto the chain stack. Window-gated: an
+    // unpin within BULK_UNPIN_CHAIN_MS of the previous one CHAINS (so
+    // two cleanup sweeps stack into a 2-level undo); a settled chain
+    // resets to a single frame. The pure helper owns the windowing +
+    // FIFO cap. We mutate the ref in place (it's not render state).
+    bulkUnpinChainRef.current = pushBulkUnpinChainFrame(
+      bulkUnpinChainRef.current, pinnedKeys, Date.now(),
+    )
+    showBulkUnpinToast()
+  }
+  // R29.42 — render the bulk-unpin toast for the CURRENT chain depth.
+  // Factored out of bulkUnpinHistory so the Undo handler can re-surface
+  // it after popping a level (so a 3-deep chain shows x3 -> x2 -> plain
+  // as the user steps back). Each Undo pops the top frame, restores its
+  // keys against the live history, then re-shows the toast for whatever
+  // depth remains (or stays silent when the chain empties).
+  const showBulkUnpinToast = () => {
+    const stack = bulkUnpinChainRef.current
+    const top = stack[stack.length - 1]
+    if (!top) return
     const undoUnpin = () => {
-      // Functional read: compute restoration against the LIVE
-      // history (may have changed via concurrent edits between
-      // unpin + undo click — adds, removes, individual pins).
-      // restorePinned... is ref-equal-on-no-op so this is cheap
-      // when nothing's actually different.
+      // Pop the most-recent frame; restore ITS keys (not the whole
+      // chain). The remaining stack stays so the next Undo steps back
+      // another level.
+      const { frame, rest } = popBulkUnpinChainFrame(bulkUnpinChainRef.current)
+      bulkUnpinChainRef.current = rest
+      if (!frame) return
+      // Functional read: compute restoration against the LIVE history
+      // (may have changed via concurrent edits between unpin + undo —
+      // adds, removes, individual pins). restorePinned... is ref-equal-
+      // on-no-op so this is cheap when nothing's actually different.
       setNoteFilterHistory(curr => {
-        const restored = restorePinnedNoteFilterHistoryEntries(curr, pinnedKeys)
+        const restored = restorePinnedNoteFilterHistoryEntries(curr, frame.keys)
         if (restored === curr) return curr
         // Persist outside React's setState so the storage write is
         // tied to the actual state transition (parallels every other
@@ -183,14 +220,22 @@ export default function PresetCarousel() {
         try { saveNoteFilterHistory(restored) } catch { /* quota */ }
         return restored
       })
+      // Re-surface the toast for the remaining chain depth so the user
+      // sees the next level is still undoable (x2 -> plain Undo, etc.).
+      if (bulkUnpinChainRef.current.length > 0) showBulkUnpinToast()
     }
+    // R29.42 — depth badge ("x2", "x3", ...) only when 2+ frames are
+    // stacked. Single-level undo keeps the plain chip (no badge) so the
+    // common case looks exactly like R28.42.
+    const badge = formatBulkUnpinChainBadge(stack)
     showToast(
-      `Unpinned ${pinnedKeys.length} pattern${pinnedKeys.length === 1 ? '' : 's'}`,
-      // Unicode pin glyph (📌-equivalent monochrome ★ to match the
-      // existing R26.42 star aesthetic — lucide 1.8 doesn't ship Pin).
-      // The icon span receives a string; Toast.jsx wraps it.
+      `Unpinned ${top.keys.length} pattern${top.keys.length === 1 ? '' : 's'}`,
+      // Unicode pin glyph (monochrome star to match the R26.42 star
+      // aesthetic — lucide 1.8 doesn't ship Pin). Icon span is wrapped
+      // by Toast.jsx.
       <span style={{ fontSize: 11, color: '#fbbf24', fontWeight: 700 }}>{'\u2605'}</span>,
       { label: 'Undo', onClick: undoUnpin },
+      badge ? { text: badge.text, color: '#fbbf24', title: `${badge.count} bulk-unpins chained — Undo steps back one level at a time.` } : undefined,
     )
   }
   // Close dropdown when input collapses entirely.

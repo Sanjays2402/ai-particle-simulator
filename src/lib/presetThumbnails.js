@@ -1113,6 +1113,102 @@ export function restorePinnedNoteFilterHistoryEntries(list, keys) {
   return next
 }
 
+// R29.42 — Multi-level bulk-unpin undo chain. Graduates R28.42's
+// single-level undo (snapshot one set of pinned keys, restore once)
+// with a STACK of unpin snapshots so a user who bulk-unpinned several
+// times in quick succession (two separate sweeps of filter cleanup)
+// can step BACK through each level — parallels the R23.35 hotkey undo
+// chain.
+//
+// The chain is a stack of frames, each:
+//   { keys: [{ query, mode }, ...], at: <ms timestamp> }
+// where `keys` is the R28.42 snapshot (the entries that frame's unpin
+// flipped to unpinned) and `at` is when the unpin happened.
+//
+// WINDOW semantics (parallels R23.35's UNDO_CHAIN_MS): a new unpin is
+// CHAINED onto the existing stack only if it lands within
+// BULK_UNPIN_CHAIN_MS of the previous frame. Otherwise the stack RESETS
+// to a single fresh frame (the previous chain is considered "settled"
+// — too much time passed for the user to be mid-cleanup). This keeps
+// the chain meaningful: it represents one continuous cleanup session,
+// not unrelated unpins minutes apart.
+export const BULK_UNPIN_CHAIN_MS = 6000
+
+// Max frames retained so a pathological rapid-fire unpin loop can't
+// grow the stack without bound. Oldest frame FIFO-dropped past the cap.
+export const BULK_UNPIN_CHAIN_MAX = 8
+
+// Push a new unpin frame onto the chain stack. Pure — returns a NEW
+// array; never mutates the input.
+//
+// Args:
+//   - stack : prior chain (array of frames) or null/undefined for none
+//   - keys  : the snapshot keys this unpin captured (R28.42 shape)
+//   - nowMs : timestamp of this unpin
+//   - windowMs : chain window (defaults BULK_UNPIN_CHAIN_MS)
+//
+// Rules:
+//   - empty keys → returns the stack unchanged (an unpin that flipped
+//     nothing doesn't earn a frame; ref-equal-on-no-op)
+//   - non-array stack → treated as empty (fresh chain)
+//   - within window of the top frame → CHAIN (push on top, newest-last)
+//   - outside window / first frame → RESET to a single-frame stack
+//   - non-finite nowMs → treated as a reset (can't reason about window)
+//   - cap at BULK_UNPIN_CHAIN_MAX (drop oldest)
+//
+// Newest frame is at the END of the array (stack semantics — pop from
+// the tail). `at` is recorded so the next push can window-check.
+export function pushBulkUnpinChainFrame(stack, keys, nowMs, windowMs = BULK_UNPIN_CHAIN_MS) {
+  const safeKeys = Array.isArray(keys) ? keys.filter(k => k && typeof k === 'object' && typeof k.query === 'string') : []
+  if (safeKeys.length === 0) return Array.isArray(stack) ? stack : []
+  const frame = { keys: safeKeys.map(k => ({ query: k.query, mode: k.mode })), at: Number.isFinite(nowMs) ? nowMs : 0 }
+  const prior = Array.isArray(stack) ? stack : []
+  const top = prior[prior.length - 1]
+  const withinWindow = top
+    && Number.isFinite(nowMs)
+    && Number.isFinite(top.at)
+    && Number.isFinite(windowMs) && windowMs >= 0
+    && (nowMs - top.at) >= 0
+    && (nowMs - top.at) <= windowMs
+  let next
+  if (withinWindow) {
+    next = [...prior, frame]
+  } else {
+    // Reset: a settled chain (or first-ever frame) starts fresh.
+    next = [frame]
+  }
+  if (next.length > BULK_UNPIN_CHAIN_MAX) next = next.slice(next.length - BULK_UNPIN_CHAIN_MAX)
+  return next
+}
+
+// Pop the most-recent frame off the chain. Pure — returns
+//   { frame, rest }
+// where `frame` is the popped top frame (or null when the stack is
+// empty / invalid) and `rest` is the remaining stack (a NEW array, or
+// the input ref when there was nothing to pop). The caller restores the
+// frame's keys against the live history, then keeps `rest` as the new
+// chain so the NEXT Undo steps back another level.
+export function popBulkUnpinChainFrame(stack) {
+  if (!Array.isArray(stack) || stack.length === 0) {
+    return { frame: null, rest: Array.isArray(stack) ? stack : [] }
+  }
+  const frame = stack[stack.length - 1]
+  const rest = stack.slice(0, stack.length - 1)
+  return { frame, rest }
+}
+
+// Pure projector for the chain DEPTH badge (parallels R24.38's hotkey
+// chain-counter formatter). Returns null when there's 0 or 1 frame (a
+// single-level undo needs no "xN" badge — the plain Undo chip suffices),
+// otherwise { text, count } where count = number of frames and text is
+// the "x2" / "x3" badge string. Non-array / corrupt → null.
+export function formatBulkUnpinChainBadge(stack) {
+  if (!Array.isArray(stack)) return null
+  const count = stack.length
+  if (count < 2) return null
+  return { text: `x${count}`, count }
+}
+
 // Remove one entry from the list by (query, mode). Returns the input
 // ref unchanged when nothing matches (no-op) so the persistence layer
 // can short-circuit.
