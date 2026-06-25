@@ -909,6 +909,30 @@ export function listClampWarnFieldOverridesAcross(attractorOverrides, field) {
   return out
 }
 
+// R31.45 — tri-state projector for the clamp multi-select "All / None"
+// toggle. R30.45 gave the toggle a binary label (flip to "None" only
+// when EVERY chip is selected), which left a partial selection looking
+// identical to an empty one — a user who'd hand-picked 3 of 7 cells saw
+// the same "All" button as someone who'd selected nothing. This returns
+// the selection's tri-state so the UI can paint an indeterminate dash
+// (some) distinct from an empty box (none) and a check (all):
+//   - 'none' : nothing selected (selectedCount <= 0) OR no cells exist
+//   - 'all'  : every existing cell selected (and at least one exists)
+//   - 'some' : a non-empty strict subset is selected
+//
+// Defensive: non-finite / negative counts coerce to 0; a selectedCount
+// that exceeds totalCount (stale selection ids that outlived their
+// cells) still reports 'all' only when there's at least one cell AND
+// the live selected count meets the total — callers pass the RECONCILED
+// (valid) selected count, so over-count can't fake 'all' here. Pure.
+export function clampSelectAllTriState(selectedCount, totalCount) {
+  const sel = Number.isFinite(selectedCount) && selectedCount > 0 ? Math.floor(selectedCount) : 0
+  const tot = Number.isFinite(totalCount) && totalCount > 0 ? Math.floor(totalCount) : 0
+  if (tot === 0 || sel === 0) return 'none'
+  if (sel >= tot) return 'all'
+  return 'some'
+}
+
 // R26.45 — Strip ONE field from EVERY attractor's per-attractor
 // override map. Drops attractor entries that become empty after the
 // strip (parallel to setClampWarnAttractorFieldOverride's last-cell-

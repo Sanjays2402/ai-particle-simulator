@@ -41,6 +41,8 @@ import {
   countClampWarnFieldOverridesAcross, clearClampWarnFieldOverridesAcross,
   // R27.45 — list per-attractor overrides for THIS field (preview chips)
   listClampWarnFieldOverridesAcross,
+  // R31.45 — tri-state projector for the multi-select All/None toggle
+  clampSelectAllTriState,
   hasClampWarnAttractorFieldOverride,
   pruneClampWarnAttractorOverrides,
 } from './midiMap.js'
@@ -2574,3 +2576,34 @@ console.log('PASS: per-cell preview-chip wipe sequence (R28.45, ~15 asserts)')
 }
 
 console.log('PASS: multi-select bulk-clear of preview chips (R29.45, ~12 asserts)')
+
+// --- R31.45: clampSelectAllTriState — none / some / all projector -----
+{
+  const eq = (a, b, m) => { if (a !== b) fail(`${m}: expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`) }
+  // Canonical cases.
+  eq(clampSelectAllTriState(0, 5), 'none', 'zero selected of 5 -> none')
+  eq(clampSelectAllTriState(3, 5), 'some', 'partial 3 of 5 -> some')
+  eq(clampSelectAllTriState(5, 5), 'all',  'full 5 of 5 -> all')
+  eq(clampSelectAllTriState(1, 5), 'some', 'single of many -> some')
+  eq(clampSelectAllTriState(4, 5), 'some', 'all-but-one -> some')
+  // Single-cell list: 1 of 1 is all; 0 of 1 is none (no 'some' possible).
+  eq(clampSelectAllTriState(0, 1), 'none', '0 of 1 -> none')
+  eq(clampSelectAllTriState(1, 1), 'all',  '1 of 1 -> all')
+  // No cells at all -> none regardless of selected count.
+  eq(clampSelectAllTriState(0, 0), 'none', '0 of 0 -> none')
+  eq(clampSelectAllTriState(3, 0), 'none', 'selected but no cells -> none')
+  // Over-count (stale ids) still reads 'all' once it meets/exceeds total
+  // (caller passes the reconciled count, so this is the safe ceiling).
+  eq(clampSelectAllTriState(7, 5), 'all',  'over-count meets total -> all')
+  // Defensive: non-finite / negative coerce to 0.
+  eq(clampSelectAllTriState(NaN, 5), 'none', 'NaN selected -> none')
+  eq(clampSelectAllTriState(-3, 5), 'none', 'negative selected -> none')
+  eq(clampSelectAllTriState(3, NaN), 'none', 'NaN total -> none')
+  eq(clampSelectAllTriState(3, -5), 'none', 'negative total -> none')
+  eq(clampSelectAllTriState(Infinity, 5), 'none', '+Infinity selected is non-finite -> coerces to 0 -> none')
+  // Float inputs floor (defensive against fractional counts).
+  eq(clampSelectAllTriState(2.9, 5), 'some', 'fractional selected floors to 2 -> some')
+  eq(clampSelectAllTriState(5.4, 5), 'all',  'fractional selected floors to 5 -> all')
+}
+
+console.log('PASS: clampSelectAllTriState — none/some/all toggle projector (R31.45, ~17 asserts)')

@@ -29,6 +29,8 @@ import {
   countClampWarnFieldOverridesAcross,
   // R27.45 — list per-attractor overrides for this field (preview chips)
   listClampWarnFieldOverridesAcross,
+  // R31.45 — tri-state projector for the multi-select All/None toggle
+  clampSelectAllTriState,
 } from '../lib/midiMap'
 import { ATTRACTOR_TYPES } from '../lib/namedAttractors'
 // R26.20 — touch-drag hit-test helper. Same pure projector the camera-
@@ -3122,6 +3124,11 @@ function ClampThresholdPopover({
   // + action so the single button covers both directions.
   const allChipsSelected = fieldOverridesAcross.length > 0
     && validSelectedChipIds.length === fieldOverridesAcross.length
+  // R31.45 — tri-state of the selection so the toggle can render an
+  // INDETERMINATE dash (some) distinct from an empty box (none) and a
+  // check (all). validSelectedChipIds is the reconciled count (ids that
+  // outlived their cells already dropped) so 'all' can't be faked.
+  const chipSelectTriState = clampSelectAllTriState(validSelectedChipIds.length, fieldOverridesAcross.length)
   const toggleSelectAllChips = () => {
     setSelectedChipIds(allChipsSelected
       ? new Set()
@@ -3484,23 +3491,66 @@ function ClampThresholdPopover({
                   {/* R30.45 — Select all / none toggle. One button covers
                       both directions (label flips on allChipsSelected) so
                       wiping every cell for a field is a single tap rather
-                      than N. Parallels R17.17's attractor select-all. */}
+                      than N. Parallels R17.17's attractor select-all.
+                      R31.45 — tri-state indicator box: empty (none),
+                      indeterminate dash (some — a hand-picked subset),
+                      check (all). 'some' no longer looks identical to
+                      'none'; the dash + amber accent flag a partial
+                      selection at a glance. */}
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); toggleSelectAllChips() }}
                     disabled={fieldOverridesAcross.length === 0}
-                    title={allChipsSelected
-                      ? 'Deselect every cell.'
-                      : `Select all ${fieldOverridesAcross.length} ${fieldLabel} cells at once.`}
+                    title={chipSelectTriState === 'all'
+                      ? 'All cells selected. Click to deselect every cell.'
+                      : chipSelectTriState === 'some'
+                        ? `${validSelectedChipIds.length} of ${fieldOverridesAcross.length} ${fieldLabel} cells selected. Click to select all.`
+                        : `Select all ${fieldOverridesAcross.length} ${fieldLabel} cells at once.`}
                     style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
                       padding: '1px 7px', borderRadius: 4, fontSize: 9, fontWeight: 600,
                       cursor: fieldOverridesAcross.length === 0 ? 'not-allowed' : 'pointer',
-                      background: allChipsSelected ? 'rgba(99,102,241,0.18)' : 'rgba(255,255,255,0.05)',
-                      color: allChipsSelected ? '#c7d2fe' : '#a8a8b8',
-                      border: allChipsSelected ? '1px solid rgba(99,102,241,0.42)' : '1px solid rgba(255,255,255,0.10)',
+                      background: chipSelectTriState === 'all'
+                        ? 'rgba(99,102,241,0.18)'
+                        : chipSelectTriState === 'some'
+                          ? 'rgba(245,158,11,0.14)'
+                          : 'rgba(255,255,255,0.05)',
+                      color: chipSelectTriState === 'all'
+                        ? '#c7d2fe'
+                        : chipSelectTriState === 'some'
+                          ? '#fcd34d'
+                          : '#a8a8b8',
+                      border: chipSelectTriState === 'all'
+                        ? '1px solid rgba(99,102,241,0.42)'
+                        : chipSelectTriState === 'some'
+                          ? '1px solid rgba(245,158,11,0.40)'
+                          : '1px solid rgba(255,255,255,0.10)',
                       fontFamily: 'Geist Mono, JetBrains Mono, monospace',
                     }}
-                  >{allChipsSelected ? 'None' : 'All'}</button>
+                  >
+                    {/* Tri-state indicator glyph box. */}
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        width: 10, height: 10, borderRadius: 2,
+                        fontSize: 9, lineHeight: 1, fontWeight: 800,
+                        background: chipSelectTriState === 'all'
+                          ? '#6366f1'
+                          : chipSelectTriState === 'some'
+                            ? 'rgba(245,158,11,0.30)'
+                            : 'transparent',
+                        border: chipSelectTriState === 'none'
+                          ? '1px solid rgba(255,255,255,0.30)'
+                          : chipSelectTriState === 'some'
+                            ? '1px solid rgba(245,158,11,0.55)'
+                            : '1px solid #6366f1',
+                        color: chipSelectTriState === 'all' ? '#fff' : '#fcd34d',
+                      }}>
+                      {chipSelectTriState === 'all' ? '\u2713' : chipSelectTriState === 'some' ? '\u2013' : ''}
+                    </span>
+                    <span>{chipSelectTriState === 'all' ? 'None' : 'All'}</span>
+                  </button>
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); commitChipBulkClear() }}
