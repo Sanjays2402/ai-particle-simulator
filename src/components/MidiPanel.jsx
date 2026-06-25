@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
+import { resolveReducedMotion } from '../lib/reducedMotion'
 import {
   ACTIONS, loadMidiMap, saveMidiMap, setBinding, clearAllBindings,
   decodeMidiMessage, applyCC, attractorActions,
@@ -63,6 +64,12 @@ import {
   // user-selectable + reload-surviving choice)
   HOTKEY_CHAIN_FADE_CURVES,
   labelForHotkeyChainFadeCurve, sanitizeHotkeyChainFadeCurve,
+  // R30.43 — live preview swatch: replay the actual fade math over the
+  // 1s window next to the cycle chip so users feel the curve before
+  // triggering a real chain. fadeDirectionColor is the same projector
+  // the Toast badge uses; HOTKEY_CHAIN_COLOR_FORWARD is a representative
+  // base hue (the amber forward-direction colour) to animate from.
+  fadeDirectionColor, HOTKEY_CHAIN_COLOR_FORWARD,
 } from '../lib/midiPresets'
 import {
   // R14.17 — single-bundle JSON export/import
@@ -2124,6 +2131,72 @@ function Banner({ color, icon, children }) {
   )
 }
 
+// R30.43 — live preview swatch for the hotkey UNDO-chain fade curve.
+// Sits next to the cycle chip and CONTINUOUSLY replays the exact fade
+// the Toast badge will perform — base direction colour walking toward
+// the faded grey over the 1s window, reshaped by the user's chosen
+// curve — so a user can FEEL the difference between linear / slow-fast
+// / fast-slow before they ever trigger a real chain.
+//
+// Self-contained animation: a 50ms tick (mirrors Toast.jsx's fade-tick
+// cadence) walks elapsed 0 -> windowMs, then holds at the faded
+// endpoint for a short beat and loops. fadeDirectionColor is the SAME
+// pure projector the live badge uses, so the swatch never lies about
+// the feel. The dot's box-shadow glow scales with remaining brightness
+// so the "urgency" reads even in peripheral vision.
+//
+// Reduced-motion: when the user prefers reduced motion we DON'T animate
+// — the swatch paints a static mid-window sample of the curve so the
+// chip still previews a representative colour without a pulsing dot.
+function FadeCurvePreviewSwatch({ curve, windowMs = UNDO_CHAIN_MS, baseColor = HOTKEY_CHAIN_COLOR_FORWARD }) {
+  const reducedMotionMode = useStore(s => s.reducedMotionMode)
+  const osPrefersReducedMotion = useStore(s => s.osPrefersReducedMotion)
+  const reduced = resolveReducedMotion(reducedMotionMode, osPrefersReducedMotion)
+  // elapsed within the loop: [0, windowMs] fade, then a HOLD_MS pause at
+  // the grey endpoint before restarting so the loop reads as discrete
+  // "chains" rather than a seamless throb.
+  const HOLD_MS = 360
+  const TICK_MS = 50
+  const [elapsed, setElapsed] = useState(0)
+  const startRef = useRef(0)
+  useEffect(() => {
+    if (reduced) return
+    startRef.current = (typeof performance !== 'undefined' ? performance.now() : Date.now())
+    const id = setInterval(() => {
+      const now = (typeof performance !== 'undefined' ? performance.now() : Date.now())
+      const dt = now - startRef.current
+      const period = windowMs + HOLD_MS
+      const phase = dt % period
+      setElapsed(phase > windowMs ? windowMs : phase)
+    }, TICK_MS)
+    return () => clearInterval(id)
+  }, [reduced, windowMs])
+  // Static sample at ~45% of the window when reduced (representative of
+  // the curve's mid-shape without motion).
+  const sampleElapsed = reduced ? windowMs * 0.45 : elapsed
+  const color = fadeDirectionColor(baseColor, sampleElapsed, windowMs, sanitizeHotkeyChainFadeCurve(curve))
+  // Brightness proxy: how far through the window (0 = fresh, 1 = faded).
+  const t = windowMs > 0 ? Math.min(1, sampleElapsed / windowMs) : 1
+  const glow = Math.max(0, 1 - t)
+  return (
+    <span
+      aria-hidden="true"
+      title="Live preview of the chain-badge fade over the 1s undo window"
+      style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: 14, height: 14, flex: '0 0 auto',
+      }}
+    >
+      <span style={{
+        width: 9, height: 9, borderRadius: '50%',
+        background: color,
+        boxShadow: `0 0 ${2 + glow * 6}px ${color}`,
+        transition: reduced ? 'none' : 'background 50ms linear, box-shadow 50ms linear',
+      }} />
+    </span>
+  )
+}
+
 // Controller-preset bar — one chip per shipped bundle plus a tiny
 // "auto-detected" badge when one of the connected inputs matches by
 // name. Click the chip to apply the bundle (Replace mode); Shift-click
@@ -2149,7 +2222,9 @@ function PresetBar({
   savingBundle, onStartSave, onCancelSave, onCommitBundle,
   bundleName, onBundleNameChange, liveBindingCount,
   // R29.43 — persisted hotkey-chain fade-curve preference + cycle.
-  fadeCurveLabel, onCycleFadeCurve, fadeCurveCycleHint,
+  // R30.43 — fadeCurve (the raw active curve id) drives the live preview
+  // swatch next to the cycle chip.
+  fadeCurve, fadeCurveLabel, onCycleFadeCurve, fadeCurveCycleHint,
 }) {
   const canSave = (bundleName || '').trim().length > 0 && liveBindingCount > 0
   const atCap = userPresets.length >= MAX_USER_PRESETS
@@ -2272,6 +2347,11 @@ function PresetBar({
               onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(99,102,241,0.10)' }}
             >
               <span aria-hidden="true" style={{ opacity: 0.7 }}>{'\u223f'}</span>
+              {/* R30.43 — live fade preview: animates the actual badge
+                  fade over the 1s window so the user feels the curve
+                  before triggering a chain. Static mid-window sample
+                  under reduced-motion. */}
+              <FadeCurvePreviewSwatch curve={fadeCurve} />
               <span>{fadeCurveLabel}</span>
             </button>
           )}
