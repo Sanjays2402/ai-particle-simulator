@@ -32,7 +32,7 @@ import {
   mergeImport as mergeCrossfadeOverridesImport,
   summarizeImportImpact as summarizeCrossfadeOverridesImpact,
 } from '../lib/crossfadeOverridesIO'
-import { ATTRACTOR_TYPES, MAX_ATTRACTORS, attractorTypeStyle, parsePositionInput, dropIndexForGap } from '../lib/namedAttractors'
+import { ATTRACTOR_TYPES, MAX_ATTRACTORS, attractorTypeStyle, parsePositionInput, dropIndexForGap, stepKeyboardGapCursor, describeGapReorderAnnouncement } from '../lib/namedAttractors'
 import { showToast } from './Toast'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
@@ -2980,9 +2980,87 @@ function NamedAttractorsBlock() {
   const moveUp = useStore(s => s.moveNamedAttractorUp)
   const moveDown = useStore(s => s.moveNamedAttractorDown)
   const moveToPosition = useStore(s => s.moveNamedAttractorToPosition)
+  const moveByIndex = useStore(s => s.moveNamedAttractorByIndex)
   const placingId = useStore(s => s.placingAttractorId)
   const setPlacing = useStore(s => s.setPlacingAttractorId)
   const atCap = list.length >= MAX_ATTRACTORS
+  // R31.20 — keyboard gap-drop reorder + aria-live narration for the
+  // attractor list. The R18.19/R19.19 gap-drop is mouse/touch-only, so
+  // keyboard-only + screen-reader users couldn't reorder the list AND
+  // got no spoken feedback. This brings over the exact lift/arrow/commit
+  // gesture MidiPanel's binding-group reorder uses (R29.20 keyboard +
+  // R30.20 narration): focus the #N badge, Enter/Space (or an arrow) to
+  // LIFT the row, Arrow up/down walk a drop cursor through the gap
+  // zones (stepKeyboardGapCursor skips the two no-op gaps adjacent to
+  // the lifted row + clamps at the ends), Enter/Space commits via
+  // dropIndexForGap, Escape cancels. All three helpers are pure +
+  // already pinned in namedAttractors.test.mjs.
+  const [liftedIdx, setLiftedIdx] = useState(null)
+  const [keyboardGapCursor, setKeyboardGapCursor] = useState(null)
+  const [reorderAnnounce, setReorderAnnounce] = useState('')
+  // Keyboard reorder handler factory — spread onto each row's #N badge.
+  // `rowIdx` is the row's index in the live list; `total` is the length.
+  // Only armed when total > 1 (nothing to reorder in a 0/1 list).
+  const onReorderKeyDown = (rowIdx, total) => (e) => {
+    const key = e.key
+    const isActivate = key === 'Enter' || key === ' ' || key === 'Spacebar'
+    const isUp = key === 'ArrowUp'
+    const isDown = key === 'ArrowDown'
+    const isCancel = key === 'Escape'
+    if (!isActivate && !isUp && !isDown && !isCancel) return
+    const lifted = liftedIdx === rowIdx
+    const liftedName = ((list || [])[rowIdx] || {}).name
+    if (isCancel) {
+      if (lifted) {
+        e.preventDefault()
+        setLiftedIdx(null)
+        setKeyboardGapCursor(null)
+        setReorderAnnounce(describeGapReorderAnnouncement('cancel', { from: rowIdx, total, name: liftedName }))
+      }
+      return
+    }
+    if (isActivate) {
+      e.preventDefault()
+      if (!lifted) {
+        setLiftedIdx(rowIdx)
+        setKeyboardGapCursor(null)
+        setReorderAnnounce(describeGapReorderAnnouncement('lift', { from: rowIdx, total, name: liftedName }))
+        return
+      }
+      // Already lifted → commit at the cursor (if any).
+      if (keyboardGapCursor != null) {
+        const insertIdx = dropIndexForGap(rowIdx, keyboardGapCursor, total)
+        if (insertIdx != null) moveByIndex(rowIdx, insertIdx)
+      }
+      setReorderAnnounce(describeGapReorderAnnouncement('commit', { from: rowIdx, gapIdx: keyboardGapCursor, total, name: liftedName }))
+      setLiftedIdx(null)
+      setKeyboardGapCursor(null)
+      return
+    }
+    // Arrow up/down. Lift first if not already lifted so the gesture is
+    // discoverable without a separate "press Enter to grab" step.
+    e.preventDefault()
+    if (!lifted) {
+      setLiftedIdx(rowIdx)
+      setReorderAnnounce(describeGapReorderAnnouncement('lift', { from: rowIdx, total, name: liftedName }))
+    }
+    const dir = isUp ? -1 : 1
+    const nextCursor = stepKeyboardGapCursor(rowIdx, lifted ? keyboardGapCursor : null, dir, total)
+    if (nextCursor != null) {
+      setKeyboardGapCursor(nextCursor)
+      setReorderAnnounce(describeGapReorderAnnouncement('move', { from: rowIdx, gapIdx: nextCursor, total, name: liftedName }))
+    }
+  }
+  // R31.20 — a lift only counts as "live" while its index is still in
+  // range. If the list shrinks out from under a lifted row (delete /
+  // external reorder), we DON'T clear via a setState-in-effect (that
+  // trips react-hooks/set-state-in-effect + cascades a render); instead
+  // every render-time consumer reads `liftActive` so a stale index just
+  // stops painting highlights. The keydown handler recomputes rowIdx +
+  // total from the live list, and the pure move helpers are defensive,
+  // so a stale lift can never commit a bad move — this is purely to keep
+  // the gap highlight honest.
+  const liftActive = liftedIdx != null && liftedIdx < list.length
   // R17.17 — multi-select state for bulk-delete. Shift-click on a row
   // toggles its membership in the selection. When non-empty, a delete
   // bar surfaces above the list; clearing the last selected row hides
@@ -3126,6 +3204,19 @@ function NamedAttractorsBlock() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {/* R31.20 — visually-hidden aria-live region narrating the keyboard
+          reorder (lift / arrow-step / commit / cancel). The clip/0-size
+          pattern hides it visually without display:none (which screen
+          readers skip). aria-atomic so the whole phrase is re-read, not
+          just the diff. Mirrors MidiPanel's R30.20 region. */}
+      <div
+        aria-live="polite"
+        aria-atomic="true"
+        style={{
+          position: 'absolute', width: 1, height: 1, padding: 0, margin: -1,
+          overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap', border: 0,
+        }}
+      >{reorderAnnounce}</div>
       <button
         onClick={() => { if (!atCap) add({ type: 'attractor' }) }}
         disabled={atCap}
@@ -3212,8 +3303,15 @@ function NamedAttractorsBlock() {
           hasSelection={validSelectedIds.size > 0}
           isBeingDragged={draggingIdx === idx}
           isDropTarget={dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx}
-          gapAboveActive={list.length > 1 && draggingIdx !== null && gapOverIdx === idx
-            && draggingIdx !== idx && draggingIdx !== idx - 1}
+          gapAboveActive={(list.length > 1 && draggingIdx !== null && gapOverIdx === idx
+            && draggingIdx !== idx && draggingIdx !== idx - 1)
+            // R31.20 — the keyboard drop-cursor pointing at the gap ABOVE
+            // this row lights the same indigo strip the mouse gap-drop
+            // uses, so the keyboard path looks identical to the pointer
+            // one.
+            || (liftActive && keyboardGapCursor === idx)}
+          isKeyboardLifted={liftActive && liftedIdx === idx}
+          onReorderKeyDown={list.length > 1 ? onReorderKeyDown(idx, list.length) : null}
           onShiftClickSelect={() => toggleSelect(a.id)}
           onRename={(name) => update(a.id, { name })}
           onTypeChange={(type) => update(a.id, { type })}
@@ -3237,20 +3335,23 @@ function NamedAttractorsBlock() {
       ))}
       {/* R19.19 — trailing gap below the last row so dropping past
           the last attractor inserts at the end. Only renders during
-          an active drag so the layout stays compact at rest. */}
-      {list.length > 1 && draggingIdx !== null && (
+          an active drag so the layout stays compact at rest.
+          R31.20 — also renders + highlights when the KEYBOARD drop
+          cursor points past the last row (gap === list.length), so a
+          keyboard user can land a row at the end. */}
+      {list.length > 1 && (draggingIdx !== null || (liftActive && keyboardGapCursor === list.length)) && (
         <div
           onDragOver={onGapDragOver(list.length)}
           onDragLeave={onGapDragLeave(list.length)}
           onDrop={onGapDrop(list.length)}
           style={{
-            height: gapOverIdx === list.length ? 32 : 10,
+            height: (gapOverIdx === list.length || keyboardGapCursor === list.length) ? 32 : 10,
             marginTop: 2,
             borderRadius: 5,
-            background: gapOverIdx === list.length
+            background: (gapOverIdx === list.length || keyboardGapCursor === list.length)
               ? 'linear-gradient(90deg, rgba(99,102,241,0.18), rgba(168,85,247,0.12))'
               : 'transparent',
-            border: gapOverIdx === list.length
+            border: (gapOverIdx === list.length || keyboardGapCursor === list.length)
               ? '1px dashed rgba(99,102,241,0.55)'
               : '1px dashed transparent',
             transition: 'height 0.12s ease-out, background 0.12s ease-out, border-color 0.12s ease-out',
@@ -3271,6 +3372,11 @@ function NamedAttractorRow({
   // ~22px tall so a row drag can drop precisely into the slot
   // between this row and the previous one.
   gapAboveActive, onGapDragOver, onGapDragLeave, onGapDrop,
+  // R31.20 — keyboard gap-drop reorder. isKeyboardLifted: this row is
+  // currently grabbed via keyboard (badge pulses indigo). onReorderKey-
+  // Down: the lift/arrow/commit handler spread onto the #N badge so the
+  // badge doubles as a keyboard reorder grab handle.
+  isKeyboardLifted, onReorderKeyDown,
   onRename, onTypeChange, onStrengthChange, onRadiusChange,
   onToggle, onRemove, onPlace, onMoveUp, onMoveDown, onJumpToPosition,
   onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd,
@@ -3466,14 +3572,27 @@ function NamedAttractorRow({
         ) : (
           <span
             onClick={(total > 1 && onJumpToPosition) ? () => { setDraftPos(String(index + 1)); setEditingPos(true) } : undefined}
+            tabIndex={onReorderKeyDown ? 0 : undefined}
+            role={onReorderKeyDown ? 'button' : undefined}
+            aria-label={onReorderKeyDown
+              ? (isKeyboardLifted
+                ? `Reordering ${attractor.name}, position ${index + 1} of ${total}. Arrow up or down to choose a position, Enter to drop, Escape to cancel.`
+                : `${attractor.name}, position ${index + 1} of ${total}. Press Enter or arrow keys to grab and reorder.`)
+              : undefined}
+            onKeyDown={onReorderKeyDown || undefined}
             style={{
               fontSize: 9, fontWeight: 700, letterSpacing: '0.12em',
-              color: attractor.enabled ? typeStyle.fg : '#6a6a80',
+              color: isKeyboardLifted ? '#c7d2fe' : (attractor.enabled ? typeStyle.fg : '#6a6a80'),
               textTransform: 'uppercase',
-              background: attractor.enabled ? typeStyle.bgSoft : 'rgba(255,255,255,0.04)',
+              background: isKeyboardLifted
+                ? 'rgba(99,102,241,0.30)'
+                : (attractor.enabled ? typeStyle.bgSoft : 'rgba(255,255,255,0.04)'),
               padding: '1px 5px', borderRadius: 4,
               fontFamily: 'Geist Mono, JetBrains Mono, monospace',
-              border: attractor.enabled ? `1px solid ${typeStyle.borderFaint}` : '1px solid transparent',
+              border: isKeyboardLifted
+                ? '1px solid rgba(99,102,241,0.75)'
+                : (attractor.enabled ? `1px solid ${typeStyle.borderFaint}` : '1px solid transparent'),
+              boxShadow: isKeyboardLifted ? '0 0 8px rgba(99,102,241,0.5)' : 'none',
               // R18.19 — badge wears the grab cursor when the row is
               // draggable (parallels camera-path R17.07 visual cue).
               // Falls back to pointer when the row isn't draggable but
@@ -3484,7 +3603,7 @@ function NamedAttractorRow({
               userSelect: 'none',
             }}
             title={onDragStart
-              ? `Type: ${TYPE_LABELS[attractor.type] || attractor.type} (${typeStyle.label}) — drag the row to reorder, or click this badge to jump to a numbered position`
+              ? `Type: ${TYPE_LABELS[attractor.type] || attractor.type} (${typeStyle.label}) — drag the row to reorder, click to jump to a numbered position, or focus + Enter/arrows to reorder by keyboard`
               : ((total > 1 && onJumpToPosition)
                 ? `Type: ${TYPE_LABELS[attractor.type] || attractor.type} (${typeStyle.label}) — click to jump this row to a numbered position`
                 : `Type: ${TYPE_LABELS[attractor.type] || attractor.type} (${typeStyle.label})`)}>
