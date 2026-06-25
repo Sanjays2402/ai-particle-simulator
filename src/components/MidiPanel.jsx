@@ -2213,38 +2213,84 @@ function FadeCurvePreviewSwatch({ curve, windowMs = UNDO_CHAIN_MS, baseColor = H
   const HOLD_MS = 360
   const TICK_MS = 50
   const [elapsed, setElapsed] = useState(-1)
-  // Bumped on each interactive click. Re-keys the animation effect so a
-  // click restarts the loop (not reduced) or fires a one-shot (reduced).
+  // Bumped on each interactive TAP. Re-keys the animation effect so a
+  // tap restarts the loop (not reduced) or fires a one-shot (reduced).
   const [playToken, setPlayToken] = useState(0)
+  // R32.43 — PINNED state. A long-press on the interactive swatch pins
+  // the ambient loop running CONTINUOUSLY until the next tap, so a user
+  // who wants to study the curve's feel (or compare two side-by-side)
+  // can keep it animating instead of re-tapping the single-shot. This is
+  // the only way a reduced-motion user gets a CONTINUOUS preview — and
+  // it's even more explicit opt-in than R31.43's single tap (a
+  // deliberate press-and-hold), so it stays defensible under reduced
+  // motion: a single tap stops it. While pinned the loop ignores the
+  // reduced-motion gate (runs the same ambient loop normal motion uses).
+  const [pinned, setPinned] = useState(false)
   const startRef = useRef(0)
+  // Long-press lifecycle (interactive only). Arm a timer on pointerdown;
+  // if it fires before release we PIN + mark pressFiredRef so the ensuing
+  // click is swallowed (doesn't immediately unpin). A short tap cancels
+  // the timer before it fires and falls through to the click handler.
+  const LONG_PRESS_MS = 420
+  const pressTimerRef = useRef(0)
+  const pressFiredRef = useRef(false)
+  const armPress = () => {
+    pressFiredRef.current = false
+    if (pressTimerRef.current) clearTimeout(pressTimerRef.current)
+    pressTimerRef.current = setTimeout(() => {
+      pressFiredRef.current = true
+      setPinned(true)
+      try { navigator.vibrate?.(10) } catch { /* unsupported */ }
+    }, LONG_PRESS_MS)
+  }
+  const cancelPress = () => {
+    if (pressTimerRef.current) { clearTimeout(pressTimerRef.current); pressTimerRef.current = 0 }
+  }
+  // Tear the press timer down on unmount so a hold-then-unmount doesn't
+  // fire setPinned on a dead component.
+  useEffect(() => () => { if (pressTimerRef.current) clearTimeout(pressTimerRef.current) }, [])
+  const onSwatchTap = (e) => {
+    e.stopPropagation()
+    // Swallow the synthetic click that trails a long-press (the press
+    // already pinned; this click must not immediately unpin it).
+    if (pressFiredRef.current) { pressFiredRef.current = false; return }
+    // A genuine tap UNPINS when pinned ("...until the next click"); when
+    // not pinned it replays the fade once (R31.43 behaviour preserved).
+    if (pinned) { setPinned(false); return }
+    setPlayToken(p => p + 1)
+  }
   useEffect(() => {
     const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
-    // Pure static (no interval) when reduced AND no one-shot is pending.
-    // Render falls back to the mid-window sample in that case.
-    if (reduced && playToken === 0) return
+    // Pure static (no interval) only when reduced, NOT pinned, and no
+    // one-shot is pending. When pinned the loop runs regardless of the
+    // reduced gate (explicit opt-in). Render falls back to the mid-window
+    // sample whenever no interval is spinning.
+    if (reduced && !pinned && playToken === 0) return
     startRef.current = now()
     const id = setInterval(() => {
       const dt = now() - startRef.current
-      if (reduced) {
+      if (reduced && !pinned) {
         // One-shot: walk 0 -> window, hold, then settle back to static
         // (sentinel -1) and stop. Self-clears so we don't spin an idle
         // interval after the single pass completes.
         if (dt >= windowMs + HOLD_MS) { setElapsed(-1); clearInterval(id); return }
         setElapsed(dt > windowMs ? windowMs : dt)
       } else {
-        // Ambient continuous loop. A click bumps playToken which re-runs
-        // this effect, resetting startRef so the visible fade restarts
-        // from the bright start on demand.
+        // Ambient continuous loop (normal motion, OR pinned in either
+        // mode). A tap bumps playToken / a long-press toggles pinned —
+        // both re-run this effect, resetting startRef so the visible fade
+        // restarts from the bright start on demand.
         const period = windowMs + HOLD_MS
         const phase = dt % period
         setElapsed(phase > windowMs ? windowMs : phase)
       }
     }, TICK_MS)
     return () => clearInterval(id)
-  }, [reduced, windowMs, playToken])
-  // Static sample at ~45% of the window when reduced + idle (sentinel),
-  // representative of the curve's mid-shape without motion.
-  const isStatic = (reduced && (playToken === 0 || elapsed < 0)) || elapsed < 0
+  }, [reduced, windowMs, playToken, pinned])
+  // Static sample at ~45% of the window when idle (no interval running):
+  // reduced + not pinned + no one-shot, or the post-one-shot sentinel.
+  // Pinned is never static — the loop always drives elapsed.
+  const isStatic = !pinned && ((reduced && playToken === 0) || elapsed < 0)
   const sampleElapsed = isStatic ? windowMs * 0.45 : elapsed
   const color = fadeDirectionColor(baseColor, sampleElapsed, windowMs, sanitizeHotkeyChainFadeCurve(curve))
   // Brightness proxy: how far through the window (0 = fresh, 1 = faded).
@@ -2273,18 +2319,32 @@ function FadeCurvePreviewSwatch({ curve, windowMs = UNDO_CHAIN_MS, baseColor = H
   return (
     <button
       type="button"
-      aria-label="Replay the chain-badge fade preview"
-      title="Click to replay the fade once over the 1s undo window."
-      onClick={(e) => { e.stopPropagation(); setPlayToken(p => p + 1) }}
+      aria-label={pinned ? 'Fade preview pinned (looping). Click to stop.' : 'Replay the chain-badge fade preview'}
+      aria-pressed={pinned}
+      title={pinned
+        ? 'Looping. Click to stop; the preview settles back to a single sample.'
+        : 'Click to replay the fade once. Press and hold to pin it looping (click again to stop).'}
+      onClick={onSwatchTap}
+      onPointerDown={armPress}
+      onPointerUp={cancelPress}
+      onPointerLeave={cancelPress}
+      onPointerCancel={cancelPress}
       style={{
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
         width: 16, height: 16, flex: '0 0 auto', padding: 0,
         borderRadius: '50%', cursor: 'pointer',
-        background: 'transparent', border: '1px solid rgba(99,102,241,0.28)',
-        transition: 'border-color 0.12s ease-out',
+        background: pinned ? 'rgba(99,102,241,0.16)' : 'transparent',
+        // Pinned wears a brighter, fuller ring so the looping state reads
+        // at a glance vs the resting single-shot affordance.
+        border: pinned ? '1px solid rgba(129,140,248,0.85)' : '1px solid rgba(99,102,241,0.28)',
+        boxShadow: pinned ? '0 0 6px rgba(99,102,241,0.45)' : 'none',
+        transition: 'border-color 0.12s ease-out, background 0.12s ease-out, box-shadow 0.12s ease-out',
+        // Block the iOS long-press callout / text selection so the hold
+        // gesture reads cleanly as a pin (parallels the clamp chip press).
+        touchAction: 'manipulation', WebkitTouchCallout: 'none', userSelect: 'none',
       }}
-      onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgba(99,102,241,0.55)' }}
-      onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(99,102,241,0.28)' }}
+      onMouseEnter={(e) => { if (!pinned) e.currentTarget.style.borderColor = 'rgba(99,102,241,0.55)' }}
+      onMouseLeave={(e) => { if (!pinned) e.currentTarget.style.borderColor = 'rgba(99,102,241,0.28)' }}
     >{dot}</button>
   )
 }
