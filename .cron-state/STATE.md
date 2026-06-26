@@ -125,6 +125,11 @@ Existing capabilities (do not re-ship):
 - (R34.C) Screenshot self-timer — optional 3..2..1 countdown ring before capture so users can stage a clean frame; TopBar toggle next to the camera button cycles Off/3/5/10s with the active delay as a badge; applies to every screenshot entry point (button, S key, command palette); Escape cancels; reduced-motion aware. Persisted (particle-screenshot-timer-v1). Pure module lib/selfTimer.js: countdownState (remaining/secondsLeft=ceil/progress/done, clock-skew + junk safe → instant-done), TIMER_DELAYS roster + sanitizeTimerDelay (snaps to nearest), ringDashoffset. TopBar capture refactored to module-level captureScreenshotNow/requestScreenshot.
 - (R34.D) Performance auto-suggest — when fps stays low for a sustained window, a one-tap toast offers to drop to a lighter quality tier ("Running at 28 fps — drop to High?"); anti-nag by construction (fires only after 4s continuous sub-40fps, 60s cooldown between suggestions, accepting opts out for the session, never suggests on the lowest tier or when perf-mode auto-throttle is on). Pure module lib/perfSuggest.js: QUALITY_TIERS, tierForCount/nextLowerTier, pushFpsSample (state machine returning {state, suggest}, pure), createSuggesterState/markSuggestionHandled. Headless PerfAutoSuggest controller samples fps once a second.
 - (R34.E) Zen mode (press Z, or command palette / "Zen Mode") — fades out ALL UI chrome (top bar, sidebars, timeline, carousel, status strip, minimap, waveform, parallax orbs) for full-bleed particles; cursor auto-hides after ~2.6s of stillness and returns on movement (like a video player); CSS-driven entry hint (fade-in-hold-out, no JS timer) teaches the Z/Esc exit; tiny gradient corner dot is a persistent marker + click-to-exit. Documented in help overlay + command palette (Eye icon). Pure module lib/zenMode.js: shouldHideCursor (never hides outside zen / on junk timestamps), cursorVisibleRemaining, classifyZenKey (Z=toggle, Esc=exit) + nextZenState reducer, ZEN_BODY_CLASS. Chrome hidden via body.zen-mode CSS rule; Minimap/WaveformOverlay carry a zen-hideable class.
+- (R35.A) Debug HUD frame-time (ms) view — press M while the HUD is open to flip the sparkline + numeric rows between fps and frame-time in milliseconds (the unit you profile a 16.7ms/60fps, 33.3ms/30fps budget in). Same 2s window drives both views; a faster frame always sits HIGHER so the silhouette reads the same direction; ms rows show live Frame ms (band-coloured), Avg/Best/Worst, "1% high" (worst-case frame time), and "Over 33ms" missed-budget count; a small FPS|MS pill in the HUD header shows the active unit. Pure lib/fpsGraph.js: fpsToFrameMs (0/Inf/neg fps -> ceiling not 0ms), buildFrameTimeSparklinePoints, frameTimeSparklineAttr, frameMsRefLineY, frameMsBandColor, summarizeFrameTimeWindow; constants FRAME_MS_GRAPH_CEIL=50ms / FRAME_BUDGET_60 / FRAME_BUDGET_30.
+- (R35.B) Composition grid inside the framing guide — "Composition Grid" chip row (LeftSidebar Camera) overlays rule-of-thirds (2x2 lines + four violet power-point dots), a centre cross, or both inside the active frame; backslash cycles off->thirds->cross->both. Draws even with NO aspect ratio active (composes into the full viewport); when a ratio IS active the lines snap to the masked-in letterbox/pillarbox region. Pure lib/framingGuides.js: FRAMING_GRIDS roster + isValidGridId/sanitizeGridId/gridLabelForId/nextGridId + computeCompositionGrid(frameRect, gridId) returning absolute-pixel {verticals, horizontals, points}, frame-origin aware, junk/degenerate-rect -> empty arrays. Store framingGridId persisted to particle-framing-grid-v1.
+- (R35.C) Screenshot burst mode — when the self-timer is armed, a burst toggle (Layers icon next to the timer button) cycles Single/x3/x5; after the 3-2-1 countdown the overlay fires that many captures 500ms apart so the user can pick the best particle moment. Ring switches from the seconds digit to a live "k/N" shot counter while bursting; Escape aborts mid-burst; each shot lands in the gallery + download like normal. Burst rides the timed path only (hidden when timer is Off). Pure lib/selfTimer.js: BURST_COUNTS + BURST_INTERVAL_MS + sanitizeBurstCount + labelForBurst + burstShotsDue (how-many-due projector, fires the diff so a dropped rAF frame catches up; non-positive interval = instant volley) + burstComplete. Store screenshotBurstCount persisted to particle-screenshot-burst-v1.
+- (R35.D) Perf auto-suggest post-FX remedy — when fps stays low and a heavy post-processing pass is ON, the perf toast first offers to DISABLE it (DoF > film grain > chromatic aberration > vignette; bloom excluded as the core glow) instead of dropping particle count, keeping the count + look mostly intact; only with no heavy FX active does it fall back to the tier drop. Live FX flags re-read at fire time. Because an FX disable is valid even on the lowest particle tier, the suggester can now fire there too (new opt-in fxAvailable flag on pushFpsSample) -- previously a low-tier user with DoF on got no help. All anti-nag behaviour unchanged. Pure lib/perfSuggest.js: POSTFX_EFFECTS (field+setter+label), pickHeaviestActivePostFx, chooseSuggestionRemedy -> {kind:'postfx'|'tier'} union.
+- (R35.E) Zen ambient auto-orbit — "Zen Auto-Orbit" preference (LeftSidebar Camera); when on, leaving the screen alone in zen mode (Z) eases in a slow camera drift after ~3.6s of stillness (just after the cursor fades) so a forgotten tab becomes a screensaver; speed ramps 0->full over ~2.2s; any interaction (mouse/click/wheel/key) resets to still; reduced-motion aware (orbit stays off under reduce). Overrides the user's autoRotate only while active; restores normal camera the instant zen exits. Pure lib/zenMode.js: shouldZenAutoOrbit + zenOrbitSpeed (eased-speed projector) + ZEN_AUTO_ORBIT_SPEED/ZEN_ORBIT_IDLE_MS/ZEN_ORBIT_RAMP_MS. Store zenAutoOrbit persisted to particle-zen-auto-orbit-v1 + transient zenAmbientOrbitSpeed (written each frame, read by CameraControls).
 - Spectrum peak-hold trail per-bar frequency-coloured tint PALETTE chip rail (R21.21). Graduates R20.13's single warm→cool ramp with 5 curated palettes selectable via a new chip in the WaveformOverlay header. Chip only renders when the existing tint chip is ON (the palette is meaningless when the trail inherits the bar's hue); warmCool stays first in cycle so an existing tint user's click target unchanged. Palettes: warmCool (R20.13 default, bass red-orange / treble blue-violet), rainbow (full 0→360 sweep), cool (260→180 indigo→teal for twilight presets), warm (0→50 red→amber for fire/embers), mono (215→195 narrow grey band, brightness-only map). New lib helpers in waveform.js: `PEAK_TRAIL_PALETTES` roster + `PEAK_TRAIL_PALETTE_NAMES` chip-cycle order + `isValidTrailPalette(name)` defensive-against-prototype-pollution + `nextTrailPalette(current)` wraparound + `peakTrailHueForBarIndexPalette(barIndex, totalBars, paletteName)` palette-aware hue projector with identical defensive contract as R20.13. INVARIANT pinned in tests: palette-aware call with 'warmCool' equals legacy peakTrailHueForBarIndex for every bar, so users with tint ON who never touch the chip see zero behavioural change. Store: spectrumPeakTrailPalette persisted to `spectrum-peak-trail-palette-v1`, default 'warmCool', corrupt values resolve via isValidTrailPalette. UI: tiny palette chip at left:188 in WaveformOverlay header wears the active palette's 3-stop linear-gradient as its own background so the chip visually previews the palette it controls.
 - Per-attractor MIDI clamp-proximity meter on STRENGTH / RADIUS / RADIUS·log / X / Y / Z rows (R21.22). Graduates R20.16's TYPE-row proximity meter to continuous fields. ENABLED rows skip (1-bit toggle — meter redundant); TYPE rows skip (R20.16 already drew the band-boundary meter). Semantic differs by field shape: TYPE = proximity to nearest FLIP BOUNDARY inside a band; continuous = proximity to nearest CLAMP EDGE of the slider. For continuous fields the safe zone is the middle of the sweep — knob at v01=0.5 reads MAX SAFE (max headroom both ways), knob at v01=0 or v01=1 reads MIN SAFE (the knob is at the rail — twisting further does nothing). New pure helpers in midiMap.js: `clampProximity01(v01)` symmetric inverted-V projector (returns 1 at centre, 0 at clamps; non-finite resolves to 1 = max-safe first-paint default) + `describeClampProximity(v01)` structured projector matching describeTypeBand's null-on-bad-input contract returning `{ kind: 'clamp', v01, proximityToBoundary01, atLow, atHigh }`. atLow / atHigh booleans fire only at the rails (v ≤ 0.001 / v ≥ 0.999) so the UI can colour the meter red specifically when knob is dead-against a clamp. UI: monospace tag between the existing typeBand tag and the CC badge, shows v01 as "87%" + a 26×4 horizontal bar; three-tier intent matches R20.16 (red at rail, amber close to clamp prox<0.25, green when safe prox≥0.25); 80ms width + 120ms colour transitions. Reuses R19.16 lastCCByNumber state cache as-is.
 - Smash bias overrides EXPORT / IMPORT as portable JSON file (R21.23). Graduates R20.07's per-chip bias editor with a portable share path. Parallels wind chip overrides IO (R12.17) + crossfade chip overrides IO (R13.14) — same envelope shape, same merge-vs-replace prompt, same MAX-bytes guard. New lib module `src/lib/biasOverridesIO.js`: kind=`ai-particle-simulator/bias-overrides`, v=1, MAX_IMPORT_BYTES=16 KB; exportableBiasIds() pulls from SCENE_BIASES so adding chips later auto-extends the IO; sanitizeBiasOverridesMap drops unknown chip ids + empty per-chip overrides; buildExportPayload / serialize / makeFilename ('particle-bias-YYYY-MM-DD.json'); parseImport handles full envelope + bare-items shorthand, rejects wrong-kind / unsupported-version / missing-items / all-invalid / invalid-JSON / non-string / top-level non-object / oversized; mergeImport with merge/replace semantics; summarizeImportImpact dry-run preview with conflicts + resultIds. UI: Export + Import buttons join the existing "Edit bias JSON" link above the chip rail in RightSidebar.jsx. Export disabled when no chip has overrides; replace-mode import also resets any chip the import didn't touch so a clean swap genuinely wipes prior state.
@@ -601,6 +606,27 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 ### Batch 35 — fresh frontend queue (graduations of THIS tick's real features)
 - [ ] R35.A FPS sparkline: add a frame-time (ms) toggle on the HUD sparkline so
   users can read 16.7ms budget line directly, not just fps; graduates R34.A
+- [x] R35.A Frame-time (ms) view for the Debug HUD sparkline — press M to flip
+  fps <-> ms; same 2s window, faster frame sits higher in both; 16.7/33.3ms
+  budget ref lines; 1%-high + over-budget rows; FPS|MS header pill
+  (lib/fpsGraph.js fpsToFrameMs/buildFrameTimeSparklinePoints/frameMsBandColor/
+  summarizeFrameTimeWindow, +63 asserts) — eeeea4e
+- [x] R35.B Composition grid (rule-of-thirds + power points / centre cross /
+  both) drawn inside the active frame; backslash cycles; works with no ratio
+  (full viewport); frame-origin aware (lib/framingGuides.js FRAMING_GRIDS +
+  computeCompositionGrid, +57 asserts) — acb2c21
+- [x] R35.C Self-timer burst mode — after the countdown fire 1/3/5 shots 500ms
+  apart, ring shows k/N counter, Escape aborts; catch-up on dropped frames
+  (lib/selfTimer.js BURST_COUNTS + burstShotsDue/burstComplete, +37 asserts) — 8d1a567
+- [x] R35.D Perf auto-suggest: offer to disable the heaviest active post-FX
+  (DoF>grain>chromatic>vignette, bloom excluded) before dropping particle
+  count; fires on lowest tier too when an FX is on (lib/perfSuggest.js
+  POSTFX_EFFECTS + pickHeaviestActivePostFx + chooseSuggestionRemedy +
+  fxAvailable opt, +36 asserts) — 53cfe5e
+- [x] R35.E Zen mode optional slow ambient auto-orbit — eases in after stillness
+  so a left-alone zen screen becomes a screensaver; any interaction resets;
+  reduced-motion aware (lib/zenMode.js shouldZenAutoOrbit + zenOrbitSpeed,
+  +40 asserts) — 4ae463f
 - [ ] R35.B Framing guides: optional rule-of-thirds / centre-cross grid overlay
   inside the active frame for stronger composition; graduates R34.B
 - [ ] R35.C Self-timer: burst mode — capture N shots at an interval after the
@@ -618,6 +644,36 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R35.H "Now playing" minimal overlay for zen mode — preset name + a tiny
   progress hint, auto-fading, for screen recordings
 
+### Batch 36 — fresh frontend queue (new features + graduations of Batch 35)
+- [ ] R36.A Debug HUD: GPU/draw-call + particle-count readout row, and a tiny
+  "budget headroom" bar (live ms vs the 16.7ms line) so the new ms view
+  (R35.A) shows how much frame budget is left, not just the current cost
+- [ ] R36.B Composition grid (R35.B): golden-ratio / phi grid + diagonal-method
+  guides as extra grid modes for stronger classical composition
+- [ ] R36.C Self-timer burst (R35.C): after a burst, a quick "burst review"
+  strip in the gallery groups the N shots so the user can pick + delete the
+  rest in one place
+- [ ] R36.D Perf auto-suggest (R35.D): a tiny live "perf budget" status pill
+  (green/amber/red) the user can opt into, separate from the toast, so they
+  can watch headroom while tuning a heavy scene
+- [ ] R36.E Zen mode "Now Playing" overlay (graduates R35.H) — auto-fading
+  preset name + palette swatch in a corner while ambient-orbiting, for clean
+  screen recordings
+- [ ] R36.F Zen auto-orbit (R35.E): direction + axis options (horizontal /
+  vertical / both, CW/CCW) so the ambient drift can be tailored per scene
+- [ ] R36.G Screenshot: optional subtle watermark / preset-name caption baked
+  into the exported PNG (toggleable), for shareable stills
+- [ ] R36.H Command palette: a "Camera" group exposing saved views + zen +
+  framing as searchable actions so power users never touch the sidebar
+- [ ] R36.I Snapshot gallery: filmstrip timeline of the session's captures with
+  jump-to + side-by-side compare of any two
+- [ ] R36.J Framing guide: a one-tap "fit current frame to a saved camera view"
+  so a composed crop can be recalled exactly
+- [ ] R36.K Reduced-motion: a global "calm mode" master toggle in the top bar
+  that gates orbit + shake + hue-cycle + ambient-orbit at once
+- [ ] R36.L Keyboard: an on-screen "shortcut cheat sheet" overlay (press ?
+  twice) grouped by area, reading the live remapped keys
+
 ### Future queue carried from Batch 24 (still genuine, unshipped)
 - [ ] R25.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view
 - [ ] R25.08 Minimap: hover a saved-view dot for ~1s shows a thumbnail preview (canvas2D sample of the scene from that camera)
@@ -626,6 +682,41 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R25.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode)
 
 ## TICK LOG
+- 2026-06-26 05:47 PT — Batch 35 (5/5). Tick 35. Frontend-focus override
+  active. Shipped the five Batch-35 graduations of tick 34's brand-new
+  features — all genuinely new user-facing capability, each its own pure
+  tested module (NOT cosmetic filler).
+  Commits: eeeea4e (R35.A Debug HUD frame-time/ms sparkline view — press M
+  to flip fps<->ms, 16.7/33.3ms budget lines, 1%-high + over-budget rows,
+  FPS|MS pill), acb2c21 (R35.B composition grid — rule-of-thirds + power
+  points / centre cross / both inside the frame, backslash cycles, works
+  with no ratio), 8d1a567 (R35.C self-timer burst mode — 1/3/5 shots
+  500ms apart after the countdown, k/N ring counter, dropped-frame catch
+  up), 53cfe5e (R35.D perf auto-suggest disables the heaviest active
+  post-FX before dropping particle count; fires on lowest tier too via
+  fxAvailable), 4ae463f (R35.E zen ambient auto-orbit — slow drift eases
+  in after stillness, any interaction resets, reduced-motion aware).
+  Pushed e1d512c..4ae463f -> origin/main (verified fast-forward, 0 ahead
+  / 0 behind).
+  Gates: lint EXACTLY at baseline (26 problems / 23 errors / 3 warnings —
+  all pre-existing in ParticleCanvas/store/LeftSidebar; proved via
+  git-stash diff that ParticleCanvas stays 9 errors before+after my edit;
+  ALL new lib code lints clean). Build: green (~737ms). Tests: ALL 45
+  files pass; ~233 fresh asserts this batch (fpsGraph +63, framingGuides
+  +57, selfTimer +37, perfSuggest +36, zenMode +40).
+  - All 5 extended EXISTING pure modules (no new files) + wired straight
+    to the UI: DebugHUD (ms view + M key + FPS|MS pill), FramingGuides
+    (grid SVG layer + backslash) + LeftSidebar (Composition Grid chips),
+    ScreenshotTimer (burst loop + k/N ring) + TopBar (BurstBtn), Layers
+    icon), PerfAutoSuggest (remedy router + FX-disable toast), ZenMode
+    (ambient-orbit rAF writer) + ParticleCanvas CameraControls (reads
+    zenAmbientOrbitSpeed) + LeftSidebar (Zen Auto-Orbit toggle).
+  - Store: 4 new persisted keys (particle-framing-grid-v1,
+    particle-screenshot-burst-v1, particle-zen-auto-orbit-v1) + 1
+    transient (zenAmbientOrbitSpeed). Frontend-focus override honoured —
+    all 5 are FRONTEND/UX. Note: the trigger message's "31 unpushed
+    commits / first tick / npm install" was stale — repo was already in
+    sync, node_modules present, .cron-state bootstrapped (tick 34 done).
 - 2026-06-26 00:13 PT — Batch 34 (5/5). Tick 34. PIVOT off the cosmetic
   micro-graduation treadmill (Batches 25-33 had iterated the same 5 tiny
   widgets ~45 commits deep; prompt forbids padding with filler). Shipped
