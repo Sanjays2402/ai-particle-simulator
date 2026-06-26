@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import {
+  buildSparklinePoints, sparklinePointsAttr, refLineY, summarizeFpsWindow,
+  fpsBandColor, FPS_GRAPH_CEIL,
+} from '../lib/fpsGraph'
 
 // Performance debug HUD. Toggle with backtick (`) so it doesn't fight
 // the existing single-letter shortcuts. Tracks FPS as a rolling window
@@ -7,6 +11,10 @@ import { useEffect, useRef, useState } from 'react'
 export default function DebugHUD() {
   const [visible, setVisible] = useState(false)
   const [stats, setStats] = useState({ fps: 60, min: 60, max: 60, avg: 60, frame: 16.7, mem: null })
+  // R34.A — the live fps series feeding the sparkline. Held in state
+  // (not just the ref) so the SVG re-renders each sample tick. Capped
+  // to the same ~2s window the numeric stats use.
+  const [series, setSeries] = useState([])
   const samplesRef = useRef([]) // [{ t, fps }] last ~2 seconds
   const lastRef = useRef(performance.now())
   const accumRef = useRef(0)
@@ -53,6 +61,9 @@ export default function DebugHUD() {
           ? performance.memory.usedJSHeapSize / 1024 / 1024
           : null
         setStats({ fps: Math.round(fps), min: Math.round(min), max: Math.round(max), avg: Math.round(avg), frame: frame.toFixed(1), mem })
+        // Feed the sparkline with the same windowed series (raw fps,
+        // newest last) so the graph and the numeric readout never drift.
+        setSeries(samplesRef.current.map(s => s.fps))
 
         accumRef.current = 0
         framesRef.current = 0
@@ -66,6 +77,22 @@ export default function DebugHUD() {
   if (!visible) return null
 
   const fpsColor = stats.fps >= 55 ? '#86efac' : stats.fps >= 30 ? '#fbbf24' : '#f87171'
+
+  // Sparkline geometry — a compact 168x34 graph of the same 2s window.
+  const GW = 168, GH = 34
+  const sparkOpts = { ceil: FPS_GRAPH_CEIL, width: GW, height: GH }
+  const sparkAttr = sparklinePointsAttr(series, sparkOpts)
+  const sparkPts = buildSparklinePoints(series, sparkOpts)
+  // Area-fill polygon: the line, then down the right edge, along the
+  // floor, and back up the left edge.
+  const areaAttr = sparkPts.length >= 2
+    ? `${sparkAttr} ${sparkPts[sparkPts.length - 1].x},${GH} ${sparkPts[0].x},${GH}`
+    : ''
+  const line60 = refLineY(60, sparkOpts)
+  const line30 = refLineY(30, sparkOpts)
+  const summary = summarizeFpsWindow(series)
+  // Colour the stroke by the live fps band so a stutter visibly reddens.
+  const strokeColor = fpsBandColor(stats.fps)
 
   return (
     <div style={{
@@ -86,10 +113,36 @@ export default function DebugHUD() {
         fontSize: 9, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase',
         color: '#a78bfa', marginBottom: 6,
       }}>Debug HUD</div>
+
+      {/* FPS sparkline — the same 2s window drawn as a graph so a
+          stutter spike is visible at a glance, not just a flickering
+          min/max number. 60fps + 30fps reference lines anchor it. */}
+      <div style={{ marginBottom: 8 }}>
+        <svg width={GW} height={GH} style={{ display: 'block', borderRadius: 5, background: 'rgba(0,0,0,0.28)' }}>
+          {line60 != null && (
+            <line x1={0} y1={line60} x2={GW} y2={line60}
+              stroke="rgba(134,239,172,0.22)" strokeWidth={1} strokeDasharray="2 3" />
+          )}
+          {line30 != null && (
+            <line x1={0} y1={line30} x2={GW} y2={line30}
+              stroke="rgba(248,113,113,0.18)" strokeWidth={1} strokeDasharray="2 3" />
+          )}
+          {areaAttr && (
+            <polygon points={areaAttr} fill={strokeColor} fillOpacity={0.1} />
+          )}
+          {sparkAttr && (
+            <polyline points={sparkAttr} fill="none" stroke={strokeColor}
+              strokeWidth={1.4} strokeLinejoin="round" strokeLinecap="round" />
+          )}
+        </svg>
+      </div>
+
       <Row label="FPS"      value={<span style={{ color: fpsColor }}>{stats.fps}</span>} />
       <Row label="Avg / 2s" value={stats.avg} />
       <Row label="Min / 2s" value={stats.min} />
       <Row label="Max / 2s" value={stats.max} />
+      <Row label="1% low"   value={<span style={{ color: summary.low >= 55 ? '#86efac' : summary.low >= 30 ? '#fbbf24' : '#f87171' }}>{summary.low}</span>} />
+      {summary.drops > 0 && <Row label="Drops" value={<span style={{ color: '#f87171' }}>{summary.drops}</span>} />}
       <Row label="Frame"    value={`${stats.frame} ms`} />
       {stats.mem != null && <Row label="Heap" value={`${stats.mem.toFixed(0)} MB`} />}
       <div style={{ fontSize: 10, color: '#6a6a80', marginTop: 6 }}>
