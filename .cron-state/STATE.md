@@ -120,6 +120,11 @@ Existing capabilities (do not re-ship):
 - Hotkey UNDO chain badge fades non-linearly (R28.43, graduates R27.43). Pre-R28.43 the fade was linear which read as "already expiring" by t=250ms — too rushed for the human's decision lag. R28.43 reshapes the t→t' progression via easeInCubic (t' = t^3): at t=0.5 the colour has only walked 12.5% toward grey, so the badge reads as ~bright through the first 500ms then accelerates to grey emphatically in the last 500ms. Roadmap requirement met: "fade slower in the first 500ms, faster in the last 500ms — non-linear curve". New constants in midiPresets.js: `HOTKEY_CHAIN_FADE_CURVES=['linear','easeOutCubic','easeInCubic']`, `HOTKEY_CHAIN_FADE_CURVE_DEFAULT='linear'` (preserves R27.43 backwards-compat — every existing call site / pinned test unchanged), `HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED='easeInCubic'` (named export so a future curve swap touches one file). New pure helper `applyHotkeyChainFadeCurve(t, curve)` — endpoint anchoring guaranteed across every curve (f(0)=0, f(1)=1); monotonicity preserved; non-finite t → 0; out-of-range clamps to endpoints; unknown curve falls through to linear. `fadeDirectionColor` extended with optional curve param threaded through Toast.jsx's existing fade-tick interval. MidiPanel.showHotkeyTransferToast passes the recommended curve into badge.fade.
 - Clamp popover preview chips become per-cell wipe buttons (R28.45, graduates R27.45). Pre-R28.45 the chips just LISTED affected attractors; R28.45 makes each chip an actionable button — tap any chip to clear JUST that one attractor's per-cell override on the current field, without leaving the popover or dropping every other attractor's override along with it. Pure wire layer — no new lib helpers; delegates to the existing `setClampWarnAttractorFieldOverride(overrides, id, field, null)` with its ref-equal-on-no-op + sanitize-and-prune contract pinned across R24.40/R25.45/R26.45/R27.45. UI: chips swap `<span>` → `<button type="button">` with onClick wired to onClearAttractorCell(id); disabled when no handler attached (read-only callers see no affordance); cursor: pointer + soft indigo hover lift; small × glyph appended to clickable chips for discoverability; tooltips differentiate read-only vs clickable-live vs clickable-stale; e.stopPropagation() prevents bubble to popover surface; native button styling reset so visually identical to pre-R28.45 span baseline.
 - MidiPanel binding-group gap-drop zones reachable via touch long-press drag (R28.20, graduates R26.20 + R27.20 combined). Pre-R28.20 desktop users had gap-drop zones (R27.20) and touch users had row-drop drag (R26.20), but the gap-drop zones were touch-unreachable — 4-18px wide pixel strips are too narrow for a thumb. R28.20 introduces a gap-AWARE touch hit-test that returns a discriminated union { kind: 'row' | 'gap', idx | gapIdx } with 12px tolerance bands around each row boundary. New pure helper `resolveTouchTargetWithGaps(y, ranges, opts)` in cameraViews.js (parallel to R22.12's resolveTouchTargetIdx): gap takes precedence at boundaries (two-pass scan — gap bands first, then row hits — so a touch sitting at a row's edge always resolves to insert-here intent); above-row-0 + within-tolerance-of-midpoint + trailing-zone-below-last-row all return gap targets; everything else falls through to row hit-test. Custom tolerance via opts.tolerancePx (default `TOUCH_GAP_TOLERANCE_PX=12`); handles partial-corrupt ranges via valid-index pair walk so gap math survives ghost entries. MidiPanel.onGroupTouchMove routes the discriminator to setGapOverGroupIdx vs setDragOverGroupIdx; touchend reads both — gap wins via dropIndexForGap, else falls through to R26.20 row-mode drop path.
+- (R34.A) Debug HUD live FPS sparkline graph — the 2s rolling fps window the HUD already sampled is now drawn as an SVG sparkline (168x34) with 60/30fps dashed reference lines + area fill + a band-coloured stroke (green/amber/red) that reddens live as fps drops, plus "1% low" (averaged worst 10% of the window) and a "Drops" count (samples under 30fps, shown only when > 0). Pure module lib/fpsGraph.js: buildSparklinePoints/sparklinePointsAttr (newest at right, junk samples collapse to floor, over-ceiling clamps to top), refLineY, summarizeFpsWindow, fpsBandColor (FPS_GRAPH_CEIL=70). Toggle the HUD with backtick as before.
+- (R34.B) Cinematic framing guides — toggleable letterbox/pillarbox bars mask the viewport to a chosen aspect ratio (2.39 / 16:9 / 3:2 / 1:1 / 4:5 / 9:16) for composing screenshots & recordings; visual-only (pointer-events:none, z below chrome above canvas), never changes what's captured. Chip row in LeftSidebar Camera section; [ clears / ] cycles; frame badge shows ratio + live pixel dims; 1px hairline on each bar's inner edge. Persisted (particle-framing-guide-v1). Pure module lib/framingGuides.js: FRAMING_RATIOS roster, computeFramingBars (mode none/letterbox/pillarbox + symmetric bar thickness, clamps junk dims to no-bars), sanitizeFramingId/nextFramingId/describeFraming. Store: framingGuideId + setFramingGuideId/cycleFramingGuide.
+- (R34.C) Screenshot self-timer — optional 3..2..1 countdown ring before capture so users can stage a clean frame; TopBar toggle next to the camera button cycles Off/3/5/10s with the active delay as a badge; applies to every screenshot entry point (button, S key, command palette); Escape cancels; reduced-motion aware. Persisted (particle-screenshot-timer-v1). Pure module lib/selfTimer.js: countdownState (remaining/secondsLeft=ceil/progress/done, clock-skew + junk safe → instant-done), TIMER_DELAYS roster + sanitizeTimerDelay (snaps to nearest), ringDashoffset. TopBar capture refactored to module-level captureScreenshotNow/requestScreenshot.
+- (R34.D) Performance auto-suggest — when fps stays low for a sustained window, a one-tap toast offers to drop to a lighter quality tier ("Running at 28 fps — drop to High?"); anti-nag by construction (fires only after 4s continuous sub-40fps, 60s cooldown between suggestions, accepting opts out for the session, never suggests on the lowest tier or when perf-mode auto-throttle is on). Pure module lib/perfSuggest.js: QUALITY_TIERS, tierForCount/nextLowerTier, pushFpsSample (state machine returning {state, suggest}, pure), createSuggesterState/markSuggestionHandled. Headless PerfAutoSuggest controller samples fps once a second.
+- (R34.E) Zen mode (press Z, or command palette / "Zen Mode") — fades out ALL UI chrome (top bar, sidebars, timeline, carousel, status strip, minimap, waveform, parallax orbs) for full-bleed particles; cursor auto-hides after ~2.6s of stillness and returns on movement (like a video player); CSS-driven entry hint (fade-in-hold-out, no JS timer) teaches the Z/Esc exit; tiny gradient corner dot is a persistent marker + click-to-exit. Documented in help overlay + command palette (Eye icon). Pure module lib/zenMode.js: shouldHideCursor (never hides outside zen / on junk timestamps), cursorVisibleRemaining, classifyZenKey (Z=toggle, Esc=exit) + nextZenState reducer, ZEN_BODY_CLASS. Chrome hidden via body.zen-mode CSS rule; Minimap/WaveformOverlay carry a zen-hideable class.
 - Spectrum peak-hold trail per-bar frequency-coloured tint PALETTE chip rail (R21.21). Graduates R20.13's single warm→cool ramp with 5 curated palettes selectable via a new chip in the WaveformOverlay header. Chip only renders when the existing tint chip is ON (the palette is meaningless when the trail inherits the bar's hue); warmCool stays first in cycle so an existing tint user's click target unchanged. Palettes: warmCool (R20.13 default, bass red-orange / treble blue-violet), rainbow (full 0→360 sweep), cool (260→180 indigo→teal for twilight presets), warm (0→50 red→amber for fire/embers), mono (215→195 narrow grey band, brightness-only map). New lib helpers in waveform.js: `PEAK_TRAIL_PALETTES` roster + `PEAK_TRAIL_PALETTE_NAMES` chip-cycle order + `isValidTrailPalette(name)` defensive-against-prototype-pollution + `nextTrailPalette(current)` wraparound + `peakTrailHueForBarIndexPalette(barIndex, totalBars, paletteName)` palette-aware hue projector with identical defensive contract as R20.13. INVARIANT pinned in tests: palette-aware call with 'warmCool' equals legacy peakTrailHueForBarIndex for every bar, so users with tint ON who never touch the chip see zero behavioural change. Store: spectrumPeakTrailPalette persisted to `spectrum-peak-trail-palette-v1`, default 'warmCool', corrupt values resolve via isValidTrailPalette. UI: tiny palette chip at left:188 in WaveformOverlay header wears the active palette's 3-stop linear-gradient as its own background so the chip visually previews the palette it controls.
 - Per-attractor MIDI clamp-proximity meter on STRENGTH / RADIUS / RADIUS·log / X / Y / Z rows (R21.22). Graduates R20.16's TYPE-row proximity meter to continuous fields. ENABLED rows skip (1-bit toggle — meter redundant); TYPE rows skip (R20.16 already drew the band-boundary meter). Semantic differs by field shape: TYPE = proximity to nearest FLIP BOUNDARY inside a band; continuous = proximity to nearest CLAMP EDGE of the slider. For continuous fields the safe zone is the middle of the sweep — knob at v01=0.5 reads MAX SAFE (max headroom both ways), knob at v01=0 or v01=1 reads MIN SAFE (the knob is at the rail — twisting further does nothing). New pure helpers in midiMap.js: `clampProximity01(v01)` symmetric inverted-V projector (returns 1 at centre, 0 at clamps; non-finite resolves to 1 = max-safe first-paint default) + `describeClampProximity(v01)` structured projector matching describeTypeBand's null-on-bad-input contract returning `{ kind: 'clamp', v01, proximityToBoundary01, atLow, atHigh }`. atLow / atHigh booleans fire only at the rails (v ≤ 0.001 / v ≥ 0.999) so the UI can colour the meter red specifically when knob is dead-against a clamp. UI: monospace tag between the existing typeBand tag and the CC badge, shows v01 as "87%" + a 26×4 horizontal bar; three-tier intent matches R20.16 (red at rail, amber close to clamp prox<0.25, green when safe prox≥0.25); 80ms width + 120ms colour transitions. Reuses R19.16 lastCCByNumber state cache as-is.
 - Smash bias overrides EXPORT / IMPORT as portable JSON file (R21.23). Graduates R20.07's per-chip bias editor with a portable share path. Parallels wind chip overrides IO (R12.17) + crossfade chip overrides IO (R13.14) — same envelope shape, same merge-vs-replace prompt, same MAX-bytes guard. New lib module `src/lib/biasOverridesIO.js`: kind=`ai-particle-simulator/bias-overrides`, v=1, MAX_IMPORT_BYTES=16 KB; exportableBiasIds() pulls from SCENE_BIASES so adding chips later auto-extends the IO; sanitizeBiasOverridesMap drops unknown chip ids + empty per-chip overrides; buildExportPayload / serialize / makeFilename ('particle-bias-YYYY-MM-DD.json'); parseImport handles full envelope + bare-items shorthand, rejects wrong-kind / unsupported-version / missing-items / all-invalid / invalid-JSON / non-string / top-level non-object / oversized; mergeImport with merge/replace semantics; summarizeImportImpact dry-run preview with conflicts + resultIds. UI: Export + Import buttons join the existing "Edit bias JSON" link above the chip rail in RightSidebar.jsx. Export disabled when no chip has overrides; replace-mode import also resets any chip the import didn't touch so a clean swap genuinely wipes prior state.
@@ -559,16 +564,104 @@ padding.
 - [x] R33.45 Clamp invert affordance: also offer the invert as a keyboard shortcut (focus the multi-select bar, press 'i') + an aria-live announcement of the resulting count ("inverted: 4 of 7 cells selected") so keyboard + SR users reach it — graduates R32.45 — e348f80
 - [x] R33.20 Attractor lifted floating chip: also show the chip during a MOUSE/touch drag (not just keyboard) so a pointer user dragging a row gets the same name-carrying "what am I moving" cue — graduates R32.20 — 154638e
 
-### Batch 34 — refilled queue (graduations of Batch 33 slices)
-- [ ] R34.41 Bias scope-history clear-undo chain: surface the chain DEPTH ("x2"/"x3") as a small pip on the clear glyph itself (not just in the toast label) so a user mid-cleanup sees how many undo levels are banked even after the toast auto-dismisses (parallels R30.42's bulk-unpin depth pip on the footer button) — graduates R33.41
-- [ ] R34.42 Bulk-unpin pip direction caret: also narrate the direction via the existing undo toast's aria text ("banked a level" / "stepped back a level") so a screen-reader user gets the same direction cue the sighted caret gives — graduates R33.42
-- [ ] R34.43 Fade swatch pin persist: surface a tiny "pinned" indicator on the cycle chip's label row (a small filled dot) that's visible even when the swatch itself is scrolled out of view, so a user who pinned it knows the loop is still running before they scroll back — graduates R33.43
-- [ ] R34.45 Clamp invert keyboard: also bind 'a' (select all) and 'n' (select none) on the focused multi-select bar with matching aria-live announcements, so the whole select-all/none/invert trio is keyboard-reachable (parallels R33.45's 'i') — graduates R33.45
-- [ ] R34.20 Attractor drag floating chip: show the chip's destination position ("→ #3") on the chip during a drag once a drop target is hovered, so a pointer user sees WHERE the row will land, not just what they're moving — graduates R33.20
+### Batch 34 — PIVOT off the cosmetic micro-graduation treadmill  (SHIPPED)
+Note (Cake, tick 34): Batches 25-33 (~45 commits) had all iterated the SAME
+five narrow cosmetic tracks — a pip on the bias-import tooltip, a caret on
+the bulk-unpin pip, a dot on the fade swatch, a keybind on the clamp toggle,
+an aria-line on the attractor reorder. Each tick the surface got tinier
+(Batch 34's planned items: "a pip on a glyph", a "-> #3" label, "a small
+filled dot"). The prompt explicitly forbids this: "NEVER pad with filler
+(cosmetic toggles, trivial aliases)... Quality is the floor." So this tick
+ships FIVE genuinely new, user-facing frontend features instead, each with
+its own pure tested module. The R34.4x/R34.20 cosmetic items below are
+RETIRED (left unchecked, deliberately not shipped — they were filler).
+- [x] R34.A FPS sparkline graph in the Debug HUD — draws the 2s fps window
+  the HUD already sampled as a live SVG sparkline with 60/30 reference lines,
+  band-coloured stroke, plus "1% low" + drop counters (lib/fpsGraph.js, 70
+  asserts) — af2dbed
+- [x] R34.B Cinematic framing guides — letterbox/pillarbox bars masking the
+  viewport to 2.39 / 16:9 / 3:2 / 1:1 / 4:5 / 9:16 for composing shots; chip
+  row in Camera section + [ ] keys + persisted (lib/framingGuides.js, 70
+  asserts) — a99adfe
+- [x] R34.C Screenshot self-timer — 3..2..1 countdown ring before capture so
+  users can stage a clean frame; TopBar toggle (Off/3/5/10s) + reduced-motion
+  aware (lib/selfTimer.js, 65 asserts) — 5256aa8
+- [x] R34.D Performance auto-suggest — one-tap "drop to a lighter tier" toast
+  when fps stays low for a sustained window; anti-nag (4s sustain + 60s
+  cooldown + opt-out) (lib/perfSuggest.js, 124 asserts) — 376fa34
+- [x] R34.E Zen mode (Z) — fade out ALL UI chrome for full-bleed particles,
+  auto-hiding cursor, CSS-driven entry hint, palette + help discoverability
+  (lib/zenMode.js, 37 asserts) — 0ea57fb
+- [ ] R34.41 Bias scope-history clear-undo chain depth pip — RETIRED (filler)
+- [ ] R34.42 Bulk-unpin pip direction aria text — RETIRED (filler)
+- [ ] R34.43 Fade swatch pin indicator dot — RETIRED (filler)
+- [ ] R34.45 Clamp invert 'a'/'n' keybinds — RETIRED (filler)
+- [ ] R34.20 Attractor drag floating chip "-> #3" — RETIRED (filler)
 
-### Future queue carried from Batch 24 (refill on next batch)
+### Batch 35 — fresh frontend queue (graduations of THIS tick's real features)
+- [ ] R35.A FPS sparkline: add a frame-time (ms) toggle on the HUD sparkline so
+  users can read 16.7ms budget line directly, not just fps; graduates R34.A
+- [ ] R35.B Framing guides: optional rule-of-thirds / centre-cross grid overlay
+  inside the active frame for stronger composition; graduates R34.B
+- [ ] R35.C Self-timer: burst mode — capture N shots at an interval after the
+  countdown (e.g. 3 frames 0.5s apart) for picking the best particle moment;
+  graduates R34.C
+- [ ] R35.D Perf auto-suggest: also suggest turning OFF the heaviest post-FX
+  (bloom/DoF) as a lighter-touch alternative to dropping particle count;
+  graduates R34.D
+- [ ] R35.E Zen mode: optional slow auto-orbit while in zen so a left-alone
+  screen becomes an ambient display; graduates R34.E
+- [ ] R35.F Keyboard shortcut to toggle the Debug HUD sparkline-only compact
+  mode (hide the numeric rows, keep the graph) for a minimal perf glance
+- [ ] R35.G Framing guide export-aware: when a frame is active, the screenshot
+  filename notes the ratio (e.g. -2.39) so a batch of crops self-documents
+- [ ] R35.H "Now playing" minimal overlay for zen mode — preset name + a tiny
+  progress hint, auto-fading, for screen recordings
+
+### Future queue carried from Batch 24 (still genuine, unshipped)
+- [ ] R25.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view
+- [ ] R25.08 Minimap: hover a saved-view dot for ~1s shows a thumbnail preview (canvas2D sample of the scene from that camera)
+- [ ] R25.14 Snapshot grid: bulk download all selected as a zip (graduates R18.06 selection mode)
+- [ ] R25.05 Audio-reactive bg curve chips -> custom curve editor (visual spline / 3-knot bezier)
+- [ ] R25.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode)
 
 ## TICK LOG
+- 2026-06-26 00:13 PT — Batch 34 (5/5). Tick 34. PIVOT off the cosmetic
+  micro-graduation treadmill (Batches 25-33 had iterated the same 5 tiny
+  widgets ~45 commits deep; prompt forbids padding with filler). Shipped
+  FIVE genuinely new frontend features instead, each with its own pure
+  tested module.
+  Commits: af2dbed (R34.A FPS sparkline graph + 1% low / drop counters in
+  the Debug HUD), a99adfe (R34.B cinematic framing guides — letterbox/
+  pillarbox at 2.39/16:9/3:2/1:1/4:5/9:16, [ ] keys, persisted), 5256aa8
+  (R34.C screenshot self-timer — 3-2-1 countdown ring, TopBar toggle
+  Off/3/5/10s), 376fa34 (R34.D performance auto-suggest — one-tap quality
+  drop on sustained low fps, anti-nag 4s-sustain + 60s-cooldown + opt-out),
+  0ea57fb (R34.E zen mode — Z hides all chrome for full-bleed particles,
+  auto-hiding cursor, palette + help discoverability).
+  Pushed 64baf19..0ea57fb -> origin/main (verified fast-forward, 0 ahead /
+  0 behind).
+  Gates: lint EXACTLY at baseline (23 errors / 3 warnings — all pre-existing
+  in ParticleCanvas/vite.config/etc; ALL new files lint 100% clean; proved
+  DebugHUD's 1 error is the pre-existing performance.now() impure call via
+  git-stash diff). Build: green (~733ms, 2431 modules). Tests: ALL 45 test
+  files pass (40 prior + 5 new); ~366 fresh asserts this batch (fpsGraph 70,
+  framingGuides 70, selfTimer 65, perfSuggest 124, zenMode 37).
+  - New pure modules: lib/fpsGraph.js (sparkline geometry + 1%-low window
+    summary), lib/framingGuides.js (letterbox/pillarbox bar math + roster),
+    lib/selfTimer.js (countdown state machine + delay snapping), lib/
+    perfSuggest.js (sustained-low fps detector w/ anti-nag cooldown), lib/
+    zenMode.js (cursor-idle decision + key reducer).
+  - New components: FramingGuides, ScreenshotTimer, PerfAutoSuggest, ZenMode
+    (all App-level overlays). Wired the self-timer through a refactor of
+    TopBar's capture into module-level helpers so new listeners/dispatcher
+    didn't add effect-dep lint. CommandPalette + HelpOverlay gained zen +
+    framing discoverability. Minimap/WaveformOverlay gained a zen-hideable
+    class. index.css gained count-pop, zen-mode chrome fade, zen-hint-flash.
+  - Lint discipline: every new component avoids setState-in-effect (zen hint
+    is a self-contained CSS animation; self-timer computes countdown in the
+    rAF loop and renders from state so no performance.now() at render time).
+    Frontend-focus override honoured — all 5 are FRONTEND/UX.
 - 2026-06-25 19:50 PT — Batch 33 (5/5). Tick 33. Frontend-focus override active.
   Commits: 24b109d (R33.41 bias scope-history clear undo -> multi-level CHAIN),
   24c7236 (R33.42 colour-blind-safe direction caret on the bulk-unpin pip pulse),
