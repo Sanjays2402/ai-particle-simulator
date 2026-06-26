@@ -263,3 +263,49 @@ export function resolveTouchTargetWithGaps(y, ranges, opts) {
   // a row drop.
   return { kind: 'row', idx: lastValid }
 }
+
+// --- R36.H: command-palette "Camera" actions -------------------------
+//
+// Surface the saved camera views as searchable command-palette actions
+// (plus the static camera actions: enter zen mode, cycle the framing
+// guide). The palette is the power-user's way to reach a saved view
+// without opening the RightSidebar — type the view's name and hit Enter.
+//
+// This pure helper normalises the persisted views into a stable action
+// list the palette can map directly:
+//   { id, kind, label, sub, keywords, view }
+// where `kind` is 'restore-view' (carries the `view` payload to hand to
+// the camera API), and `keywords` is a search string the palette can
+// match on. Static actions (zen / framing) are added by the component
+// itself since they dispatch events rather than carry a payload — this
+// helper owns only the dynamic, data-derived part so the view list stays
+// the single thing under test.
+//
+// Defensive: non-array input → []; corrupt rows (missing id, or no
+// usable pos/target) are skipped so a malformed localStorage blob can't
+// inject a crash-on-restore action. Order is preserved (newest-first, as
+// stored). `sub` is a compact, human "x, y, z" position so two similar
+// view names can be told apart in the list.
+export function buildCameraPaletteActions(views) {
+  if (!Array.isArray(views)) return []
+  const out = []
+  for (const v of views) {
+    if (!v || typeof v !== 'object') continue
+    if (v.id === null || v.id === undefined) continue
+    // A view is only actionable if it has a restorable camera position.
+    if (!Array.isArray(v.pos) || v.pos.length < 3) continue
+    if (!v.pos.every(n => Number.isFinite(Number(n)))) continue
+    const name = (typeof v.name === 'string' && v.name.trim()) ? v.name.trim() : `View ${v.id}`
+    const pos = v.pos.map(n => Math.round(Number(n) * 10) / 10)
+    out.push({
+      id: `cam-view-${v.id}`,
+      kind: 'restore-view',
+      label: name,
+      sub: `${pos[0]}, ${pos[1]}, ${pos[2]}`,
+      keywords: `camera view restore ${name}`.toLowerCase(),
+      view: v,
+    })
+  }
+  return out
+}
+

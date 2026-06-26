@@ -2,13 +2,21 @@ import { useEffect, useState } from 'react'
 import { Command } from 'cmdk'
 import { useStore } from '../store'
 import { presets } from '../presets'
+import { loadCameraViews, buildCameraPaletteActions } from '../lib/cameraViews'
+import { labelForId as framingLabelForId } from '../lib/framingGuides'
 import {
   Play, Pause, Shuffle, Camera, Link2, Download, Settings as Cog,
-  Magnet, Mic, RotateCcw, Maximize2, Sparkles, Eye,
+  Magnet, Mic, RotateCcw, Maximize2, Sparkles, Eye, Video, Crop, Wind,
 } from 'lucide-react'
 
 export function CommandPalette({ onSettings }) {
   const [open, setOpen] = useState(false)
+  // R36.H — saved camera views surfaced as palette actions. Re-read from
+  // storage each time the palette opens so a view saved this session
+  // shows up without a refresh.
+  const [cameraViews, setCameraViews] = useState([])
+  const framingGuideId = useStore(s => s.framingGuideId)
+  const cycleFramingGuide = useStore(s => s.cycleFramingGuide)
   const {
     loadPreset, setPlaying, playing, setMouseAttract, mouseAttract, loadRandom,
   } = useStore()
@@ -17,7 +25,11 @@ export function CommandPalette({ onSettings }) {
     const h = (e) => {
       if ((e.key === 'k' || e.key === 'K') && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
-        setOpen(o => !o)
+        setOpen(o => {
+          // Refresh the saved-view list as we open so it's current.
+          if (!o) setCameraViews(loadCameraViews())
+          return !o
+        })
       }
     }
     document.addEventListener('keydown', h)
@@ -26,7 +38,16 @@ export function CommandPalette({ onSettings }) {
 
   const run = (fn) => () => { fn(); setOpen(false) }
 
+  // R36.H — restore a saved camera view via the global camera API the
+  // RightSidebar panel also uses (no ref drilling through the canvas).
+  const restoreView = (view) => {
+    const api = window.__particleCamera
+    if (api && view && view.pos) api.set({ pos: view.pos, target: view.target })
+  }
+
   if (!open) return null
+
+  const cameraActions = buildCameraPaletteActions(cameraViews)
 
   return (
     <div
@@ -101,6 +122,39 @@ export function CommandPalette({ onSettings }) {
             <Item icon={Cog} label="Open Settings" onSelect={run(() => onSettings?.())} />
           </Command.Group>
 
+          {/* R36.H — Camera group: saved views + zen + framing as
+              searchable actions so power users never touch the sidebar. */}
+          <Command.Group heading="Camera" style={groupHeading}>
+            <Item icon={Eye} label="Enter Zen Mode" shortcut="Z" onSelect={run(() => window.dispatchEvent(new CustomEvent('particle:toggle-zen')))} />
+            <Item
+              icon={Crop}
+              label="Cycle Framing Guide"
+              sub={`Now: ${framingLabelForId(framingGuideId)}`}
+              shortcut="]"
+              onSelect={run(() => cycleFramingGuide())}
+            />
+            <Item
+              icon={Wind}
+              label={`${useStore.getState().calmMode ? 'Disable' : 'Enable'} Calm Mode`}
+              sub="Pause auto-rotate, shake, hue-cycle & zen orbit"
+              onSelect={run(() => useStore.getState().setCalmMode(!useStore.getState().calmMode))}
+            />
+            {cameraActions.length === 0 ? (
+              <Item icon={Video} label="No saved views yet" sub="Press V on the scene to save the current camera" onSelect={() => {}} />
+            ) : (
+              cameraActions.map(a => (
+                <Item
+                  key={a.id}
+                  icon={Video}
+                  label={a.label}
+                  sub={`Restore view · ${a.sub}`}
+                  keywords={a.keywords}
+                  onSelect={run(() => restoreView(a.view))}
+                />
+              ))
+            )}
+          </Command.Group>
+
           <Command.Group heading="Presets" style={groupHeading}>
             {presets.map(p => (
               <Item key={p.id} emoji={p.emoji} label={p.name} sub={p.description} onSelect={run(() => loadPreset(p.id))} />
@@ -140,10 +194,11 @@ const kbd = {
 }
 const kbdSm = { ...kbd, padding: '1px 5px', fontSize: 9 }
 
-function Item({ icon: Icon, emoji, label, sub, shortcut, onSelect }) {
+function Item({ icon: Icon, emoji, label, sub, shortcut, keywords, onSelect }) {
   return (
     <Command.Item
       onSelect={onSelect}
+      keywords={keywords ? [keywords] : undefined}
       style={{
         display: 'flex', alignItems: 'center', gap: 12,
         padding: '10px 12px', borderRadius: 10,

@@ -7,6 +7,8 @@ import {
   resolveTouchTargetIdx,
   // R28.20 — gap-aware touch hit-test (returns { kind, idx } discriminator)
   resolveTouchTargetWithGaps, TOUCH_GAP_TOLERANCE_PX,
+  // R36.H — command-palette camera action builder
+  buildCameraPaletteActions,
 } from './cameraViews.js'
 
 function assertEq(actual, expected, msg) {
@@ -432,3 +434,58 @@ function rows(specs) {
 }
 
 console.log('PASS: resolveTouchTargetWithGaps — gap-aware touch hit-test (R28.20, ~60 asserts)')
+
+// --- R36.H: buildCameraPaletteActions ---
+{
+  const views = [
+    { id: 3, name: 'Hero', pos: [1.234, 2, 3.567], target: [0, 0, 0], createdAt: 30 },
+    { id: 2, name: '  ', pos: [4, 5, 6], target: [0, 0, 0], createdAt: 20 },   // blank name → fallback
+    { id: 1, name: 'Wide', pos: [7, 8, 9], target: [0, 0, 0], createdAt: 10 },
+  ]
+  const actions = buildCameraPaletteActions(views)
+  assertEq(actions.length, 3, 'one action per valid view')
+  assertEq(actions[0].id, 'cam-view-3', 'stable id from view id')
+  assertEq(actions[0].kind, 'restore-view', 'kind is restore-view')
+  assertEq(actions[0].label, 'Hero', 'label from name')
+  // order preserved (newest-first as stored).
+  assertEq(actions.map(a => a.label), ['Hero', 'View 2', 'Wide'], 'order preserved + blank name falls back to View N')
+  // pos rounded to 0.1 in the sub line.
+  assertEq(actions[0].sub, '1.2, 2, 3.6', 'sub is rounded x, y, z')
+  // keywords are lowercase + include the name for search.
+  assertEq(actions[0].keywords.includes('hero'), true, 'keywords include lowercased name')
+  assertEq(actions[0].keywords.includes('camera'), true, 'keywords include camera')
+  // the view payload is carried through for restore.
+  assertEq(actions[0].view.id, 3, 'view payload carried')
+}
+
+// --- buildCameraPaletteActions: defensive ---
+{
+  assertEq(buildCameraPaletteActions([]), [], 'empty list → no actions')
+  assertEq(buildCameraPaletteActions(null), [], 'null → no actions')
+  assertEq(buildCameraPaletteActions(undefined), [], 'undefined → no actions')
+  assertEq(buildCameraPaletteActions('nope'), [], 'non-array → no actions')
+  // corrupt rows are skipped, valid ones survive.
+  const mixed = [
+    null,                                            // dropped
+    { name: 'no id', pos: [1, 2, 3] },               // missing id → dropped
+    { id: 5, name: 'no pos' },                       // missing pos → dropped
+    { id: 6, name: 'short pos', pos: [1, 2] },       // pos too short → dropped
+    { id: 7, name: 'nan pos', pos: [1, NaN, 3] },    // non-finite pos → dropped
+    { id: 8, name: 'Good', pos: [1, 2, 3], target: [0, 0, 0] }, // kept
+  ]
+  const out = buildCameraPaletteActions(mixed)
+  assertEq(out.length, 1, 'only the one fully-valid view survives')
+  assertEq(out[0].id, 'cam-view-8', 'the valid view is the kept one')
+  assertEq(out[0].label, 'Good', 'valid view label')
+  // id 0 is a legitimate id (falsy but defined) — must NOT be dropped.
+  const zeroId = buildCameraPaletteActions([{ id: 0, name: 'Zero', pos: [0, 0, 0] }])
+  assertEq(zeroId.length, 1, 'id 0 is valid (not treated as missing)')
+  assertEq(zeroId[0].id, 'cam-view-0', 'id 0 builds a stable action id')
+  // purity: input not mutated.
+  const src = [{ id: 1, name: 'X', pos: [1, 2, 3] }]
+  const snapshot = JSON.stringify(src)
+  buildCameraPaletteActions(src)
+  assertEq(JSON.stringify(src), snapshot, 'input views not mutated')
+}
+
+console.log('PASS: buildCameraPaletteActions — command-palette camera actions (R36.H, ~22 asserts)')
