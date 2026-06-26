@@ -250,6 +250,111 @@ export function headroomBandColor(headroom) {
   return '#f87171'
 }
 
+// --- R37.A: budget-headroom history strip ----------------------------
+//
+// The live headroom bar (R36.A) shows the INSTANT leftover budget. This
+// turns the same 2s window into a tiny rolling strip so a user can see
+// whether they're trending TOWARD or AWAY from the 16.7ms edge, not just
+// the current value — the perf equivalent of watching a stock ticker
+// instead of a single price.
+//
+// The y-axis is the signed headroom fraction: +1 (100% free) at the top,
+// 0 (right at the budget edge) on a marked centreline, down to a floor of
+// -1 (the frame is taking 2x its budget) at the bottom. Plotting it
+// SIGNED around a fixed zero line means the budget edge sits at a stable
+// height and the eye reads "above the line = healthy / below = over"
+// instantly, the same way the bar's colour already works.
+
+// The clamp range for the signed-headroom plot. A frame with >100% free
+// budget (sub-8ms) pins to the top; one taking >=2x its budget pins to
+// the floor. Symmetric so the zero line lands dead centre.
+export const HEADROOM_HISTORY_TOP = 1
+export const HEADROOM_HISTORY_BOTTOM = -1
+
+// Clamp a signed headroom value into [BOTTOM, TOP].
+function clampHeadroom(h) {
+  const v = Number(h)
+  if (!Number.isFinite(v)) return HEADROOM_HISTORY_BOTTOM
+  if (v > HEADROOM_HISTORY_TOP) return HEADROOM_HISTORY_TOP
+  if (v < HEADROOM_HISTORY_BOTTOM) return HEADROOM_HISTORY_BOTTOM
+  return v
+}
+
+// Map signed headroom h (in [BOTTOM, TOP]) to a y pixel in a box of
+// `height`. TOP → y=0 (top), BOTTOM → y=height (floor), 0 → the centre.
+function headroomToY(h, height) {
+  const span = HEADROOM_HISTORY_TOP - HEADROOM_HISTORY_BOTTOM // 2
+  const frac = (clampHeadroom(h) - HEADROOM_HISTORY_BOTTOM) / span // 0..1, BOTTOM→0
+  return height - frac * height // BOTTOM→height (floor), TOP→0 (top)
+}
+
+// Map fps samples to {x, y} points for the headroom history strip. Each
+// fps sample is run through frameBudgetHeadroom() so the strip reads the
+// exact same headroom the live bar shows. Newest sample sits at the right
+// edge. Returns [] for empty / non-array input.
+export function buildHeadroomHistoryPoints(fpsSamples, opts = {}) {
+  if (!Array.isArray(fpsSamples) || fpsSamples.length === 0) return []
+  const width = Number.isFinite(opts.width) && opts.width > 0 ? opts.width : 100
+  const height = Number.isFinite(opts.height) && opts.height > 0 ? opts.height : 28
+  const budgetMs = Number.isFinite(opts.budgetMs) && opts.budgetMs > 0 ? opts.budgetMs : FRAME_BUDGET_60
+  const n = fpsSamples.length
+  const stepDenom = n > 1 ? n - 1 : 1
+  const out = []
+  for (let i = 0; i < n; i++) {
+    const h = frameBudgetHeadroom(fpsSamples[i], budgetMs).headroom
+    const x = n > 1 ? (i / stepDenom) * width : width
+    out.push({ x, y: headroomToY(h, height) })
+  }
+  return out
+}
+
+// The headroom-history points as an SVG `points="x,y x,y"` string. '' when empty.
+export function headroomHistoryAttr(fpsSamples, opts = {}) {
+  const pts = buildHeadroomHistoryPoints(fpsSamples, opts)
+  if (pts.length === 0) return ''
+  return pts.map(p => `${round1(p.x)},${round1(p.y)}`).join(' ')
+}
+
+// The y pixel of the zero line (the budget edge) for the history strip —
+// where headroom crosses from positive (free) to negative (over). Always
+// the vertical centre of the box for the symmetric [BOTTOM, TOP] range.
+export function headroomZeroLineY(opts = {}) {
+  const height = Number.isFinite(opts.height) && opts.height > 0 ? opts.height : 28
+  return headroomToY(0, height)
+}
+
+// Trend of the headroom window: is the user heading TOWARD the budget
+// edge (falling headroom = scene getting heavier) or AWAY from it
+// (rising = recovering)? We compare the average headroom of the OLDER
+// half of the window to the NEWER half. Returns:
+//   { dir: 'rising' | 'falling' | 'flat', delta }
+// where `delta` is newerAvg - olderAvg (positive = gaining headroom).
+// A small dead-band (default 0.04 headroom fraction, ~0.7ms at 60fps)
+// keeps a steady scene reading 'flat' instead of jittering rising/
+// falling on sampling noise. Junk-tolerant; < 2 valid samples → flat/0.
+export function headroomTrend(fpsSamples, opts = {}) {
+  const flat = { dir: 'flat', delta: 0 }
+  if (!Array.isArray(fpsSamples) || fpsSamples.length < 2) return flat
+  const budgetMs = Number.isFinite(opts.budgetMs) && opts.budgetMs > 0 ? opts.budgetMs : FRAME_BUDGET_60
+  const deadband = Number.isFinite(opts.deadband) && opts.deadband >= 0 ? opts.deadband : 0.04
+  const valid = []
+  for (const s of fpsSamples) {
+    const v = Number(s)
+    if (Number.isFinite(v) && v > 0) valid.push(frameBudgetHeadroom(v, budgetMs).headroom)
+  }
+  if (valid.length < 2) return flat
+  const mid = Math.floor(valid.length / 2)
+  // Older half is the front of the array (oldest samples first); newer
+  // half is the back. With an odd count the middle sample is shared into
+  // neither half so the two windows stay balanced.
+  const older = valid.slice(0, mid)
+  const newer = valid.slice(valid.length - mid)
+  const avg = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length
+  const delta = avg(newer) - avg(older)
+  const dir = delta > deadband ? 'rising' : delta < -deadband ? 'falling' : 'flat'
+  return { dir, delta: round1(delta * 100) / 100 }
+}
+
 // Frame-time window summary — mirrors summarizeFpsWindow but in ms.
 // `high` is the averaged WORST `pctHigh` fraction (the 1%-HIGH frame
 // time, the ms analogue of the 1% low); `over` counts frames slower

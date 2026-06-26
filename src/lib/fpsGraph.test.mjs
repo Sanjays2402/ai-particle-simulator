@@ -157,6 +157,10 @@ const {
   frameMsRefLineY, frameMsBandColor, summarizeFrameTimeWindow,
   // R36.A — frame-budget headroom
   frameBudgetHeadroom, headroomBandColor,
+  // R37.A — budget-headroom history strip
+  HEADROOM_HISTORY_TOP, HEADROOM_HISTORY_BOTTOM,
+  buildHeadroomHistoryPoints, headroomHistoryAttr, headroomZeroLineY,
+  headroomTrend,
 } = r35
 
 // --- constants ---
@@ -324,3 +328,102 @@ eq(frameMsBandColor(Infinity), '#6a6a80', 'Infinity → neutral grey')
 }
 
 console.log(`PASS: fpsGraph — ${passed} assertions (sparkline geometry, band colour, 1%-low window summary, R35.A frame-time ms view, R36.A budget headroom)`)
+
+// === R37.A: budget-headroom history strip ============================
+{
+  // constants: symmetric clamp range with the zero line dead-centre.
+  eq(HEADROOM_HISTORY_TOP, 1, 'history top is +1 (100% free)')
+  eq(HEADROOM_HISTORY_BOTTOM, -1, 'history bottom is -1 (2x budget)')
+
+  const OPT = { width: 100, height: 40, budgetMs: FRAME_BUDGET_60 }
+
+  // --- buildHeadroomHistoryPoints: geometry ---
+  eq(buildHeadroomHistoryPoints([], OPT).length, 0, 'empty samples → no points')
+  eq(buildHeadroomHistoryPoints(null, OPT).length, 0, 'non-array → no points')
+  eq(buildHeadroomHistoryPoints('nope', OPT).length, 0, 'string → no points')
+
+  // 120fps (8.33ms) has ~50% headroom → above the centre line (y < mid).
+  // 60fps (16.7ms) is right at the edge → on the centre line.
+  // 30fps (33.3ms) is 2x budget → pinned to the floor.
+  const pts = buildHeadroomHistoryPoints([120, 60, 30], OPT)
+  eq(pts.length, 3, 'one point per sample')
+  near(pts[0].x, 0, 'oldest sample at left edge')
+  near(pts[2].x, 100, 'newest sample at right edge')
+  const midY = headroomZeroLineY(OPT)
+  near(midY, 20, 'zero line is vertical centre of a 40px box')
+  ok(pts[0].y < midY, '120fps (free budget) sits ABOVE the zero line')
+  near(pts[1].y, midY, '60fps (at edge) sits ON the zero line')
+  near(pts[2].y, 40, '30fps (2x budget) pins to the floor')
+
+  // Single sample pins to the right edge (no divide-by-zero).
+  const one = buildHeadroomHistoryPoints([60], OPT)
+  eq(one.length, 1, 'single sample → one point')
+  near(one[0].x, 100, 'single sample at right edge')
+
+  // A frame way under budget (e.g. 1000fps = 1ms) approaches the top.
+  // Headroom = 1 - ms/budget asymptotically nears +1 but never reaches
+  // it (ms is always > 0), so it sits just shy of the top edge.
+  const fast = buildHeadroomHistoryPoints([1000], OPT)
+  ok(fast[0].y < 2 && fast[0].y >= 0, 'super-fast frame sits near the top edge')
+
+  // A frame way over budget (e.g. 5fps = 200ms) clamps to the floor.
+  const slow = buildHeadroomHistoryPoints([5], OPT)
+  near(slow[0].y, 40, 'super-slow frame clamps to the floor (y=height)')
+
+  // Junk samples collapse to the over-budget floor (never falsely high).
+  const junky = buildHeadroomHistoryPoints([NaN, Infinity, -1], OPT)
+  eq(junky.length, 3, 'junk samples still produce points')
+  for (const p of junky) near(p.y, 40, 'junk sample pins to the floor, never the top')
+
+  // --- headroomHistoryAttr: SVG string ---
+  eq(headroomHistoryAttr([], OPT), '', 'empty → empty attr string')
+  const attr = headroomHistoryAttr([120, 60, 30], OPT)
+  ok(attr.includes(' '), 'attr joins points with spaces')
+  eq(attr.split(' ').length, 3, 'attr has one coord pair per sample')
+  ok(/^[\d.,-]+$/.test(attr.replace(/ /g, '')), 'attr is numeric coords only')
+
+  // --- headroomZeroLineY: defensive ---
+  near(headroomZeroLineY({ height: 28 }), 14, 'default-ish box centre')
+  near(headroomZeroLineY({}), 14, 'no height → 28px default → centre 14')
+
+  // --- headroomTrend: rising / falling / flat ---
+  eq(headroomTrend([], OPT).dir, 'flat', 'empty → flat')
+  eq(headroomTrend([60], OPT).dir, 'flat', 'single sample → flat (needs 2)')
+  eq(headroomTrend(null, OPT).dir, 'flat', 'non-array → flat')
+
+  // Older half slow (30fps, negative headroom), newer half fast (120fps,
+  // positive headroom) → recovering → rising, positive delta.
+  const rising = headroomTrend([30, 30, 120, 120], OPT)
+  eq(rising.dir, 'rising', 'slow→fast window reads rising')
+  ok(rising.delta > 0, 'rising delta is positive')
+
+  // Reverse: fast→slow → heading toward the edge → falling, negative delta.
+  const falling = headroomTrend([120, 120, 30, 30], OPT)
+  eq(falling.dir, 'falling', 'fast→slow window reads falling')
+  ok(falling.delta < 0, 'falling delta is negative')
+
+  // Steady scene → flat (within the dead-band).
+  const steady = headroomTrend([60, 60, 60, 60], OPT)
+  eq(steady.dir, 'flat', 'steady fps reads flat')
+  eq(steady.delta, 0, 'steady delta is zero')
+
+  // Dead-band keeps tiny drift flat. 61 vs 59fps headroom differ by a
+  // hair (~0.005) — well under the 0.04 default dead-band.
+  eq(headroomTrend([61, 61, 59, 59], OPT).dir, 'flat', 'sub-deadband drift stays flat')
+
+  // A custom tiny dead-band lets that same drift register as a direction.
+  const sensitive = headroomTrend([61, 61, 59, 59], { ...OPT, deadband: 0 })
+  ok(sensitive.dir === 'falling' || sensitive.dir === 'rising', 'zero dead-band surfaces tiny drift')
+
+  // Junk samples are filtered; a window of only junk → flat.
+  eq(headroomTrend([NaN, Infinity, 'x', null], OPT).dir, 'flat', 'all-junk window → flat')
+
+  // Purity: input not mutated.
+  const src = [60, 30, 120]
+  const snap = JSON.stringify(src)
+  buildHeadroomHistoryPoints(src, OPT)
+  headroomTrend(src, OPT)
+  eq(JSON.stringify(src), snap, 'R37.A helpers do not mutate input')
+}
+
+console.log(`PASS: fpsGraph R37.A — ${passed} total assertions (incl. budget-headroom history strip + trend)`)

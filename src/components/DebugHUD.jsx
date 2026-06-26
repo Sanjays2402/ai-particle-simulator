@@ -7,6 +7,7 @@ import {
   summarizeFrameTimeWindow, frameMsBandColor, fpsToFrameMs,
   FRAME_MS_GRAPH_CEIL, FRAME_BUDGET_60, FRAME_BUDGET_30,
   frameBudgetHeadroom, headroomBandColor,
+  headroomHistoryAttr, headroomZeroLineY, headroomTrend,
 } from '../lib/fpsGraph'
 
 // Performance debug HUD. Toggle with backtick (`) so it doesn't fight
@@ -140,6 +141,21 @@ export default function DebugHUD() {
   // current cost.
   const budget = frameBudgetHeadroom(stats.fps)
   const headroomColor = headroomBandColor(budget.headroom)
+  // R37.A — the same 2s window as a tiny rolling headroom strip so the
+  // user can see whether they're trending toward or away from the 16.7ms
+  // budget edge, not just the instant value. Plotted SIGNED around a
+  // centre zero-line (above = free budget, below = over). A trend arrow
+  // (rising / falling / flat) summarises the direction at a glance.
+  const HSW = GW, HSH = 26
+  const headroomOpts = { width: HSW, height: HSH }
+  const headroomAttr = headroomHistoryAttr(series, headroomOpts)
+  const headroomZeroY = headroomZeroLineY(headroomOpts)
+  const trend = headroomTrend(series)
+  const trendGlyph = trend.dir === 'rising' ? '\u2197' : trend.dir === 'falling' ? '\u2198' : '\u2192'
+  // Rising headroom (recovering) is good → green; falling (heading for
+  // the edge) is a warning → amber; flat is neutral.
+  const trendColor = trend.dir === 'rising' ? '#86efac' : trend.dir === 'falling' ? '#fbbf24' : '#8a8aa0'
+  const trendWord = trend.dir === 'rising' ? 'easing' : trend.dir === 'falling' ? 'loading' : 'steady'
 
   return (
     <div style={{
@@ -237,6 +253,32 @@ export default function DebugHUD() {
               }} />
             </div>
           </div>
+          {/* R37.A — budget-headroom history strip: the last ~2s of
+              headroom plotted SIGNED around a centre zero-line (the
+              16.7ms budget edge). Above the line = free budget; below =
+              over. The trend pill says whether the user is trending
+              toward (loading) or away from (easing) the edge so they see
+              direction, not just the instant value. */}
+          {headroomAttr && (
+            <div style={{ margin: '0 0 7px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                <span style={{ color: '#8a8aa0' }}>Trend</span>
+                <span style={{ color: trendColor, fontVariantNumeric: 'tabular-nums' }}>
+                  <span style={{ fontWeight: 700, marginRight: 3 }}>{trendGlyph}</span>{trendWord}
+                </span>
+              </div>
+              <svg width={HSW} height={HSH} style={{ display: 'block', borderRadius: 5, background: 'rgba(0,0,0,0.28)' }}>
+                {/* The budget edge — headroom crosses 0 here. Above is
+                    healthy (green tint), below is over budget (red tint). */}
+                <rect x={0} y={0} width={HSW} height={headroomZeroY} fill="rgba(134,239,172,0.06)" />
+                <rect x={0} y={headroomZeroY} width={HSW} height={HSH - headroomZeroY} fill="rgba(248,113,113,0.07)" />
+                <line x1={0} y1={headroomZeroY} x2={HSW} y2={headroomZeroY}
+                  stroke="rgba(255,255,255,0.22)" strokeWidth={1} strokeDasharray="2 3" />
+                <polyline points={headroomAttr} fill="none" stroke={headroomColor}
+                  strokeWidth={1.4} strokeLinejoin="round" strokeLinecap="round" />
+              </svg>
+            </div>
+          )}
           <Row label="Avg / 2s"  value={`${msSummary.avg} ms`} />
           <Row label="Best / 2s" value={`${msSummary.min} ms`} />
           <Row label="Worst / 2s" value={`${msSummary.max} ms`} />
