@@ -38,6 +38,10 @@ import {
   // (parallels R23.35 hotkey chain). Stack of unpin frames; window-gated
   // chaining; pop+restore steps back one level per Undo click.
   pushBulkUnpinChainFrame, popBulkUnpinChainFrame, formatBulkUnpinChainBadge,
+  // R33.42 — colour-blind-safe direction glyph for the depth-pip pulse
+  // (caret points up on bank / down on step-back). Pairs the R32.42
+  // colour cue with a SHAPE cue so the direction reads without colour.
+  describeBulkUnpinPulse,
 } from '../lib/presetThumbnails'
 import { showToast } from './Toast'
 
@@ -976,6 +980,11 @@ export default function PresetCarousel() {
                                     0%   { transform: scale(1);    background: rgba(99,102,241,0.22); box-shadow: 0 0 0 0 rgba(244,63,94,0); }
                                     35%  { transform: scale(0.7);  background: rgba(244,63,94,0.45); box-shadow: 0 0 7px 1px rgba(244,63,94,0.5); }
                                     100% { transform: scale(1);    background: rgba(99,102,241,0.22); box-shadow: 0 0 0 0 rgba(244,63,94,0); }
+                                  }
+                                  @keyframes bulk-unpin-caret-fade {
+                                    0%   { opacity: 0; transform: translateY(0); }
+                                    18%  { opacity: 1; }
+                                    100% { opacity: 0; transform: translateY(0); }
                                   }`}</style>
                                 )}
                                 <span
@@ -986,11 +995,38 @@ export default function PresetCarousel() {
                                     border: '1px solid rgba(99,102,241,0.45)',
                                     fontWeight: 700, letterSpacing: 0,
                                     fontFamily: 'Geist Mono, JetBrains Mono, monospace',
-                                    display: 'inline-block',
+                                    display: 'inline-flex', alignItems: 'center', gap: 1,
                                     animation: reducedMotion
                                       ? 'none'
                                       : `bulk-unpin-pip-pulse-${bulkUnpinPulseDir} 0.42s cubic-bezier(0.2,0.9,0.25,1)`,
-                                  }}>{`x${bulkUnpinChainDepth}`}</span>
+                                  }}>
+                                  {/* R33.42 — colour-blind-safe direction caret. Pairs
+                                      the R32.42 indigo-BLOOM / rose-CONTRACT colour cue
+                                      with a SHAPE cue (▲ bank / ▼ step-back) so a user
+                                      who can't distinguish the two colours still reads
+                                      the direction. aria-hidden (the toast text carries
+                                      the spoken truth); fades out after the pulse so it
+                                      doesn't linger as a static arrow, but stays put
+                                      under reduced-motion (snaps, mirrors the pip). */}
+                                  {(() => {
+                                    const pulseDir = describeBulkUnpinPulse(bulkUnpinPulseDir)
+                                    if (!pulseDir) return null
+                                    return (
+                                      <span
+                                        aria-hidden="true"
+                                        title={pulseDir.label}
+                                        style={{
+                                          fontSize: 7, lineHeight: 1,
+                                          color: pulseDir.dir === 'up' ? '#a5b4fc' : '#fda4af',
+                                          opacity: reducedMotion ? 0.85 : 0,
+                                          animation: reducedMotion
+                                            ? 'none'
+                                            : 'bulk-unpin-caret-fade 0.95s ease-out forwards',
+                                        }}>{pulseDir.glyph}</span>
+                                    )
+                                  })()}
+                                  <span>{`x${bulkUnpinChainDepth}`}</span>
+                                </span>
                               </>
                             )}
                           </button>

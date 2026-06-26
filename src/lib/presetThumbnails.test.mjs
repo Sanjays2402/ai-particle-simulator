@@ -31,6 +31,8 @@ import {
   // R29.42 — multi-level bulk-unpin undo chain
   BULK_UNPIN_CHAIN_MS, BULK_UNPIN_CHAIN_MAX,
   pushBulkUnpinChainFrame, popBulkUnpinChainFrame, formatBulkUnpinChainBadge,
+  // R33.42 — colour-blind-safe direction glyph for the depth-pip pulse
+  describeBulkUnpinPulse, BULK_UNPIN_PULSE_GLYPHS,
   THUMB_WIDTH, THUMB_HEIGHT,
 } from './presetThumbnails.js'
 
@@ -2236,3 +2238,31 @@ const K = (q, m = NOTE_FILTER_MODE_SUBSTRING) => ({ query: q, mode: m })
 }
 
 console.log('PASS: bulk-unpin undo CHAIN — push/pop/badge across rapid unpins (R29.42, ~50 asserts)')
+
+// R33.42 — describeBulkUnpinPulse: colour-blind-safe direction glyph.
+{
+  const up = describeBulkUnpinPulse('up')
+  truthy(up, 'up -> non-null descriptor')
+  eq(up.glyph, '\u25b2', 'up -> filled up-caret glyph')
+  eq(up.dir, 'up', 'up -> dir up')
+  truthy(typeof up.label === 'string' && up.label.length > 0, 'up -> non-empty label')
+  const down = describeBulkUnpinPulse('down')
+  truthy(down, 'down -> non-null descriptor')
+  eq(down.glyph, '\u25bc', 'down -> filled down-caret glyph')
+  eq(down.dir, 'down', 'down -> dir down')
+  // The two carets are genuinely distinct shapes (the whole point).
+  truthy(up.glyph !== down.glyph, 'up and down carets are distinct glyphs')
+  // Unknown / corrupt directions -> null (caller renders no caret).
+  eq(describeBulkUnpinPulse(null), null, 'null dir -> null')
+  eq(describeBulkUnpinPulse(undefined), null, 'undefined dir -> null')
+  eq(describeBulkUnpinPulse(''), null, 'empty string dir -> null')
+  eq(describeBulkUnpinPulse('sideways'), null, 'unknown dir -> null')
+  eq(describeBulkUnpinPulse(42), null, 'non-string dir -> null')
+  eq(describeBulkUnpinPulse('UP'), null, 'case-sensitive: UP -> null (only lowercase)')
+  // Static roster matches the projector output (no drift).
+  eq(BULK_UNPIN_PULSE_GLYPHS.up.glyph, up.glyph, 'roster up glyph matches projector')
+  eq(BULK_UNPIN_PULSE_GLYPHS.down.glyph, down.glyph, 'roster down glyph matches projector')
+}
+
+console.log('PASS: describeBulkUnpinPulse — colour-blind-safe direction caret projector (R33.42, ~16 asserts)')
+

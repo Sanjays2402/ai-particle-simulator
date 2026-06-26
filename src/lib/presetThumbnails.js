@@ -1209,6 +1209,28 @@ export function formatBulkUnpinChainBadge(stack) {
   return { text: `x${count}`, count }
 }
 
+// R33.42 — direction glyph for the bulk-unpin depth-pip pulse. R32.42
+// pulses the pip in a distinct colour per direction (indigo BLOOM on
+// bank, rose CONTRACT on step-back), but a colour-blind user can't tell
+// the two pulses apart. This projector returns a SHAPE cue (a caret that
+// points up on bank / down on step-back) so the direction reads without
+// relying on the colour at all.
+//
+// Returns { glyph, dir, label } or null for an unknown direction (the
+// caller renders no caret then — null is the "nothing to show" signal,
+// parallels formatBulkUnpinChainBadge's null contract).
+//   - 'up'   → ▲ ('\u25b2'), "banked a level"
+//   - 'down' → ▼ ('\u25bc'), "stepped back a level"
+//   - anything else (null / '' / 'sideways' / non-string) → null
+export const BULK_UNPIN_PULSE_GLYPHS = {
+  up: { glyph: '\u25b2', dir: 'up', label: 'banked a level' },
+  down: { glyph: '\u25bc', dir: 'down', label: 'stepped back a level' },
+}
+export function describeBulkUnpinPulse(dir) {
+  if (dir !== 'up' && dir !== 'down') return null
+  return BULK_UNPIN_PULSE_GLYPHS[dir]
+}
+
 // Remove one entry from the list by (query, mode). Returns the input
 // ref unchanged when nothing matches (no-op) so the persistence layer
 // can short-circuit.
