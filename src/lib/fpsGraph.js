@@ -207,6 +207,49 @@ export function frameMsBandColor(ms) {
   return '#f87171'
 }
 
+// --- R36.A: frame-budget headroom -----------------------------------
+//
+// The ms view (R35.A) shows how long a frame TOOK; this shows how much
+// of the 60fps budget (16.7ms) is LEFT. A frame that renders in 8ms has
+// ~52% headroom — lots of room before it'll drop below 60fps; a frame at
+// 16.7ms has 0% (right at the edge); a frame slower than the budget has
+// NEGATIVE headroom (it's already over). Surfacing the leftover budget —
+// not just the current cost — tells the user how much heavier a scene
+// they can push before the frame rate suffers.
+//
+// `used` is the fraction of the budget consumed (clamped to [0, 1] for a
+// progress bar — an over-budget frame pins the bar full), `headroom` is
+// the signed leftover fraction (can go negative so a caller can colour
+// "over budget" distinctly), `overBudget` is a convenience boolean.
+// Pure + defensive: junk fps maps to a stalled, zero-headroom frame so a
+// corrupt sample never reads as "tons of headroom".
+export function frameBudgetHeadroom(fps, budgetMs = FRAME_BUDGET_60) {
+  const budget = Number.isFinite(budgetMs) && budgetMs > 0 ? budgetMs : FRAME_BUDGET_60
+  const ms = fpsToFrameMs(fps)
+  const ratio = ms / budget
+  const headroom = 1 - ratio
+  const used = ratio < 0 ? 0 : ratio > 1 ? 1 : ratio
+  return {
+    ms: round1(ms),
+    budgetMs: round1(budget),
+    used,                       // [0,1] for a progress bar
+    headroom,                   // signed; negative = over budget
+    headroomPct: Math.round(headroom * 100),
+    overBudget: ms > budget + 0.0001,
+  }
+}
+
+// Colour the headroom bar by how much budget is left — green when
+// there's comfortable room (>= 25%), amber when it's getting tight
+// (>= 0%), red once the frame is over budget. Junk → neutral grey.
+export function headroomBandColor(headroom) {
+  const v = Number(headroom)
+  if (!Number.isFinite(v)) return '#6a6a80'
+  if (v >= 0.25) return '#86efac'
+  if (v >= 0) return '#fbbf24'
+  return '#f87171'
+}
+
 // Frame-time window summary — mirrors summarizeFpsWindow but in ms.
 // `high` is the averaged WORST `pctHigh` fraction (the 1%-HIGH frame
 // time, the ms analogue of the 1% low); `over` counts frames slower

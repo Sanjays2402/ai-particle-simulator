@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
+import { useStore } from '../store'
 import {
   buildSparklinePoints, sparklinePointsAttr, refLineY, summarizeFpsWindow,
   fpsBandColor, FPS_GRAPH_CEIL,
   buildFrameTimeSparklinePoints, frameTimeSparklineAttr, frameMsRefLineY,
   summarizeFrameTimeWindow, frameMsBandColor, fpsToFrameMs,
   FRAME_MS_GRAPH_CEIL, FRAME_BUDGET_60, FRAME_BUDGET_30,
+  frameBudgetHeadroom, headroomBandColor,
 } from '../lib/fpsGraph'
 
 // Performance debug HUD. Toggle with backtick (`) so it doesn't fight
@@ -18,6 +20,9 @@ export default function DebugHUD() {
   const [visible, setVisible] = useState(false)
   // false = fps view (default), true = frame-time (ms) view.
   const [msView, setMsView] = useState(false)
+  // R36.A — live particle count for the GPU-load readout row. Cheap
+  // store subscription (only re-renders the HUD when the count changes).
+  const particleCount = useStore(s => s.particleCount)
   const [stats, setStats] = useState({ fps: 60, min: 60, max: 60, avg: 60, frame: 16.7, mem: null })
   // R34.A — the live fps series feeding the sparkline. Held in state
   // (not just the ref) so the SVG re-renders each sample tick. Capped
@@ -129,6 +134,12 @@ export default function DebugHUD() {
     : ''
   const fpsSummary = summarizeFpsWindow(series)
   const msSummary = summarizeFrameTimeWindow(series)
+  // R36.A — how much of the 60fps (16.7ms) budget the live frame leaves
+  // on the table. Shown as a bar in the ms view so the user can see how
+  // much heavier a scene they can push before fps drops, not just the
+  // current cost.
+  const budget = frameBudgetHeadroom(stats.fps)
+  const headroomColor = headroomBandColor(budget.headroom)
 
   return (
     <div style={{
@@ -201,6 +212,31 @@ export default function DebugHUD() {
       {msView ? (
         <>
           <Row label="Frame"     value={<span style={{ color: frameMsBandColor(liveMs) }}>{liveMs.toFixed(1)} ms</span>} />
+          {/* R36.A — budget headroom bar: how much of the 16.7ms (60fps)
+              frame budget is left. Green = comfortable room, amber =
+              tight, red = already over budget. The filled portion is the
+              budget USED; the label shows the signed headroom %. */}
+          <div style={{ margin: '5px 0 7px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+              <span style={{ color: '#8a8aa0' }}>Budget</span>
+              <span style={{ color: headroomColor, fontVariantNumeric: 'tabular-nums' }}>
+                {budget.overBudget ? 'over' : `${budget.headroomPct}% free`}
+              </span>
+            </div>
+            <div style={{
+              position: 'relative', height: 5, borderRadius: 3,
+              background: 'rgba(255,255,255,0.06)', overflow: 'hidden',
+            }}>
+              {/* 16.7ms budget tick sits at 100% of the bar; the fill is
+                  the fraction used so it crosses the full bar exactly at
+                  the budget edge. */}
+              <div style={{
+                position: 'absolute', inset: 0, width: `${Math.round(budget.used * 100)}%`,
+                background: headroomColor, opacity: 0.85,
+                transition: 'width 0.2s ease-out, background 0.2s ease-out',
+              }} />
+            </div>
+          </div>
           <Row label="Avg / 2s"  value={`${msSummary.avg} ms`} />
           <Row label="Best / 2s" value={`${msSummary.min} ms`} />
           <Row label="Worst / 2s" value={`${msSummary.max} ms`} />
@@ -219,6 +255,10 @@ export default function DebugHUD() {
         </>
       )}
       {stats.mem != null && <Row label="Heap" value={`${stats.mem.toFixed(0)} MB`} />}
+      {/* R36.A — particle load: the single biggest GPU-cost lever, so it
+          sits right next to the perf numbers for a quick "is the count
+          why I'm slow?" read. */}
+      <Row label="Particles" value={`${(particleCount / 1000).toFixed(particleCount >= 10000 ? 0 : 1)}K`} />
       <div style={{ fontSize: 10, color: '#6a6a80', marginTop: 6 }}>
         <kbd style={kbd}>`</kbd> toggle · <kbd style={kbd}>M</kbd> {msView ? 'fps' : 'ms'}
       </div>

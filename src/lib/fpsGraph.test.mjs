@@ -155,6 +155,8 @@ const {
   FRAME_MS_GRAPH_CEIL, FRAME_BUDGET_60, FRAME_BUDGET_30,
   fpsToFrameMs, buildFrameTimeSparklinePoints, frameTimeSparklineAttr,
   frameMsRefLineY, frameMsBandColor, summarizeFrameTimeWindow,
+  // R36.A — frame-budget headroom
+  frameBudgetHeadroom, headroomBandColor,
 } = r35
 
 // --- constants ---
@@ -268,4 +270,57 @@ eq(frameMsBandColor(Infinity), '#6a6a80', 'Infinity → neutral grey')
   eq(JSON.stringify(input), JSON.stringify(copy), 'ms helpers leave input unmutated')
 }
 
-console.log(`PASS: fpsGraph — ${passed} assertions (sparkline geometry, band colour, 1%-low window summary, R35.A frame-time ms view)`)
+// --- R36.A: frame-budget headroom ---
+{
+  // 120fps → 8.33ms frame, half the 16.7ms budget → ~50% headroom.
+  const fast = frameBudgetHeadroom(120)
+  near(fast.ms, 8.3, 'fast frame ms')
+  ok(fast.headroom > 0.49 && fast.headroom < 0.51, '120fps ~50% headroom')
+  eq(fast.headroomPct, 50, '120fps headroom 50%')
+  eq(fast.overBudget, false, '120fps not over budget')
+  ok(fast.used > 0.49 && fast.used < 0.51, '120fps ~50% used')
+
+  // Exactly 60fps → 16.7ms → ~0% headroom, right at the edge (not over).
+  const edge = frameBudgetHeadroom(60)
+  ok(Math.abs(edge.headroom) < 0.001, '60fps ~0 headroom')
+  eq(edge.overBudget, false, '60fps exactly at budget is not over')
+  ok(edge.used > 0.99 && edge.used <= 1, '60fps ~full bar')
+
+  // 30fps → 33.3ms → double the budget → negative headroom, over budget.
+  const slow = frameBudgetHeadroom(30)
+  ok(slow.headroom < 0, '30fps negative headroom')
+  eq(slow.headroomPct, -100, '30fps headroom -100%')
+  eq(slow.overBudget, true, '30fps over the 60fps budget')
+  eq(slow.used, 1, 'over-budget bar pins to full (clamped)')
+
+  // Junk fps → stalled frame (ceiling ms), zero headroom-ish, over budget.
+  const junk = frameBudgetHeadroom(NaN)
+  eq(junk.overBudget, true, 'NaN fps reads as over budget (stalled)')
+  ok(junk.headroom < 0, 'NaN fps negative headroom')
+  eq(junk.used, 1, 'NaN fps pins the bar full, never falsely empty')
+
+  // Custom budget (the 30fps line) — 45fps (22.2ms) is under the 33.3ms
+  // budget so it has positive headroom against the looser target.
+  const loose = frameBudgetHeadroom(45, FRAME_BUDGET_30)
+  eq(loose.overBudget, false, '45fps under the 30fps budget')
+  ok(loose.headroom > 0, '45fps positive headroom vs 33.3ms budget')
+
+  // Bad budget arg falls back to the 60fps budget.
+  const badBudget = frameBudgetHeadroom(60, 0)
+  ok(Math.abs(badBudget.headroom) < 0.001, 'zero budget falls back to 16.7ms')
+
+  // headroomBandColor bands.
+  eq(headroomBandColor(0.4), '#86efac', 'comfortable headroom green')
+  eq(headroomBandColor(0.1), '#fbbf24', 'tight headroom amber')
+  eq(headroomBandColor(-0.2), '#f87171', 'over budget red')
+  eq(headroomBandColor(NaN), '#6a6a80', 'junk headroom grey')
+  eq(headroomBandColor(0.25), '#86efac', 'exactly 25% is green (boundary)')
+  eq(headroomBandColor(0), '#fbbf24', 'exactly 0% is amber (boundary)')
+
+  // Purity: same input twice → equal output, no shared mutation.
+  const a = frameBudgetHeadroom(90)
+  const b = frameBudgetHeadroom(90)
+  eq(JSON.stringify(a), JSON.stringify(b), 'frameBudgetHeadroom is pure')
+}
+
+console.log(`PASS: fpsGraph — ${passed} assertions (sparkline geometry, band colour, 1%-low window summary, R35.A frame-time ms view, R36.A budget headroom)`)
