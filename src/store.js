@@ -40,6 +40,11 @@ import {
   sanitizeFramingId as sanitizeFramingGuideId,
   nextFramingId as nextFramingGuideId,
 } from './lib/framingGuides'
+// R34.C — screenshot self-timer delay sanitiser + default.
+import {
+  sanitizeTimerDelay as sanitizeTimerDelayHelper,
+  DEFAULT_TIMER_DELAY as DEFAULT_TIMER_DELAY_VAL,
+} from './lib/selfTimer'
 // R29.43 — persisted hotkey-chain fade curve preference helpers.
 import {
   sanitizeHotkeyChainFadeCurve as sanitizeHotkeyChainFadeCurveHelper,
@@ -54,6 +59,8 @@ const PERSIST_KEY = 'particle-settings-v1'
 // R34.B — framing-guide aspect-ratio id (separate key so it round-trips
 // independently of the main settings blob).
 const FRAMING_GUIDE_KEY = 'particle-framing-guide-v1'
+// R34.C — screenshot self-timer delay (seconds), own key.
+const SCREENSHOT_TIMER_KEY = 'particle-screenshot-timer-v1'
 const PERSIST_FIELDS = [
   'particleCount', 'speed', 'glowIntensity', 'visualStyle',
   'theme', 'trails', 'mouseAttract', 'attractStrength',
@@ -493,6 +500,19 @@ export const useStore = create((set, get) => {
     const next = nextFramingGuideId(get().framingGuideId)
     try { localStorage.setItem(FRAMING_GUIDE_KEY, next) } catch { /* */ }
     set({ framingGuideId: next })
+  },
+
+  // R34.C — Screenshot self-timer delay (seconds). When > 0, the
+  // screenshot button / shortcut starts a 3..2..1 countdown overlay
+  // before capturing so the user can move the cursor out of frame and
+  // compose. 0 = instant (classic behaviour). Persisted.
+  screenshotTimerDelay: (() => {
+    try { return sanitizeTimerDelayHelper(localStorage.getItem(SCREENSHOT_TIMER_KEY)) } catch { return DEFAULT_TIMER_DELAY_VAL }
+  })(),
+  setScreenshotTimerDelay: (d) => {
+    const next = sanitizeTimerDelayHelper(d)
+    try { localStorage.setItem(SCREENSHOT_TIMER_KEY, String(next)) } catch { /* quota / private mode */ }
+    set({ screenshotTimerDelay: next })
   },
 
 

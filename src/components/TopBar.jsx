@@ -5,13 +5,61 @@ import { buildShareUrl } from '../lib/share'
 import { captureFromCanvas, appendSnapshot, loadSnapshots, saveSnapshots } from '../lib/snapshotGallery'
 import { createLoop, DEMO_LOOPS } from '../lib/demoAudioLoops'
 import { loadKeymap, resolveAction } from '../lib/keymap'
+import { TIMER_DELAYS, labelForDelay } from '../lib/selfTimer'
 import {
   Play, Pause, RotateCcw, Maximize2, Shuffle, Magnet, Camera, Link2,
-  Mic, Download, Settings, Repeat, Sparkles, Zap, Paintbrush, Send, Images, Music2,
+  Mic, Download, Settings, Repeat, Sparkles, Zap, Paintbrush, Send, Images, Music2, Timer,
 } from 'lucide-react'
 
+// R34.C — module-level screenshot helpers. Kept out of the component
+// so the capture-now / legacy-screenshot event listeners (and the
+// keymap dispatcher) can reference them without becoming effect deps
+// (they read live state via useStore.getState(), no closure needed).
+
+// Do the real PNG capture from the live canvas + stash it in the
+// in-app gallery. Fired by the ScreenshotTimer overlay's
+// `particle:capture-now` after a countdown, or directly for 0 delay.
+function captureScreenshotNow() {
+  const canvas = document.querySelector('#particle-canvas canvas')
+  if (!canvas) return
+  const { infoTitle, currentPreset, bumpSessionStat } = useStore.getState()
+  const name = (infoTitle || currentPreset || 'particles').replace(/\s+/g, '-').toLowerCase()
+  const ts = Date.now()
+  const link = document.createElement('a')
+  link.download = `particle-${name}-${ts}.png`
+  link.href = canvas.toDataURL('image/png')
+  link.click()
+  bumpSessionStat('screenshotsTaken', 1)
+  // Also stash the snapshot in the in-app gallery so users can revisit
+  // / re-download without re-firing the scene. After the download so
+  // the gallery op can't slow down the user-facing save.
+  try {
+    const entry = captureFromCanvas(canvas)
+    if (entry) {
+      const next = appendSnapshot(loadSnapshots(), {
+        ...entry,
+        label: infoTitle || currentPreset || 'particles',
+        preset: currentPreset || null,
+      })
+      saveSnapshots(next)
+      window.dispatchEvent(new CustomEvent('particle:snapshot-saved', { detail: next.length }))
+    }
+  } catch (e) { console.warn('Snapshot gallery stash failed:', e) }
+}
+
+// Entry point for a screenshot request: route through the self-timer
+// when a delay is set, else capture immediately.
+function requestScreenshot() {
+  const { screenshotTimerDelay } = useStore.getState()
+  if (screenshotTimerDelay > 0) {
+    window.dispatchEvent(new CustomEvent('particle:screenshot-timed', { detail: { delay: screenshotTimerDelay } }))
+  } else {
+    captureScreenshotNow()
+  }
+}
+
 export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snapshotCount }) {
-  const { playing, setPlaying, loadRandom, smashRandom, mouseAttract, setMouseAttract, paintMode, setPaintMode, clearPaintPoints, setAudioReactive, isRecording, startRecording, stopRecording, recordingBuffer, enterReplay, isReplaying } = useStore()
+  const { playing, setPlaying, loadRandom, smashRandom, mouseAttract, setMouseAttract, paintMode, setPaintMode, clearPaintPoints, setAudioReactive, isRecording, startRecording, stopRecording, recordingBuffer, enterReplay, isReplaying, screenshotTimerDelay, setScreenshotTimerDelay } = useStore()
   const audioCtxRef = useRef(null)
   const streamRef = useRef(null)
   const analyserRef = useRef(null)
@@ -42,35 +90,7 @@ export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snaps
     URL.revokeObjectURL(url)
   }
 
-  const handleScreenshot = () => {
-    const canvas = document.querySelector('#particle-canvas canvas')
-    if (!canvas) return
-    const { infoTitle, currentPreset, bumpSessionStat } = useStore.getState()
-    const name = (infoTitle || currentPreset || 'particles').replace(/\s+/g, '-').toLowerCase()
-    const ts = Date.now()
-    const link = document.createElement('a')
-    link.download = `particle-${name}-${ts}.png`
-    link.href = canvas.toDataURL('image/png')
-    link.click()
-    bumpSessionStat('screenshotsTaken', 1)
-    // Also stash the snapshot in the in-app gallery so users can
-    // revisit / re-download without re-firing the scene. Capture
-    // happens after the download so the gallery operation can't slow
-    // down the user-facing save.
-    try {
-      const entry = captureFromCanvas(canvas)
-      if (entry) {
-        const next = appendSnapshot(loadSnapshots(), {
-          ...entry,
-          label: infoTitle || currentPreset || 'particles',
-          preset: currentPreset || null,
-        })
-        saveSnapshots(next)
-        // Tell App-level overlay state if it's listening.
-        window.dispatchEvent(new CustomEvent('particle:snapshot-saved', { detail: next.length }))
-      }
-    } catch (e) { console.warn('Snapshot gallery stash failed:', e) }
-  }
+  const handleScreenshot = () => requestScreenshot()
 
   const handleShare = () => {
     const url = buildShareUrl(useStore.getState())
@@ -224,6 +244,23 @@ export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snaps
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => () => teardownAudio(), [])
 
+  // R34.C — screenshot capture wiring. `particle:capture-now` does the
+  // real PNG capture (fired by the ScreenshotTimer overlay after its
+  // countdown, or directly for a 0-delay). `particle:screenshot` is
+  // the legacy command-palette trigger — route it through the timer
+  // so the chosen delay applies everywhere. Both handlers call
+  // module-level helpers, so this effect has no reactive deps.
+  useEffect(() => {
+    const onCaptureNow = () => captureScreenshotNow()
+    const onLegacyScreenshot = () => requestScreenshot()
+    document.addEventListener('particle:capture-now', onCaptureNow)
+    document.addEventListener('particle:screenshot', onLegacyScreenshot)
+    return () => {
+      document.removeEventListener('particle:capture-now', onCaptureNow)
+      document.removeEventListener('particle:screenshot', onLegacyScreenshot)
+    }
+  }, [])
+
   useEffect(() => {
     // Live keymap snapshot — reloaded on every keypress so a remap
     // applied in Settings takes effect without a refresh. Cheap (one
@@ -265,7 +302,7 @@ export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snaps
           }
           break
         }
-        case 'screenshot': handleScreenshot(); break
+        case 'screenshot': requestScreenshot(); break
         // saveView, bookmark, bookmarkPanel, help are handled by the
         // components that own those features — they read the keymap
         // themselves so the dispatcher doesn't need refs into them.
@@ -361,6 +398,14 @@ export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snaps
         />
         <Divider />
         <Btn onClick={handleScreenshot} title="Screenshot (S)"><Camera size={14} strokeWidth={2.2} /></Btn>
+        <TimerBtn
+          delay={screenshotTimerDelay}
+          onCycle={() => {
+            const idx = TIMER_DELAYS.indexOf(screenshotTimerDelay)
+            const next = TIMER_DELAYS[(idx + 1) % TIMER_DELAYS.length]
+            setScreenshotTimerDelay(next)
+          }}
+        />
         <GalleryBtn onClick={onToggleGallery} active={galleryOpen} count={snapshotCount} />
         <Btn onClick={handleShare} title="Share URL"><Link2 size={14} strokeWidth={2.2} /></Btn>
         <Btn onClick={handleTweet} title="Tweet this scene"><Send size={14} strokeWidth={2.2} /></Btn>
@@ -464,6 +509,66 @@ function GalleryBtn({ onClick, active, count }) {
           fontFamily: 'Geist Mono, monospace',
           lineHeight: 1,
         }}>{count > 99 ? '99+' : count}</span>
+      )}
+    </button>
+  )
+}
+
+// R34.C — screenshot self-timer toggle. Click cycles the delay
+// (Off -> 3s -> 5s -> 10s -> Off); the active delay shows as a badge so
+// users always know whether the next screenshot will count down. Acts
+// as the discoverable surface for the feature next to the camera button.
+function TimerBtn({ delay, onCycle }) {
+  const active = delay > 0
+  return (
+    <button
+      onClick={onCycle}
+      title={active
+        ? `Self-timer: ${labelForDelay(delay)} — click to change (Off / 3s / 5s / 10s)`
+        : 'Self-timer: Off — click to count down before capture'}
+      style={{
+        position: 'relative',
+        width: 30, height: 30,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        borderRadius: 9, cursor: 'pointer',
+        transition: 'all 0.18s cubic-bezier(0.2, 0.8, 0.2, 1)',
+        background: active
+          ? 'linear-gradient(135deg, rgba(139,92,246,0.25) 0%, rgba(236,72,153,0.2) 100%)'
+          : 'rgba(255,255,255,0.035)',
+        color: active ? '#e9d5ff' : '#c8c8d0',
+        border: active ? '1px solid rgba(168,85,247,0.5)' : '1px solid rgba(255,255,255,0.05)',
+        boxShadow: active ? '0 0 16px rgba(168,85,247,0.35), inset 0 1px 0 rgba(255,255,255,0.08)' : 'none',
+      }}
+      onMouseEnter={e => {
+        if (!active) {
+          e.currentTarget.style.background = 'rgba(255,255,255,0.08)'
+          e.currentTarget.style.borderColor = 'rgba(168,85,247,0.3)'
+          e.currentTarget.style.color = '#fff'
+          e.currentTarget.style.transform = 'translateY(-1px)'
+        }
+      }}
+      onMouseLeave={e => {
+        if (!active) {
+          e.currentTarget.style.background = 'rgba(255,255,255,0.035)'
+          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)'
+          e.currentTarget.style.color = '#c8c8d0'
+          e.currentTarget.style.transform = 'translateY(0)'
+        }
+      }}
+    >
+      <Timer size={14} strokeWidth={2.2} />
+      {active && (
+        <span style={{
+          position: 'absolute', top: -3, right: -4,
+          minWidth: 14, height: 14, padding: '0 3px',
+          background: 'linear-gradient(135deg, #a855f7, #ec4899)',
+          color: '#fff', fontSize: 8.5, fontWeight: 700,
+          borderRadius: 7, display: 'inline-flex',
+          alignItems: 'center', justifyContent: 'center',
+          border: '1.5px solid rgba(10,10,16,0.95)',
+          fontFamily: 'Geist Mono, monospace',
+          lineHeight: 1,
+        }}>{labelForDelay(delay)}</span>
       )}
     </button>
   )

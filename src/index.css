@@ -357,6 +357,14 @@ button:focus-visible {
 }
 @keyframes count-blink { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
+/* R34.C — self-timer digit pop. Each new countdown number scales in
+   from slightly large + transparent so the 3..2..1 feels alive. */
+@keyframes count-pop {
+  0%   { transform: scale(1.35); opacity: 0; }
+  35%  { transform: scale(1); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
 /* v2 iter 08: status strip at the bottom-left for live telemetry */
 .status-strip {
   position: fixed; bottom: 16px; left: 16px; z-index: 50;

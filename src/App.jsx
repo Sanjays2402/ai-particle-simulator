@@ -23,6 +23,7 @@ import CameraPathPlayer from './components/CameraPathPlayer'
 import PresetThumbnailPrerenderer from './components/PresetThumbnailPrerenderer'
 import MobileGestureHint from './components/MobileGestureHint'
 import FramingGuides from './components/FramingGuides'
+import ScreenshotTimer from './components/ScreenshotTimer'
 import { useGlobalMidi } from './lib/useGlobalMidi'
 import { loadSnapshots } from './lib/snapshotGallery'
 import { useIsMobile } from './lib/useIsMobile'
@@ -305,6 +306,7 @@ export default function App() {
       <PresetThumbnailPrerenderer />
       <MobileGestureHint />
       <FramingGuides />
+      <ScreenshotTimer />
       <MidiPanel open={midiOpen} onClose={() => setMidiOpen(false)} />
 
       {showSplash && (
