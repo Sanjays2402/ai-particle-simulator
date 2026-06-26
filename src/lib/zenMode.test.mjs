@@ -81,4 +81,79 @@ eq(nextZenState(false, null), false, 'no key → unchanged (off)')
   eq(a, b, 'shouldHideCursor deterministic')
 }
 
-console.log(`PASS: zenMode — ${passed} assertions (cursor idle decision, key reducer, integration)`)
+// === R35.E: zen auto-orbit (ambient display) =========================
+const r35e = await import('./zenMode.js')
+const {
+  ZEN_AUTO_ORBIT_SPEED, ZEN_ORBIT_IDLE_MS, ZEN_ORBIT_RAMP_MS,
+  shouldZenAutoOrbit, zenOrbitSpeed,
+} = r35e
+
+// --- constants ---
+ok(ZEN_AUTO_ORBIT_SPEED > 0 && ZEN_AUTO_ORBIT_SPEED < 2, 'ambient orbit speed is slow + positive')
+ok(ZEN_ORBIT_IDLE_MS > CURSOR_IDLE_MS, 'orbit idle window is longer than the cursor-hide one')
+ok(ZEN_ORBIT_RAMP_MS > 0, 'ramp window positive')
+
+// --- shouldZenAutoOrbit ---
+eq(shouldZenAutoOrbit(false, true, 0, 999999), false, 'not in zen → no orbit')
+eq(shouldZenAutoOrbit(true, false, 0, 999999), false, 'preference off → no orbit')
+eq(shouldZenAutoOrbit(true, true, 1000, 1000), false, 'just interacted → no orbit')
+eq(shouldZenAutoOrbit(true, true, 1000, 1000 + ZEN_ORBIT_IDLE_MS - 1), false, 'within idle window → no orbit')
+eq(shouldZenAutoOrbit(true, true, 1000, 1000 + ZEN_ORBIT_IDLE_MS), true, 'at idle threshold → orbit')
+eq(shouldZenAutoOrbit(true, true, 1000, 1000 + ZEN_ORBIT_IDLE_MS + 9000), true, 'well past idle → orbit')
+// custom idle window.
+eq(shouldZenAutoOrbit(true, true, 0, 800, 1000), false, '0.8s into a 1s window → no orbit')
+eq(shouldZenAutoOrbit(true, true, 0, 1000, 1000), true, 'at custom window → orbit')
+// defensive: bad timestamps never orbit.
+eq(shouldZenAutoOrbit(true, true, NaN, 5000), false, 'NaN lastInteract → no orbit')
+eq(shouldZenAutoOrbit(true, true, 1000, NaN), false, 'NaN now → no orbit')
+eq(shouldZenAutoOrbit(true, true, 1000, 5000, -1), false, 'negative idle → no orbit')
+
+// --- zenOrbitSpeed: ramp ---
+{
+  const opts = { idleMs: 1000, rampMs: 2000, maxSpeed: 0.4 }
+  // before the idle threshold → 0.
+  eq(zenOrbitSpeed(true, true, 0, 500, opts), 0, 'pre-threshold → 0 speed')
+  eq(zenOrbitSpeed(true, true, 0, 1000, opts), 0, 'exactly at threshold → 0 (ramp just begins)')
+  // halfway through the ramp → half speed.
+  near(zenOrbitSpeed(true, true, 0, 2000, opts), 0.2, 'halfway ramp → half max speed', 0.001)
+  // ramp complete → full speed.
+  near(zenOrbitSpeed(true, true, 0, 3000, opts), 0.4, 'ramp done → full speed', 0.001)
+  // past ramp stays clamped at full.
+  near(zenOrbitSpeed(true, true, 0, 9000, opts), 0.4, 'past ramp → still full (clamped)', 0.001)
+}
+// off conditions → 0 speed.
+eq(zenOrbitSpeed(false, true, 0, 999999), 0, 'not zen → 0 speed')
+eq(zenOrbitSpeed(true, false, 0, 999999), 0, 'preference off → 0 speed')
+// zero ramp → instant full speed once orbiting.
+{
+  const opts = { idleMs: 1000, rampMs: 0, maxSpeed: 0.5 }
+  eq(zenOrbitSpeed(true, true, 0, 500, opts), 0, 'zero ramp, pre-threshold → 0')
+  near(zenOrbitSpeed(true, true, 0, 1000, opts), 0.5, 'zero ramp → instant full at threshold', 0.001)
+}
+// defaults applied when opts omitted.
+{
+  const v = zenOrbitSpeed(true, true, 0, ZEN_ORBIT_IDLE_MS + ZEN_ORBIT_RAMP_MS)
+  near(v, ZEN_AUTO_ORBIT_SPEED, 'default opts ramp to the default max speed', 0.001)
+}
+
+// --- monotonic: speed never decreases as stillness grows ---
+{
+  let prev = -1
+  for (let t = 0; t <= 8000; t += 250) {
+    const v = zenOrbitSpeed(true, true, 0, t, { idleMs: 1000, rampMs: 2000, maxSpeed: 0.4 })
+    ok(v >= prev - 1e-9, `orbit speed monotonic up at t=${t}`)
+    prev = v
+  }
+  near(prev, 0.4, 'sweep reaches full speed')
+}
+
+// --- interaction resets the orbit (speed drops back to 0) ---
+{
+  const opts = { idleMs: 1000, rampMs: 2000, maxSpeed: 0.4 }
+  // orbiting at full speed...
+  near(zenOrbitSpeed(true, true, 0, 3000, opts), 0.4, 'orbiting at full before interaction')
+  // ...user interacts at t=3000 (lastInteract jumps to 3000); now at 3100 → back to 0.
+  eq(zenOrbitSpeed(true, true, 3000, 3100, opts), 0, 'interaction resets orbit to 0')
+}
+
+console.log(`PASS: zenMode — ${passed} assertions (cursor idle decision, key reducer, integration, R35.E auto-orbit ramp)`)

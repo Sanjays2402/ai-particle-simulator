@@ -72,3 +72,61 @@ export function nextZenState(active, keyKind) {
   if (keyKind === 'exit') return false
   return active
 }
+
+// --- R35.E: zen auto-orbit (ambient display) -------------------------
+//
+// When the screen is left alone in zen mode, optionally start a slow
+// auto-orbit so a forgotten tab becomes an ambient particle display —
+// like a screensaver. It only kicks in after a stillness window (a bit
+// longer than the cursor-hide one) so it never fights a user who's
+// actively framing a shot, and the speed RAMPS in gently rather than
+// lurching into motion. Any interaction (mouse / key) resets it.
+
+// The ambient orbit's top speed (OrbitControls autoRotateSpeed units) —
+// deliberately slow + calm.
+export const ZEN_AUTO_ORBIT_SPEED = 0.35
+// Stillness required before the ambient orbit begins (ms). Longer than
+// CURSOR_IDLE_MS so the cursor fades first, then the drift starts.
+export const ZEN_ORBIT_IDLE_MS = 3600
+// How long the speed eases from 0 → full once orbiting begins (ms).
+export const ZEN_ORBIT_RAMP_MS = 2200
+
+function znClamp01(v) {
+  if (!Number.isFinite(v)) return 0
+  if (v < 0) return 0
+  if (v > 1) return 1
+  return v
+}
+
+function znNumOr(v, fallback) {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : fallback
+}
+
+// Should the ambient zen orbit be running right now? Pure.
+//   - not in zen, or the preference is off → never
+//   - interacted more recently than the idle window → no (user is active)
+//   - still past the idle window → yes
+// Defensive: non-finite timestamps → false (never drift on bad data).
+export function shouldZenAutoOrbit(zenActive, orbitEnabled, lastInteractMs, nowMs, idleMs = ZEN_ORBIT_IDLE_MS) {
+  if (!zenActive || !orbitEnabled) return false
+  const last = Number(lastInteractMs)
+  const now = Number(nowMs)
+  const idle = Number(idleMs)
+  if (!Number.isFinite(last) || !Number.isFinite(now) || !Number.isFinite(idle) || idle < 0) return false
+  return (now - last) >= idle
+}
+
+// The live ambient orbit speed: 0 when not orbiting, else a value ramped
+// from 0 up to `maxSpeed` over `rampMs` once the idle threshold passes,
+// so the drift eases in. Pure.
+//   opts: { idleMs, rampMs, maxSpeed }
+export function zenOrbitSpeed(zenActive, orbitEnabled, lastInteractMs, nowMs, opts = {}) {
+  const idleMs = znNumOr(opts.idleMs, ZEN_ORBIT_IDLE_MS)
+  const rampMs = znNumOr(opts.rampMs, ZEN_ORBIT_RAMP_MS)
+  const maxSpeed = znNumOr(opts.maxSpeed, ZEN_AUTO_ORBIT_SPEED)
+  if (!shouldZenAutoOrbit(zenActive, orbitEnabled, lastInteractMs, nowMs, idleMs)) return 0
+  const sinceOrbitStart = (Number(nowMs) - Number(lastInteractMs)) - idleMs
+  if (rampMs <= 0) return maxSpeed
+  return znClamp01(sinceOrbitStart / rampMs) * maxSpeed
+}

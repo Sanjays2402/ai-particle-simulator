@@ -736,6 +736,11 @@ function CameraControls() {
   const reducedMotionMode = useStore(s => s.reducedMotionMode)
   const osPrefersReducedMotion = useStore(s => s.osPrefersReducedMotion)
   const reduced = resolveReducedMotion(reducedMotionMode, osPrefersReducedMotion)
+  // R35.E — ambient zen auto-orbit: a transient speed the ZenMode
+  // controller writes when the screen is left alone in zen mode. When
+  // > 0 it drives the orbit even if the user's own autoRotate is off,
+  // so a forgotten tab becomes an ambient display.
+  const zenAmbientOrbitSpeed = useStore(s => s.zenAmbientOrbitSpeed)
   const { camera } = useThree()
   const controlsRef = useRef()
 
@@ -762,6 +767,15 @@ function CameraControls() {
     return () => { if (window.__particleCamera) window.__particleCamera = null }
   }, [camera])
 
+  // The ambient zen orbit takes precedence when it's active (speed > 0):
+  // it turns the orbit on (even if the user's autoRotate is off) at the
+  // slow ambient speed. Otherwise the user's own autoRotate settings
+  // apply. Reduced motion suppresses the user-driven orbit; the ambient
+  // one is already gated to 0 under reduced motion upstream.
+  const zenOrbiting = zenAmbientOrbitSpeed > 0
+  const effectiveAutoRotate = zenOrbiting || (autoRotate && !reduced)
+  const effectiveAutoRotateSpeed = zenOrbiting ? zenAmbientOrbitSpeed : autoRotateSpeed
+
   return (
     <OrbitControls
       ref={controlsRef}
@@ -769,8 +783,8 @@ function CameraControls() {
       dampingFactor={0.05}
       rotateSpeed={orbitSpeed}
       zoomSpeed={0.8}
-      autoRotate={autoRotate && !reduced}
-      autoRotateSpeed={autoRotateSpeed}
+      autoRotate={effectiveAutoRotate}
+      autoRotateSpeed={effectiveAutoRotateSpeed}
       minDistance={minDistance}
       maxDistance={maxDistance}
     />

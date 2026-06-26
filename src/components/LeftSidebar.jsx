@@ -298,6 +298,21 @@ export default function LeftSidebar() {
               )
             })}
           </div>
+
+          {/* R35.E — Zen auto-orbit: when on, leaving the screen alone in
+              zen mode (press Z) eases in a slow ambient camera drift so a
+              forgotten tab becomes a screensaver. Any interaction stops
+              it; respects reduced-motion. */}
+          <div style={{ marginTop: 12 }}>
+            <ToggleRow
+              label="Zen Auto-Orbit"
+              value={useStore(s => s.zenAutoOrbit)}
+              onChange={useStore(s => s.setZenAutoOrbit)}
+            />
+            <p style={{ fontSize: 10, color: '#5a5a70', marginTop: 4, lineHeight: 1.4 }}>
+              In zen mode (Z), drift the camera after a few seconds of stillness.
+            </p>
+          </div>
         </div>
       </Section>
 

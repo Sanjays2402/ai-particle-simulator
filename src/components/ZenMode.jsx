@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import {
   ZEN_BODY_CLASS, CURSOR_IDLE_MS,
-  classifyZenKey, nextZenState, shouldHideCursor,
+  classifyZenKey, nextZenState, shouldHideCursor, zenOrbitSpeed,
 } from '../lib/zenMode'
 import { resolveReducedMotion } from '../lib/reducedMotion'
 
@@ -82,7 +82,9 @@ export default function ZenMode() {
 
   // Cursor auto-hide loop — only runs while zen is active. Tracks the
   // last pointer movement and hides the cursor once still past the idle
-  // window; any movement reveals it again.
+  // window; any movement reveals it again. R35.E: the same loop drives
+  // the ambient auto-orbit — it computes the eased orbit speed from the
+  // stillness clock and writes it to the store for the camera to read.
   useEffect(() => {
     if (!active) return undefined
     const onMove = () => {
@@ -92,26 +94,43 @@ export default function ZenMode() {
         document.body.style.cursor = ''
       }
     }
+    // A keystroke also counts as interaction so the orbit resets when the
+    // user does anything, not just mouse moves.
+    const onInteract = () => { lastMoveRef.current = performance.now() }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mousedown', onMove)
+    window.addEventListener('wheel', onInteract, { passive: true })
+    window.addEventListener('keydown', onInteract)
 
     let raf
     const loop = () => {
-      const hide = shouldHideCursor(true, lastMoveRef.current, performance.now(), CURSOR_IDLE_MS)
+      const now = performance.now()
+      const hide = shouldHideCursor(true, lastMoveRef.current, now, CURSOR_IDLE_MS)
       if (hide && !cursorHiddenRef.current) {
         cursorHiddenRef.current = true
         document.body.style.cursor = 'none'
       }
+      // Ambient orbit: only when the preference is on AND motion isn't
+      // reduced (a drifting camera is exactly the kind of motion the
+      // reduced-motion setting exists to suppress). zenOrbitSpeed is 0
+      // until the stillness window passes, then eases in.
+      const wantOrbit = useStore.getState().zenAutoOrbit && !reduced
+      const speed = wantOrbit ? zenOrbitSpeed(true, true, lastMoveRef.current, now) : 0
+      useStore.getState().setZenAmbientOrbitSpeed(speed)
       raf = requestAnimationFrame(loop)
     }
     raf = requestAnimationFrame(loop)
     return () => {
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mousedown', onMove)
+      window.removeEventListener('wheel', onInteract)
+      window.removeEventListener('keydown', onInteract)
       cancelAnimationFrame(raf)
       document.body.style.cursor = ''
+      // Stop any drift the moment we leave zen.
+      useStore.getState().setZenAmbientOrbitSpeed(0)
     }
-  }, [active])
+  }, [active, reduced])
 
   if (!active) return null
 

@@ -69,6 +69,8 @@ const FRAMING_GRID_KEY = 'particle-framing-grid-v1'
 const SCREENSHOT_TIMER_KEY = 'particle-screenshot-timer-v1'
 // R35.C — screenshot burst count (frames per capture), own key.
 const SCREENSHOT_BURST_KEY = 'particle-screenshot-burst-v1'
+// R35.E — zen ambient auto-orbit preference, own key.
+const ZEN_AUTO_ORBIT_KEY = 'particle-zen-auto-orbit-v1'
 const PERSIST_FIELDS = [
   'particleCount', 'speed', 'glowIntensity', 'visualStyle',
   'theme', 'trails', 'mouseAttract', 'attractStrength',
@@ -527,6 +529,32 @@ export const useStore = create((set, get) => {
     const next = nextFramingGridId(get().framingGridId)
     try { localStorage.setItem(FRAMING_GRID_KEY, next) } catch { /* */ }
     set({ framingGridId: next })
+  },
+
+  // R35.E — Zen auto-orbit: when enabled and the screen is left alone in
+  // zen mode, a slow camera auto-orbit eases in so a forgotten tab
+  // becomes an ambient particle display. `zenAutoOrbit` is the persisted
+  // preference; `zenAmbientOrbitSpeed` is a transient live value the
+  // ZenMode controller writes each frame (0 when not orbiting) and the
+  // camera reads — NOT persisted.
+  zenAutoOrbit: (() => {
+    try { return localStorage.getItem(ZEN_AUTO_ORBIT_KEY) === '1' } catch { return false }
+  })(),
+  setZenAutoOrbit: (v) => {
+    const next = !!v
+    try { localStorage.setItem(ZEN_AUTO_ORBIT_KEY, next ? '1' : '0') } catch { /* quota / private mode */ }
+    // Clearing the preference also zeroes any in-flight ambient speed so
+    // the camera stops drifting immediately.
+    set(next ? { zenAutoOrbit: true } : { zenAutoOrbit: false, zenAmbientOrbitSpeed: 0 })
+  },
+  zenAmbientOrbitSpeed: 0,
+  setZenAmbientOrbitSpeed: (v) => {
+    const n = Number(v)
+    const next = Number.isFinite(n) && n > 0 ? n : 0
+    // Skip redundant writes so a steady 0 (the common case) doesn't
+    // churn the store every animation frame.
+    if (get().zenAmbientOrbitSpeed === next) return
+    set({ zenAmbientOrbitSpeed: next })
   },
 
   // R34.C — Screenshot self-timer delay (seconds). When > 0, the
