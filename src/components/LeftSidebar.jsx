@@ -33,6 +33,7 @@ import {
   summarizeImportImpact as summarizeCrossfadeOverridesImpact,
 } from '../lib/crossfadeOverridesIO'
 import { ATTRACTOR_TYPES, MAX_ATTRACTORS, attractorTypeStyle, parsePositionInput, dropIndexForGap, stepKeyboardGapCursor, describeGapReorderAnnouncement } from '../lib/namedAttractors'
+import { FRAMING_RATIOS } from '../lib/framingGuides'
 import { showToast } from './Toast'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
@@ -74,6 +75,7 @@ export default function LeftSidebar() {
     favoritedPresets, toggleFavorite,
     presetSearch, setPresetSearch,
     showFavoritesOnly, setShowFavoritesOnly,
+    framingGuideId, setFramingGuideId,
   } = useStore()
 
   const exportGif = async () => {
@@ -233,6 +235,39 @@ export default function LeftSidebar() {
           value={useStore(s => s.minimapEnabled)}
           onChange={useStore(s => s.setMinimapEnabled)}
         />
+
+        {/* R34.B — Cinematic framing guides. Mask the viewport to a
+            chosen aspect ratio so screenshots / recordings can be
+            composed into a deliberate crop. Bracket keys [ ] also
+            clear / cycle the frame. Visual guide only. */}
+        <div style={{ marginTop: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span style={{ fontSize: 11, color: '#7a7a90', fontWeight: 500 }}>Framing Guide</span>
+            <span style={{ fontSize: 9.5, color: '#5a5a70', fontFamily: 'Geist Mono, monospace' }}>[ ] to cycle</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+            {FRAMING_RATIOS.map(f => {
+              const active = framingGuideId === f.id
+              return (
+                <button key={f.id}
+                  onClick={() => setFramingGuideId(f.id)}
+                  title={f.hint || (f.id === 'off' ? 'No framing bars' : f.label)}
+                  style={{
+                    padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+                    cursor: 'pointer', transition: 'all 0.15s ease-out',
+                    fontFamily: f.id === 'off' ? 'inherit' : 'Geist Mono, monospace',
+                    background: active
+                      ? 'linear-gradient(135deg, rgba(168,85,247,0.22) 0%, rgba(236,72,153,0.18) 100%)'
+                      : 'rgba(255,255,255,0.03)',
+                    color: active ? '#f3e8ff' : '#8a8aa0',
+                    border: active ? '1px solid rgba(168,85,247,0.45)' : '1px solid rgba(255,255,255,0.05)',
+                    boxShadow: active ? '0 0 12px rgba(168,85,247,0.22)' : 'none',
+                  }}
+                >{f.label}</button>
+              )
+            })}
+          </div>
+        </div>
       </Section>
 
       <Section title="Cursor">

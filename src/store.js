@@ -35,6 +35,11 @@ import {
   removeAttractors as removeNamedAttractorsHelper,
 } from './lib/namedAttractors'
 import { clampHueReactiveStrength as clampBgGradientStrength, normalizeReactiveCurve as normalizeBgGradientCurve } from './lib/bgGradient'
+// R34.B — cinematic framing-guide id roster + sanitiser.
+import {
+  sanitizeFramingId as sanitizeFramingGuideId,
+  nextFramingId as nextFramingGuideId,
+} from './lib/framingGuides'
 // R29.43 — persisted hotkey-chain fade curve preference helpers.
 import {
   sanitizeHotkeyChainFadeCurve as sanitizeHotkeyChainFadeCurveHelper,
@@ -46,6 +51,9 @@ import {
 // Doing this by hand (instead of zustand/middleware/persist) keeps the
 // API surface unchanged and lets us pick exactly which keys persist.
 const PERSIST_KEY = 'particle-settings-v1'
+// R34.B — framing-guide aspect-ratio id (separate key so it round-trips
+// independently of the main settings blob).
+const FRAMING_GUIDE_KEY = 'particle-framing-guide-v1'
 const PERSIST_FIELDS = [
   'particleCount', 'speed', 'glowIntensity', 'visualStyle',
   'theme', 'trails', 'mouseAttract', 'attractStrength',
@@ -466,6 +474,26 @@ export const useStore = create((set, get) => {
   hueCycleSpeed: 6,  // cycles per minute
   setHueCycleEnabled: (v) => set({ hueCycleEnabled: v }),
   setHueCycleSpeed: (v) => set({ hueCycleSpeed: Math.max(0.5, Math.min(60, v)) }),
+
+  // R34.B — Cinematic framing guides. A composition aid: overlay
+  // letterbox / pillarbox bars to mask the viewport down to a chosen
+  // aspect ratio (2.39 / 16:9 / 1:1 / 4:5 / 9:16 ...) so the user can
+  // frame a screenshot or recording the way it'll be cropped. Visual
+  // only — doesn't change what the canvas renders or captures. The id
+  // persists so the chosen frame survives reload. 'off' = no bars.
+  framingGuideId: (() => {
+    try { return sanitizeFramingGuideId(localStorage.getItem(FRAMING_GUIDE_KEY)) } catch { return 'off' }
+  })(),
+  setFramingGuideId: (id) => {
+    const next = sanitizeFramingGuideId(id)
+    try { localStorage.setItem(FRAMING_GUIDE_KEY, next) } catch { /* quota / private mode */ }
+    set({ framingGuideId: next })
+  },
+  cycleFramingGuide: () => {
+    const next = nextFramingGuideId(get().framingGuideId)
+    try { localStorage.setItem(FRAMING_GUIDE_KEY, next) } catch { /* */ }
+    set({ framingGuideId: next })
+  },
 
 
 
