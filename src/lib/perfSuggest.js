@@ -82,6 +82,10 @@ export function createSuggesterState(nowMs = 0) {
 //   sustainMs     how long fps must stay low (default SUSTAINED_LOW_MS)
 //   cooldownMs    quiet period after a suggestion (default cooldown)
 //   enabled       master switch; when false, never suggests (default true)
+//   fxAvailable   when true, allow a suggestion to fire even if there's
+//                 no lower particle-count tier (because a heavy post-FX
+//                 can still be turned off — R35.D). Default false, so the
+//                 classic "lowest tier never suggests" behaviour holds.
 export function pushFpsSample(state, fps, nowMs, opts = {}) {
   const s = state && typeof state === 'object'
     ? state
@@ -114,11 +118,14 @@ export function pushFpsSample(state, fps, nowMs, opts = {}) {
 
   const sustainedLongEnough = (now - lowSince) >= sustainMs
   const target = nextLowerTier(opts.currentCount)
+  // We can act if there's a lower tier to drop to OR (R35.D) a heavy
+  // post-FX the UI told us it can turn off instead.
+  const canAct = target !== null || opts.fxAvailable === true
 
   // Cooldown gate: stay quiet for cooldownMs after the last suggestion.
   const cooledDown = s.lastSuggestAt === null || (now - s.lastSuggestAt) >= cooldownMs
 
-  if (enabled && sustainedLongEnough && cooledDown && target) {
+  if (enabled && sustainedLongEnough && cooledDown && canAct) {
     // Fire. Reset the streak + arm the cooldown so we don't re-fire
     // every frame while fps stays low.
     return {
@@ -142,4 +149,52 @@ export function markSuggestionHandled(state, nowMs) {
 function numOr(v, fallback) {
   const n = Number(v)
   return Number.isFinite(n) ? n : fallback
+}
+
+// --- R35.D: post-FX lighter-touch alternative ------------------------
+//
+// Dropping particle count is the big hammer. Often a cheaper fix is to
+// turn OFF an expensive post-processing pass — depth-of-field (a
+// multi-tap bokeh blur) is by far the heaviest, then film grain, then
+// chromatic aberration, then vignette. If one of those is ON we'd
+// rather suggest disabling it FIRST (keeps the user's particle count +
+// look mostly intact) and only fall back to a tier drop when no heavy
+// FX is active. Bloom is intentionally excluded — it's the scene's core
+// glow and isn't a simple toggle.
+//
+// Ordered heaviest → lightest so we always suggest the biggest single
+// win first. `field` is the store flag; `setter` is the store action
+// name the UI calls to turn it off.
+export const POSTFX_EFFECTS = [
+  { id: 'dof',       label: 'Depth of Field',      field: 'depthOfField',        setter: 'setDepthOfField' },
+  { id: 'grain',     label: 'Film Grain',          field: 'filmGrain',           setter: 'setFilmGrain' },
+  { id: 'chromatic', label: 'Chromatic Aberration', field: 'chromaticAberration', setter: 'setChromaticAberration' },
+  { id: 'vignette',  label: 'Vignette',            field: 'vignette',            setter: 'setVignette' },
+]
+
+// Given a map of the live post-FX flags (e.g. the store slice), return
+// the heaviest one that's currently ON, as its roster descriptor, or
+// null if none are active. Pure + defensive (non-object → null).
+export function pickHeaviestActivePostFx(activeFx) {
+  if (!activeFx || typeof activeFx !== 'object') return null
+  for (const fx of POSTFX_EFFECTS) {
+    if (activeFx[fx.field]) return fx
+  }
+  return null
+}
+
+// Decide which remedy to offer for a fired suggestion: prefer turning
+// off the heaviest active post-FX (lighter touch), else fall back to the
+// particle-count tier drop. Returns a discriminated union:
+//   { kind: 'postfx', fx, fps }            — disable this effect
+//   { kind: 'tier', targetTier, fps }      — drop to this quality tier
+//   null                                   — nothing to offer
+// `suggest` is the object pushFpsSample handed back; `activeFx` is the
+// live post-FX flag map. Pure.
+export function chooseSuggestionRemedy(suggest, activeFx) {
+  if (!suggest || typeof suggest !== 'object') return null
+  const fx = pickHeaviestActivePostFx(activeFx)
+  if (fx) return { kind: 'postfx', fx, fps: suggest.fps }
+  if (suggest.targetTier) return { kind: 'tier', targetTier: suggest.targetTier, fps: suggest.fps }
+  return null
 }

@@ -196,4 +196,87 @@ ok(LOW_FPS_THRESHOLD > 0 && LOW_FPS_THRESHOLD < 60, 'threshold in a sane range')
 ok(SUSTAINED_LOW_MS >= 1000, 'sustain window at least 1s')
 ok(SUGGEST_COOLDOWN_MS >= SUSTAINED_LOW_MS, 'cooldown longer than sustain window')
 
-console.log(`PASS: perfSuggest — ${passed} assertions (sustained-low detection, anti-nag cooldown, tier mapping)`)
+// === R35.D: post-FX lighter-touch alternative =======================
+const r35d = await import('./perfSuggest.js')
+const {
+  POSTFX_EFFECTS, pickHeaviestActivePostFx, chooseSuggestionRemedy,
+} = r35d
+
+// --- POSTFX_EFFECTS roster ---
+ok(POSTFX_EFFECTS.length >= 3, 'has a meaningful set of post-FX')
+eq(POSTFX_EFFECTS[0].id, 'dof', 'depth-of-field is heaviest (first)')
+{
+  const ids = new Set(POSTFX_EFFECTS.map(f => f.id))
+  eq(ids.size, POSTFX_EFFECTS.length, 'fx ids unique')
+  for (const f of POSTFX_EFFECTS) {
+    ok(typeof f.field === 'string' && f.field.length > 0, `fx ${f.id} has a store field`)
+    ok(typeof f.setter === 'string' && f.setter.startsWith('set'), `fx ${f.id} has a setter`)
+    ok(typeof f.label === 'string' && f.label.length > 0, `fx ${f.id} has a label`)
+  }
+  // Bloom is intentionally NOT in the roster (core glow, not a toggle).
+  ok(!ids.has('bloom'), 'bloom excluded from the disable roster')
+}
+
+// --- pickHeaviestActivePostFx: order + selection ---
+{
+  eq(pickHeaviestActivePostFx({}), null, 'no fx on → null')
+  eq(pickHeaviestActivePostFx({ vignette: true }).id, 'vignette', 'only vignette → vignette')
+  // dof beats everything else when multiple are on.
+  eq(pickHeaviestActivePostFx({ depthOfField: true, vignette: true, filmGrain: true }).id, 'dof', 'dof wins over lighter fx')
+  // grain beats chromatic + vignette.
+  eq(pickHeaviestActivePostFx({ filmGrain: true, chromaticAberration: true, vignette: true }).id, 'grain', 'grain wins over chromatic/vignette')
+  eq(pickHeaviestActivePostFx({ chromaticAberration: true, vignette: true }).id, 'chromatic', 'chromatic wins over vignette')
+  // defensive.
+  eq(pickHeaviestActivePostFx(null), null, 'null → null')
+  eq(pickHeaviestActivePostFx(undefined), null, 'undefined → null')
+  eq(pickHeaviestActivePostFx('nope'), null, 'non-object → null')
+}
+
+// --- chooseSuggestionRemedy: postfx preferred, tier fallback ---
+{
+  const suggest = { targetTier: { id: 'high', label: 'High', count: 25000 }, fps: 28 }
+  // With a heavy fx on, prefer disabling it.
+  const r1 = chooseSuggestionRemedy(suggest, { depthOfField: true })
+  eq(r1.kind, 'postfx', 'fx on → postfx remedy')
+  eq(r1.fx.id, 'dof', 'remedy targets dof')
+  eq(r1.fps, 28, 'remedy carries fps')
+  // No fx on → fall back to the tier drop.
+  const r2 = chooseSuggestionRemedy(suggest, {})
+  eq(r2.kind, 'tier', 'no fx → tier remedy')
+  eq(r2.targetTier.id, 'high', 'tier remedy carries the target')
+  // No fx AND no lower tier (lowest tier, fired via fxAvailable but fx
+  // turned off in the meantime) → nothing to offer.
+  const r3 = chooseSuggestionRemedy({ targetTier: null, fps: 20 }, {})
+  eq(r3, null, 'no fx + no tier → null')
+  // Bad suggest.
+  eq(chooseSuggestionRemedy(null, { depthOfField: true }), null, 'null suggest → null')
+}
+
+// --- fxAvailable lets a LOWEST-tier user still get helped ---
+{
+  // On the lowest tier (2000) there's no lower tier, so classically it
+  // never fires. With fxAvailable (a heavy fx is on), it should fire.
+  let st = createSuggesterState(0)
+  let fired = null
+  for (let t = 0; t <= 6000; t += 250) {
+    const r = pushFpsSample(st, 25, t, { currentCount: 2000, fxAvailable: true })
+    st = r.state
+    if (r.suggest && !fired) fired = r.suggest
+  }
+  ok(fired !== null, 'lowest tier + fxAvailable still fires a suggestion')
+  eq(fired.targetTier, null, 'lowest-tier fire has no tier target (fx-only remedy)')
+  // chooseSuggestionRemedy then routes it to the fx disable.
+  const remedy = chooseSuggestionRemedy(fired, { vignette: true })
+  eq(remedy.kind, 'postfx', 'lowest-tier fire → fx disable remedy')
+}
+{
+  // Lowest tier WITHOUT fxAvailable still never fires (backwards compat).
+  let st = createSuggesterState(0)
+  let fires = 0
+  for (let t = 0; t <= 12000; t += 250) {
+    const r = pushFpsSample(st, 20, t, { currentCount: 2000 }); st = r.state; if (r.suggest) fires++
+  }
+  eq(fires, 0, 'lowest tier without fxAvailable → still silent (unchanged)')
+}
+
+console.log(`PASS: perfSuggest — ${passed} assertions (sustained-low detection, anti-nag cooldown, tier mapping, R35.D post-FX remedy)`)
