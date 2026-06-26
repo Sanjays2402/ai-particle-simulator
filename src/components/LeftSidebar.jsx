@@ -3620,8 +3620,16 @@ function NamedAttractorRow({
                 user gets spoken (R31.20 aria-live). aria-hidden so the
                 live region stays the single source of spoken truth (no
                 double announcement). pointerEvents:none so it never
-                intercepts the badge's own keyboard focus / clicks. */}
-            {isKeyboardLifted && (
+                intercepts the badge's own keyboard focus / clicks.
+                R33.20 — ALSO renders during a MOUSE / touch drag (not
+                just keyboard) so a pointer user dragging a row gets the
+                same name-carrying cue. The two sources are visually
+                differentiated: keyboard lift wears the indigo accent,
+                a pointer drag wears the violet accent that matches the
+                row's drag stripe (borderLeft rgba(168,85,247)) so the
+                chip's colour echoes the drag affordance the user already
+                sees on the row. */}
+            {(isKeyboardLifted || isBeingDragged) && (
               <span
                 aria-hidden="true"
                 style={{
@@ -3632,17 +3640,21 @@ function NamedAttractorRow({
                   display: 'inline-flex', alignItems: 'center', gap: 4,
                   padding: '2px 7px', borderRadius: 5,
                   whiteSpace: 'nowrap', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis',
-                  background: 'rgba(67,56,202,0.95)',
+                  // Indigo for the keyboard lift, violet for a pointer drag
+                  // (matches the row's violet drag stripe). isKeyboardLifted
+                  // wins when both are somehow true (keyboard is the more
+                  // deliberate gesture).
+                  background: isKeyboardLifted ? 'rgba(67,56,202,0.95)' : 'rgba(126,34,206,0.95)',
                   color: '#eef2ff',
-                  border: '1px solid rgba(129,140,248,0.85)',
-                  boxShadow: '0 4px 14px rgba(49,46,129,0.55)',
+                  border: isKeyboardLifted ? '1px solid rgba(129,140,248,0.85)' : '1px solid rgba(192,132,252,0.85)',
+                  boxShadow: isKeyboardLifted ? '0 4px 14px rgba(49,46,129,0.55)' : '0 4px 14px rgba(88,28,135,0.55)',
                   fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',
                   textTransform: 'none',
                   fontFamily: 'Geist Mono, JetBrains Mono, monospace',
                   pointerEvents: 'none',
                   zIndex: 5,
                 }}>
-                <span aria-hidden="true" style={{ opacity: 0.85 }}>{'\u2725'}</span>
+                <span aria-hidden="true" style={{ opacity: 0.85 }}>{isKeyboardLifted ? '\u2725' : '\u2723'}</span>
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{attractor.name}</span>
               </span>
             )}
