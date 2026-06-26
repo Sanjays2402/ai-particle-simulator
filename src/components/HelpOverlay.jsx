@@ -32,6 +32,8 @@ const STATIC_SHORTCUTS = [
   { group: 'Tools', items: [
     ['\u2318 K / Ctrl K', 'Open command palette'],
     ['1\u20139, 0',        'Jump to preset 1\u201310'],
+    ['Z',                  'Zen mode (hide all UI)'],
+    ['[ / ]',              'Framing guide: clear / cycle'],
   ] },
   { group: 'Touch (mobile)', items: [
     ['Pinch',                 'Decrease / increase particle count'],

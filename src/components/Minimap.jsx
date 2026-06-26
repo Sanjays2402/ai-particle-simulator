@@ -253,7 +253,7 @@ export default function Minimap() {
   const hoverLabel = hoverName || 'View'
 
   return (
-    <div style={{
+    <div className="zen-hideable" style={{
       position: 'fixed', right: 18, bottom: 78, zIndex: 22,
       pointerEvents: 'auto',
       borderRadius: 10,

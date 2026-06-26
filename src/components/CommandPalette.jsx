@@ -4,7 +4,7 @@ import { useStore } from '../store'
 import { presets } from '../presets'
 import {
   Play, Pause, Shuffle, Camera, Link2, Download, Settings as Cog,
-  Magnet, Mic, RotateCcw, Maximize2, Sparkles,
+  Magnet, Mic, RotateCcw, Maximize2, Sparkles, Eye,
 } from 'lucide-react'
 
 export function CommandPalette({ onSettings }) {
@@ -95,6 +95,7 @@ export function CommandPalette({ onSettings }) {
 
           <Command.Group heading="Tools" style={groupHeading}>
             <Item icon={Magnet} label={`${mouseAttract ? 'Disable' : 'Enable'} Mouse Attract`} onSelect={run(() => setMouseAttract(!mouseAttract))} />
+            <Item icon={Eye} label="Zen Mode — hide all UI" shortcut="Z" onSelect={run(() => window.dispatchEvent(new CustomEvent('particle:toggle-zen')))} />
             <Item icon={Camera} label="Screenshot" shortcut="S" onSelect={run(() => document.dispatchEvent(new CustomEvent('particle:screenshot')))} />
             <Item icon={Link2} label="Copy Share URL" onSelect={run(() => navigator.clipboard?.writeText(location.href))} />
             <Item icon={Cog} label="Open Settings" onSelect={run(() => onSettings?.())} />

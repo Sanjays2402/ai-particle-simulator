@@ -256,7 +256,7 @@ export default function WaveformOverlay() {
   const scaleLabel = spectrumScale === 'log' ? 'log' : 'lin'
 
   return (
-    <div style={{
+    <div className="zen-hideable" style={{
       position: 'fixed', right: 18, top: 60, zIndex: 22,
       pointerEvents: 'none',
       borderRadius: 10,

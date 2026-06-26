@@ -365,6 +365,37 @@ button:focus-visible {
   100% { transform: scale(1); opacity: 1; }
 }
 
+/* R34.E — Zen mode. When body.zen-mode is set, fade out every piece of
+   UI chrome (top bar, sidebars, timeline, carousel) and the corner
+   overlays (status strip, minimap, waveform, parallax orbs) so the
+   particle field fills the whole screen. The canvas, framing guides,
+   toast (so perf suggestions still reach the user), and the zen hint
+   stay. Transition the opacity so entering / leaving zen breathes. */
+.app-chrome,
+.status-strip,
+.zen-hideable {
+  transition: opacity 0.45s ease, visibility 0.45s ease;
+}
+body.zen-mode .app-chrome,
+body.zen-mode .status-strip,
+body.zen-mode .zen-hideable,
+body.zen-mode .orb {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+/* Zen entry hint — fades in, holds, then fades out on its own so it
+   never lingers in a recording (no JS timer needed). */
+@keyframes zen-hint-flash {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
+  12%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  72%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+}
+.zen-exit-dot { transition: opacity 0.2s ease, transform 0.2s ease; }
+.zen-exit-dot:hover { opacity: 1 !important; transform: scale(1.3); }
+
 /* v2 iter 08: status strip at the bottom-left for live telemetry */
 .status-strip {
   position: fixed; bottom: 16px; left: 16px; z-index: 50;

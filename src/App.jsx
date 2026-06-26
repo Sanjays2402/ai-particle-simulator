@@ -25,6 +25,7 @@ import MobileGestureHint from './components/MobileGestureHint'
 import FramingGuides from './components/FramingGuides'
 import ScreenshotTimer from './components/ScreenshotTimer'
 import PerfAutoSuggest from './components/PerfAutoSuggest'
+import ZenMode from './components/ZenMode'
 import { useGlobalMidi } from './lib/useGlobalMidi'
 import { loadSnapshots } from './lib/snapshotGallery'
 import { useIsMobile } from './lib/useIsMobile'
@@ -212,7 +213,7 @@ export default function App() {
       <div ref={orb2} className="orb orb-2" style={{ zIndex: 1 }} />
       <div ref={orb3} className="orb orb-3" style={{ zIndex: 1 }} />
 
-      <div className="relative z-10 flex flex-col h-full w-full pointer-events-none">
+      <div className="app-chrome relative z-10 flex flex-col h-full w-full pointer-events-none">
         <div className="pointer-events-auto"><TopBar onSettings={() => setShowSettings(true)} onToggleGallery={() => setGalleryOpen(o => !o)} galleryOpen={galleryOpen} snapshotCount={snapshotCount} /></div>
         <div className="flex flex-1 overflow-hidden">
           {/* Left sidebar + toggle */}
@@ -309,6 +310,7 @@ export default function App() {
       <FramingGuides />
       <ScreenshotTimer />
       <PerfAutoSuggest />
+      <ZenMode />
       <MidiPanel open={midiOpen} onClose={() => setMidiOpen(false)} />
 
       {showSplash && (
