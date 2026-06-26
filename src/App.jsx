@@ -24,6 +24,7 @@ import PresetThumbnailPrerenderer from './components/PresetThumbnailPrerenderer'
 import MobileGestureHint from './components/MobileGestureHint'
 import FramingGuides from './components/FramingGuides'
 import ScreenshotTimer from './components/ScreenshotTimer'
+import PerfAutoSuggest from './components/PerfAutoSuggest'
 import { useGlobalMidi } from './lib/useGlobalMidi'
 import { loadSnapshots } from './lib/snapshotGallery'
 import { useIsMobile } from './lib/useIsMobile'
@@ -307,6 +308,7 @@ export default function App() {
       <MobileGestureHint />
       <FramingGuides />
       <ScreenshotTimer />
+      <PerfAutoSuggest />
       <MidiPanel open={midiOpen} onClose={() => setMidiOpen(false)} />
 
       {showSplash && (
