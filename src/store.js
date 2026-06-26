@@ -786,6 +786,26 @@ export const useStore = create((set, get) => {
     set({ hotkeyChainFadeCurve: next })
   },
 
+  // R33.43 — PERSIST the fade-preview swatch's PINNED loop state across
+  // panel collapse / reopen. R32.43 kept `pinned` in the swatch's own
+  // useState, so collapsing the MIDI panel (which unmounts the swatch)
+  // reset the loop to idle — a user who pinned it to study a curve lost
+  // the loop on an accidental collapse. Lifting it to a persisted store
+  // boolean means the loop survives remount AND reload. Defaults OFF
+  // (idle) — only an explicit long-press pins it; '1' opts in. Parallels
+  // spectrumPeakHolds (boolean persisted on a '1'/'0' token).
+  hotkeyFadePreviewPinned: (() => {
+    try {
+      const v = typeof localStorage !== 'undefined' ? localStorage.getItem('hotkey-fade-preview-pinned-v1') : null
+      return v === '1'  // default OFF; only an explicit pin persists '1'
+    } catch { return false }
+  })(),
+  setHotkeyFadePreviewPinned: (v) => {
+    const next = !!v
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem('hotkey-fade-preview-pinned-v1', next ? '1' : '0') } catch { /* */ }
+    set({ hotkeyFadePreviewPinned: next })
+  },
+
   setMouseAttract: (v) => set({ mouseAttract: v }),
   paintMode: false,
   paintPoints: [], // array of [x, y, z]

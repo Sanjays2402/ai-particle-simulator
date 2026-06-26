@@ -2227,7 +2227,20 @@ function FadeCurvePreviewSwatch({ curve, windowMs = UNDO_CHAIN_MS, baseColor = H
   // deliberate press-and-hold), so it stays defensible under reduced
   // motion: a single tap stops it. While pinned the loop ignores the
   // reduced-motion gate (runs the same ambient loop normal motion uses).
-  const [pinned, setPinned] = useState(false)
+  //
+  // R33.43 — the pinned flag now lives in the PERSISTED store (was local
+  // useState) so it survives the MIDI panel collapsing (which unmounts
+  // this swatch) AND a full reload. A user who pins it to study a curve
+  // no longer loses the loop on an accidental collapse. Only the
+  // interactive swatch reads/writes it; the non-interactive preview dot
+  // ignores pinning entirely. We mirror the local useState API
+  // (pinned / setPinned) so the rest of the gesture logic is unchanged.
+  const persistedPinned = useStore(s => s.hotkeyFadePreviewPinned)
+  const setHotkeyFadePreviewPinned = useStore(s => s.setHotkeyFadePreviewPinned)
+  // Non-interactive instances never pin (they're ambient chrome); only
+  // the interactive swatch honours the persisted flag.
+  const pinned = interactive ? persistedPinned : false
+  const setPinned = setHotkeyFadePreviewPinned
   const startRef = useRef(0)
   // Long-press lifecycle (interactive only). Arm a timer on pointerdown;
   // if it fires before release we PIN + mark pressFiredRef so the ensuing
