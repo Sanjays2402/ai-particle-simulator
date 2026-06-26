@@ -141,12 +141,13 @@ const {
 } = r35b
 
 // --- grid roster integrity ---
-ok(FRAMING_GRIDS.length === 4, 'four grid modes')
+ok(FRAMING_GRIDS.length === 6, 'six grid modes (R36.B adds phi + diagonal)')
 eq(FRAMING_GRIDS[0].id, 'off', 'first grid is Off')
 {
   const ids = new Set(FRAMING_GRIDS.map(g => g.id))
   eq(ids.size, FRAMING_GRIDS.length, 'grid ids unique')
   ok(ids.has('thirds') && ids.has('cross') && ids.has('both'), 'has thirds/cross/both')
+  ok(ids.has('phi') && ids.has('diagonal'), 'R36.B has phi + diagonal')
   for (const g of FRAMING_GRIDS) {
     ok(typeof g.label === 'string' && g.label.length > 0, `grid ${g.id} has a label`)
   }
@@ -241,4 +242,79 @@ eq(gridLabelForId('bogus'), 'Off', 'unknown grid label → Off')
   eq(computeCompositionGrid({ frameX: 0, frameY: 0, frameW: 100, frameH: -5 }, 'thirds').verticals.length, 0, 'negative height → empty')
 }
 
-console.log(`PASS: framingGuides — ${passed} assertions (letterbox/pillarbox geometry, roster, cycle, describe, R35.B composition grid)`)
+// --- R36.B: golden-ratio (phi) grid ---
+{
+  const rect = { frameX: 0, frameY: 0, frameW: 1000, frameH: 1000 }
+  const g = computeCompositionGrid(rect, 'phi')
+  eq(g.verticals.length, 2, 'phi → 2 vertical lines')
+  eq(g.horizontals.length, 2, 'phi → 2 horizontal lines')
+  // ~0.382 and ~0.618 of the axis (vs thirds' 0.333 / 0.667).
+  near(g.verticals[0], 381.97, 'phi vertical at ~0.382', 0.1)
+  near(g.verticals[1], 618.03, 'phi vertical at ~0.618', 0.1)
+  near(g.horizontals[0], 381.97, 'phi horizontal at ~0.382', 0.1)
+  near(g.horizontals[1], 618.03, 'phi horizontal at ~0.618', 0.1)
+  eq(g.points.length, 4, 'phi → 4 power points')
+  eq(g.diagonals.length, 0, 'phi has no diagonals')
+  // phi lines are INSIDE the thirds lines (closer to centre on the lo
+  // side, ALSO closer on the hi side — the golden grid is tighter).
+  const thirds = computeCompositionGrid(rect, 'thirds')
+  ok(g.verticals[0] > thirds.verticals[0], 'phi lo line sits inside thirds lo line')
+  ok(g.verticals[1] < thirds.verticals[1], 'phi hi line sits inside thirds hi line')
+  // symmetry: the two splits mirror around the centre.
+  near(g.verticals[0] + g.verticals[1], 1000, 'phi verticals symmetric about centre')
+}
+
+// --- phi respects frame origin offset ---
+{
+  const rect = { frameX: 100, frameY: 40, frameW: 500, frameH: 500 }
+  const g = computeCompositionGrid(rect, 'phi')
+  near(g.verticals[0], 100 + 500 * (1 - 0.618033988749895), 'phi lo carries origin x', 0.1)
+  ok(g.points.every(p => p.x >= 100 && p.x <= 600 && p.y >= 40 && p.y <= 540), 'phi points inside inset frame')
+}
+
+// --- R36.B: diagonal method ---
+{
+  // Square frame → the 45° run length equals the side; lines reach the
+  // exact opposite corners.
+  const sq = computeCompositionGrid({ frameX: 0, frameY: 0, frameW: 400, frameH: 400 }, 'diagonal')
+  eq(sq.diagonals.length, 4, 'diagonal → 4 corner lines')
+  eq(sq.verticals.length, 0, 'diagonal has no verticals')
+  eq(sq.horizontals.length, 0, 'diagonal has no horizontals')
+  eq(sq.points.length, 0, 'diagonal has no power points')
+  // top-left line runs corner-to-corner on a square.
+  const tl = sq.diagonals[0]
+  near(tl.x1, 0, 'TL starts at left'); near(tl.y1, 0, 'TL starts at top')
+  near(tl.x2, 400, 'TL reaches far x on square'); near(tl.y2, 400, 'TL reaches far y on square')
+  // every diagonal is exactly 45° (|dx| === |dy|).
+  for (const d of sq.diagonals) {
+    near(Math.abs(d.x2 - d.x1), Math.abs(d.y2 - d.y1), 'diagonal is 45 degrees')
+  }
+}
+
+// --- diagonal on a wide (non-square) frame: run length = shorter side ---
+{
+  const wide = computeCompositionGrid({ frameX: 0, frameY: 0, frameW: 800, frameH: 300 }, 'diagonal')
+  eq(wide.diagonals.length, 4, 'wide diagonal → 4 lines')
+  for (const d of wide.diagonals) {
+    near(Math.abs(d.x2 - d.x1), 300, 'wide diagonal run = shorter side (height)')
+    near(Math.abs(d.y2 - d.y1), 300, 'wide diagonal stays 45 degrees')
+  }
+  // top-right line goes leftward + down from the top-right corner.
+  const tr = wide.diagonals[1]
+  near(tr.x1, 800, 'TR starts at right edge')
+  near(tr.x2, 500, 'TR runs 300px left'); near(tr.y2, 300, 'TR runs 300px down')
+}
+
+// --- diagonal carries frame origin + degenerate frames stay empty ---
+{
+  const inset = computeCompositionGrid({ frameX: 50, frameY: 20, frameW: 200, frameH: 200 }, 'diagonal')
+  near(inset.diagonals[0].x1, 50, 'diagonal TL starts at frame origin x')
+  near(inset.diagonals[0].y1, 20, 'diagonal TL starts at frame origin y')
+  eq(computeCompositionGrid({ frameX: 0, frameY: 0, frameW: 0, frameH: 100 }, 'diagonal').diagonals.length, 0, 'zero-width diagonal → empty')
+  eq(computeCompositionGrid({ frameX: 0, frameY: 0, frameW: NaN, frameH: 100 }, 'phi').verticals.length, 0, 'NaN-width phi → empty')
+  // empty result always carries the diagonals key (shape stability).
+  ok(Array.isArray(computeCompositionGrid(null, 'diagonal').diagonals), 'empty result has diagonals array')
+  ok(Array.isArray(computeCompositionGrid({ frameX: 0, frameY: 0, frameW: 300, frameH: 300 }, 'thirds').diagonals), 'thirds result has diagonals array (empty)')
+}
+
+console.log(`PASS: framingGuides — ${passed} assertions (letterbox/pillarbox geometry, roster, cycle, describe, R35.B composition grid, R36.B phi + diagonal)`)

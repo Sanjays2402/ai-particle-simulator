@@ -119,13 +119,23 @@ export function describeFraming(id, viewportW, viewportH) {
 // All purely visual, like the bars. The geometry is pure + DOM-free.
 
 // Selectable grid modes. Ordered off → light → heavier so a cycle reads
-// naturally.
+// naturally. R36.B adds the golden-ratio (phi) grid and the diagonal
+// method for stronger classical composition beyond rule-of-thirds.
 export const FRAMING_GRIDS = [
-  { id: 'off',    label: 'Off',     hint: 'No composition grid' },
-  { id: 'thirds', label: 'Thirds',  hint: 'Rule-of-thirds grid + power points' },
-  { id: 'cross',  label: 'Cross',   hint: 'Centre cross for symmetric framing' },
-  { id: 'both',   label: 'Both',    hint: 'Thirds grid + centre cross' },
+  { id: 'off',      label: 'Off',     hint: 'No composition grid' },
+  { id: 'thirds',   label: 'Thirds',  hint: 'Rule-of-thirds grid + power points' },
+  { id: 'cross',    label: 'Cross',   hint: 'Centre cross for symmetric framing' },
+  { id: 'both',     label: 'Both',    hint: 'Thirds grid + centre cross' },
+  { id: 'phi',      label: 'Phi',     hint: 'Golden-ratio grid (0.382 / 0.618) + power points' },
+  { id: 'diagonal', label: 'Diag',    hint: 'Diagonal method — 45° corner lines + crossings' },
 ]
+
+// Golden ratio split points. The frame is divided so the smaller part
+// is to the whole as the larger part is to the smaller (1/phi). Lines
+// land at 1 - 1/phi (~0.382) and 1/phi (~0.618) of each axis — the
+// photographic golden-ratio grid, a subtler cousin of rule-of-thirds.
+export const INV_PHI = 0.6180339887498949
+const PHI_LO = 1 - INV_PHI // ~0.38196601125
 
 const GRID_BY_ID = new Map(FRAMING_GRIDS.map(g => [g.id, g]))
 
@@ -153,15 +163,26 @@ export function nextGridId(id) {
 // Compute the grid line + intersection geometry for a given frame rect
 // and grid mode. The frame rect is the masked-in region (from
 // computeFramingBars): { frameX, frameY, frameW, frameH }. Returns:
-//   { verticals: [x...], horizontals: [y...], points: [{x,y}...] }
+//   { verticals: [x...], horizontals: [y...], points: [{x,y}...],
+//     diagonals: [{x1,y1,x2,y2}...] }
 // where coordinates are ABSOLUTE viewport pixels (so the overlay can
 // position lines without re-deriving the frame origin), `points` are
-// the rule-of-thirds intersections (empty unless thirds are drawn).
+// the power-point intersections (rule-of-thirds OR golden-ratio,
+// empty unless one of those grids is drawn), and `diagonals` are the
+// diagonal-method lines (empty unless the diagonal grid is drawn).
+//
+// R36.B grid modes:
+//   - phi: the golden-ratio grid — verticals/horizontals at ~0.382 and
+//     ~0.618 of each axis (vs thirds' 1/3, 2/3), with the four crossings
+//     as power points. A subtler, classical alternative to thirds.
+//   - diagonal: the diagonal method — a 45° line in from each of the
+//     four corners (top-left↘, top-right↙, bottom-left↗, bottom-right↖)
+//     for placing subjects along the natural diagonals of the frame.
 //
 // Defensive: unknown/off mode, or a degenerate (<=0) frame, returns
 // empty arrays so the overlay renders nothing rather than NaN lines.
 export function computeCompositionGrid(frameRect, gridId) {
-  const empty = { verticals: [], horizontals: [], points: [] }
+  const empty = { verticals: [], horizontals: [], points: [], diagonals: [] }
   const mode = sanitizeGridId(gridId)
   if (mode === 'off') return empty
   if (!frameRect || typeof frameRect !== 'object') return empty
@@ -174,15 +195,31 @@ export function computeCompositionGrid(frameRect, gridId) {
   const verticals = []
   const horizontals = []
   let points = []
+  const diagonals = []
 
   const wantThirds = mode === 'thirds' || mode === 'both'
   const wantCross = mode === 'cross' || mode === 'both'
+  const wantPhi = mode === 'phi'
+  const wantDiagonal = mode === 'diagonal'
 
   if (wantThirds) {
     const vx1 = x + w / 3
     const vx2 = x + (2 * w) / 3
     const hy1 = y + h / 3
     const hy2 = y + (2 * h) / 3
+    verticals.push(vx1, vx2)
+    horizontals.push(hy1, hy2)
+    points = [
+      { x: vx1, y: hy1 }, { x: vx2, y: hy1 },
+      { x: vx1, y: hy2 }, { x: vx2, y: hy2 },
+    ]
+  }
+
+  if (wantPhi) {
+    const vx1 = x + w * PHI_LO
+    const vx2 = x + w * INV_PHI
+    const hy1 = y + h * PHI_LO
+    const hy2 = y + h * INV_PHI
     verticals.push(vx1, vx2)
     horizontals.push(hy1, hy2)
     points = [
@@ -198,5 +235,20 @@ export function computeCompositionGrid(frameRect, gridId) {
     horizontals.push(cy)
   }
 
-  return { verticals, horizontals, points }
+  if (wantDiagonal) {
+    // The diagonal method: a 45° line dropped in from each corner. On a
+    // non-square frame the line runs at 45° until it hits the nearer
+    // opposite edge, so the run length is the SHORTER of (w, h). The
+    // four lines cross at the classic diagonal "sweet spots".
+    const d = Math.min(w, h)
+    const x0 = x, y0 = y, x1 = x + w, y1 = y + h
+    diagonals.push(
+      { x1: x0, y1: y0, x2: x0 + d, y2: y0 + d }, // top-left ↘
+      { x1: x1, y1: y0, x2: x1 - d, y2: y0 + d }, // top-right ↙
+      { x1: x0, y1: y1, x2: x0 + d, y2: y1 - d }, // bottom-left ↗
+      { x1: x1, y1: y1, x2: x1 - d, y2: y1 - d }, // bottom-right ↖
+    )
+  }
+
+  return { verticals, horizontals, points, diagonals }
 }

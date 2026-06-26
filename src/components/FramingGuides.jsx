@@ -74,7 +74,8 @@ export default function FramingGuides() {
   const grid = gridActive ? computeCompositionGrid(frameRect, framingGridId) : null
 
   // Nothing to draw (no bars, no grid lines) → render nothing.
-  if (!showBars && (!grid || (grid.verticals.length === 0 && grid.horizontals.length === 0))) return null
+  const gridHasLines = grid && (grid.verticals.length > 0 || grid.horizontals.length > 0 || (grid.diagonals && grid.diagonals.length > 0))
+  if (!showBars && !gridHasLines) return null
 
   const label = describeFraming(framingGuideId, vp.w, vp.h)
   const barStyle = {
@@ -109,7 +110,7 @@ export default function FramingGuides() {
           dots so a user can line a subject up to a stronger spot than
           dead centre. Full-screen SVG, pointer-events:none, above the
           bars but below the frame badge. */}
-      {grid && (grid.verticals.length > 0 || grid.horizontals.length > 0) && (
+      {grid && gridHasLines && (
         <svg
           width={vp.w} height={vp.h}
           style={{ position: 'fixed', inset: 0, zIndex: 6, pointerEvents: 'none' }}
@@ -121,6 +122,11 @@ export default function FramingGuides() {
           {grid.horizontals.map((y, i) => (
             <line key={`h${i}`} x1={frameRect.frameX} y1={y} x2={frameRect.frameX + frameRect.frameW} y2={y}
               stroke="rgba(255,255,255,0.22)" strokeWidth={1} />
+          ))}
+          {/* R36.B — diagonal-method lines (45deg in from each corner). */}
+          {grid.diagonals && grid.diagonals.map((d, i) => (
+            <line key={`d${i}`} x1={d.x1} y1={d.y1} x2={d.x2} y2={d.y2}
+              stroke="rgba(255,255,255,0.18)" strokeWidth={1} strokeDasharray="4 4" />
           ))}
           {grid.points.map((p, i) => (
             <circle key={`p${i}`} cx={p.x} cy={p.y} r={3}

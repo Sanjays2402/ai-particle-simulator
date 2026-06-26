@@ -277,7 +277,7 @@ export default function LeftSidebar() {
             <span style={{ fontSize: 11, color: '#7a7a90', fontWeight: 500 }}>Composition Grid</span>
             <span style={{ fontSize: 9.5, color: '#5a5a70', fontFamily: 'Geist Mono, monospace' }}>\ to cycle</span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
             {FRAMING_GRIDS.map(g => {
               const active = framingGridId === g.id
               return (
