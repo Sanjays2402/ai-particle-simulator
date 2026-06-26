@@ -149,4 +149,123 @@ ok(FPS_GOOD === 55 && FPS_OK === 30, 'band thresholds match HUD')
   eq(JSON.stringify(input), JSON.stringify(copy), 'input array not mutated')
 }
 
-console.log(`PASS: fpsGraph — ${passed} assertions (sparkline geometry, band colour, 1%-low window summary)`)
+// === R35.A: frame-time (ms) view =====================================
+const r35 = await import('./fpsGraph.js')
+const {
+  FRAME_MS_GRAPH_CEIL, FRAME_BUDGET_60, FRAME_BUDGET_30,
+  fpsToFrameMs, buildFrameTimeSparklinePoints, frameTimeSparklineAttr,
+  frameMsRefLineY, frameMsBandColor, summarizeFrameTimeWindow,
+} = r35
+
+// --- constants ---
+eq(FRAME_MS_GRAPH_CEIL, 50, 'ms ceiling 50ms (== 20fps)')
+near(FRAME_BUDGET_60, 16.6667, '60fps budget ~16.67ms', 0.001)
+near(FRAME_BUDGET_30, 33.3333, '30fps budget ~33.33ms', 0.001)
+
+// --- fpsToFrameMs ---
+near(fpsToFrameMs(60), 16.6667, '60fps → 16.67ms', 0.001)
+near(fpsToFrameMs(30), 33.3333, '30fps → 33.33ms', 0.001)
+near(fpsToFrameMs(120), 8.3333, '120fps → 8.33ms', 0.001)
+eq(fpsToFrameMs(20), 50, '20fps → 50ms (ceiling)')
+eq(fpsToFrameMs(10), FRAME_MS_GRAPH_CEIL, '10fps clamps to ceiling (not 100ms)')
+eq(fpsToFrameMs(0), FRAME_MS_GRAPH_CEIL, '0fps → ceiling, never 0ms (Infinity guard)')
+eq(fpsToFrameMs(-5), FRAME_MS_GRAPH_CEIL, 'negative fps → ceiling')
+eq(fpsToFrameMs(NaN), FRAME_MS_GRAPH_CEIL, 'NaN → ceiling (reads as bad, not perfect)')
+eq(fpsToFrameMs(Infinity), FRAME_MS_GRAPH_CEIL, 'Infinity fps → ceiling')
+near(fpsToFrameMs(40, 100), 25, '40fps with custom ceil → 25ms', 0.001)
+
+// --- buildFrameTimeSparklinePoints: low ms sits near the TOP ---
+{
+  const pts = buildFrameTimeSparklinePoints([60, 30, 20], { ceil: 50, width: 100, height: 50 })
+  eq(pts.length, 3, 'three samples → three points')
+  near(pts[0].y, 16.6667, '60fps (16.7ms) near top (small y)', 0.01)
+  near(pts[1].y, 33.3333, '30fps (33.3ms) mid', 0.01)
+  near(pts[2].y, 50, '20fps (50ms) at floor (full height)', 0.01)
+  // x spreads newest-at-right.
+  eq(pts[0].x, 0, 'oldest at left edge')
+  eq(pts[2].x, 100, 'newest at right edge')
+  // faster frame is HIGHER (smaller y) than slower — same direction as fps dips.
+  ok(pts[0].y < pts[2].y, 'fast frame drawn above slow frame')
+}
+{
+  eq(buildFrameTimeSparklinePoints([], {}).length, 0, 'empty → no points')
+  eq(buildFrameTimeSparklinePoints(null).length, 0, 'null → no points')
+  eq(buildFrameTimeSparklinePoints('x').length, 0, 'non-array → no points')
+  // single sample pins right.
+  const one = buildFrameTimeSparklinePoints([60], { width: 80, height: 40 })
+  eq(one.length, 1, 'one sample → one point')
+  eq(one[0].x, 80, 'single sample pinned to right edge')
+}
+
+// --- frameTimeSparklineAttr ---
+{
+  const attr = frameTimeSparklineAttr([60, 30], { ceil: 50, width: 100, height: 50 })
+  ok(typeof attr === 'string' && attr.includes(' '), 'attr is a space-joined string')
+  eq(frameTimeSparklineAttr([], {}), '', 'empty → empty string')
+}
+
+// --- frameMsRefLineY ---
+{
+  near(frameMsRefLineY(16.6667, { ceil: 50, height: 50 }), 16.6667, '16.7ms line at ~16.7px', 0.01)
+  near(frameMsRefLineY(50, { ceil: 50, height: 50 }), 50, '50ms line at floor', 0.01)
+  near(frameMsRefLineY(0, { ceil: 50, height: 50 }), 0, '0ms line at top', 0.01)
+  eq(frameMsRefLineY(60, { ceil: 50, height: 50 }), null, 'line beyond ceil → null')
+  eq(frameMsRefLineY(-1, { ceil: 50 }), null, 'negative ms → null')
+  eq(frameMsRefLineY(NaN), null, 'NaN → null')
+}
+
+// --- frameMsBandColor: budget-line agreement ---
+eq(frameMsBandColor(16.6), '#86efac', 'under 16.7ms → green')
+eq(frameMsBandColor(FRAME_BUDGET_60), '#86efac', 'exactly 60fps budget → green')
+eq(frameMsBandColor(20), '#fbbf24', '20ms → amber')
+eq(frameMsBandColor(FRAME_BUDGET_30), '#fbbf24', 'exactly 30fps budget → amber')
+eq(frameMsBandColor(40), '#f87171', '40ms (slower than 30fps) → red')
+eq(frameMsBandColor(NaN), '#6a6a80', 'NaN → neutral grey')
+eq(frameMsBandColor(Infinity), '#6a6a80', 'Infinity → neutral grey')
+
+// --- summarizeFrameTimeWindow ---
+{
+  // Mix of good + bad frames. fps 60,60,30,20 → 16.7,16.7,33.3,50ms.
+  const s = summarizeFrameTimeWindow([60, 60, 30, 20])
+  near(s.min, 16.7, 'min frame time ~16.7ms', 0.1)
+  eq(s.max, 50, 'max frame time 50ms (the 20fps frame)')
+  near(s.last, 50, 'last frame is the 20fps (50ms) one', 0.1)
+  // over = frames slower than 33.3ms budget: only the 50ms one (33.3 itself is not strictly over).
+  eq(s.over, 1, 'one frame over the 30fps budget')
+  eq(s.count, 4, 'four valid frames')
+  ok(s.high >= s.avg, '1%-high frame time >= avg (worst-case lead)')
+}
+{
+  // All fast frames → no over-budget, high ~= the samples.
+  const s = summarizeFrameTimeWindow([60, 60, 60, 60])
+  eq(s.over, 0, 'all-fast → zero over budget')
+  near(s.avg, 16.7, 'avg ~16.7ms', 0.1)
+}
+{
+  // Junk filtered out.
+  const s = summarizeFrameTimeWindow([60, NaN, Infinity, -5, 0])
+  eq(s.count, 1, 'only the one valid sample counts')
+  near(s.avg, 16.7, 'junk excluded from ms avg', 0.1)
+}
+{
+  eq(summarizeFrameTimeWindow([]).count, 0, 'empty → empty summary')
+  eq(summarizeFrameTimeWindow(null).count, 0, 'null → empty summary')
+  eq(summarizeFrameTimeWindow([NaN, -1, 0]).count, 0, 'all-junk → empty')
+}
+{
+  // Custom overMs threshold.
+  const s = summarizeFrameTimeWindow([60, 50, 40], { overMs: 20 })
+  // 60→16.7, 50→20, 40→25ms. over 20ms strictly: only 25ms.
+  eq(s.over, 1, 'custom overMs counts the 25ms frame')
+}
+
+// --- purity: ms helpers don't mutate ---
+{
+  const input = [60, 30, 20]
+  const copy = input.slice()
+  summarizeFrameTimeWindow(input)
+  buildFrameTimeSparklinePoints(input)
+  eq(JSON.stringify(input), JSON.stringify(copy), 'ms helpers leave input unmutated')
+}
+
+console.log(`PASS: fpsGraph — ${passed} assertions (sparkline geometry, band colour, 1%-low window summary, R35.A frame-time ms view)`)

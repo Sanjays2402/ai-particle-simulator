@@ -2,14 +2,22 @@ import { useEffect, useRef, useState } from 'react'
 import {
   buildSparklinePoints, sparklinePointsAttr, refLineY, summarizeFpsWindow,
   fpsBandColor, FPS_GRAPH_CEIL,
+  buildFrameTimeSparklinePoints, frameTimeSparklineAttr, frameMsRefLineY,
+  summarizeFrameTimeWindow, frameMsBandColor, fpsToFrameMs,
+  FRAME_MS_GRAPH_CEIL, FRAME_BUDGET_60, FRAME_BUDGET_30,
 } from '../lib/fpsGraph'
 
 // Performance debug HUD. Toggle with backtick (`) so it doesn't fight
 // the existing single-letter shortcuts. Tracks FPS as a rolling window
 // (min / avg / max over the last 2 seconds), plus heap usage when
 // available (Chrome only) and frame-time variance as a stutter signal.
+// Press M while the HUD is open to flip the sparkline + numeric rows
+// between fps and frame-time (ms) — the unit you profile a 16.7ms
+// budget in directly (R35.A).
 export default function DebugHUD() {
   const [visible, setVisible] = useState(false)
+  // false = fps view (default), true = frame-time (ms) view.
+  const [msView, setMsView] = useState(false)
   const [stats, setStats] = useState({ fps: 60, min: 60, max: 60, avg: 60, frame: 16.7, mem: null })
   // R34.A — the live fps series feeding the sparkline. Held in state
   // (not just the ref) so the SVG re-renders each sample tick. Capped
@@ -19,6 +27,10 @@ export default function DebugHUD() {
   const lastRef = useRef(performance.now())
   const accumRef = useRef(0)
   const framesRef = useRef(0)
+  // Mirror `visible` into a ref so the (deps-free) key handler can read
+  // the live value without a nested setState in another updater.
+  const visibleRef = useRef(false)
+  useEffect(() => { visibleRef.current = visible }, [visible])
 
   useEffect(() => {
     const onKey = (e) => {
@@ -26,6 +38,13 @@ export default function DebugHUD() {
       if (e.key === '`' || e.key === '~') {
         e.preventDefault()
         setVisible(v => !v)
+      } else if ((e.key === 'm' || e.key === 'M') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        // Flip fps <-> ms, but only while the HUD is open so M stays
+        // free for any future global shortcut when it's closed.
+        if (visibleRef.current) {
+          e.preventDefault()
+          setMsView(v => !v)
+        }
       }
     }
     window.addEventListener('keydown', onKey)
@@ -79,20 +98,37 @@ export default function DebugHUD() {
   const fpsColor = stats.fps >= 55 ? '#86efac' : stats.fps >= 30 ? '#fbbf24' : '#f87171'
 
   // Sparkline geometry — a compact 168x34 graph of the same 2s window.
+  // The view (fps vs ms) only swaps which pure mappers + summary we use;
+  // the SVG box + the live series are identical so the toggle is cheap.
   const GW = 168, GH = 34
-  const sparkOpts = { ceil: FPS_GRAPH_CEIL, width: GW, height: GH }
-  const sparkAttr = sparklinePointsAttr(series, sparkOpts)
-  const sparkPts = buildSparklinePoints(series, sparkOpts)
+  const liveMs = fpsToFrameMs(stats.fps)
+  let sparkOpts, sparkAttr, sparkPts, lineA, lineB, lineAColor, lineBColor, strokeColor
+  if (msView) {
+    sparkOpts = { ceil: FRAME_MS_GRAPH_CEIL, width: GW, height: GH }
+    sparkAttr = frameTimeSparklineAttr(series, sparkOpts)
+    sparkPts = buildFrameTimeSparklinePoints(series, sparkOpts)
+    lineA = frameMsRefLineY(FRAME_BUDGET_60, sparkOpts) // 16.7ms budget
+    lineB = frameMsRefLineY(FRAME_BUDGET_30, sparkOpts) // 33.3ms budget
+    lineAColor = 'rgba(134,239,172,0.22)'
+    lineBColor = 'rgba(248,113,113,0.18)'
+    strokeColor = frameMsBandColor(liveMs)
+  } else {
+    sparkOpts = { ceil: FPS_GRAPH_CEIL, width: GW, height: GH }
+    sparkAttr = sparklinePointsAttr(series, sparkOpts)
+    sparkPts = buildSparklinePoints(series, sparkOpts)
+    lineA = refLineY(60, sparkOpts)
+    lineB = refLineY(30, sparkOpts)
+    lineAColor = 'rgba(134,239,172,0.22)'
+    lineBColor = 'rgba(248,113,113,0.18)'
+    strokeColor = fpsBandColor(stats.fps)
+  }
   // Area-fill polygon: the line, then down the right edge, along the
   // floor, and back up the left edge.
   const areaAttr = sparkPts.length >= 2
     ? `${sparkAttr} ${sparkPts[sparkPts.length - 1].x},${GH} ${sparkPts[0].x},${GH}`
     : ''
-  const line60 = refLineY(60, sparkOpts)
-  const line30 = refLineY(30, sparkOpts)
-  const summary = summarizeFpsWindow(series)
-  // Colour the stroke by the live fps band so a stutter visibly reddens.
-  const strokeColor = fpsBandColor(stats.fps)
+  const fpsSummary = summarizeFpsWindow(series)
+  const msSummary = summarizeFrameTimeWindow(series)
 
   return (
     <div style={{
@@ -110,22 +146,47 @@ export default function DebugHUD() {
       pointerEvents: 'none',
     }}>
       <div style={{
-        fontSize: 9, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase',
-        color: '#a78bfa', marginBottom: 6,
-      }}>Debug HUD</div>
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        marginBottom: 6,
+      }}>
+        <span style={{
+          fontSize: 9, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase',
+          color: '#a78bfa',
+        }}>Debug HUD</span>
+        {/* Tiny fps|ms unit pill — the active unit is highlighted so the
+            user can see which view they're in at a glance. */}
+        <span style={{
+          display: 'inline-flex', gap: 1, fontSize: 8.5, fontWeight: 700,
+          letterSpacing: '0.06em', borderRadius: 4, overflow: 'hidden',
+          border: '1px solid rgba(168,85,247,0.25)',
+        }}>
+          <span style={{
+            padding: '1px 5px',
+            background: msView ? 'transparent' : 'rgba(168,85,247,0.28)',
+            color: msView ? '#6a6a80' : '#e9d5ff',
+          }}>FPS</span>
+          <span style={{
+            padding: '1px 5px',
+            background: msView ? 'rgba(168,85,247,0.28)' : 'transparent',
+            color: msView ? '#e9d5ff' : '#6a6a80',
+          }}>MS</span>
+        </span>
+      </div>
 
-      {/* FPS sparkline — the same 2s window drawn as a graph so a
-          stutter spike is visible at a glance, not just a flickering
-          min/max number. 60fps + 30fps reference lines anchor it. */}
+      {/* Sparkline — the same 2s window drawn as a graph so a stutter
+          spike is visible at a glance. In fps view the 60/30fps lines
+          anchor it; in ms view the 16.7ms / 33.3ms frame-budget lines
+          do. A faster frame always sits HIGHER in both views so the
+          silhouette reads the same direction (dips = trouble). */}
       <div style={{ marginBottom: 8 }}>
         <svg width={GW} height={GH} style={{ display: 'block', borderRadius: 5, background: 'rgba(0,0,0,0.28)' }}>
-          {line60 != null && (
-            <line x1={0} y1={line60} x2={GW} y2={line60}
-              stroke="rgba(134,239,172,0.22)" strokeWidth={1} strokeDasharray="2 3" />
+          {lineA != null && (
+            <line x1={0} y1={lineA} x2={GW} y2={lineA}
+              stroke={lineAColor} strokeWidth={1} strokeDasharray="2 3" />
           )}
-          {line30 != null && (
-            <line x1={0} y1={line30} x2={GW} y2={line30}
-              stroke="rgba(248,113,113,0.18)" strokeWidth={1} strokeDasharray="2 3" />
+          {lineB != null && (
+            <line x1={0} y1={lineB} x2={GW} y2={lineB}
+              stroke={lineBColor} strokeWidth={1} strokeDasharray="2 3" />
           )}
           {areaAttr && (
             <polygon points={areaAttr} fill={strokeColor} fillOpacity={0.1} />
@@ -137,16 +198,29 @@ export default function DebugHUD() {
         </svg>
       </div>
 
-      <Row label="FPS"      value={<span style={{ color: fpsColor }}>{stats.fps}</span>} />
-      <Row label="Avg / 2s" value={stats.avg} />
-      <Row label="Min / 2s" value={stats.min} />
-      <Row label="Max / 2s" value={stats.max} />
-      <Row label="1% low"   value={<span style={{ color: summary.low >= 55 ? '#86efac' : summary.low >= 30 ? '#fbbf24' : '#f87171' }}>{summary.low}</span>} />
-      {summary.drops > 0 && <Row label="Drops" value={<span style={{ color: '#f87171' }}>{summary.drops}</span>} />}
-      <Row label="Frame"    value={`${stats.frame} ms`} />
+      {msView ? (
+        <>
+          <Row label="Frame"     value={<span style={{ color: frameMsBandColor(liveMs) }}>{liveMs.toFixed(1)} ms</span>} />
+          <Row label="Avg / 2s"  value={`${msSummary.avg} ms`} />
+          <Row label="Best / 2s" value={`${msSummary.min} ms`} />
+          <Row label="Worst / 2s" value={`${msSummary.max} ms`} />
+          <Row label="1% high"   value={<span style={{ color: frameMsBandColor(msSummary.high) }}>{msSummary.high} ms</span>} />
+          {msSummary.over > 0 && <Row label="Over 33ms" value={<span style={{ color: '#f87171' }}>{msSummary.over}</span>} />}
+        </>
+      ) : (
+        <>
+          <Row label="FPS"      value={<span style={{ color: fpsColor }}>{stats.fps}</span>} />
+          <Row label="Avg / 2s" value={stats.avg} />
+          <Row label="Min / 2s" value={stats.min} />
+          <Row label="Max / 2s" value={stats.max} />
+          <Row label="1% low"   value={<span style={{ color: fpsSummary.low >= 55 ? '#86efac' : fpsSummary.low >= 30 ? '#fbbf24' : '#f87171' }}>{fpsSummary.low}</span>} />
+          {fpsSummary.drops > 0 && <Row label="Drops" value={<span style={{ color: '#f87171' }}>{fpsSummary.drops}</span>} />}
+          <Row label="Frame"    value={`${stats.frame} ms`} />
+        </>
+      )}
       {stats.mem != null && <Row label="Heap" value={`${stats.mem.toFixed(0)} MB`} />}
       <div style={{ fontSize: 10, color: '#6a6a80', marginTop: 6 }}>
-        toggle with <kbd style={kbd}>`</kbd>
+        <kbd style={kbd}>`</kbd> toggle · <kbd style={kbd}>M</kbd> {msView ? 'fps' : 'ms'}
       </div>
     </div>
   )
