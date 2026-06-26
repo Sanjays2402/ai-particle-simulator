@@ -73,6 +73,8 @@ const SCREENSHOT_BURST_KEY = 'particle-screenshot-burst-v1'
 const ZEN_AUTO_ORBIT_KEY = 'particle-zen-auto-orbit-v1'
 // R36.D — live perf-budget status pill toggle, own key.
 const PERF_PILL_KEY = 'particle-perf-pill-v1'
+// R36.K — global calm-mode master toggle, own key.
+const CALM_MODE_KEY = 'particle-calm-mode-v1'
 const PERSIST_FIELDS = [
   'particleCount', 'speed', 'glowIntensity', 'visualStyle',
   'theme', 'trails', 'mouseAttract', 'attractStrength',
@@ -688,6 +690,25 @@ export const useStore = create((set, get) => {
     set({ reducedMotionMode: next })
   },
   setOSPrefersReducedMotion: (v) => set({ osPrefersReducedMotion: !!v }),
+
+  // R36.K — global "calm mode" master toggle. One switch that gates the
+  // four ambient camera/colour motions at once (auto-rotate, audio
+  // camera-shake, hue-cycle drift, zen ambient auto-orbit) so a user can
+  // instantly settle a busy scene — e.g. before a screenshot — without
+  // hunting four separate controls and WITHOUT changing their
+  // accessibility reduced-motion setting. Composes with reduced motion
+  // via resolveCalm() at each consumer (calm OR reduced → suppressed).
+  // Persisted on its own key.
+  calmMode: (() => {
+    try { return localStorage.getItem(CALM_MODE_KEY) === '1' } catch { return false }
+  })(),
+  setCalmMode: (v) => {
+    const next = !!v
+    try { localStorage.setItem(CALM_MODE_KEY, next ? '1' : '0') } catch { /* quota / private mode */ }
+    // Turning calm mode on also zeroes any in-flight zen ambient orbit so
+    // a drifting camera stops the instant the user hits the switch.
+    set(next ? { calmMode: true, zenAmbientOrbitSpeed: 0 } : { calmMode: false })
+  },
 
   // Slideshow mode — rotate through filtered/favourited presets on a
   // timer. `slideshowOrder` is one of 'sequence' | 'shuffle' | 'favourites'.

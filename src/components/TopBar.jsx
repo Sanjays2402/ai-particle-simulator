@@ -8,7 +8,7 @@ import { loadKeymap, resolveAction } from '../lib/keymap'
 import { TIMER_DELAYS, labelForDelay, BURST_COUNTS, labelForBurst } from '../lib/selfTimer'
 import {
   Play, Pause, RotateCcw, Maximize2, Shuffle, Magnet, Camera, Link2,
-  Mic, Download, Settings, Repeat, Sparkles, Zap, Paintbrush, Send, Images, Music2, Timer, Layers,
+  Mic, Download, Settings, Repeat, Sparkles, Zap, Paintbrush, Send, Images, Music2, Timer, Layers, Wind,
 } from 'lucide-react'
 
 // R34.C — module-level screenshot helpers. Kept out of the component
@@ -400,6 +400,8 @@ export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snaps
           onPick={handleDemo}
         />
         <Divider />
+        <CalmModeBtn />
+        <Divider />
         <Btn onClick={handleScreenshot} title="Screenshot (S)"><Camera size={14} strokeWidth={2.2} /></Btn>
         <TimerBtn
           delay={screenshotTimerDelay}
@@ -644,6 +646,27 @@ function BurstBtn({ count, onCycle }) {
         }}>{labelForBurst(count)}</span>
       )}
     </button>
+  )
+}
+
+// R36.K — global calm-mode master toggle. One click gates the four
+// ambient camera/colour motions (auto-rotate, camera shake, hue-cycle,
+// zen ambient orbit) so the user can instantly settle a busy scene
+// without touching four controls or their accessibility setting. Reads
+// the store directly so it stays a self-contained toolbar button.
+function CalmModeBtn() {
+  const calmMode = useStore(s => s.calmMode)
+  const setCalmMode = useStore(s => s.setCalmMode)
+  return (
+    <Btn
+      onClick={() => setCalmMode(!calmMode)}
+      active={calmMode}
+      title={calmMode
+        ? 'Calm mode ON — auto-rotate, shake, hue-cycle & zen orbit paused. Click to resume.'
+        : 'Calm mode — pause auto-rotate, camera shake, hue-cycle & zen orbit at once'}
+    >
+      <Wind size={14} strokeWidth={2.2} />
+    </Btn>
   )
 }
 

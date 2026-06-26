@@ -7,6 +7,7 @@ import { useStore, THEMES } from '../store'
 import { cameraShakeOffset } from '../lib/cameraShake'
 import { smoothstep } from '../lib/crossfade'
 import { resolveReducedMotion } from '../lib/reducedMotion'
+import { resolveCalm } from '../lib/calmMode'
 import { windVector, applyWind } from '../lib/wind'
 import { resolveTheme as resolveActiveTheme } from '../lib/customThemes'
 import { applyNoise } from '../lib/noiseDeformer'
@@ -301,12 +302,14 @@ function Particles() {
     // hue offset that wraps every (60 / speed) seconds. Computing this
     // once per frame keeps the per-particle work to a single offsetHSL.
     // Suppressed entirely under reduced motion so colour-strobing users
-    // who flip the OS pref aren't forced into rainbow churn.
+    // who flip the OS pref aren't forced into rainbow churn. R36.K — calm
+    // mode also gates it (calm OR reduced → no hue drift).
     const reducedMotion = resolveReducedMotion(
       useStore.getState().reducedMotionMode,
       useStore.getState().osPrefersReducedMotion,
     )
-    const hueCycleOffset = (hueCycleEnabled && !reducedMotion)
+    const motionCalm = resolveCalm(reducedMotion, useStore.getState().calmMode)
+    const hueCycleOffset = (hueCycleEnabled && !motionCalm)
       ? ((t * (hueCycleSpeed / 60)) % 1 + 1) % 1
       : 0
 
@@ -700,7 +703,7 @@ function CameraShakeFX() {
   useFrame((_, delta) => {
     const { cameraShake, cameraShakeIntensity, audioReactive,
             audioMode, audioBeat, audioBass, audioLevel,
-            reducedMotionMode, osPrefersReducedMotion } = useStore.getState()
+            reducedMotionMode, osPrefersReducedMotion, calmMode } = useStore.getState()
     // Always undo last frame's offset so we never accumulate drift,
     // even when the user toggles the feature off mid-shake.
     const [pdx, pdy] = lastOffset.current
@@ -710,7 +713,8 @@ function CameraShakeFX() {
       lastOffset.current = [0, 0]
     }
     if (!cameraShake || !audioReactive) return
-    if (resolveReducedMotion(reducedMotionMode, osPrefersReducedMotion)) return
+    // R36.K — calm mode (or reduced motion) suppresses the shake.
+    if (resolveCalm(resolveReducedMotion(reducedMotionMode, osPrefersReducedMotion), calmMode)) return
     const impulse =
       audioMode === 'beat' ? audioBeat :
       audioMode === 'bass' ? audioBass :
@@ -735,7 +739,11 @@ function CameraControls() {
   const maxDistance = useStore(s => s.maxDistance)
   const reducedMotionMode = useStore(s => s.reducedMotionMode)
   const osPrefersReducedMotion = useStore(s => s.osPrefersReducedMotion)
-  const reduced = resolveReducedMotion(reducedMotionMode, osPrefersReducedMotion)
+  // R36.K — calm mode gates the user's auto-rotate the same way reduced
+  // motion does (calm OR reduced → no auto-rotate). The zen ambient orbit
+  // is already forced to 0 upstream when calm mode is on.
+  const calmMode = useStore(s => s.calmMode)
+  const reduced = resolveCalm(resolveReducedMotion(reducedMotionMode, osPrefersReducedMotion), calmMode)
   // R35.E — ambient zen auto-orbit: a transient speed the ZenMode
   // controller writes when the screen is left alone in zen mode. When
   // > 0 it drives the orbit even if the user's own autoRotate is off,

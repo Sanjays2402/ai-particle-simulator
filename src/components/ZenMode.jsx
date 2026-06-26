@@ -112,11 +112,13 @@ export default function ZenMode() {
       }
       // Ambient orbit: only when the preference is on AND motion isn't
       // reduced (a drifting camera is exactly the kind of motion the
-      // reduced-motion setting exists to suppress). zenOrbitSpeed is 0
-      // until the stillness window passes, then eases in.
-      const wantOrbit = useStore.getState().zenAutoOrbit && !reduced
+      // reduced-motion setting exists to suppress) AND calm mode is off
+      // (R36.K — calm mode gates the ambient orbit too). zenOrbitSpeed is
+      // 0 until the stillness window passes, then eases in.
+      const st = useStore.getState()
+      const wantOrbit = st.zenAutoOrbit && !reduced && !st.calmMode
       const speed = wantOrbit ? zenOrbitSpeed(true, true, lastMoveRef.current, now) : 0
-      useStore.getState().setZenAmbientOrbitSpeed(speed)
+      st.setZenAmbientOrbitSpeed(speed)
       raf = requestAnimationFrame(loop)
     }
     raf = requestAnimationFrame(loop)
