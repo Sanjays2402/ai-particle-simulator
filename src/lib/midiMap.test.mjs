@@ -45,6 +45,8 @@ import {
   clampSelectAllTriState,
   // R32.45 — invert a chip selection to its complement against live ids
   invertChipSelection,
+  // R33.45 — aria-live phrasing for the keyboard 'i' invert shortcut
+  describeChipSelectionInvert,
   hasClampWarnAttractorFieldOverride,
   pruneClampWarnAttractorOverrides,
 } from './midiMap.js'
@@ -2667,3 +2669,46 @@ console.log('PASS: clampSelectAllTriState — none/some/all toggle projector (R3
 }
 
 console.log('PASS: invertChipSelection — complement-against-live projector (R32.45, ~22 asserts)')
+
+// --- R33.45: describeChipSelectionInvert — aria-live phrasing ----------
+{
+  // Canonical: partial selection inverted to its complement.
+  eq(describeChipSelectionInvert(4, 7, 'STRENGTH'), 'Inverted: 4 of 7 STRENGTH cells selected',
+    'phrases count + field scope')
+  eq(describeChipSelectionInvert(3, 7), 'Inverted: 3 of 7 cells selected',
+    'no field label -> plain "cells"')
+  // Singular total -> "cell" (no trailing s).
+  eq(describeChipSelectionInvert(0, 1, 'RADIUS'), 'Inverted: 0 of 1 RADIUS cell selected',
+    'singular total uses "cell"')
+  eq(describeChipSelectionInvert(1, 1), 'Inverted: 1 of 1 cell selected', 'singular plain')
+  // Field label trimmed; blank label falls through to plain.
+  eq(describeChipSelectionInvert(2, 5, '  X  '), 'Inverted: 2 of 5 X cells selected',
+    'field label trimmed')
+  eq(describeChipSelectionInvert(2, 5, '   '), 'Inverted: 2 of 5 cells selected',
+    'whitespace-only label -> plain')
+  eq(describeChipSelectionInvert(2, 5, ''), 'Inverted: 2 of 5 cells selected',
+    'empty label -> plain')
+  // Defensive: selected clamped to [0, total]; never claims more than exist.
+  eq(describeChipSelectionInvert(9, 5), 'Inverted: 5 of 5 cells selected',
+    'selected > total clamps to total')
+  eq(describeChipSelectionInvert(-3, 5), 'Inverted: 0 of 5 cells selected',
+    'negative selected -> 0')
+  eq(describeChipSelectionInvert(NaN, 5), 'Inverted: 0 of 5 cells selected',
+    'NaN selected -> 0')
+  eq(describeChipSelectionInvert(2.7, 5), 'Inverted: 2 of 5 cells selected',
+    'fractional selected floored')
+  // Defensive: non-finite / non-positive total -> 0.
+  eq(describeChipSelectionInvert(0, 0), 'Inverted: 0 of 0 cells selected',
+    'zero total -> "cells" (plural for 0)')
+  eq(describeChipSelectionInvert(0, NaN), 'Inverted: 0 of 0 cells selected',
+    'NaN total -> 0')
+  eq(describeChipSelectionInvert(0, -4), 'Inverted: 0 of 0 cells selected',
+    'negative total -> 0')
+  eq(describeChipSelectionInvert(3, 6.9), 'Inverted: 3 of 6 cells selected',
+    'fractional total floored')
+  // Always returns a non-empty string (aria-live never speaks "").
+  ok(typeof describeChipSelectionInvert(0, 0) === 'string', 'always a string')
+}
+
+console.log('PASS: describeChipSelectionInvert — aria-live invert phrasing (R33.45, ~16 asserts)')
+

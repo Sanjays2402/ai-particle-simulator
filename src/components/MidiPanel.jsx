@@ -33,6 +33,8 @@ import {
   clampSelectAllTriState,
   // R32.45 — invert a chip selection to its complement against live ids
   invertChipSelection,
+  // R33.45 — aria-live phrasing for the keyboard 'i' invert shortcut
+  describeChipSelectionInvert,
 } from '../lib/midiMap'
 import { ATTRACTOR_TYPES } from '../lib/namedAttractors'
 // R26.20 — touch-drag hit-test helper. Same pure projector the camera-
@@ -3209,6 +3211,11 @@ function ClampThresholdPopover({
       ? new Set()
       : new Set(fieldOverridesAcross.map(c => c.id)))
   }
+  // R33.45 — aria-live announcement text for the invert action (keyboard
+  // 'i' shortcut + button click both narrate). A visually-hidden status
+  // region speaks the post-invert count so SR + keyboard users hear the
+  // result; describeChipSelectionInvert (pure, in midiMap.js) phrases it.
+  const [chipInvertAnnounce, setChipInvertAnnounce] = useState('')
   // R32.45 — flip a PARTIAL selection to its complement in one tap. When
   // the tri-state is 'some' (a hand-picked subset), the user may actually
   // want "everything EXCEPT these" — R31.45 made the partial state
@@ -3217,8 +3224,37 @@ function ClampThresholdPopover({
   // LIVE chip ids (stale selected ids self-heal out), so this is a pure
   // one-step toggle. Only surfaced in the 'some' state (none/all already
   // have the All/None toggle as their natural complement).
+  //
+  // R33.45 — also announce the resulting count to the aria-live region so
+  // a keyboard / SR user who triggers the flip (button OR 'i' shortcut)
+  // hears "Inverted: 4 of 7 cells selected". We compute the complement
+  // size from the LIVE ids (same projector the setter uses) so the spoken
+  // count matches what actually lands in state.
   const invertChipSelectionSet = () => {
-    setSelectedChipIds(prev => invertChipSelection(fieldOverridesAcross.map(c => c.id), prev))
+    const liveIds = fieldOverridesAcross.map(c => c.id)
+    let nextSize = 0
+    setSelectedChipIds(prev => {
+      const next = invertChipSelection(liveIds, prev)
+      nextSize = next.size
+      return next
+    })
+    setChipInvertAnnounce(describeChipSelectionInvert(nextSize, liveIds.length, fieldLabel))
+  }
+  // R33.45 — keyboard shortcut: press 'i' while the multi-select bar is
+  // active and the selection is partial ('some') to invert it without
+  // reaching for the mouse. Bound to the multi-select bar container (not
+  // window) so it only fires when the user has tabbed into / is focused
+  // within the bar — a global 'i' would collide with text inputs + other
+  // panels. Ignored when a text input / textarea has focus so typing 'i'
+  // in a field never flips a selection out from under the user.
+  const onChipBarKeyDown = (e) => {
+    if (e.key !== 'i' && e.key !== 'I') return
+    const tag = (e.target && e.target.tagName) || ''
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target && e.target.isContentEditable)) return
+    if (chipSelectTriState !== 'some') return
+    e.preventDefault()
+    e.stopPropagation()
+    invertChipSelectionSet()
   }
   // Long-press lifecycle for a chip. On touchstart/mousedown, arm a
   // timer; if it fires before release (and the pointer didn't move far)
@@ -3573,7 +3609,13 @@ function ClampThresholdPopover({
                   long-press opens multi-select (only when a per-cell
                   wipe handler is wired). */}
               {chipMultiSelect ? (
-                <span style={{ display: 'inline-flex', gap: 4, textTransform: 'none', letterSpacing: 0 }}>
+                <span
+                  role="group"
+                  aria-label={`${fieldLabel} cell multi-select actions. Press i to invert the selection.`}
+                  tabIndex={0}
+                  onKeyDown={onChipBarKeyDown}
+                  style={{ display: 'inline-flex', gap: 4, textTransform: 'none', letterSpacing: 0, outline: 'none' }}
+                >
                   {/* R30.45 — Select all / none toggle. One button covers
                       both directions (label flips on allChipsSelected) so
                       wiping every cell for a field is a single tap rather
@@ -3648,7 +3690,7 @@ function ClampThresholdPopover({
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); invertChipSelectionSet() }}
-                      title={`Invert: select the ${fieldOverridesAcross.length - validSelectedChipIds.length} ${fieldLabel} cell${(fieldOverridesAcross.length - validSelectedChipIds.length) === 1 ? '' : 's'} you DIDN'T pick (and deselect the ${validSelectedChipIds.length} you did).`}
+                      title={`Invert: select the ${fieldOverridesAcross.length - validSelectedChipIds.length} ${fieldLabel} cell${(fieldOverridesAcross.length - validSelectedChipIds.length) === 1 ? '' : 's'} you DIDN'T pick (and deselect the ${validSelectedChipIds.length} you did). Keyboard: focus this bar and press i.`}
                       style={{
                         display: 'inline-flex', alignItems: 'center', gap: 3,
                         padding: '1px 7px', borderRadius: 4, fontSize: 9, fontWeight: 600,
@@ -3664,6 +3706,16 @@ function ClampThresholdPopover({
                     >
                       <span aria-hidden="true" style={{ fontSize: 10, lineHeight: 1 }}>{'\u21c4'}</span>
                       <span>Invert</span>
+                      {/* R33.45 — visible keyboard affordance: the bar is
+                          focusable and 'i' inverts. The little key cap tells
+                          a sighted keyboard user the shortcut exists without
+                          opening the tooltip. */}
+                      <span aria-hidden="true" style={{
+                        fontSize: 7.5, lineHeight: 1, padding: '0 2px', borderRadius: 2,
+                        marginLeft: 1,
+                        background: 'rgba(0,0,0,0.28)', color: '#fde68a',
+                        border: '1px solid rgba(245,158,11,0.45)', fontWeight: 700,
+                      }}>i</span>
                     </button>
                   )}
                   <button
@@ -3703,6 +3755,22 @@ function ClampThresholdPopover({
                 </span>
               ))}
             </div>
+            {/* R33.45 — visually-hidden aria-live region narrating the
+                invert action. When a keyboard / SR user presses 'i' (or
+                clicks Invert), describeChipSelectionInvert phrases the
+                resulting count and it's spoken here ("Inverted: 4 of 7
+                STRENGTH cells selected"). The clip/0-size pattern hides it
+                visually without display:none (which SRs skip); aria-atomic
+                re-reads the whole phrase. Mirrors LeftSidebar's R31.20 +
+                MidiPanel's R30.20 reorder-narration regions. */}
+            <div
+              aria-live="polite"
+              aria-atomic="true"
+              style={{
+                position: 'absolute', width: 1, height: 1, padding: 0, margin: -1,
+                overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap', border: 0,
+              }}
+            >{chipMultiSelect ? chipInvertAnnounce : ''}</div>
             <div style={{
               display: 'flex', flexWrap: 'wrap', gap: 4,
               maxHeight: 64, overflowY: 'auto',

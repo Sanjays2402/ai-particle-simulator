@@ -976,6 +976,29 @@ export function invertChipSelection(liveIds, selectedIds) {
   return out
 }
 
+// R33.45 — phrase the aria-live announcement for a chip-selection invert
+// (keyboard 'i' shortcut). Screen-reader + keyboard users press 'i' to
+// flip the partial selection to its complement; this projector turns the
+// post-invert counts into a spoken sentence so they hear the result
+// ("Inverted: 4 of 7 cells selected"). Pure — string only, no DOM.
+//
+// fieldLabel is optional (e.g. "STRENGTH"); when present it scopes the
+// phrase ("4 of 7 STRENGTH cells selected") so a user flipping selections
+// across different field meters can tell which one they just inverted.
+//
+// Defensive: counts coerced via Math.max(0, floor) so a NaN / negative /
+// fractional never leaks into the spoken text; selected is clamped to
+// [0, total] so it can never claim more selected than exist.
+export function describeChipSelectionInvert(selectedCount, total, fieldLabel) {
+  const safeTotal = Number.isFinite(total) && total > 0 ? Math.floor(total) : 0
+  let safeSel = Number.isFinite(selectedCount) && selectedCount > 0 ? Math.floor(selectedCount) : 0
+  if (safeSel > safeTotal) safeSel = safeTotal
+  const scope = (typeof fieldLabel === 'string' && fieldLabel.trim())
+    ? `${fieldLabel.trim()} cell${safeTotal === 1 ? '' : 's'}`
+    : `cell${safeTotal === 1 ? '' : 's'}`
+  return `Inverted: ${safeSel} of ${safeTotal} ${scope} selected`
+}
+
 // R26.45 — Strip ONE field from EVERY attractor's per-attractor
 // override map. Drops attractor entries that become empty after the
 // strip (parallel to setClampWarnAttractorFieldOverride's last-cell-
