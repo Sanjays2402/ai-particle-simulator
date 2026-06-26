@@ -552,16 +552,37 @@ padding.
 - [x] R32.45 Clamp tri-state toggle: when in the 'some' state, clicking should offer a THREE-way cycle (some -> all -> none -> some) via a tiny adjacent "invert" affordance so a user can flip their partial selection to its complement in one tap — graduates R31.45 — f9b40e4
 - [x] R32.20 Attractor keyboard reorder: add a visible "lifted" floating chip near the badge during a keyboard grab (mirrors the row's name) so a SIGHTED keyboard user gets the same at-a-glance "what am I moving" cue the SR user gets spoken — graduates R31.20 — 198b525
 
-### Batch 33 — refilled queue (graduations of Batch 32 slices)
-- [ ] R33.41 Bias scope-history clear undo: extend the single-shot Undo into a multi-level CHAIN — clearing twice within a window should let the user step back through BOTH clears (snapshot stack + window-gated, parallels R29.42's note-filter bulk-unpin chain) — graduates R32.41
-- [ ] R33.42 Bulk-unpin pip pulse direction: surface a tiny directional glyph on the pip during the pulse (up-caret on bank, down-caret on step-back) so the direction reads even for a user who can't distinguish the indigo-bloom vs rose-contract colour cue (colour-blind safe) — graduates R32.42
-- [ ] R33.43 Fade swatch pin: persist the PINNED state across panel collapse / reopen (today re-opening the MIDI panel resets the loop to idle) so a user who pinned it to study a curve doesn't lose the loop on an accidental collapse — graduates R32.43
-- [ ] R33.45 Clamp invert affordance: also offer the invert as a keyboard shortcut (focus the multi-select bar, press 'i') + an aria-live announcement of the resulting count ("inverted: 4 of 7 cells selected") so keyboard + SR users reach it — graduates R32.45
-- [ ] R33.20 Attractor lifted floating chip: also show the chip during a MOUSE/touch drag (not just keyboard) so a pointer user dragging a row gets the same name-carrying "what am I moving" cue — graduates R32.20
+### Batch 33 — refilled queue (graduations of Batch 32 slices)  (SHIPPED)
+- [x] R33.41 Bias scope-history clear undo: extend the single-shot Undo into a multi-level CHAIN — clearing twice within a window should let the user step back through BOTH clears (snapshot stack + window-gated, parallels R29.42's note-filter bulk-unpin chain) — graduates R32.41 — 24b109d
+- [x] R33.42 Bulk-unpin pip pulse direction: surface a tiny directional glyph on the pip during the pulse (up-caret on bank, down-caret on step-back) so the direction reads even for a user who can't distinguish the indigo-bloom vs rose-contract colour cue (colour-blind safe) — graduates R32.42 — 24c7236
+- [x] R33.43 Fade swatch pin: persist the PINNED state across panel collapse / reopen (today re-opening the MIDI panel resets the loop to idle) so a user who pinned it to study a curve doesn't lose the loop on an accidental collapse — graduates R32.43 — f00d9a7
+- [x] R33.45 Clamp invert affordance: also offer the invert as a keyboard shortcut (focus the multi-select bar, press 'i') + an aria-live announcement of the resulting count ("inverted: 4 of 7 cells selected") so keyboard + SR users reach it — graduates R32.45 — e348f80
+- [x] R33.20 Attractor lifted floating chip: also show the chip during a MOUSE/touch drag (not just keyboard) so a pointer user dragging a row gets the same name-carrying "what am I moving" cue — graduates R32.20 — 154638e
+
+### Batch 34 — refilled queue (graduations of Batch 33 slices)
+- [ ] R34.41 Bias scope-history clear-undo chain: surface the chain DEPTH ("x2"/"x3") as a small pip on the clear glyph itself (not just in the toast label) so a user mid-cleanup sees how many undo levels are banked even after the toast auto-dismisses (parallels R30.42's bulk-unpin depth pip on the footer button) — graduates R33.41
+- [ ] R34.42 Bulk-unpin pip direction caret: also narrate the direction via the existing undo toast's aria text ("banked a level" / "stepped back a level") so a screen-reader user gets the same direction cue the sighted caret gives — graduates R33.42
+- [ ] R34.43 Fade swatch pin persist: surface a tiny "pinned" indicator on the cycle chip's label row (a small filled dot) that's visible even when the swatch itself is scrolled out of view, so a user who pinned it knows the loop is still running before they scroll back — graduates R33.43
+- [ ] R34.45 Clamp invert keyboard: also bind 'a' (select all) and 'n' (select none) on the focused multi-select bar with matching aria-live announcements, so the whole select-all/none/invert trio is keyboard-reachable (parallels R33.45's 'i') — graduates R33.45
+- [ ] R34.20 Attractor drag floating chip: show the chip's destination position ("→ #3") on the chip during a drag once a drop target is hovered, so a pointer user sees WHERE the row will land, not just what they're moving — graduates R33.20
 
 ### Future queue carried from Batch 24 (refill on next batch)
 
 ## TICK LOG
+- 2026-06-25 19:50 PT — Batch 33 (5/5). Tick 33. Frontend-focus override active.
+  Commits: 24b109d (R33.41 bias scope-history clear undo -> multi-level CHAIN),
+  24c7236 (R33.42 colour-blind-safe direction caret on the bulk-unpin pip pulse),
+  f00d9a7 (R33.43 persist the fade-preview swatch PINNED loop across panel collapse + reload),
+  e348f80 (R33.45 keyboard 'i' invert shortcut + aria-live announcement for the clamp multi-select bar),
+  154638e (R33.20 floating name-chip during mouse/touch drag too, violet accent vs indigo keyboard lift).
+  Gates: lint EXACTLY at baseline (23 errors / 3 warnings, all pre-existing —
+  the 3 on touched files are store.js empty-catch at the shifted line + a
+  LeftSidebar setState-in-effect in an untouched code path); build green 733ms;
+  tests 40/40 files pass (biasOverridesIO +~40 asserts for the scopeClear chain
+  trio, presetThumbnails +~16 for describeBulkUnpinPulse, midiMap +~16 for
+  describeChipSelectionInvert). Pushed 453ecf9..154638e to origin/main, verified
+  landed + in sync (0/0). All 5 were FRONTEND/UX graduations of Batch 32.
+  dist/ is gitignored — no build artifacts pushed.
 - 2026-06-25 14:54 PT — Batch 32 (5/5). Tick 32. Frontend-focus override active.
   Commits: 7a02856 (R32.41 bias scope-history clear undo toast),
   a06801f (R32.42 bulk-unpin pip pulses on Undo step-back, rose contract),
