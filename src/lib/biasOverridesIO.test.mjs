@@ -30,6 +30,9 @@ import {
   sanitizeImportScopeHistory, loadImportScopeHistory, saveImportScopeHistory,
   // R31.41 — clear the persisted ring on demand
   clearImportScopeHistory,
+  // R33.41 — multi-level CHAIN for the clear undo
+  SCOPE_CLEAR_CHAIN_MS, SCOPE_CLEAR_CHAIN_MAX,
+  pushScopeClearChainFrame, popScopeClearChainFrame, formatScopeClearChainBadge,
 } from './biasOverridesIO.js'
 import { SCENE_BIASES, SCENE_BIAS_RANGE_FIELDS, SCENE_BIAS_CHANCE_FIELDS } from './randomScene.js'
 
@@ -1389,5 +1392,133 @@ console.log('PASS: persist scope-history ring — sanitize/load/save round-trip 
 }
 
 console.log('PASS: clearImportScopeHistory — wipe the persisted scope-history ring (R31.41, ~8 asserts)')
+
+// R33.41 — multi-level CHAIN for the scope-history clear undo.
+{
+  // A ring with prior scopes (length >= 2) earns a frame; <= 1 does not.
+  const ring2 = [
+    { changed: 5, total: 30, intensity: 'low' },
+    { changed: 12, total: 30, intensity: 'medium' },
+  ]
+  const ring3 = [
+    { changed: 5, total: 30, intensity: 'low' },
+    { changed: 12, total: 30, intensity: 'medium' },
+    { changed: 22, total: 30, intensity: 'high' },
+  ]
+  // First push seeds a single-frame stack.
+  const s1 = pushScopeClearChainFrame([], ring2, 1000)
+  eq(s1.length, 1, 'first clear -> 1 frame')
+  eq(s1[0].ring.length, 2, 'frame carries the full pre-clear ring')
+  eq(s1[0].at, 1000, 'frame records timestamp')
+  // Non-array stack treated as empty.
+  eq(pushScopeClearChainFrame(null, ring2, 500).length, 1, 'non-array stack -> fresh single frame')
+
+  // A ring with no PRIOR scopes (length <= 1) earns no frame (ref-equal).
+  const head1 = [{ changed: 5, total: 30, intensity: 'low' }]
+  const same = pushScopeClearChainFrame(s1, head1, 1200)
+  ok(same === s1, 'ring with only the live head -> input ref unchanged (nothing to recover)')
+  ok(pushScopeClearChainFrame([], [], 1200).length === 0, 'empty ring -> empty stack')
+  ok(pushScopeClearChainFrame([], head1, 1200).length === 0, 'single-head ring from empty -> still empty')
+
+  // Within window CHAINS (stacks newest-last).
+  let c = pushScopeClearChainFrame([], ring2, 1000)
+  c = pushScopeClearChainFrame(c, ring3, 1000 + SCOPE_CLEAR_CHAIN_MS - 1)  // just inside
+  eq(c.length, 2, 'within window -> chained to 2 frames')
+  eq(c[1].ring.length, 3, 'newest frame at the END (stack tail), carries ring3')
+  eq(c[0].ring.length, 2, 'older frame stays at front, carries ring2')
+  // Exactly AT the window edge still chains (<=).
+  let cEdge = pushScopeClearChainFrame([], ring2, 0)
+  cEdge = pushScopeClearChainFrame(cEdge, ring3, SCOPE_CLEAR_CHAIN_MS)
+  eq(cEdge.length, 2, 'exactly at window edge still chains')
+
+  // Outside window RESETS to a single frame.
+  let r = pushScopeClearChainFrame([], ring2, 1000)
+  r = pushScopeClearChainFrame(r, ring3, 1000 + SCOPE_CLEAR_CHAIN_MS + 1)  // just past
+  eq(r.length, 1, 'outside window -> reset to single frame')
+  eq(r[0].ring.length, 3, 'reset frame is the new clear (ring3)')
+  // Backwards clock jump (negative delta) -> reset.
+  let rb = pushScopeClearChainFrame([], ring2, 5000)
+  rb = pushScopeClearChainFrame(rb, ring3, 4000)
+  eq(rb.length, 1, 'negative delta (clock jump back) -> reset')
+  // Non-finite nowMs -> reset (can't reason about the window).
+  let rn = pushScopeClearChainFrame([], ring2, 1000)
+  rn = pushScopeClearChainFrame(rn, ring3, NaN)
+  eq(rn.length, 1, 'non-finite nowMs -> reset to single frame')
+  eq(rn[0].at, 0, 'non-finite nowMs frame records at=0')
+
+  // Cap at SCOPE_CLEAR_CHAIN_MAX (oldest FIFO-dropped).
+  let cap = []
+  for (let i = 0; i < SCOPE_CLEAR_CHAIN_MAX + 4; i++) {
+    cap = pushScopeClearChainFrame(cap, ring2, i * 10)  // all within window
+  }
+  eq(cap.length, SCOPE_CLEAR_CHAIN_MAX, 'chain capped at SCOPE_CLEAR_CHAIN_MAX')
+
+  // Corrupt rows in the ring are sanitised out (frame ring is canonical).
+  const dirtyRing = [
+    { changed: 5, total: 30, intensity: 'low' },
+    null,
+    { changed: 'bad' },
+    { changed: 12, total: 30, intensity: 'medium' },
+  ]
+  const sd = pushScopeClearChainFrame([], dirtyRing, 1000)
+  eq(sd.length, 1, 'dirty ring with 2 valid rows still earns a frame')
+  eq(sd[0].ring.length, 2, 'frame ring sanitised down to the 2 valid rows')
+
+  // Input not mutated.
+  const inStack = pushScopeClearChainFrame([], ring2, 1000)
+  const before = inStack.length
+  pushScopeClearChainFrame(inStack, ring3, 1001)
+  eq(inStack.length, before, 'push does not mutate the input stack')
+}
+
+// R33.41 — popScopeClearChainFrame steps back one level per Undo.
+{
+  const ringA = [
+    { changed: 5, total: 30, intensity: 'low' },
+    { changed: 12, total: 30, intensity: 'medium' },
+  ]
+  const ringB = [
+    { changed: 7, total: 40, intensity: 'low' },
+    { changed: 22, total: 40, intensity: 'high' },
+  ]
+  let chain = pushScopeClearChainFrame([], ringA, 1000)
+  chain = pushScopeClearChainFrame(chain, ringB, 1500)
+  eq(chain.length, 2, 'precondition: two frames')
+  // First pop returns the NEWEST frame (ringB).
+  const pop1 = popScopeClearChainFrame(chain)
+  eq(pop1.frame.ring.length, 2, 'pop returns a frame')
+  eq(pop1.frame.ring[1].changed, 22, 'pop returns the NEWEST frame (ringB)')
+  eq(pop1.rest.length, 1, 'rest has one frame remaining')
+  // Second pop returns the older frame (ringA).
+  const pop2 = popScopeClearChainFrame(pop1.rest)
+  eq(pop2.frame.ring[1].changed, 12, 'second pop returns the older frame (ringA)')
+  eq(pop2.rest.length, 0, 'rest empty after stepping back through both')
+  // Pop on empty / invalid -> null frame, empty rest.
+  const popEmpty = popScopeClearChainFrame([])
+  eq(popEmpty.frame, null, 'pop empty -> null frame')
+  deepEq(popEmpty.rest, [], 'pop empty -> empty rest')
+  const popNull = popScopeClearChainFrame(null)
+  eq(popNull.frame, null, 'pop null -> null frame')
+  deepEq(popNull.rest, [], 'pop null -> empty rest')
+  // Input not mutated.
+  const inChain = pushScopeClearChainFrame([], ringA, 1000)
+  popScopeClearChainFrame(inChain)
+  eq(inChain.length, 1, 'pop does not mutate the input stack')
+}
+
+// R33.41 — formatScopeClearChainBadge surfaces "xN" only at depth >= 2.
+{
+  eq(formatScopeClearChainBadge([]), null, 'empty chain -> no badge')
+  eq(formatScopeClearChainBadge([{ ring: [], at: 0 }]), null, 'single frame -> no badge')
+  const b2 = formatScopeClearChainBadge([{ ring: [], at: 0 }, { ring: [], at: 1 }])
+  eq(b2.text, 'x2', 'two frames -> x2 badge')
+  eq(b2.count, 2, 'badge count == frame count')
+  const b3 = formatScopeClearChainBadge([{}, {}, {}])
+  eq(b3.text, 'x3', 'three frames -> x3 badge')
+  eq(formatScopeClearChainBadge(null), null, 'non-array -> null')
+  eq(formatScopeClearChainBadge('nope'), null, 'string -> null')
+}
+
+console.log('PASS: scope-history clear undo CHAIN — push/pop/badge, window-gated, capped, defensive (R33.41, ~40 asserts)')
 
 console.log(`PASS: biasOverridesIO — envelope build/parse, merge/replace, summarize, defensive, multi-file combine, R24.36 preview rows, R25.41 per-field diff, R26.41 summary counts, R27.41 total-impact projector, R28.41 three-tier intensity (${SCENE_BIASES.length} chip ids, ${SCENE_BIAS_RANGE_FIELDS.length} ranges + ${SCENE_BIAS_CHANCE_FIELDS.length} chances per chip)`)

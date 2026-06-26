@@ -753,6 +753,107 @@ export function clearImportScopeHistory(storage) {
   } catch { return false }
 }
 
+// R33.41 — multi-level CHAIN for the scope-history clear undo (graduates
+// R32.41's single-shot). R32.41 snapshotted the prior ring on each clear
+// and offered a one-shot Undo, but a user who cleared TWICE inside the
+// toast window could only step back through the LAST clear — the first
+// snapshot was gone. R33.41 stacks each clear's snapshot into a window-
+// gated frame chain (a direct parallel of presetThumbnails' R29.42
+// bulk-unpin chain) so the user can Undo step-by-step back through every
+// clear they made in one continuous cleanup burst.
+//
+// WINDOW semantics (parallels BULK_UNPIN_CHAIN_MS): a fresh clear is
+// CHAINED onto the existing stack only when it lands within
+// SCOPE_CLEAR_CHAIN_MS of the previous frame; otherwise the stack RESETS
+// to a single frame (the prior chain is considered settled — too much
+// time passed for the user to be mid-cleanup). This keeps the chain
+// meaningful: one continuous burst, not unrelated clears minutes apart.
+export const SCOPE_CLEAR_CHAIN_MS = 6000
+
+// Max frames retained so a pathological rapid-fire clear loop can't grow
+// the stack without bound. Oldest frame FIFO-dropped past the cap.
+export const SCOPE_CLEAR_CHAIN_MAX = 8
+
+// Sanitize a single snapshot ring into the canonical [{ changed, total,
+// intensity }] shape (reuses sanitizeImportScopeHistory so a frame can
+// never carry a corrupt entry the rest of the app would choke on).
+// Internal helper.
+function sanitizeScopeClearFrameRing(ring) {
+  return sanitizeImportScopeHistory(Array.isArray(ring) ? ring : [])
+}
+
+// Push a clear-frame onto the chain. Pure — returns a NEW array; never
+// mutates the input.
+//
+// Args:
+//   - stack    : prior chain (array of frames) or null/undefined for none
+//   - ring     : the FULL pre-clear scope-history snapshot this clear
+//                captured (the dots the user was about to lose)
+//   - nowMs    : timestamp of this clear
+//   - windowMs : chain window (defaults SCOPE_CLEAR_CHAIN_MS)
+//
+// Rules (mirror pushBulkUnpinChainFrame exactly so the two chains behave
+// identically):
+//   - a ring with NO PRIOR scopes to lose (length <= 1: just the live
+//     head, or empty) earns no frame → returns the input ref unchanged
+//     (an Undo would restore nothing, so it shouldn't deepen the chain)
+//   - within window of the top frame → CHAIN (push on top, newest-last)
+//   - outside window / first frame / non-finite nowMs → RESET to one frame
+//   - cap at SCOPE_CLEAR_CHAIN_MAX (drop oldest)
+//
+// Newest frame is at the END of the array (stack semantics — pop from the
+// tail). `at` is recorded so the next push can window-check.
+export function pushScopeClearChainFrame(stack, ring, nowMs, windowMs = SCOPE_CLEAR_CHAIN_MS) {
+  const safeRing = sanitizeScopeClearFrameRing(ring)
+  // Only the entries BEYOND the live head are "prior scopes" a user could
+  // want back; a ring of <= 1 entry (just the head, or empty) carries no
+  // recoverable history, so clearing it earns no undo frame.
+  if (safeRing.length <= 1) return Array.isArray(stack) ? stack : []
+  const frame = { ring: safeRing, at: Number.isFinite(nowMs) ? nowMs : 0 }
+  const prior = Array.isArray(stack) ? stack : []
+  const top = prior[prior.length - 1]
+  const withinWindow = top
+    && Number.isFinite(nowMs)
+    && Number.isFinite(top.at)
+    && Number.isFinite(windowMs) && windowMs >= 0
+    && (nowMs - top.at) >= 0
+    && (nowMs - top.at) <= windowMs
+  let next
+  if (withinWindow) {
+    next = [...prior, frame]
+  } else {
+    next = [frame]
+  }
+  if (next.length > SCOPE_CLEAR_CHAIN_MAX) next = next.slice(next.length - SCOPE_CLEAR_CHAIN_MAX)
+  return next
+}
+
+// Pop the most-recent clear-frame off the chain. Pure — returns
+//   { frame, rest }
+// where `frame` is the popped top frame (or null when the stack is empty
+// / invalid) and `rest` is the remaining stack (a NEW array, or the input
+// ref when there was nothing to pop). The caller restores the frame's
+// ring against state + storage, then keeps `rest` as the new chain so the
+// NEXT Undo steps back another level. Mirrors popBulkUnpinChainFrame.
+export function popScopeClearChainFrame(stack) {
+  if (!Array.isArray(stack) || stack.length === 0) {
+    return { frame: null, rest: Array.isArray(stack) ? stack : [] }
+  }
+  const frame = stack[stack.length - 1]
+  const rest = stack.slice(0, stack.length - 1)
+  return { frame, rest }
+}
+
+// Pure projector for the chain-DEPTH badge on the Undo toast (parallels
+// formatBulkUnpinChainBadge). Returns null at 0 or 1 frame (a single
+// undo needs no "xN" badge), otherwise { text, count }. Non-array → null.
+export function formatScopeClearChainBadge(stack) {
+  if (!Array.isArray(stack)) return null
+  const count = stack.length
+  if (count < 2) return null
+  return { text: `x${count}`, count }
+}
+
 // Pure equality check for bias-override field values. Routes by kind:
 //   - range fields (4): two-element numeric array, element-wise eq
 //   - chance fields (10): numeric eq

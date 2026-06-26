@@ -32,6 +32,11 @@ import {
   // R31.41 — clearImportScopeHistory wipes the durable ring on demand.
   pushImportScopeHistory, describeImportScopeHistory,
   loadImportScopeHistory, saveImportScopeHistory, clearImportScopeHistory,
+  // R33.41 — multi-level CHAIN for the clear undo (graduates R32.41's
+  // single-shot). pushScopeClearChainFrame stacks each clear's pre-wipe
+  // snapshot (window-gated), popScopeClearChainFrame steps back one
+  // level per Undo, formatScopeClearChainBadge surfaces the "xN" depth.
+  pushScopeClearChainFrame, popScopeClearChainFrame, formatScopeClearChainBadge,
 } from '../lib/biasOverridesIO'
 import {
   loadCameraViews, saveCameraViews, appendView, moveView, moveViewUp, moveViewDown,
@@ -1133,6 +1138,15 @@ function SceneBookmarks() {
   // panel close (R29.41 reset it on every remount); every push persists
   // through saveImportScopeHistory so the comparison is durable.
   const [biasScopeHistory, setBiasScopeHistory] = useState(() => loadImportScopeHistory())
+  // R33.41 — multi-level undo CHAIN stack for scope-history clears. A ref
+  // (not state) because it's read/written only from the clear handler +
+  // the toast's Undo closure and never drives a render directly; the
+  // toast's own badge carries the visible chain depth. Each frame holds
+  // the FULL pre-clear ring snapshot; pushScopeClearChainFrame handles
+  // window-gated chaining + the FIFO cap, popScopeClearChainFrame steps
+  // back one level per Undo. Survives toast dismissals so a user clearing
+  // twice in a burst can step back through both.
+  const biasScopeClearChainRef = useRef([])
   const recordBiasScope = (changed, total) => {
     setBiasScopeHistory(prev => {
       const next = pushImportScopeHistory(prev, changed, total)
@@ -1170,20 +1184,34 @@ function SceneBookmarks() {
     // elsewhere.
     const priorCount = Math.max(0, beforeClear.length - 1)
     if (priorCount > 0) {
+      // R33.41 — push this clear's snapshot onto the undo CHAIN (window-
+      // gated). Clearing twice within SCOPE_CLEAR_CHAIN_MS stacks both
+      // frames so the user can step back through each clear; clearing
+      // again after the window resets to a single frame. The chain is the
+      // source of truth for what an Undo restores — NOT the single
+      // beforeClear closure (which only knows about THIS clear).
+      const nextChain = pushScopeClearChainFrame(biasScopeClearChainRef.current, beforeClear, Date.now())
+      biasScopeClearChainRef.current = nextChain
+      const badge = formatScopeClearChainBadge(nextChain)
+      const depthSuffix = badge ? ` (${badge.text})` : ''
       showToast(
-        `Cleared ${priorCount} prior import scope${priorCount === 1 ? '' : 's'}`,
+        `Cleared ${priorCount} prior import scope${priorCount === 1 ? '' : 's'}${depthSuffix}`,
         // Monochrome x glyph to echo the clear affordance the user just
         // clicked (Toast.jsx wraps the icon span).
         <span style={{ fontSize: 11, color: '#fca5a5', fontWeight: 700 }}>{'\u00d7'}</span>,
         {
-          label: 'Undo',
+          label: badge ? `Undo ${badge.text}` : 'Undo',
           onClick: () => {
-            // Restore against the durable + in-memory copies. saveImport-
-            // ScopeHistory re-sanitises on write, so a snapshot that drifted
-            // can't persist a corrupt ring; setBiasScopeHistory takes the
-            // same array so the dots reappear immediately.
-            if (beforeClear.length > 0) { try { saveImportScopeHistory(beforeClear) } catch { /* quota */ } }
-            setBiasScopeHistory(beforeClear)
+            // Pop the most-recent clear-frame and restore ITS ring (steps
+            // back exactly one level). The remaining stack is kept so the
+            // NEXT Undo click steps back another level. saveImportScope-
+            // History re-sanitises on write so a snapshot that drifted
+            // can't persist a corrupt ring.
+            const { frame, rest } = popScopeClearChainFrame(biasScopeClearChainRef.current)
+            biasScopeClearChainRef.current = rest
+            const restore = frame && Array.isArray(frame.ring) ? frame.ring : beforeClear
+            if (restore.length > 0) { try { saveImportScopeHistory(restore) } catch { /* quota */ } }
+            setBiasScopeHistory(restore)
           },
         },
       )
