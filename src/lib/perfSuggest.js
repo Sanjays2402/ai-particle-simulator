@@ -151,6 +151,37 @@ function numOr(v, fallback) {
   return Number.isFinite(n) ? n : fallback
 }
 
+// --- R36.D: live perf-budget status pill -----------------------------
+//
+// The auto-suggest toast (above) is reactive — it only speaks up after a
+// sustained low spell. Sometimes a user TUNING a heavy scene wants to
+// watch their headroom continuously, the way a game's perf overlay
+// shows a live green/amber/red dot. This pure helper maps the live fps
+// into a small status descriptor a tiny opt-in pill can render, with no
+// state machine + no nagging — just an at-a-glance "am I smooth?".
+//
+// Bands mirror the rest of the app (StatusStrip / fpsGraph): >= 55 good,
+// >= 30 ok, else bad — so the pill agrees with the numeric fps colour
+// the user already knows. Returns { level, label, color, fps }.
+export const PERF_PILL_GOOD = 55
+export const PERF_PILL_OK = 30
+
+const PERF_PILL_STATUS = {
+  good: { level: 'good', label: 'Smooth',  color: '#86efac' },
+  ok:   { level: 'ok',   label: 'Tight',   color: '#fbbf24' },
+  bad:  { level: 'bad',  label: 'Heavy',   color: '#f87171' },
+  none: { level: 'none', label: '—',       color: '#6a6a80' },
+}
+
+export function perfBudgetStatus(fps) {
+  const v = Number(fps)
+  if (!Number.isFinite(v) || v <= 0) return { ...PERF_PILL_STATUS.none, fps: 0 }
+  const rounded = Math.round(v)
+  if (v >= PERF_PILL_GOOD) return { ...PERF_PILL_STATUS.good, fps: rounded }
+  if (v >= PERF_PILL_OK) return { ...PERF_PILL_STATUS.ok, fps: rounded }
+  return { ...PERF_PILL_STATUS.bad, fps: rounded }
+}
+
 // --- R35.D: post-FX lighter-touch alternative ------------------------
 //
 // Dropping particle count is the big hammer. Often a cheaper fix is to

@@ -313,6 +313,21 @@ export default function LeftSidebar() {
               In zen mode (Z), drift the camera after a few seconds of stillness.
             </p>
           </div>
+
+          {/* R36.D — live perf-budget pill: an always-on green/amber/red
+              fps dot pinned bottom-left, for users tuning a heavy scene
+              who want to watch headroom continuously. Separate from the
+              reactive low-fps suggestion toast. */}
+          <div style={{ marginTop: 12 }}>
+            <ToggleRow
+              label="Perf budget pill"
+              value={useStore(s => s.perfPillEnabled)}
+              onChange={useStore(s => s.setPerfPillEnabled)}
+            />
+            <p style={{ fontSize: 10, color: '#5a5a70', marginTop: 4, lineHeight: 1.4 }}>
+              Live fps headroom dot (bottom-left). Click the pill to hide it.
+            </p>
+          </div>
         </div>
       </Section>
 

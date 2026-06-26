@@ -25,6 +25,7 @@ import MobileGestureHint from './components/MobileGestureHint'
 import FramingGuides from './components/FramingGuides'
 import ScreenshotTimer from './components/ScreenshotTimer'
 import PerfAutoSuggest from './components/PerfAutoSuggest'
+import PerfBudgetPill from './components/PerfBudgetPill'
 import ZenMode from './components/ZenMode'
 import { useGlobalMidi } from './lib/useGlobalMidi'
 import { loadSnapshots } from './lib/snapshotGallery'
@@ -310,6 +311,7 @@ export default function App() {
       <FramingGuides />
       <ScreenshotTimer />
       <PerfAutoSuggest />
+      <PerfBudgetPill />
       <ZenMode />
       <MidiPanel open={midiOpen} onClose={() => setMidiOpen(false)} />
 

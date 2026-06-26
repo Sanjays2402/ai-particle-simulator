@@ -71,6 +71,8 @@ const SCREENSHOT_TIMER_KEY = 'particle-screenshot-timer-v1'
 const SCREENSHOT_BURST_KEY = 'particle-screenshot-burst-v1'
 // R35.E — zen ambient auto-orbit preference, own key.
 const ZEN_AUTO_ORBIT_KEY = 'particle-zen-auto-orbit-v1'
+// R36.D — live perf-budget status pill toggle, own key.
+const PERF_PILL_KEY = 'particle-perf-pill-v1'
 const PERSIST_FIELDS = [
   'particleCount', 'speed', 'glowIntensity', 'visualStyle',
   'theme', 'trails', 'mouseAttract', 'attractStrength',
@@ -710,6 +712,20 @@ export const useStore = create((set, get) => {
   cameraShakeIntensity: 0.5,
   setCameraShake: (v) => set({ cameraShake: v }),
   setCameraShakeIntensity: (v) => set({ cameraShakeIntensity: Math.max(0, Math.min(1, v)) }),
+
+  // R36.D — live perf-budget status pill. An opt-in always-on HUD dot
+  // (green/amber/red + fps) for users TUNING a heavy scene who want to
+  // watch headroom continuously, separate from the reactive auto-suggest
+  // toast. Off by default (zero cost when off — the component returns
+  // null). Persisted on its own key.
+  perfPillEnabled: (() => {
+    try { return localStorage.getItem(PERF_PILL_KEY) === '1' } catch { return false }
+  })(),
+  setPerfPillEnabled: (v) => {
+    const next = !!v
+    try { localStorage.setItem(PERF_PILL_KEY, next ? '1' : '0') } catch { /* quota / private mode */ }
+    set({ perfPillEnabled: next })
+  },
 
   // Mini-map overlay — small top-down XZ widget pinned to the bottom-
   // right of the canvas. Shows where the camera sits vs the scene

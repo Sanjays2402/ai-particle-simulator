@@ -3,6 +3,8 @@ import {
   QUALITY_TIERS, LOW_FPS_THRESHOLD, SUSTAINED_LOW_MS, SUGGEST_COOLDOWN_MS,
   tierForCount, nextLowerTier, createSuggesterState, pushFpsSample,
   markSuggestionHandled,
+  // R36.D — live perf-budget status pill
+  perfBudgetStatus, PERF_PILL_GOOD, PERF_PILL_OK,
 } from './perfSuggest.js'
 
 let passed = 0
@@ -279,4 +281,46 @@ eq(POSTFX_EFFECTS[0].id, 'dof', 'depth-of-field is heaviest (first)')
   eq(fires, 0, 'lowest tier without fxAvailable → still silent (unchanged)')
 }
 
-console.log(`PASS: perfSuggest — ${passed} assertions (sustained-low detection, anti-nag cooldown, tier mapping, R35.D post-FX remedy)`)
+// --- R36.D: live perf-budget status pill ---
+{
+  const good = perfBudgetStatus(60)
+  eq(good.level, 'good', '60fps → good')
+  eq(good.label, 'Smooth', '60fps label Smooth')
+  eq(good.color, '#86efac', '60fps green')
+  eq(good.fps, 60, '60fps rounded fps')
+
+  eq(perfBudgetStatus(55).level, 'good', '55fps (boundary) → good')
+  eq(perfBudgetStatus(54).level, 'ok', '54fps → ok')
+  eq(perfBudgetStatus(54).label, 'Tight', '54fps label Tight')
+  eq(perfBudgetStatus(54).color, '#fbbf24', '54fps amber')
+  eq(perfBudgetStatus(30).level, 'ok', '30fps (boundary) → ok')
+  eq(perfBudgetStatus(29).level, 'bad', '29fps → bad')
+  eq(perfBudgetStatus(29).label, 'Heavy', '29fps label Heavy')
+  eq(perfBudgetStatus(29).color, '#f87171', '29fps red')
+  eq(perfBudgetStatus(12).level, 'bad', '12fps → bad')
+
+  // rounding: 59.6 rounds to 60 but is still good band.
+  eq(perfBudgetStatus(59.6).fps, 60, '59.6 rounds to 60')
+  eq(perfBudgetStatus(59.6).level, 'good', '59.6 still good band')
+  // 54.4 rounds DOWN to 54 and is in the ok band (band is on raw value).
+  eq(perfBudgetStatus(54.4).fps, 54, '54.4 rounds to 54')
+  eq(perfBudgetStatus(54.4).level, 'ok', '54.4 ok band')
+
+  // Defensive: junk / zero / negative → neutral none, fps 0.
+  eq(perfBudgetStatus(0).level, 'none', '0fps → none')
+  eq(perfBudgetStatus(0).fps, 0, '0fps fps 0')
+  eq(perfBudgetStatus(-5).level, 'none', 'negative → none')
+  eq(perfBudgetStatus(NaN).level, 'none', 'NaN → none')
+  eq(perfBudgetStatus(Infinity).level, 'none', 'Infinity → none')
+  eq(perfBudgetStatus('x').level, 'none', 'non-numeric → none')
+  eq(perfBudgetStatus(undefined).color, '#6a6a80', 'undefined → grey')
+
+  // Purity: independent objects each call (no shared band singletons).
+  const a = perfBudgetStatus(60)
+  const b = perfBudgetStatus(60)
+  ok(a !== b, 'each call returns a fresh object')
+  eq(JSON.stringify(a), JSON.stringify(b), 'perfBudgetStatus is pure')
+  ok(PERF_PILL_GOOD === 55 && PERF_PILL_OK === 30, 'pill band constants exported')
+}
+
+console.log(`PASS: perfSuggest — ${passed} assertions (sustained-low detection, anti-nag cooldown, tier mapping, R35.D post-FX remedy, R36.D status pill)`)
