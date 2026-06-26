@@ -128,6 +128,7 @@ export const FRAMING_GRIDS = [
   { id: 'both',     label: 'Both',    hint: 'Thirds grid + centre cross' },
   { id: 'phi',      label: 'Phi',     hint: 'Golden-ratio grid (0.382 / 0.618) + power points' },
   { id: 'diagonal', label: 'Diag',    hint: 'Diagonal method — 45° corner lines + crossings' },
+  { id: 'spiral',   label: 'Spiral',  hint: 'Golden (Fibonacci) spiral — click again to rotate' },
 ]
 
 // Golden ratio split points. The frame is divided so the smaller part
@@ -182,7 +183,7 @@ export function nextGridId(id) {
 // Defensive: unknown/off mode, or a degenerate (<=0) frame, returns
 // empty arrays so the overlay renders nothing rather than NaN lines.
 export function computeCompositionGrid(frameRect, gridId) {
-  const empty = { verticals: [], horizontals: [], points: [], diagonals: [] }
+  const empty = { verticals: [], horizontals: [], points: [], diagonals: [], spiral: [] }
   const mode = sanitizeGridId(gridId)
   if (mode === 'off') return empty
   if (!frameRect || typeof frameRect !== 'object') return empty
@@ -196,11 +197,13 @@ export function computeCompositionGrid(frameRect, gridId) {
   const horizontals = []
   let points = []
   const diagonals = []
+  let spiral = []
 
   const wantThirds = mode === 'thirds' || mode === 'both'
   const wantCross = mode === 'cross' || mode === 'both'
   const wantPhi = mode === 'phi'
   const wantDiagonal = mode === 'diagonal'
+  const wantSpiral = mode === 'spiral'
 
   if (wantThirds) {
     const vx1 = x + w / 3
@@ -250,5 +253,129 @@ export function computeCompositionGrid(frameRect, gridId) {
     )
   }
 
-  return { verticals, horizontals, points, diagonals }
+  if (wantSpiral) {
+    spiral = buildGoldenSpiral(x, y, w, h, frameRect.spiralOrientation)
+  }
+
+  return { verticals, horizontals, points, diagonals, spiral }
+}
+
+// --- R37.B: golden (Fibonacci) spiral --------------------------------
+//
+// The golden spiral is the classical S-curve composition guide: a frame
+// is repeatedly divided into a square + a smaller golden rectangle, and
+// a quarter-circle arc swept through each square traces the spiral. A
+// subject placed at the spiral's tight "eye" (the convergence point)
+// gets the strongest possible focal emphasis.
+//
+// There are four orientations — the eye can sit in any of the four
+// corners — so a user composing a left- vs right-facing subject can flip
+// the spiral to match. `spiralOrientation` (0..3) selects the corner;
+// out-of-range values wrap so a cycling caller never goes out of bounds.
+
+// The 4 spiral orientations, by which corner the spiral's eye converges
+// toward. Ordered so cycling reads naturally (TL → TR → BR → BL).
+export const SPIRAL_ORIENTATIONS = ['tl', 'tr', 'br', 'bl']
+
+// Normalise a stored orientation (id string OR numeric index) to a
+// valid index 0..3. Junk → 0.
+export function sanitizeSpiralOrientation(o) {
+  if (typeof o === 'string') {
+    const idx = SPIRAL_ORIENTATIONS.indexOf(o)
+    return idx >= 0 ? idx : 0
+  }
+  const n = Number(o)
+  if (!Number.isFinite(n)) return 0
+  // Wrap into range so a monotonic cycle counter stays valid.
+  const m = Math.floor(n) % SPIRAL_ORIENTATIONS.length
+  return m < 0 ? m + SPIRAL_ORIENTATIONS.length : m
+}
+
+// Build a golden spiral as a flat polyline of absolute-pixel points
+// ([{x, y}, ...]) inside the frame rect. We approximate each
+// quarter-turn arc with a short run of segments (smooth enough at screen
+// scale) and walk inward through `depth` nested golden squares.
+//
+// The construction: start with the full frame as a golden rectangle.
+// Split off the leading square, sweep a quarter arc through it centred on
+// the inner corner of that square, then recurse into the remaining
+// rectangle (rotated 90°). Each step shrinks by 1/phi so after ~8 turns
+// the arc is sub-pixel — we stop at `depth` (default 8) turns.
+//
+// `orientation` (index or id) places the spiral's first square in one of
+// the four corners so the eye converges where the user wants it.
+//
+// Defensive: degenerate (<=0) frame → []; non-finite inputs → [].
+export function buildGoldenSpiral(frameX, frameY, frameW, frameH, orientation, depth = 8) {
+  const x = Number(frameX), y = Number(frameY), w = Number(frameW), h = Number(frameH)
+  if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) return []
+  const turns = Number.isFinite(depth) && depth > 0 ? Math.min(Math.floor(depth), 14) : 8
+  const ori = sanitizeSpiralOrientation(orientation)
+
+  // The canonical spiral is built for the 'tl' orientation (eye toward
+  // the top-left), then mirrored into the requested corner by flipping
+  // the normalised [0,1] coordinates. flipX/flipY per orientation:
+  //   tl: no flip · tr: flip X · br: flip X+Y · bl: flip Y
+  const flipX = ori === 1 || ori === 2
+  const flipY = ori === 2 || ori === 3
+
+  // Walk the nested-square construction in a normalised GOLDEN RECTANGLE
+  // (width 1, height 1/phi ~ 0.618) so the spiral actually spirals — a
+  // unit square would peel to nothing in a single turn. We then
+  // re-normalise the rectangle's bounding box to [0,1]^2 and stretch to
+  // the frame (matching how photo tools fit a golden spiral overlay to
+  // any image aspect). Rectangle we're consuming, in golden-rect coords:
+  const H = INV_PHI
+  let rx = 0, ry = 0, rw = 1, rh = H
+  // Which side the leading square peels from rotates each turn:
+  // 0=left, 1=top, 2=right, 3=bottom. Canonical 'tl' spiral peels left
+  // first so the eye converges toward the top-left.
+  let side = 0
+  const SEG = 12 // segments per quarter-arc
+  const norm = []
+
+  for (let t = 0; t < turns; t++) {
+    const sq = Math.min(rw, rh)
+    if (sq <= 1e-6) break
+    // Square + arc geometry depends on which side we peel from. `cx, cy`
+    // is the arc centre (the square's inner corner); the arc sweeps a
+    // quarter turn of radius `sq`. Angles in radians, SVG-y-down space.
+    let cx, cy, a0, a1
+    if (side === 0) {            // peel left edge
+      cx = rx + sq; cy = ry + sq
+      a0 = Math.PI; a1 = Math.PI * 1.5
+      rx += sq; rw -= sq
+    } else if (side === 1) {     // peel top edge
+      cx = rx + rw - sq; cy = ry + sq
+      a0 = Math.PI * 1.5; a1 = Math.PI * 2
+      ry += sq; rh -= sq
+    } else if (side === 2) {     // peel right edge
+      cx = rx + rw - sq; cy = ry + rh - sq
+      a0 = 0; a1 = Math.PI * 0.5
+      rw -= sq
+    } else {                     // peel bottom edge
+      cx = rx + sq; cy = ry + rh - sq
+      a0 = Math.PI * 0.5; a1 = Math.PI
+      rh -= sq
+    }
+    for (let s = 0; s <= SEG; s++) {
+      const a = a0 + (a1 - a0) * (s / SEG)
+      norm.push({ x: cx + Math.cos(a) * sq, y: cy + Math.sin(a) * sq })
+    }
+    side = (side + 1) % 4
+  }
+
+  // Map golden-rect points into pixel space: re-normalise the bounding
+  // box (width 1, height H) to [0,1]^2, apply the orientation flip, then
+  // scale to the actual frame so the spiral stretches with it the way
+  // the diagonal method does.
+  const out = []
+  for (const p of norm) {
+    const nx0 = p.x          // already in [0,1]
+    const ny0 = p.y / H      // [0,H] → [0,1]
+    const nx = flipX ? 1 - nx0 : nx0
+    const ny = flipY ? 1 - ny0 : ny0
+    out.push({ x: x + nx * w, y: y + ny * h })
+  }
+  return out
 }

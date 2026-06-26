@@ -33,7 +33,7 @@ import {
   summarizeImportImpact as summarizeCrossfadeOverridesImpact,
 } from '../lib/crossfadeOverridesIO'
 import { ATTRACTOR_TYPES, MAX_ATTRACTORS, attractorTypeStyle, parsePositionInput, dropIndexForGap, stepKeyboardGapCursor, describeGapReorderAnnouncement } from '../lib/namedAttractors'
-import { FRAMING_RATIOS, FRAMING_GRIDS } from '../lib/framingGuides'
+import { FRAMING_RATIOS, FRAMING_GRIDS, SPIRAL_ORIENTATIONS } from '../lib/framingGuides'
 import { showToast } from './Toast'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
@@ -77,6 +77,7 @@ export default function LeftSidebar() {
     showFavoritesOnly, setShowFavoritesOnly,
     framingGuideId, setFramingGuideId,
     framingGridId, setFramingGridId,
+    spiralOrientation, cycleSpiralOrientation,
   } = useStore()
 
   const exportGif = async () => {
@@ -280,11 +281,22 @@ export default function LeftSidebar() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
             {FRAMING_GRIDS.map(g => {
               const active = framingGridId === g.id
+              // R37.B — the spiral chip doubles as a rotate control: when
+              // it's already active, clicking again cycles the eye through
+              // the four corners instead of toggling the mode off.
+              const isSpiral = g.id === 'spiral'
+              const spiralActive = isSpiral && active
               return (
                 <button key={g.id}
-                  onClick={() => setFramingGridId(g.id)}
-                  title={g.hint || g.label}
+                  onClick={() => {
+                    if (spiralActive) cycleSpiralOrientation()
+                    else setFramingGridId(g.id)
+                  }}
+                  title={isSpiral
+                    ? `${g.hint} (${SPIRAL_ORIENTATIONS[spiralOrientation].toUpperCase()})`
+                    : (g.hint || g.label)}
                   style={{
+                    position: 'relative',
                     padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
                     cursor: 'pointer', transition: 'all 0.15s ease-out',
                     background: active
@@ -294,7 +306,16 @@ export default function LeftSidebar() {
                     border: active ? '1px solid rgba(168,85,247,0.45)' : '1px solid rgba(255,255,255,0.05)',
                     boxShadow: active ? '0 0 12px rgba(168,85,247,0.22)' : 'none',
                   }}
-                >{g.label}</button>
+                >
+                  {g.label}
+                  {spiralActive && (
+                    <span style={{
+                      position: 'absolute', top: 2, right: 4,
+                      fontSize: 8, fontWeight: 700, letterSpacing: '0.04em',
+                      color: '#f9a8d4', fontFamily: 'Geist Mono, monospace',
+                    }}>{SPIRAL_ORIENTATIONS[spiralOrientation].toUpperCase()}</span>
+                  )}
+                </button>
               )
             })}
           </div>

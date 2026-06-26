@@ -41,6 +41,7 @@ import {
   nextFramingId as nextFramingGuideId,
   sanitizeGridId as sanitizeFramingGridId,
   nextGridId as nextFramingGridId,
+  sanitizeSpiralOrientation,
 } from './lib/framingGuides'
 // R34.C — screenshot self-timer delay sanitiser + default.
 import {
@@ -65,6 +66,9 @@ const PERSIST_KEY = 'particle-settings-v1'
 const FRAMING_GUIDE_KEY = 'particle-framing-guide-v1'
 // R35.B — composition grid inside the framing guide, own key.
 const FRAMING_GRID_KEY = 'particle-framing-grid-v1'
+// R37.B — golden-spiral orientation (which corner the eye converges
+// toward), own key so it round-trips independently of the grid mode.
+const SPIRAL_ORIENT_KEY = 'particle-spiral-orientation-v1'
 // R34.C — screenshot self-timer delay (seconds), own key.
 const SCREENSHOT_TIMER_KEY = 'particle-screenshot-timer-v1'
 // R35.C — screenshot burst count (frames per capture), own key.
@@ -533,6 +537,24 @@ export const useStore = create((set, get) => {
     const next = nextFramingGridId(get().framingGridId)
     try { localStorage.setItem(FRAMING_GRID_KEY, next) } catch { /* */ }
     set({ framingGridId: next })
+  },
+
+  // R37.B — golden-spiral orientation (0..3 → tl/tr/br/bl). Which corner
+  // the spiral's eye converges toward, so a user can flip it to match a
+  // left- vs right-facing subject. Persisted on its own key; only has a
+  // visible effect while the 'spiral' grid mode is active.
+  spiralOrientation: (() => {
+    try { return sanitizeSpiralOrientation(localStorage.getItem(SPIRAL_ORIENT_KEY)) } catch { return 0 }
+  })(),
+  setSpiralOrientation: (o) => {
+    const next = sanitizeSpiralOrientation(o)
+    try { localStorage.setItem(SPIRAL_ORIENT_KEY, String(next)) } catch { /* quota / private mode */ }
+    set({ spiralOrientation: next })
+  },
+  cycleSpiralOrientation: () => {
+    const next = sanitizeSpiralOrientation(get().spiralOrientation + 1)
+    try { localStorage.setItem(SPIRAL_ORIENT_KEY, String(next)) } catch { /* */ }
+    set({ spiralOrientation: next })
   },
 
   // R35.E — Zen auto-orbit: when enabled and the screen is left alone in

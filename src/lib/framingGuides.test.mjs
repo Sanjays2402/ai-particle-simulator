@@ -138,16 +138,19 @@ const r35b = await import('./framingGuides.js')
 const {
   FRAMING_GRIDS, isValidGridId, sanitizeGridId, gridLabelForId,
   nextGridId, computeCompositionGrid,
+  // R37.B — golden spiral
+  SPIRAL_ORIENTATIONS, sanitizeSpiralOrientation, buildGoldenSpiral,
 } = r35b
 
 // --- grid roster integrity ---
-ok(FRAMING_GRIDS.length === 6, 'six grid modes (R36.B adds phi + diagonal)')
+ok(FRAMING_GRIDS.length === 7, 'seven grid modes (R37.B adds spiral)')
 eq(FRAMING_GRIDS[0].id, 'off', 'first grid is Off')
 {
   const ids = new Set(FRAMING_GRIDS.map(g => g.id))
   eq(ids.size, FRAMING_GRIDS.length, 'grid ids unique')
   ok(ids.has('thirds') && ids.has('cross') && ids.has('both'), 'has thirds/cross/both')
   ok(ids.has('phi') && ids.has('diagonal'), 'R36.B has phi + diagonal')
+  ok(ids.has('spiral'), 'R37.B has spiral')
   for (const g of FRAMING_GRIDS) {
     ok(typeof g.label === 'string' && g.label.length > 0, `grid ${g.id} has a label`)
   }
@@ -318,3 +321,83 @@ eq(gridLabelForId('bogus'), 'Off', 'unknown grid label → Off')
 }
 
 console.log(`PASS: framingGuides — ${passed} assertions (letterbox/pillarbox geometry, roster, cycle, describe, R35.B composition grid, R36.B phi + diagonal)`)
+
+// === R37.B: golden (Fibonacci) spiral ================================
+{
+  // --- orientation roster + sanitiser ---
+  eq(SPIRAL_ORIENTATIONS.length, 4, 'four spiral orientations')
+  eq(SPIRAL_ORIENTATIONS.join(','), 'tl,tr,br,bl', 'orientation order TL,TR,BR,BL')
+  eq(sanitizeSpiralOrientation('tr'), 1, 'string id resolves to index')
+  eq(sanitizeSpiralOrientation('bl'), 3, 'bl → index 3')
+  eq(sanitizeSpiralOrientation('xx'), 0, 'unknown string → 0')
+  eq(sanitizeSpiralOrientation(2), 2, 'numeric index passthrough')
+  eq(sanitizeSpiralOrientation(5), 1, 'wraps past length (5 % 4 = 1)')
+  eq(sanitizeSpiralOrientation(-1), 3, 'negative wraps to 3')
+  eq(sanitizeSpiralOrientation(NaN), 0, 'NaN → 0')
+  eq(sanitizeSpiralOrientation(undefined), 0, 'undefined → 0')
+  eq(sanitizeSpiralOrientation(1.9), 1, 'fractional floors to 1')
+
+  // --- buildGoldenSpiral geometry ---
+  const tl = buildGoldenSpiral(0, 0, 100, 100, 'tl', 8)
+  ok(tl.length > 0, 'spiral produces points')
+  // 8 turns × (SEG+1=13) points = 104.
+  eq(tl.length, 104, '8 turns at 13 pts/turn → 104 points')
+  // Every point is inside the frame (a tiny epsilon for float drift).
+  ok(tl.every(p => p.x >= -0.5 && p.x <= 100.5 && p.y >= -0.5 && p.y <= 100.5),
+    'all spiral points inside the frame')
+  // The spiral uses the full width + height of the frame (it's not a
+  // degenerate dot in one corner).
+  const xs = tl.map(p => p.x), ys = tl.map(p => p.y)
+  ok(Math.max(...xs) - Math.min(...xs) > 90, 'spiral spans most of the width')
+  ok(Math.max(...ys) - Math.min(...ys) > 90, 'spiral spans most of the height')
+
+  // --- orientation mirrors the eye (last, most-converged point) ---
+  const tr = buildGoldenSpiral(0, 0, 100, 100, 'tr', 8)
+  const eyeTL = tl[tl.length - 1]
+  const eyeTR = tr[tr.length - 1]
+  // tl + tr are X-mirror images: eye x's sum to ~frame width, y's equal.
+  near(eyeTL.x + eyeTR.x, 100, 'tl/tr eyes mirror across x', 0.5)
+  near(eyeTL.y, eyeTR.y, 'tl/tr eyes share the same y', 0.5)
+  const br = buildGoldenSpiral(0, 0, 100, 100, 'br', 8)
+  const eyeBR = br[br.length - 1]
+  // tl + br are point-mirror images: both coords sum to ~frame dims.
+  near(eyeTL.x + eyeBR.x, 100, 'tl/br eyes mirror across x', 0.5)
+  near(eyeTL.y + eyeBR.y, 100, 'tl/br eyes mirror across y', 0.5)
+
+  // --- offset + non-square frame: points stay inside the frame rect ---
+  const off = buildGoldenSpiral(10, 20, 200, 120, 'tl', 8)
+  ok(off.every(p => p.x >= 9.5 && p.x <= 210.5 && p.y >= 19.5 && p.y <= 140.5),
+    'offset non-square spiral stays in the frame rect')
+
+  // --- depth clamps ---
+  eq(buildGoldenSpiral(0, 0, 100, 100, 'tl', 3).length, 3 * 13, 'depth 3 → 3 turns')
+  ok(buildGoldenSpiral(0, 0, 100, 100, 'tl', 999).length <= 14 * 13, 'depth clamps at 14 turns')
+  eq(buildGoldenSpiral(0, 0, 100, 100, 'tl', 0).length, 8 * 13, 'depth 0 → default 8 turns')
+
+  // --- defensive ---
+  eq(buildGoldenSpiral(0, 0, 0, 100, 'tl').length, 0, 'zero width → empty')
+  eq(buildGoldenSpiral(0, 0, 100, -5, 'tl').length, 0, 'negative height → empty')
+  eq(buildGoldenSpiral(NaN, 0, 100, 100, 'tl').length, 0, 'NaN x → empty')
+  eq(buildGoldenSpiral(0, 0, Infinity, 100, 'tl').length, 0, 'Infinity width → empty')
+
+  // --- computeCompositionGrid wires the spiral + keeps shape stable ---
+  const g = computeCompositionGrid({ frameX: 0, frameY: 0, frameW: 300, frameH: 300, spiralOrientation: 'tr' }, 'spiral')
+  ok(Array.isArray(g.spiral) && g.spiral.length > 0, 'spiral grid mode populates spiral[]')
+  eq(g.verticals.length, 0, 'spiral mode draws no thirds verticals')
+  eq(g.diagonals.length, 0, 'spiral mode draws no diagonals')
+  // Every OTHER grid mode (and the empty result) carries a spiral key.
+  ok(Array.isArray(computeCompositionGrid({ frameX: 0, frameY: 0, frameW: 100, frameH: 100 }, 'thirds').spiral),
+    'thirds result has spiral array (empty, shape stability)')
+  ok(Array.isArray(computeCompositionGrid(null, 'spiral').spiral), 'empty result has spiral array')
+  eq(computeCompositionGrid({ frameX: 0, frameY: 0, frameW: 100, frameH: 100 }, 'off').spiral.length, 0,
+    'off mode → empty spiral')
+
+  // --- purity ---
+  const rect = { frameX: 0, frameY: 0, frameW: 100, frameH: 100, spiralOrientation: 'tl' }
+  const snap = JSON.stringify(rect)
+  computeCompositionGrid(rect, 'spiral')
+  buildGoldenSpiral(0, 0, 100, 100, 'tl')
+  eq(JSON.stringify(rect), snap, 'R37.B helpers do not mutate input')
+}
+
+console.log(`PASS: framingGuides R37.B — ${passed} total assertions (incl. golden spiral + 4 orientations)`)

@@ -20,6 +20,7 @@ export default function FramingGuides() {
   const setFramingGuideId = useStore(s => s.setFramingGuideId)
   const framingGridId = useStore(s => s.framingGridId)
   const cycleFramingGrid = useStore(s => s.cycleFramingGrid)
+  const spiralOrientation = useStore(s => s.spiralOrientation)
 
   // Track the viewport so the bars recompute on resize / orientation
   // change. Initialised from window so the first paint is already
@@ -67,15 +68,23 @@ export default function FramingGuides() {
   const bars = ratio != null ? computeFramingBars(vp.w, vp.h, ratio) : { mode: 'none', bar: 0, frameW: vp.w, frameH: vp.h, frameX: 0, frameY: 0 }
   const showBars = bars.mode !== 'none'
   // Frame rect the grid composes into: the masked-in region when bars
-  // are showing, else the whole viewport.
+  // are showing, else the whole viewport. `spiralOrientation` rides on
+  // the rect so computeCompositionGrid can place the golden-spiral eye.
   const frameRect = showBars
-    ? { frameX: bars.frameX, frameY: bars.frameY, frameW: bars.frameW, frameH: bars.frameH }
-    : { frameX: 0, frameY: 0, frameW: vp.w, frameH: vp.h }
+    ? { frameX: bars.frameX, frameY: bars.frameY, frameW: bars.frameW, frameH: bars.frameH, spiralOrientation }
+    : { frameX: 0, frameY: 0, frameW: vp.w, frameH: vp.h, spiralOrientation }
   const grid = gridActive ? computeCompositionGrid(frameRect, framingGridId) : null
 
   // Nothing to draw (no bars, no grid lines) → render nothing.
-  const gridHasLines = grid && (grid.verticals.length > 0 || grid.horizontals.length > 0 || (grid.diagonals && grid.diagonals.length > 0))
+  const gridHasLines = grid && (grid.verticals.length > 0 || grid.horizontals.length > 0 || (grid.diagonals && grid.diagonals.length > 0) || (grid.spiral && grid.spiral.length > 0))
   if (!showBars && !gridHasLines) return null
+
+  // R37.B — the golden spiral as an SVG polyline `points` string + its
+  // converged "eye" (the last, most-wound point) so we can paint a focal
+  // dot there.
+  const spiralPts = grid && grid.spiral && grid.spiral.length > 0 ? grid.spiral : null
+  const spiralAttr = spiralPts ? spiralPts.map(p => `${Math.round(p.x * 10) / 10},${Math.round(p.y * 10) / 10}`).join(' ') : ''
+  const spiralEye = spiralPts ? spiralPts[spiralPts.length - 1] : null
 
   const label = describeFraming(framingGuideId, vp.w, vp.h)
   const barStyle = {
@@ -128,6 +137,19 @@ export default function FramingGuides() {
             <line key={`d${i}`} x1={d.x1} y1={d.y1} x2={d.x2} y2={d.y2}
               stroke="rgba(255,255,255,0.18)" strokeWidth={1} strokeDasharray="4 4" />
           ))}
+          {/* R37.B — golden (Fibonacci) spiral: the classical S-curve
+              guide. A smooth quarter-arc polyline winding to a focal
+              "eye" dot a user can place a subject on for the strongest
+              emphasis. The eye corner is set by spiralOrientation. */}
+          {spiralAttr && (
+            <polyline points={spiralAttr} fill="none"
+              stroke="rgba(168,85,247,0.55)" strokeWidth={1.4}
+              strokeLinejoin="round" strokeLinecap="round" />
+          )}
+          {spiralEye && (
+            <circle cx={spiralEye.x} cy={spiralEye.y} r={4}
+              fill="rgba(236,72,153,0.92)" stroke="rgba(255,255,255,0.6)" strokeWidth={1} />
+          )}
           {grid.points.map((p, i) => (
             <circle key={`p${i}`} cx={p.x} cy={p.y} r={3}
               fill="rgba(168,85,247,0.9)" stroke="rgba(255,255,255,0.5)" strokeWidth={0.75} />
