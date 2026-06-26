@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import {
   ratioForId, computeFramingBars, describeFraming, labelForId,
+  computeCompositionGrid,
 } from '../lib/framingGuides'
 
 // Cinematic framing guides overlay. Renders letterbox / pillarbox bars
@@ -17,6 +18,8 @@ export default function FramingGuides() {
   const framingGuideId = useStore(s => s.framingGuideId)
   const cycleFramingGuide = useStore(s => s.cycleFramingGuide)
   const setFramingGuideId = useStore(s => s.setFramingGuideId)
+  const framingGridId = useStore(s => s.framingGridId)
+  const cycleFramingGrid = useStore(s => s.cycleFramingGrid)
 
   // Track the viewport so the bars recompute on resize / orientation
   // change. Initialised from window so the first paint is already
@@ -33,7 +36,8 @@ export default function FramingGuides() {
   }, [])
 
   // Bracket-key shortcuts: ']' cycles to the next frame, '[' clears it.
-  // Skipped while typing in a field so they don't fight text entry.
+  // Backslash '\' cycles the composition grid (off -> thirds -> cross ->
+  // both). Skipped while typing so they don't fight text entry.
   useEffect(() => {
     const onKey = (e) => {
       const tag = e.target.tagName
@@ -45,17 +49,32 @@ export default function FramingGuides() {
       } else if (e.code === 'BracketLeft') {
         e.preventDefault()
         setFramingGuideId('off')
+      } else if (e.code === 'Backslash') {
+        e.preventDefault()
+        cycleFramingGrid()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [cycleFramingGuide, setFramingGuideId])
+  }, [cycleFramingGuide, setFramingGuideId, cycleFramingGrid])
 
   const ratio = ratioForId(framingGuideId)
-  if (ratio == null) return null
+  // The grid can draw even with no ratio active (full-viewport frame) so
+  // a user gets rule-of-thirds without committing to a crop.
+  const gridActive = framingGridId && framingGridId !== 'off'
+  if (ratio == null && !gridActive) return null
 
-  const bars = computeFramingBars(vp.w, vp.h, ratio)
-  if (bars.mode === 'none') return null
+  const bars = ratio != null ? computeFramingBars(vp.w, vp.h, ratio) : { mode: 'none', bar: 0, frameW: vp.w, frameH: vp.h, frameX: 0, frameY: 0 }
+  const showBars = bars.mode !== 'none'
+  // Frame rect the grid composes into: the masked-in region when bars
+  // are showing, else the whole viewport.
+  const frameRect = showBars
+    ? { frameX: bars.frameX, frameY: bars.frameY, frameW: bars.frameW, frameH: bars.frameH }
+    : { frameX: 0, frameY: 0, frameW: vp.w, frameH: vp.h }
+  const grid = gridActive ? computeCompositionGrid(frameRect, framingGridId) : null
+
+  // Nothing to draw (no bars, no grid lines) → render nothing.
+  if (!showBars && (!grid || (grid.verticals.length === 0 && grid.horizontals.length === 0))) return null
 
   const label = describeFraming(framingGuideId, vp.w, vp.h)
   const barStyle = {
@@ -73,7 +92,7 @@ export default function FramingGuides() {
 
   return (
     <>
-      {bars.mode === 'letterbox' ? (
+      {showBars && (bars.mode === 'letterbox' ? (
         <>
           <div style={{ ...barStyle, top: 0, left: 0, right: 0, height: bars.bar, boxShadow: `inset 0 -1px 0 rgba(255,255,255,0.16)` }} />
           <div style={{ ...barStyle, bottom: 0, left: 0, right: 0, height: bars.bar, boxShadow: `inset 0 1px 0 rgba(255,255,255,0.16)` }} />
@@ -83,34 +102,61 @@ export default function FramingGuides() {
           <div style={{ ...barStyle, top: 0, bottom: 0, left: 0, width: bars.bar, boxShadow: `inset -1px 0 0 rgba(255,255,255,0.16)` }} />
           <div style={{ ...barStyle, top: 0, bottom: 0, right: 0, width: bars.bar, boxShadow: `inset 1px 0 0 rgba(255,255,255,0.16)` }} />
         </>
+      ))}
+
+      {/* R35.B — composition grid drawn INSIDE the frame: thin lines at
+          the rule-of-thirds (or centre cross) plus the four power-point
+          dots so a user can line a subject up to a stronger spot than
+          dead centre. Full-screen SVG, pointer-events:none, above the
+          bars but below the frame badge. */}
+      {grid && (grid.verticals.length > 0 || grid.horizontals.length > 0) && (
+        <svg
+          width={vp.w} height={vp.h}
+          style={{ position: 'fixed', inset: 0, zIndex: 6, pointerEvents: 'none' }}
+        >
+          {grid.verticals.map((x, i) => (
+            <line key={`v${i}`} x1={x} y1={frameRect.frameY} x2={x} y2={frameRect.frameY + frameRect.frameH}
+              stroke="rgba(255,255,255,0.22)" strokeWidth={1} />
+          ))}
+          {grid.horizontals.map((y, i) => (
+            <line key={`h${i}`} x1={frameRect.frameX} y1={y} x2={frameRect.frameX + frameRect.frameW} y2={y}
+              stroke="rgba(255,255,255,0.22)" strokeWidth={1} />
+          ))}
+          {grid.points.map((p, i) => (
+            <circle key={`p${i}`} cx={p.x} cy={p.y} r={3}
+              fill="rgba(168,85,247,0.9)" stroke="rgba(255,255,255,0.5)" strokeWidth={0.75} />
+          ))}
+        </svg>
       )}
 
       {/* Frame badge — sits just inside the frame at the bottom-left so
           the user knows exactly which ratio + pixel dims they're
-          composing into. */}
-      <div style={{
-        position: 'fixed',
-        left: bars.frameX + 12,
-        top: bars.frameY + bars.frameH - 30,
-        zIndex: 6,
-        pointerEvents: 'none',
-        fontFamily: 'Geist Mono, JetBrains Mono, monospace',
-        fontSize: 10.5, fontWeight: 500, letterSpacing: '0.04em',
-        color: '#e8e8f0',
-        padding: '3px 8px', borderRadius: 6,
-        background: 'rgba(10,10,16,0.6)',
-        border: '1px solid rgba(255,255,255,0.1)',
-        backdropFilter: 'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
-        display: 'inline-flex', alignItems: 'center', gap: 6,
-      }}>
-        <span style={{
-          width: 5, height: 5, borderRadius: '50%',
-          background: 'linear-gradient(135deg, #a855f7, #ec4899)',
-          boxShadow: '0 0 6px rgba(168,85,247,0.6)',
-        }} />
-        {label || labelForId(framingGuideId)}
-      </div>
+          composing into. Only when a ratio is active. */}
+      {showBars && (
+        <div style={{
+          position: 'fixed',
+          left: bars.frameX + 12,
+          top: bars.frameY + bars.frameH - 30,
+          zIndex: 7,
+          pointerEvents: 'none',
+          fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+          fontSize: 10.5, fontWeight: 500, letterSpacing: '0.04em',
+          color: '#e8e8f0',
+          padding: '3px 8px', borderRadius: 6,
+          background: 'rgba(10,10,16,0.6)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+        }}>
+          <span style={{
+            width: 5, height: 5, borderRadius: '50%',
+            background: 'linear-gradient(135deg, #a855f7, #ec4899)',
+            boxShadow: '0 0 6px rgba(168,85,247,0.6)',
+          }} />
+          {label || labelForId(framingGuideId)}
+        </div>
+      )}
     </>
   )
 }

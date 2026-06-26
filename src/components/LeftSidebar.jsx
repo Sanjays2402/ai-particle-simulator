@@ -33,7 +33,7 @@ import {
   summarizeImportImpact as summarizeCrossfadeOverridesImpact,
 } from '../lib/crossfadeOverridesIO'
 import { ATTRACTOR_TYPES, MAX_ATTRACTORS, attractorTypeStyle, parsePositionInput, dropIndexForGap, stepKeyboardGapCursor, describeGapReorderAnnouncement } from '../lib/namedAttractors'
-import { FRAMING_RATIOS } from '../lib/framingGuides'
+import { FRAMING_RATIOS, FRAMING_GRIDS } from '../lib/framingGuides'
 import { showToast } from './Toast'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
@@ -76,6 +76,7 @@ export default function LeftSidebar() {
     presetSearch, setPresetSearch,
     showFavoritesOnly, setShowFavoritesOnly,
     framingGuideId, setFramingGuideId,
+    framingGridId, setFramingGridId,
   } = useStore()
 
   const exportGif = async () => {
@@ -264,6 +265,36 @@ export default function LeftSidebar() {
                     boxShadow: active ? '0 0 12px rgba(168,85,247,0.22)' : 'none',
                   }}
                 >{f.label}</button>
+              )
+            })}
+          </div>
+
+          {/* R35.B — composition grid drawn inside the active frame.
+              Rule-of-thirds (with power-point dots) or a centre cross for
+              symmetric framing; works even with no ratio (full viewport).
+              Backslash cycles it. */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, marginBottom: 6 }}>
+            <span style={{ fontSize: 11, color: '#7a7a90', fontWeight: 500 }}>Composition Grid</span>
+            <span style={{ fontSize: 9.5, color: '#5a5a70', fontFamily: 'Geist Mono, monospace' }}>\ to cycle</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+            {FRAMING_GRIDS.map(g => {
+              const active = framingGridId === g.id
+              return (
+                <button key={g.id}
+                  onClick={() => setFramingGridId(g.id)}
+                  title={g.hint || g.label}
+                  style={{
+                    padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+                    cursor: 'pointer', transition: 'all 0.15s ease-out',
+                    background: active
+                      ? 'linear-gradient(135deg, rgba(168,85,247,0.22) 0%, rgba(236,72,153,0.18) 100%)'
+                      : 'rgba(255,255,255,0.03)',
+                    color: active ? '#f3e8ff' : '#8a8aa0',
+                    border: active ? '1px solid rgba(168,85,247,0.45)' : '1px solid rgba(255,255,255,0.05)',
+                    boxShadow: active ? '0 0 12px rgba(168,85,247,0.22)' : 'none',
+                  }}
+                >{g.label}</button>
               )
             })}
           </div>

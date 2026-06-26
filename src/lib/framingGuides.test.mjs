@@ -133,4 +133,112 @@ eq(labelForId('bogus'), 'Off', 'unknown label → Off')
   eq(before, after, 'roster order stable')
 }
 
-console.log(`PASS: framingGuides — ${passed} assertions (letterbox/pillarbox geometry, roster, cycle, describe)`)
+// === R35.B: composition grid overlay =================================
+const r35b = await import('./framingGuides.js')
+const {
+  FRAMING_GRIDS, isValidGridId, sanitizeGridId, gridLabelForId,
+  nextGridId, computeCompositionGrid,
+} = r35b
+
+// --- grid roster integrity ---
+ok(FRAMING_GRIDS.length === 4, 'four grid modes')
+eq(FRAMING_GRIDS[0].id, 'off', 'first grid is Off')
+{
+  const ids = new Set(FRAMING_GRIDS.map(g => g.id))
+  eq(ids.size, FRAMING_GRIDS.length, 'grid ids unique')
+  ok(ids.has('thirds') && ids.has('cross') && ids.has('both'), 'has thirds/cross/both')
+  for (const g of FRAMING_GRIDS) {
+    ok(typeof g.label === 'string' && g.label.length > 0, `grid ${g.id} has a label`)
+  }
+}
+
+// --- grid validation / sanitize ---
+eq(isValidGridId('thirds'), true, 'thirds valid')
+eq(isValidGridId('nope'), false, 'unknown grid invalid')
+eq(sanitizeGridId('cross'), 'cross', 'known grid passes')
+eq(sanitizeGridId('junk'), 'off', 'junk grid → off')
+eq(sanitizeGridId(null), 'off', 'null grid → off')
+eq(sanitizeGridId(undefined), 'off', 'undefined grid → off')
+eq(gridLabelForId('both'), 'Both', 'both label')
+eq(gridLabelForId('bogus'), 'Off', 'unknown grid label → Off')
+
+// --- nextGridId cycles through every entry once ---
+{
+  let id = FRAMING_GRIDS[0].id
+  const seen = new Set()
+  for (let i = 0; i < FRAMING_GRIDS.length; i++) {
+    ok(!seen.has(id), `grid cycle visits ${id} once`)
+    seen.add(id)
+    id = nextGridId(id)
+  }
+  eq(id, FRAMING_GRIDS[0].id, 'grid cycle wraps to start')
+  eq(nextGridId('unknown'), FRAMING_GRIDS[0].id, 'unknown grid → first')
+}
+
+// --- computeCompositionGrid: thirds geometry ---
+{
+  // A 300x300 frame at origin (0,0).
+  const rect = { frameX: 0, frameY: 0, frameW: 300, frameH: 300 }
+  const g = computeCompositionGrid(rect, 'thirds')
+  eq(g.verticals.length, 2, 'thirds → 2 vertical lines')
+  eq(g.horizontals.length, 2, 'thirds → 2 horizontal lines')
+  near(g.verticals[0], 100, 'first vertical at 1/3')
+  near(g.verticals[1], 200, 'second vertical at 2/3')
+  near(g.horizontals[0], 100, 'first horizontal at 1/3')
+  near(g.horizontals[1], 200, 'second horizontal at 2/3')
+  eq(g.points.length, 4, 'thirds → 4 power points')
+  // intersections at (100,100),(200,100),(100,200),(200,200)
+  ok(g.points.some(p => p.x === 100 && p.y === 100), 'top-left power point')
+  ok(g.points.some(p => p.x === 200 && p.y === 200), 'bottom-right power point')
+}
+
+// --- thirds offset by frame origin (pillarbox/letterbox case) ---
+{
+  // Frame inset at (60, 0), size 180x300 (a pillarboxed square in a wide vp).
+  const rect = { frameX: 60, frameY: 0, frameW: 180, frameH: 300 }
+  const g = computeCompositionGrid(rect, 'thirds')
+  near(g.verticals[0], 60 + 60, 'vertical 1/3 is frame-relative + origin')
+  near(g.verticals[1], 60 + 120, 'vertical 2/3 frame-relative + origin')
+  // points carry the same origin offset.
+  ok(g.points.every(p => p.x >= 60 && p.x <= 240), 'power points inside the inset frame')
+}
+
+// --- centre cross ---
+{
+  const rect = { frameX: 0, frameY: 0, frameW: 300, frameH: 200 }
+  const g = computeCompositionGrid(rect, 'cross')
+  eq(g.verticals.length, 1, 'cross → 1 vertical')
+  eq(g.horizontals.length, 1, 'cross → 1 horizontal')
+  near(g.verticals[0], 150, 'cross vertical at centre')
+  near(g.horizontals[0], 100, 'cross horizontal at centre')
+  eq(g.points.length, 0, 'cross has no power points')
+}
+
+// --- both: thirds + cross combined ---
+{
+  const rect = { frameX: 0, frameY: 0, frameW: 300, frameH: 300 }
+  const g = computeCompositionGrid(rect, 'both')
+  eq(g.verticals.length, 3, 'both → 2 thirds + 1 centre vertical')
+  eq(g.horizontals.length, 3, 'both → 2 thirds + 1 centre horizontal')
+  ok(g.verticals.includes(150), 'centre vertical present in both')
+  eq(g.points.length, 4, 'both keeps the 4 power points')
+}
+
+// --- off / defensive ---
+{
+  const rect = { frameX: 0, frameY: 0, frameW: 300, frameH: 300 }
+  const off = computeCompositionGrid(rect, 'off')
+  eq(off.verticals.length, 0, 'off → no verticals')
+  eq(off.horizontals.length, 0, 'off → no horizontals')
+  eq(off.points.length, 0, 'off → no points')
+  // junk grid id behaves like off (sanitised).
+  eq(computeCompositionGrid(rect, 'garbage').verticals.length, 0, 'junk grid → empty')
+  // bad frame rects.
+  eq(computeCompositionGrid(null, 'thirds').verticals.length, 0, 'null rect → empty')
+  eq(computeCompositionGrid({}, 'thirds').verticals.length, 0, 'missing dims → empty')
+  eq(computeCompositionGrid({ frameX: 0, frameY: 0, frameW: 0, frameH: 100 }, 'thirds').verticals.length, 0, 'zero width → empty')
+  eq(computeCompositionGrid({ frameX: 0, frameY: 0, frameW: NaN, frameH: 100 }, 'thirds').verticals.length, 0, 'NaN width → empty')
+  eq(computeCompositionGrid({ frameX: 0, frameY: 0, frameW: 100, frameH: -5 }, 'thirds').verticals.length, 0, 'negative height → empty')
+}
+
+console.log(`PASS: framingGuides — ${passed} assertions (letterbox/pillarbox geometry, roster, cycle, describe, R35.B composition grid)`)

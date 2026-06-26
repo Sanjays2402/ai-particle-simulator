@@ -106,3 +106,97 @@ export function describeFraming(id, viewportW, viewportH) {
   if (bars.mode === 'none') return labelForId(id)
   return `${labelForId(id)} · ${Math.round(bars.frameW)}x${Math.round(bars.frameH)}`
 }
+
+// --- R35.B: composition grid overlay ---------------------------------
+//
+// Inside the active frame, optionally draw classic composition guides so
+// a user can line a subject up to a stronger point than dead centre:
+//   - thirds: the rule-of-thirds grid (2 vertical + 2 horizontal lines
+//     at 1/3 and 2/3), with the four intersections as the "power points"
+//   - cross:  a centre cross (1 vertical + 1 horizontal through the
+//     middle) for symmetric / centred compositions
+//   - both:   thirds + the centre cross together
+// All purely visual, like the bars. The geometry is pure + DOM-free.
+
+// Selectable grid modes. Ordered off → light → heavier so a cycle reads
+// naturally.
+export const FRAMING_GRIDS = [
+  { id: 'off',    label: 'Off',     hint: 'No composition grid' },
+  { id: 'thirds', label: 'Thirds',  hint: 'Rule-of-thirds grid + power points' },
+  { id: 'cross',  label: 'Cross',   hint: 'Centre cross for symmetric framing' },
+  { id: 'both',   label: 'Both',    hint: 'Thirds grid + centre cross' },
+]
+
+const GRID_BY_ID = new Map(FRAMING_GRIDS.map(g => [g.id, g]))
+
+export function isValidGridId(id) {
+  return GRID_BY_ID.has(id)
+}
+
+// Normalize a stored / incoming grid id; junk → 'off'.
+export function sanitizeGridId(id) {
+  return GRID_BY_ID.has(id) ? id : 'off'
+}
+
+export function gridLabelForId(id) {
+  const g = GRID_BY_ID.get(id)
+  return g ? g.label : 'Off'
+}
+
+// Cycle to the next grid mode (wraps). Unknown id → first entry.
+export function nextGridId(id) {
+  const idx = FRAMING_GRIDS.findIndex(g => g.id === id)
+  if (idx < 0) return FRAMING_GRIDS[0].id
+  return FRAMING_GRIDS[(idx + 1) % FRAMING_GRIDS.length].id
+}
+
+// Compute the grid line + intersection geometry for a given frame rect
+// and grid mode. The frame rect is the masked-in region (from
+// computeFramingBars): { frameX, frameY, frameW, frameH }. Returns:
+//   { verticals: [x...], horizontals: [y...], points: [{x,y}...] }
+// where coordinates are ABSOLUTE viewport pixels (so the overlay can
+// position lines without re-deriving the frame origin), `points` are
+// the rule-of-thirds intersections (empty unless thirds are drawn).
+//
+// Defensive: unknown/off mode, or a degenerate (<=0) frame, returns
+// empty arrays so the overlay renders nothing rather than NaN lines.
+export function computeCompositionGrid(frameRect, gridId) {
+  const empty = { verticals: [], horizontals: [], points: [] }
+  const mode = sanitizeGridId(gridId)
+  if (mode === 'off') return empty
+  if (!frameRect || typeof frameRect !== 'object') return empty
+  const x = Number(frameRect.frameX)
+  const y = Number(frameRect.frameY)
+  const w = Number(frameRect.frameW)
+  const h = Number(frameRect.frameH)
+  if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) return empty
+
+  const verticals = []
+  const horizontals = []
+  let points = []
+
+  const wantThirds = mode === 'thirds' || mode === 'both'
+  const wantCross = mode === 'cross' || mode === 'both'
+
+  if (wantThirds) {
+    const vx1 = x + w / 3
+    const vx2 = x + (2 * w) / 3
+    const hy1 = y + h / 3
+    const hy2 = y + (2 * h) / 3
+    verticals.push(vx1, vx2)
+    horizontals.push(hy1, hy2)
+    points = [
+      { x: vx1, y: hy1 }, { x: vx2, y: hy1 },
+      { x: vx1, y: hy2 }, { x: vx2, y: hy2 },
+    ]
+  }
+
+  if (wantCross) {
+    const cx = x + w / 2
+    const cy = y + h / 2
+    verticals.push(cx)
+    horizontals.push(cy)
+  }
+
+  return { verticals, horizontals, points }
+}

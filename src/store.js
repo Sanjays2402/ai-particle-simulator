@@ -39,6 +39,8 @@ import { clampHueReactiveStrength as clampBgGradientStrength, normalizeReactiveC
 import {
   sanitizeFramingId as sanitizeFramingGuideId,
   nextFramingId as nextFramingGuideId,
+  sanitizeGridId as sanitizeFramingGridId,
+  nextGridId as nextFramingGridId,
 } from './lib/framingGuides'
 // R34.C — screenshot self-timer delay sanitiser + default.
 import {
@@ -59,6 +61,8 @@ const PERSIST_KEY = 'particle-settings-v1'
 // R34.B — framing-guide aspect-ratio id (separate key so it round-trips
 // independently of the main settings blob).
 const FRAMING_GUIDE_KEY = 'particle-framing-guide-v1'
+// R35.B — composition grid inside the framing guide, own key.
+const FRAMING_GRID_KEY = 'particle-framing-grid-v1'
 // R34.C — screenshot self-timer delay (seconds), own key.
 const SCREENSHOT_TIMER_KEY = 'particle-screenshot-timer-v1'
 const PERSIST_FIELDS = [
@@ -500,6 +504,25 @@ export const useStore = create((set, get) => {
     const next = nextFramingGuideId(get().framingGuideId)
     try { localStorage.setItem(FRAMING_GUIDE_KEY, next) } catch { /* */ }
     set({ framingGuideId: next })
+  },
+
+  // R35.B — Composition grid drawn INSIDE the active framing guide:
+  // 'off' | 'thirds' (rule-of-thirds + power points) | 'cross' (centre
+  // cross) | 'both'. A composition aid only; renders nothing when no
+  // framing ratio is active. Persisted on its own key so it round-trips
+  // independently of the chosen ratio.
+  framingGridId: (() => {
+    try { return sanitizeFramingGridId(localStorage.getItem(FRAMING_GRID_KEY)) } catch { return 'off' }
+  })(),
+  setFramingGridId: (id) => {
+    const next = sanitizeFramingGridId(id)
+    try { localStorage.setItem(FRAMING_GRID_KEY, next) } catch { /* quota / private mode */ }
+    set({ framingGridId: next })
+  },
+  cycleFramingGrid: () => {
+    const next = nextFramingGridId(get().framingGridId)
+    try { localStorage.setItem(FRAMING_GRID_KEY, next) } catch { /* */ }
+    set({ framingGridId: next })
   },
 
   // R34.C — Screenshot self-timer delay (seconds). When > 0, the
