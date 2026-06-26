@@ -46,6 +46,8 @@ import {
 import {
   sanitizeTimerDelay as sanitizeTimerDelayHelper,
   DEFAULT_TIMER_DELAY as DEFAULT_TIMER_DELAY_VAL,
+  sanitizeBurstCount as sanitizeBurstCountHelper,
+  DEFAULT_BURST_COUNT as DEFAULT_BURST_COUNT_VAL,
 } from './lib/selfTimer'
 // R29.43 — persisted hotkey-chain fade curve preference helpers.
 import {
@@ -65,6 +67,8 @@ const FRAMING_GUIDE_KEY = 'particle-framing-guide-v1'
 const FRAMING_GRID_KEY = 'particle-framing-grid-v1'
 // R34.C — screenshot self-timer delay (seconds), own key.
 const SCREENSHOT_TIMER_KEY = 'particle-screenshot-timer-v1'
+// R35.C — screenshot burst count (frames per capture), own key.
+const SCREENSHOT_BURST_KEY = 'particle-screenshot-burst-v1'
 const PERSIST_FIELDS = [
   'particleCount', 'speed', 'glowIntensity', 'visualStyle',
   'theme', 'trails', 'mouseAttract', 'attractStrength',
@@ -536,6 +540,20 @@ export const useStore = create((set, get) => {
     const next = sanitizeTimerDelayHelper(d)
     try { localStorage.setItem(SCREENSHOT_TIMER_KEY, String(next)) } catch { /* quota / private mode */ }
     set({ screenshotTimerDelay: next })
+  },
+
+  // R35.C — Screenshot burst count: after the self-timer countdown,
+  // fire N shots spaced BURST_INTERVAL_MS apart so the user can pick the
+  // best particle moment from a quick sequence. 1 = single shot
+  // (classic). Persisted on its own key. Only takes effect when the
+  // timer delay is > 0 (the burst rides on the countdown overlay).
+  screenshotBurstCount: (() => {
+    try { return sanitizeBurstCountHelper(localStorage.getItem(SCREENSHOT_BURST_KEY)) } catch { return DEFAULT_BURST_COUNT_VAL }
+  })(),
+  setScreenshotBurstCount: (n) => {
+    const next = sanitizeBurstCountHelper(n)
+    try { localStorage.setItem(SCREENSHOT_BURST_KEY, String(next)) } catch { /* quota / private mode */ }
+    set({ screenshotBurstCount: next })
   },
 
 

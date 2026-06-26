@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
-import { countdownState, ringDashoffset } from '../lib/selfTimer'
+import {
+  countdownState, ringDashoffset,
+  burstShotsDue, BURST_INTERVAL_MS, sanitizeBurstCount,
+} from '../lib/selfTimer'
 import { resolveReducedMotion } from '../lib/reducedMotion'
 
 // Screenshot self-timer overlay. When a timed capture is requested
@@ -9,71 +12,108 @@ import { resolveReducedMotion } from '../lib/reducedMotion'
 // countdown ring centred on screen, then dispatches the actual
 // screenshot once the countdown completes.
 //
-// The countdown math lives in lib/selfTimer (pure, tested); this
+// R35.C — burst mode: once the countdown ends, fire N shots spaced
+// BURST_INTERVAL_MS apart (driven by the pure burstShotsDue helper) so
+// the user can pick the best particle moment from a quick sequence.
+// While the burst runs, the ring shows a small "k / N" shot counter.
+//
+// The countdown + burst math live in lib/selfTimer (pure, tested); this
 // component owns only the rAF loop + the visual ring. The computed
-// countdown state is held in React state (updated from the loop, never
-// recomputed during render) so the render stays a pure function of
-// state — no performance.now() at render time.
+// state is held in React state (updated from the loop, never recomputed
+// during render) so the render stays a pure function of state.
 const RING_R = 54
 const RING_C = 2 * Math.PI * RING_R
 
 export default function ScreenshotTimer() {
-  // null = idle. Otherwise { startMs, delay }.
+  // null = idle. Otherwise { startMs, delay, burst }.
   const [active, setActive] = useState(null)
   // Latest computed countdown snapshot: { secondsLeft, progress, done }.
   const [snap, setSnap] = useState({ secondsLeft: 0, progress: 0, done: false })
+  // Burst progress shown on the ring while shots fire: { fired, total }.
+  const [burstSnap, setBurstSnap] = useState({ fired: 0, total: 1 })
   const reducedMotionMode = useStore(s => s.reducedMotionMode)
   const osReduced = useStore(s => s.osPrefersReducedMotion)
   const reduced = resolveReducedMotion(reducedMotionMode, osReduced)
   const firedRef = useRef(false)
+  // How many burst shots we've already fired (so we only fire the diff).
+  const burstFiredRef = useRef(0)
+  const burstStartRef = useRef(0)
 
   // Listen for timed-capture requests. detail.delay (seconds) drives
-  // the countdown; a 0/absent delay fires immediately.
+  // the countdown; detail.burst (count) drives the post-countdown burst.
+  // A 0/absent delay fires immediately (a single shot — the burst rides
+  // on the countdown overlay so there's a clear staging moment).
   useEffect(() => {
     const onRequest = (e) => {
       const delay = Number(e?.detail?.delay) || 0
+      const burst = sanitizeBurstCount(e?.detail?.burst)
       if (delay <= 0) {
         // Instant — just fire the real capture, no overlay.
         document.dispatchEvent(new CustomEvent('particle:capture-now'))
         return
       }
       firedRef.current = false
+      burstFiredRef.current = 0
+      burstStartRef.current = 0
       const startMs = performance.now()
       setSnap({ secondsLeft: Math.ceil(delay), progress: 0, done: false })
-      setActive({ startMs, delay })
+      setBurstSnap({ fired: 0, total: burst })
+      setActive({ startMs, delay, burst })
     }
     window.addEventListener('particle:screenshot-timed', onRequest)
     return () => window.removeEventListener('particle:screenshot-timed', onRequest)
   }, [])
 
-  // Drive the countdown. Computes the state here (where performance.now
-  // is allowed) and pushes it into render state. Tears down when idle
-  // or once fired.
+  // Drive the countdown, then the burst. Computes state here (where
+  // performance.now is allowed) and pushes it into render state. Tears
+  // down once the whole burst has fired.
   useEffect(() => {
     if (!active) return undefined
+    const total = sanitizeBurstCount(active.burst)
     let raf
     const loop = () => {
-      const st = countdownState(active.startMs, active.delay, performance.now())
+      const now = performance.now()
+      const st = countdownState(active.startMs, active.delay, now)
       setSnap({ secondsLeft: st.secondsLeft, progress: st.progress, done: st.done })
-      if (st.done && !firedRef.current) {
-        firedRef.current = true
-        // Fire the real capture, then clear the overlay so the ring
-        // doesn't sit in the screenshot.
-        document.dispatchEvent(new CustomEvent('particle:capture-now'))
-        setActive(null)
-        return
+      if (st.done) {
+        // Countdown finished — run the burst. Mark its start once.
+        if (!firedRef.current) {
+          firedRef.current = true
+          burstStartRef.current = now
+        }
+        const due = burstShotsDue(burstStartRef.current, total, BURST_INTERVAL_MS, now)
+        // Fire any shots that have come due since the last frame so a
+        // dropped frame catches up instead of skipping a shot. Only push
+        // a render when the count actually advanced.
+        if (burstFiredRef.current < due) {
+          while (burstFiredRef.current < due) {
+            burstFiredRef.current += 1
+            document.dispatchEvent(new CustomEvent('particle:capture-now'))
+          }
+          setBurstSnap({ fired: burstFiredRef.current, total })
+        }
+        if (burstFiredRef.current >= total) {
+          // All shots away — clear the overlay so the ring isn't in the
+          // last frame.
+          setActive(null)
+          return
+        }
       }
-      if (!st.done) raf = requestAnimationFrame(loop)
+      raf = requestAnimationFrame(loop)
     }
     raf = requestAnimationFrame(loop)
     return () => { if (raf) cancelAnimationFrame(raf) }
   }, [active])
 
-  // Escape cancels a pending countdown.
+  // Escape cancels a pending countdown / aborts a running burst.
   useEffect(() => {
     if (!active) return undefined
     const onKey = (e) => {
-      if (e.key === 'Escape') { firedRef.current = true; setActive(null) }
+      if (e.key === 'Escape') {
+        firedRef.current = true
+        burstFiredRef.current = sanitizeBurstCount(active.burst)
+        setActive(null)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -82,6 +122,11 @@ export default function ScreenshotTimer() {
   if (!active) return null
 
   const offset = ringDashoffset(snap.progress, RING_C)
+  const total = sanitizeBurstCount(active.burst)
+  const bursting = snap.done && total > 1
+  // While counting down show the seconds; once bursting show the live
+  // shot counter (e.g. "2/3").
+  const centerLabel = bursting ? `${Math.min(burstSnap.fired + 1, total)}/${total}` : snap.secondsLeft
 
   return (
     <div style={{
@@ -96,7 +141,7 @@ export default function ScreenshotTimer() {
           <circle cx={70} cy={70} r={RING_R} fill="none"
             stroke="url(#timerGrad)" strokeWidth={4} strokeLinecap="round"
             strokeDasharray={RING_C}
-            strokeDashoffset={offset}
+            strokeDashoffset={bursting ? 0 : offset}
             style={{ transition: reduced ? 'none' : 'stroke-dashoffset 0.12s linear' }} />
           <defs>
             <linearGradient id="timerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -109,12 +154,12 @@ export default function ScreenshotTimer() {
           position: 'absolute', inset: 0,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontFamily: 'Geist, sans-serif',
-          fontSize: 52, fontWeight: 700, color: '#f8f8fc',
+          fontSize: bursting ? 34 : 52, fontWeight: 700, color: '#f8f8fc',
           textShadow: '0 0 24px rgba(168,85,247,0.6)',
           fontVariantNumeric: 'tabular-nums',
           animation: reduced ? 'none' : 'count-pop 1s ease-out',
-        }} key={snap.secondsLeft}>
-          {snap.secondsLeft}
+        }} key={`${bursting ? 'b' : 'c'}-${centerLabel}`}>
+          {centerLabel}
         </div>
       </div>
     </div>

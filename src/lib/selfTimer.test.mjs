@@ -108,4 +108,90 @@ eq(labelForDelay(99), '10s', 'junk snaps then labels')
   }
 }
 
-console.log(`PASS: selfTimer — ${passed} assertions (countdown state machine, delay snapping, ring sweep)`)
+// === R35.C: burst mode ===============================================
+const r35c = await import('./selfTimer.js')
+const {
+  BURST_COUNTS, DEFAULT_BURST_COUNT, BURST_INTERVAL_MS,
+  sanitizeBurstCount, labelForBurst, burstShotsDue, burstComplete,
+} = r35c
+
+// --- burst roster ---
+ok(BURST_COUNTS.includes(1), 'roster has single (1)')
+ok(BURST_COUNTS.includes(DEFAULT_BURST_COUNT), 'roster has the default')
+eq(BURST_COUNTS[0], 1, 'first burst count is single')
+for (const c of BURST_COUNTS) ok(Number.isInteger(c) && c >= 1, `burst ${c} is a positive int`)
+ok(Number.isFinite(BURST_INTERVAL_MS) && BURST_INTERVAL_MS > 0, 'burst interval positive')
+
+// --- sanitizeBurstCount ---
+eq(sanitizeBurstCount(3), 3, 'exact burst passes')
+eq(sanitizeBurstCount(1), 1, 'single passes')
+eq(sanitizeBurstCount('5'), 5, 'numeric string coerced')
+eq(sanitizeBurstCount(NaN), DEFAULT_BURST_COUNT, 'NaN → default')
+eq(sanitizeBurstCount(undefined), DEFAULT_BURST_COUNT, 'undefined → default')
+eq(sanitizeBurstCount(4), 3, '4 snaps to nearest (3)')
+eq(sanitizeBurstCount(100), 5, '100 snaps to max (5)')
+eq(sanitizeBurstCount(0), 1, '0 snaps to min (1)')
+eq(sanitizeBurstCount(-3), 1, 'negative snaps to 1')
+
+// --- labelForBurst ---
+eq(labelForBurst(1), 'Single', '1 → Single')
+eq(labelForBurst(3), 'x3', '3 → x3')
+eq(labelForBurst(5), 'x5', '5 → x5')
+eq(labelForBurst(99), 'x5', 'junk snaps then labels')
+
+// --- burstShotsDue: single shot ---
+{
+  eq(burstShotsDue(1000, 1, 500, 1000), 1, 'single: 1 due at start')
+  eq(burstShotsDue(1000, 1, 500, 5000), 1, 'single: never more than 1')
+  eq(burstShotsDue(1000, 1, 500, 999), 0, 'single: 0 due before start')
+}
+
+// --- burstShotsDue: 3-shot @ 500ms ---
+{
+  const start = 1000
+  eq(burstShotsDue(start, 3, 500, 1000), 1, 'shot 1 due at start')
+  eq(burstShotsDue(start, 3, 500, 1499), 1, 'still 1 just before interval')
+  eq(burstShotsDue(start, 3, 500, 1500), 2, 'shot 2 due at +500ms')
+  eq(burstShotsDue(start, 3, 500, 2000), 3, 'shot 3 due at +1000ms')
+  eq(burstShotsDue(start, 3, 500, 9000), 3, 'caps at count (never 4)')
+  eq(burstShotsDue(start, 3, 500, 999), 0, '0 due before start')
+}
+
+// --- burstShotsDue: catch-up after a dropped frame ---
+{
+  // A long rAF hitch: jump straight from start to +1200ms → all 3 due.
+  eq(burstShotsDue(0, 3, 500, 1200), 3, 'late poll catches up to all due (no skipped shot)')
+}
+
+// --- burstShotsDue: defensive ---
+{
+  eq(burstShotsDue(NaN, 3, 500, 1000), 0, 'NaN start → 0')
+  eq(burstShotsDue(0, 3, 500, NaN), 0, 'NaN now → 0')
+  // zero / negative / non-finite interval → instant volley (all due once started).
+  eq(burstShotsDue(0, 3, 0, 0), 3, 'zero interval → all due at once')
+  eq(burstShotsDue(0, 5, -1, 100), 5, 'negative interval → all due')
+  eq(burstShotsDue(0, 3, Infinity, 100), 3, 'Infinity interval → all due (collapses to volley)')
+  // junk count sanitised.
+  eq(burstShotsDue(0, 99, 500, 0), 1, 'junk count snaps to 5 then 1 due at start')
+}
+
+// --- burstComplete ---
+{
+  eq(burstComplete(1000, 3, 500, 2000), true, '3-shot complete at +1000ms')
+  eq(burstComplete(1000, 3, 500, 1500), false, 'not complete at shot 2')
+  eq(burstComplete(1000, 1, 500, 1000), true, 'single complete at start')
+  eq(burstComplete(1000, 1, 500, 999), false, 'single not complete before start')
+}
+
+// --- monotonic: shots-due never decreases across a burst sweep ---
+{
+  let prev = -1
+  for (let t = 1000; t <= 3000; t += 100) {
+    const due = burstShotsDue(1000, 5, 500, t)
+    ok(due >= prev, `burst shots-due monotonic at t=${t}`)
+    prev = due
+  }
+  eq(prev, 5, 'sweep reaches all 5 shots')
+}
+
+console.log(`PASS: selfTimer — ${passed} assertions (countdown state machine, delay snapping, ring sweep, R35.C burst mode)`)

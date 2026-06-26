@@ -5,10 +5,10 @@ import { buildShareUrl } from '../lib/share'
 import { captureFromCanvas, appendSnapshot, loadSnapshots, saveSnapshots } from '../lib/snapshotGallery'
 import { createLoop, DEMO_LOOPS } from '../lib/demoAudioLoops'
 import { loadKeymap, resolveAction } from '../lib/keymap'
-import { TIMER_DELAYS, labelForDelay } from '../lib/selfTimer'
+import { TIMER_DELAYS, labelForDelay, BURST_COUNTS, labelForBurst } from '../lib/selfTimer'
 import {
   Play, Pause, RotateCcw, Maximize2, Shuffle, Magnet, Camera, Link2,
-  Mic, Download, Settings, Repeat, Sparkles, Zap, Paintbrush, Send, Images, Music2, Timer,
+  Mic, Download, Settings, Repeat, Sparkles, Zap, Paintbrush, Send, Images, Music2, Timer, Layers,
 } from 'lucide-react'
 
 // R34.C — module-level screenshot helpers. Kept out of the component
@@ -48,18 +48,21 @@ function captureScreenshotNow() {
 }
 
 // Entry point for a screenshot request: route through the self-timer
-// when a delay is set, else capture immediately.
+// when a delay is set, else capture immediately. The burst count rides
+// on the timed path (it needs the countdown's staging moment).
 function requestScreenshot() {
-  const { screenshotTimerDelay } = useStore.getState()
+  const { screenshotTimerDelay, screenshotBurstCount } = useStore.getState()
   if (screenshotTimerDelay > 0) {
-    window.dispatchEvent(new CustomEvent('particle:screenshot-timed', { detail: { delay: screenshotTimerDelay } }))
+    window.dispatchEvent(new CustomEvent('particle:screenshot-timed', {
+      detail: { delay: screenshotTimerDelay, burst: screenshotBurstCount },
+    }))
   } else {
     captureScreenshotNow()
   }
 }
 
 export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snapshotCount }) {
-  const { playing, setPlaying, loadRandom, smashRandom, mouseAttract, setMouseAttract, paintMode, setPaintMode, clearPaintPoints, setAudioReactive, isRecording, startRecording, stopRecording, recordingBuffer, enterReplay, isReplaying, screenshotTimerDelay, setScreenshotTimerDelay } = useStore()
+  const { playing, setPlaying, loadRandom, smashRandom, mouseAttract, setMouseAttract, paintMode, setPaintMode, clearPaintPoints, setAudioReactive, isRecording, startRecording, stopRecording, recordingBuffer, enterReplay, isReplaying, screenshotTimerDelay, setScreenshotTimerDelay, screenshotBurstCount, setScreenshotBurstCount } = useStore()
   const audioCtxRef = useRef(null)
   const streamRef = useRef(null)
   const analyserRef = useRef(null)
@@ -406,6 +409,16 @@ export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snaps
             setScreenshotTimerDelay(next)
           }}
         />
+        {screenshotTimerDelay > 0 && (
+          <BurstBtn
+            count={screenshotBurstCount}
+            onCycle={() => {
+              const idx = BURST_COUNTS.indexOf(screenshotBurstCount)
+              const next = BURST_COUNTS[(idx + 1) % BURST_COUNTS.length]
+              setScreenshotBurstCount(next)
+            }}
+          />
+        )}
         <GalleryBtn onClick={onToggleGallery} active={galleryOpen} count={snapshotCount} />
         <Btn onClick={handleShare} title="Share URL"><Link2 size={14} strokeWidth={2.2} /></Btn>
         <Btn onClick={handleTweet} title="Tweet this scene"><Send size={14} strokeWidth={2.2} /></Btn>
@@ -569,6 +582,66 @@ function TimerBtn({ delay, onCycle }) {
           fontFamily: 'Geist Mono, monospace',
           lineHeight: 1,
         }}>{labelForDelay(delay)}</span>
+      )}
+    </button>
+  )
+}
+
+// R35.C — burst-mode toggle. Only shown when the self-timer is armed
+// (it rides on the countdown). Click cycles 1 -> 3 -> 5 shots; the count
+// shows as a badge when > 1 so the user knows the next capture fires a
+// sequence they can pick the best frame from.
+function BurstBtn({ count, onCycle }) {
+  const active = count > 1
+  return (
+    <button
+      onClick={onCycle}
+      title={active
+        ? `Burst: ${labelForBurst(count)} shots after the countdown — click to change (Single / x3 / x5)`
+        : 'Burst: Single — click to capture a sequence after the countdown'}
+      style={{
+        position: 'relative',
+        width: 30, height: 30,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        borderRadius: 9, cursor: 'pointer',
+        transition: 'all 0.18s cubic-bezier(0.2, 0.8, 0.2, 1)',
+        background: active
+          ? 'linear-gradient(135deg, rgba(139,92,246,0.25) 0%, rgba(236,72,153,0.2) 100%)'
+          : 'rgba(255,255,255,0.035)',
+        color: active ? '#e9d5ff' : '#c8c8d0',
+        border: active ? '1px solid rgba(168,85,247,0.5)' : '1px solid rgba(255,255,255,0.05)',
+        boxShadow: active ? '0 0 16px rgba(168,85,247,0.35), inset 0 1px 0 rgba(255,255,255,0.08)' : 'none',
+      }}
+      onMouseEnter={e => {
+        if (!active) {
+          e.currentTarget.style.background = 'rgba(255,255,255,0.08)'
+          e.currentTarget.style.borderColor = 'rgba(168,85,247,0.3)'
+          e.currentTarget.style.color = '#fff'
+          e.currentTarget.style.transform = 'translateY(-1px)'
+        }
+      }}
+      onMouseLeave={e => {
+        if (!active) {
+          e.currentTarget.style.background = 'rgba(255,255,255,0.035)'
+          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)'
+          e.currentTarget.style.color = '#c8c8d0'
+          e.currentTarget.style.transform = 'translateY(0)'
+        }
+      }}
+    >
+      <Layers size={14} strokeWidth={2.2} />
+      {active && (
+        <span style={{
+          position: 'absolute', top: -3, right: -4,
+          minWidth: 14, height: 14, padding: '0 3px',
+          background: 'linear-gradient(135deg, #a855f7, #ec4899)',
+          color: '#fff', fontSize: 8.5, fontWeight: 700,
+          borderRadius: 7, display: 'inline-flex',
+          alignItems: 'center', justifyContent: 'center',
+          border: '1.5px solid rgba(10,10,16,0.95)',
+          fontFamily: 'Geist Mono, monospace',
+          lineHeight: 1,
+        }}>{labelForBurst(count)}</span>
       )}
     </button>
   )

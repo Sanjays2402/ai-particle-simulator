@@ -81,3 +81,76 @@ export function ringDashoffset(progress, circumference) {
   // Drain: offset grows from 0 (full) to circumference (empty).
   return p * c
 }
+
+// --- R35.C: burst mode -----------------------------------------------
+//
+// After the countdown completes, optionally fire a BURST of N shots
+// spaced a fixed interval apart, so the user can pick the best particle
+// moment from a quick sequence instead of nailing a single frame. Shot
+// 1 fires immediately when the countdown ends; shots 2..N follow at
+// `intervalMs` spacing.
+//
+// The roster + the "how many shots are due by now" math live here
+// (pure) so the React overlay just fires whatever shots the helper says
+// are due and never double-fires.
+
+// Selectable burst sizes (number of frames). 1 = single shot (classic).
+export const BURST_COUNTS = [1, 3, 5]
+export const DEFAULT_BURST_COUNT = 1
+// Spacing between burst frames, in milliseconds. Fast enough that the
+// scene moves a little between shots but slow enough to be distinct.
+export const BURST_INTERVAL_MS = 500
+
+// Clamp an incoming burst count to an allowed value; junk → default.
+// Snaps to the nearest roster entry so a stored value from a future
+// build degrades gracefully.
+export function sanitizeBurstCount(raw) {
+  const v = Number(raw)
+  if (!Number.isFinite(v)) return DEFAULT_BURST_COUNT
+  if (BURST_COUNTS.includes(v)) return v
+  let best = BURST_COUNTS[0]
+  let bestDist = Infinity
+  for (const c of BURST_COUNTS) {
+    const dist = Math.abs(c - v)
+    if (dist < bestDist) { bestDist = dist; best = c }
+  }
+  return best
+}
+
+// Label a burst count for a chip: 1 → "Single", else "x3".
+export function labelForBurst(count) {
+  const v = sanitizeBurstCount(count)
+  return v === 1 ? 'Single' : `x${v}`
+}
+
+// How many burst shots are DUE to have fired by `nowMs`, given when the
+// burst started (the moment the countdown completed), the total count,
+// and the interval. Shot 1 is due at burstStartMs, shot k at
+// burstStartMs + (k-1)*interval. Returns an integer in [0, count].
+//
+// The overlay tracks how many it has ALREADY fired and fires the
+// difference, so a dropped frame (rAF hitch) catches up rather than
+// skipping a shot. Defensive: junk inputs → 0 (fire nothing) except a
+// finite start with count>=1 always yields at least 1 once now>=start.
+export function burstShotsDue(burstStartMs, count, intervalMs, nowMs) {
+  const start = Number(burstStartMs)
+  const n = sanitizeBurstCount(count)
+  const interval = Number(intervalMs)
+  const now = Number(nowMs)
+  if (!Number.isFinite(start) || !Number.isFinite(now)) return 0
+  if (now < start) return 0
+  // A non-positive / non-finite interval collapses the burst to an
+  // instant volley: once started, all N are due.
+  if (!Number.isFinite(interval) || interval <= 0) return n
+  const elapsed = now - start
+  const due = 1 + Math.floor(elapsed / interval)
+  if (due < 1) return 1
+  return due > n ? n : due
+}
+
+// Is the burst complete (all N shots due) at `nowMs`? Convenience for
+// the overlay's teardown.
+export function burstComplete(burstStartMs, count, intervalMs, nowMs) {
+  const n = sanitizeBurstCount(count)
+  return burstShotsDue(burstStartMs, n, intervalMs, nowMs) >= n
+}
