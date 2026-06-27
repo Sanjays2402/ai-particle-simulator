@@ -6,6 +6,8 @@ import {
   EXPORT_KIND, EXPORT_VERSION, MAX_IMPORT_BYTES,
   buildExportPayload, serializeCalmGates, makeFilename,
   parseImport, mergeImport, summarizeImportImpact,
+  // R41.K — diff-only preview-row filter
+  filterPreviewRows,
 } from './calmGatesIO.js'
 import { CALM_MOTION_IDS, defaultCalmGates } from './calmMode.js'
 
@@ -167,3 +169,52 @@ eq(parseImport(JSON.stringify({ kind: EXPORT_KIND, v: 1, gates: { nope: true, bo
 }
 
 console.log(`PASS: calmGatesIO — ${passed} assertions (envelope round-trip, merge/replace, dry-run summary, defensive matrix) [R39.K]`)
+
+// --- R41.K: filterPreviewRows — diff-only preview filter ---------------
+{
+  // A realistic summarize output: 4 rows, 2 changed.
+  const summary = summarizeImportImpact(ALL_GATED, PARTIAL, 'replace')
+  const rows = summary.rows
+  ok(rows.length === 4, 'filter: baseline summary has 4 rows')
+  const changedCount = rows.filter(r => r.changes).length
+  ok(changedCount === 2, 'filter: baseline summary has 2 changed rows (shake + zen)')
+
+  // diffOnly OFF → returns the SAME array reference (no allocation).
+  ok(filterPreviewRows(rows, false) === rows, 'filter: diffOnly=false returns input ref')
+  // diffOnly ON → only the changed rows, in original order.
+  const only = filterPreviewRows(rows, true)
+  eq(only.length, 2, 'filter: diffOnly=true keeps only changed rows')
+  ok(only.every(r => r.changes === true), 'filter: every kept row actually changes')
+  // order preserved (CALM_GATED_MOTIONS order).
+  const keptIds = only.map(r => r.id)
+  const expectedIds = rows.filter(r => r.changes).map(r => r.id)
+  eq(JSON.stringify(keptIds), JSON.stringify(expectedIds), 'filter: kept rows keep their order')
+
+  // all-unchanged input → [] under diffOnly.
+  const noChange = summarizeImportImpact(ALL_GATED, ALL_GATED, 'replace').rows
+  eq(filterPreviewRows(noChange, true).length, 0, 'filter: all-unchanged → [] under diffOnly')
+  ok(filterPreviewRows(noChange, false) === noChange, 'filter: all-unchanged off → ref-equal')
+
+  // strict-true semantics: a row with a truthy-but-not-true `changes`
+  // (e.g. 1) is NOT counted (guards against a corrupt summary lying).
+  const fakeRows = [{ id: 'a', changes: 1 }, { id: 'b', changes: true }, { id: 'c', changes: false }]
+  eq(filterPreviewRows(fakeRows, true).length, 1, 'filter: only strictly-true changes kept')
+  eq(filterPreviewRows(fakeRows, true)[0].id, 'b', 'filter: the strictly-true row is the one kept')
+
+  // null rows in the array are skipped (don't crash).
+  const withNull = [null, { id: 'x', changes: true }, undefined]
+  eq(filterPreviewRows(withNull, true).length, 1, 'filter: null/undefined rows skipped')
+
+  // defensive: non-array → [].
+  eq(filterPreviewRows(null, true).length, 0, 'filter: non-array → []')
+  eq(filterPreviewRows(undefined, false).length, 0, 'filter: undefined → []')
+
+  // purity: input not mutated.
+  {
+    const snap = JSON.stringify(rows)
+    filterPreviewRows(rows, true)
+    eq(JSON.stringify(rows), snap, 'filter: does not mutate input')
+  }
+}
+
+console.log(`PASS: calmGatesIO R41.K — ${passed} assertions (incl. diff-only preview filter)`)

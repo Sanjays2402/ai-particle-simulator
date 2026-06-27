@@ -7,7 +7,7 @@ import { createLoop, DEMO_LOOPS } from '../lib/demoAudioLoops'
 import { loadKeymap, resolveAction } from '../lib/keymap'
 import { TIMER_DELAYS, labelForDelay, BURST_COUNTS, labelForBurst } from '../lib/selfTimer'
 import { formatCalmToast, CALM_GATED_MOTIONS, countGatedMotions } from '../lib/calmMode'
-import { downloadCalmGatesFile, parseImport as parseCalmGatesImport, mergeImport as mergeCalmGatesImport, summarizeImportImpact as summarizeCalmGatesImpact } from '../lib/calmGatesIO'
+import { downloadCalmGatesFile, parseImport as parseCalmGatesImport, mergeImport as mergeCalmGatesImport, summarizeImportImpact as summarizeCalmGatesImpact, filterPreviewRows as filterCalmGatesPreviewRows } from '../lib/calmGatesIO'
 import { showToast } from './Toast'
 import {
   Play, Pause, RotateCcw, Maximize2, Shuffle, Magnet, Camera, Link2,
@@ -677,6 +677,10 @@ function CalmModeBtn() {
   // keymap / wind / crossfade import previews.
   const [pendingImport, setPendingImport] = useState(null)
   const [importMode, setImportMode] = useState('replace')
+  // R41.K — "diff-only" filter for the import preview: hide unchanged
+  // rows so a large map's actual changes stand out (parallels the keymap
+  // preview's changed-only view).
+  const [diffOnly, setDiffOnly] = useState(false)
 
   // R39.K — export the live calm-gate map as a portable JSON envelope so
   // a user can carry their per-motion calm preferences to another machine
@@ -708,6 +712,7 @@ function CalmModeBtn() {
         // Stage for preview (default replace — the file IS the intended
         // preference, matching R39.K's old direct behaviour).
         setImportMode('replace')
+        setDiffOnly(false)
         setPendingImport({ gates: res.gates, filename: file.name || 'import.json' })
         setOpen(true)
       } catch (e) {
@@ -725,6 +730,7 @@ function CalmModeBtn() {
     const merged = mergeCalmGatesImport(calmGates, pendingImport.gates, importMode)
     setCalmGates(merged.gates)
     setPendingImport(null)
+    setDiffOnly(false)
     showToast(
       merged.changed > 0
         ? `Calm gates imported — ${merged.changed} motion${merged.changed === 1 ? '' : 's'} changed`
@@ -733,13 +739,18 @@ function CalmModeBtn() {
     )
   }
 
-  const cancelStagedImport = () => setPendingImport(null)
+  const cancelStagedImport = () => { setPendingImport(null); setDiffOnly(false) }
   // R40.K — the live dry-run diff for the staged import under the chosen
   // mode. Recomputed each render so flipping merge/replace updates the
   // preview in place. null when nothing is staged.
   const importPreview = pendingImport
     ? summarizeCalmGatesImpact(calmGates, pendingImport.gates, importMode)
     : null
+  // R41.K — the rows actually rendered: all of them, or only the changed
+  // ones when the diff-only filter is on. The unchanged count drives the
+  // "+N unchanged hidden" hint so the user knows rows are being filtered.
+  const previewRows = importPreview ? filterCalmGatesPreviewRows(importPreview.rows, diffOnly) : []
+  const hiddenUnchanged = importPreview ? importPreview.rows.length - previewRows.length : 0
 
   // R37.K — naming what the one-click gate changed. The toggle silently
   // affects the gated motions; the auto-fading toast names them so the
@@ -809,7 +820,7 @@ function CalmModeBtn() {
       {open && (
         <>
           <div
-            onClick={() => { setOpen(false); setPendingImport(null) }}
+            onClick={() => { setOpen(false); setPendingImport(null); setDiffOnly(false) }}
             style={{ position: 'fixed', inset: 0, zIndex: 60 }}
           />
           <div style={{
@@ -911,6 +922,36 @@ function CalmModeBtn() {
                   }} title={pendingImport.filename}>{pendingImport.filename}</span>
                 </div>
 
+                {/* R41.K — diff-only filter: hide unchanged rows so the
+                    handful that flip stand out in a large map. Only worth
+                    offering when there's at least one unchanged row to
+                    hide AND at least one change to keep (else the list is
+                    already all-changed or all-unchanged). */}
+                {importPreview.willChange > 0 && importPreview.willChange < importPreview.rows.length && (
+                  <button
+                    onClick={() => setDiffOnly(d => !d)}
+                    title={diffOnly ? 'Show every motion row' : 'Show only the motions that change'}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 5,
+                      marginBottom: 8, padding: '3px 8px', borderRadius: 999,
+                      background: diffOnly ? 'rgba(168,85,247,0.22)' : 'rgba(255,255,255,0.04)',
+                      border: `1px solid ${diffOnly ? 'rgba(168,85,247,0.5)' : 'rgba(255,255,255,0.08)'}`,
+                      color: diffOnly ? '#e9d5ff' : '#9a9ab0', cursor: 'pointer',
+                      fontFamily: 'inherit', fontSize: 9.5, fontWeight: 600, letterSpacing: '0.02em',
+                      transition: 'all 0.14s ease-out',
+                    }}
+                  >
+                    <span style={{
+                      width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                      background: diffOnly ? '#c084fc' : '#6a6a80',
+                    }} />
+                    Changed only
+                    {diffOnly && hiddenUnchanged > 0 && (
+                      <span style={{ color: '#8a8aa0', fontWeight: 500 }}>· {hiddenUnchanged} hidden</span>
+                    )}
+                  </button>
+                )}
+
                 {/* Merge / Replace mode toggle — recomputes the diff in place. */}
                 <div style={{
                   display: 'flex', gap: 2, marginBottom: 8, padding: 2,
@@ -939,9 +980,11 @@ function CalmModeBtn() {
                 </div>
 
                 {/* Per-motion from->to diff. Changed rows highlight; an
-                    unchanged row stays muted so the eye lands on what flips. */}
+                    unchanged row stays muted so the eye lands on what flips.
+                    R41.K — when the diff-only filter is on, only changed
+                    rows render. */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 8 }}>
-                  {importPreview.rows.map(row => (
+                  {previewRows.map(row => (
                     <div key={row.id} style={{
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                       gap: 8, padding: '4px 7px', borderRadius: 6,

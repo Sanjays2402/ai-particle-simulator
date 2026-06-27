@@ -161,6 +161,20 @@ export function summarizeImportImpact(existing, imported, mode = 'replace') {
   return { mode: merged.mode, rows, willChange: merged.changed }
 }
 
+// R41.K — a "diff-only" filter for the import-preview rows: when a user
+// imports a large map, the unchanged rows are noise that drowns out the
+// handful that actually flip. This pure helper returns only the rows
+// whose value changes when `diffOnly` is on, or every row when it's off
+// (parallels the keymap preview's changed-only view). Defensive:
+// non-array rows → []; with diffOnly off it returns the SAME array
+// reference (no allocation) so a caller can cheaply tell "nothing
+// filtered". Never mutates the input.
+export function filterPreviewRows(rows, diffOnly) {
+  if (!Array.isArray(rows)) return []
+  if (!diffOnly) return rows
+  return rows.filter(r => r && r.changes === true)
+}
+
 // Trigger a browser download of the JSON envelope. Returns the filename
 // used, or null when something went wrong (e.g. no document available
 // during SSR).
