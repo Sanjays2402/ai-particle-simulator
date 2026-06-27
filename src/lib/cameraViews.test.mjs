@@ -15,6 +15,8 @@ import {
   renameView, buildCameraRenameActions,
   // R39.H — duplicate a saved view
   duplicateView, buildCameraDuplicateActions,
+  // R40.H — duplicate ALL saved views
+  duplicateAllViews,
 } from './cameraViews.js'
 
 function assertEq(actual, expected, msg) {
@@ -754,3 +756,83 @@ console.log('PASS: renameView + buildCameraRenameActions — palette rename/clea
 }
 
 console.log('PASS: duplicateView + buildCameraDuplicateActions — palette duplicate lifecycle (R39.H)')
+
+// --- R40.H: duplicateAllViews — fork the whole set in one action ------
+{
+  // Two angle-bearing views → two clones prepended, source order kept
+  // within the cloned block; originals follow.
+  {
+    const views = [
+      { id: 2, name: 'B', pos: [4, 5, 6], target: [0, 0, 0] },
+      { id: 1, name: 'A', pos: [1, 2, 3], target: [7, 8, 9] },
+    ]
+    const out = duplicateAllViews(views)
+    assertEq(out.length, 4, 'dup-all: two clones + two originals')
+    assertEq(out.map(v => v.name), ['B copy', 'A copy', 'B', 'A'], 'dup-all: clones prepended, source order kept')
+    // Fresh monotonic ids above the current max (2): 3, 4.
+    assertEq(out[0].id, 3, 'dup-all: first clone gets max+1')
+    assertEq(out[1].id, 4, 'dup-all: second clone gets max+2')
+    assertEq(out[0].pos, [4, 5, 6], 'dup-all: B copy carries B angle')
+    assertEq(out[1].pos, [1, 2, 3], 'dup-all: A copy carries A angle')
+    assertEq(out[1].target, [7, 8, 9], 'dup-all: A copy carries A target')
+  }
+  // Deep-copy isolation: editing a clone's arrays can't mutate the source.
+  {
+    const views = [{ id: 1, name: 'A', pos: [1, 2, 3], target: [0, 0, 0] }]
+    const out = duplicateAllViews(views)
+    out[0].pos[0] = 999
+    out[0].target[0] = 999
+    assertEq(views[0].pos[0], 1, 'dup-all: clone pos is a deep copy')
+    assertEq(views[0].target[0], 0, 'dup-all: clone target is a deep copy')
+  }
+  // MAX cap: the freshest clones win, oldest originals fall off the tail.
+  {
+    // Six views (at the cap). Duplicating all → 6 clones + 6 originals,
+    // sliced to MAX (6) → just the 6 clones.
+    const views = []
+    for (let i = 6; i >= 1; i--) views.push({ id: i, name: `V${i}`, pos: [i, 0, 0], target: [0, 0, 0] })
+    const out = duplicateAllViews(views)
+    assertEq(out.length, CAMERA_VIEWS_MAX, 'dup-all: result capped at MAX')
+    assertEq(out.every(v => v.name.endsWith(' copy')), true, 'dup-all: only the clones survive the cap')
+  }
+  // Position-corrupt views are skipped (no angle to clone); valid ones
+  // still clone.
+  {
+    const views = [
+      { id: 2, name: 'good', pos: [1, 2, 3], target: [0, 0, 0] },
+      { id: 1, name: 'broken', pos: [1, 2] }, // too-short pos → not cloneable
+    ]
+    const out = duplicateAllViews(views)
+    assertEq(out.length, 3, 'dup-all: one clone + two originals (broken skipped)')
+    assertEq(out[0].name, 'good copy', 'dup-all: only the angle-bearing view cloned')
+  }
+  // No cloneable view → ref-equal-on-no-op (persistence can skip a save).
+  {
+    const views = [{ id: 1, name: 'broken', pos: [1, 2] }]
+    const out = duplicateAllViews(views)
+    assertEq(out === views, true, 'dup-all: no cloneable → input ref unchanged')
+  }
+  // Empty list → ref-equal (no cloneable views).
+  {
+    const views = []
+    assertEq(duplicateAllViews(views) === views, true, 'dup-all: empty → input ref unchanged')
+  }
+  // Custom nameFor overrides the default "<name> copy".
+  {
+    const views = [{ id: 1, name: 'A', pos: [1, 2, 3], target: [0, 0, 0] }]
+    const out = duplicateAllViews(views, v => `${v.name} (fork)`)
+    assertEq(out[0].name, 'A (fork)', 'dup-all: custom nameFor applied')
+  }
+  // Defensive: non-array → [].
+  assertEq(duplicateAllViews(null), [], 'dup-all: non-array → []')
+  assertEq(duplicateAllViews('nope'), [], 'dup-all: string → []')
+  // Purity: input array not mutated.
+  {
+    const src = [{ id: 1, name: 'A', pos: [1, 2, 3], target: [0, 0, 0] }]
+    const snap = JSON.stringify(src)
+    duplicateAllViews(src)
+    assertEq(JSON.stringify(src), snap, 'dup-all: does not mutate input')
+  }
+}
+
+console.log('PASS: duplicateAllViews — fork the whole saved-view set (R40.H)')

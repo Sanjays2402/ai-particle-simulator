@@ -6,6 +6,7 @@ import {
   loadCameraViews, saveCameraViews, appendView, removeView,
   renameView, buildCameraPaletteActions, buildCameraDeleteActions,
   buildCameraRenameActions, duplicateView, buildCameraDuplicateActions,
+  duplicateAllViews,
 } from '../lib/cameraViews'
 import { labelForId as framingLabelForId } from '../lib/framingGuides'
 import { formatCalmToast } from '../lib/calmMode'
@@ -128,6 +129,26 @@ export function CommandPalette({ onSettings }) {
     setCameraViews(next)
     window.dispatchEvent(new CustomEvent('particle:camera-views-changed'))
     showToast(`Duplicated "${next[0].name}"`, <Copy size={10} color="#fff" strokeWidth={2.4} />)
+  }
+
+  // R40.H — duplicate ALL saved views at once: clone the whole set as
+  // "<name> copy" so a user can fork an entire framing collection before
+  // a round of edits. Pure duplicateAllViews (ref-equal-on-no-op when
+  // nothing is cloneable) does the work; we persist + re-sync as usual.
+  const duplicateAll = () => {
+    const current = loadCameraViews()
+    const next = duplicateAllViews(current)
+    if (next === current) return // none cloneable (no angle-bearing views)
+    saveCameraViews(next)
+    setCameraViews(next)
+    window.dispatchEvent(new CustomEvent('particle:camera-views-changed'))
+    const added = next.length - current.length
+    showToast(
+      added > 0
+        ? `Duplicated ${added} view${added === 1 ? '' : 's'}`
+        : 'Views duplicated (some dropped at the cap)',
+      <Copy size={10} color="#fff" strokeWidth={2.4} />,
+    )
   }
 
   if (!open) return null
@@ -345,6 +366,18 @@ export function CommandPalette({ onSettings }) {
                 />
               )
             ))}
+            {/* R40.H — fork the WHOLE set at once (clone every saved view
+                as "<name> copy"). Only when 2+ duplicable views exist —
+                with a single view the per-view duplicate above suffices. */}
+            {duplicateActions.length >= 2 && (
+              <Item
+                icon={Copy}
+                label="Duplicate All Saved Views"
+                sub={`Clone all ${duplicateActions.length} views as "<name> copy"`}
+                keywords="camera view duplicate all clone copy fork bulk set collection"
+                onSelect={run(duplicateAll)}
+              />
+            )}
             {/* R38.H — wipe every saved view at once (only when some exist). */}
             {cameraActions.length > 0 && (
               <Item

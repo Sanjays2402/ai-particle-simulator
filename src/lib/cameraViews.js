@@ -473,3 +473,54 @@ export function buildCameraDuplicateActions(views) {
   return out
 }
 
+// --- R40.H: duplicate ALL saved views --------------------------------
+//
+// R39.H clones a SINGLE view. This forks the WHOLE set in one action:
+// every angle-bearing view gets a "<name> copy" clone, so a user can
+// fork an entire framing collection before a round of edits without
+// duplicating each one by hand.
+//
+// The clones are minted with fresh monotonic ids and PREPENDED as a block
+// (newest-first, like duplicateView), preserving the source order WITHIN
+// the cloned block so "A, B, C" duplicates to "A copy, B copy, C copy, A,
+// B, C" (then trimmed to MAX, oldest-falling-off). Position-corrupt views
+// are skipped (a clone with no angle to restore is useless), matching
+// duplicateView's per-view contract.
+//
+// Contract:
+//   - non-array views → [] (nothing to clone)
+//   - no cloneable (angle-bearing) view present → input ref unchanged
+//     (ref-equal-on-no-op so persistence can skip a redundant save)
+//   - each clone deep-copies pos/target so editing a copy can't mutate
+//     the original's coordinate arrays
+//   - the whole result is capped at MAX (the freshest clones win; the
+//     oldest originals fall off the tail first)
+//   - input array + every source view's arrays never mutated
+export function duplicateAllViews(views, nameFor) {
+  if (!Array.isArray(views)) return []
+  // Find the cloneable (angle-bearing) views, preserving order.
+  const cloneable = views.filter(v =>
+    v && typeof v === 'object' &&
+    v.id !== null && v.id !== undefined &&
+    Array.isArray(v.pos) && v.pos.length >= 3 &&
+    v.pos.every(n => Number.isFinite(Number(n))),
+  )
+  if (cloneable.length === 0) return views // nothing to clone → ref-equal
+  let nextId = (views.reduce((m, v) => Math.max(m, (v && v.id) || 0), 0)) + 1
+  const now = Date.now()
+  const clones = cloneable.map(src => {
+    const baseName = (typeof src.name === 'string' && src.name.trim()) ? src.name.trim() : `View ${src.id}`
+    const name = (typeof nameFor === 'function' ? nameFor(src) : null) || `${baseName} copy`
+    const clone = {
+      id: nextId,
+      name,
+      pos: src.pos.slice(),
+      target: Array.isArray(src.target) ? src.target.slice() : src.target,
+      createdAt: now,
+    }
+    nextId += 1
+    return clone
+  })
+  return [...clones, ...views].slice(0, MAX)
+}
+
