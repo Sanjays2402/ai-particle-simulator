@@ -355,6 +355,82 @@ export function headroomTrend(fpsSamples, opts = {}) {
   return { dir, delta: round1(delta * 100) / 100 }
 }
 
+// --- R38.A: ETA-to-budget-edge -------------------------------------
+//
+// The trend pill (R37.A) tells the user they're "loading" (headroom
+// falling) but not HOW URGENT it is. This extrapolates the current
+// headroom slope to a concrete warning: "at this rate you'll cross the
+// 16.7ms budget in ~Ns". It only speaks while genuinely falling AND
+// still above the edge — a recovering or already-over scene has no ETA
+// to give. The slope is a least-squares fit over the live window so one
+// noisy frame doesn't whipsaw the estimate.
+//
+// Returns:
+//   { approaching, etaSec, slopePerSec, currentHeadroom }
+// where `approaching` is true only when currentHeadroom > 0 AND the fit
+// slope is falling past `minSlope` (so the readout shows ONLY when the
+// warning is real); `etaSec` is the seconds-until-edge (clamped to
+// [0, ETA_MAX_SEC]) or null when not approaching; `slopePerSec` is the
+// headroom-fraction lost per second (signed; negative = falling).
+//
+// opts:
+//   budgetMs   the budget edge in ms (default 16.7 / 60fps)
+//   sampleMs   real wall-time between samples (default 250 — the HUD's
+//              4Hz cadence) so the per-sample slope converts to /sec
+//   minSlope   how steeply headroom must fall (fraction/sec) before we
+//              call it "approaching" — a dead-band against sampling
+//              noise (default 0.01, ~0.17ms/s of frame time at 60fps)
+export const ETA_MAX_SEC = 999
+
+export function headroomEtaToEdge(fpsSamples, opts = {}) {
+  const none = { approaching: false, etaSec: null, slopePerSec: 0, currentHeadroom: 0 }
+  if (!Array.isArray(fpsSamples) || fpsSamples.length < 2) return none
+  const budgetMs = Number.isFinite(opts.budgetMs) && opts.budgetMs > 0 ? opts.budgetMs : FRAME_BUDGET_60
+  const sampleMs = Number.isFinite(opts.sampleMs) && opts.sampleMs > 0 ? opts.sampleMs : 250
+  const minSlope = Number.isFinite(opts.minSlope) && opts.minSlope >= 0 ? opts.minSlope : 0.01
+  // Build the valid headroom series (oldest first), filtering junk so a
+  // corrupt frame doesn't tilt the regression.
+  const h = []
+  for (const s of fpsSamples) {
+    const v = Number(s)
+    if (Number.isFinite(v) && v > 0) h.push(frameBudgetHeadroom(v, budgetMs).headroom)
+  }
+  if (h.length < 2) return none
+  const currentHeadroom = h[h.length - 1]
+  // Least-squares slope of headroom vs sample index (0..n-1).
+  const slopePerSample = linregSlope(h)
+  const slopePerSec = slopePerSample * (1000 / sampleMs)
+  const result = { approaching: false, etaSec: null, slopePerSec: round2(slopePerSec), currentHeadroom: round2(currentHeadroom) }
+  // Only an ETA when we're still ABOVE the edge and FALLING past the
+  // dead-band. A flat / rising / already-over scene returns no ETA.
+  if (currentHeadroom > 0 && slopePerSec < -minSlope) {
+    const etaRaw = currentHeadroom / -slopePerSec // seconds until headroom hits 0
+    const eta = etaRaw > ETA_MAX_SEC ? ETA_MAX_SEC : etaRaw
+    result.approaching = true
+    result.etaSec = Math.round(eta * 10) / 10
+  }
+  return result
+}
+
+// Least-squares slope of `ys` against x = 0,1,2,... Returns 0 for a
+// degenerate (<2 point) series or a zero-variance x (can't happen with
+// the 0..n-1 indexing for n>=2, but guarded anyway). Pure.
+function linregSlope(ys) {
+  const n = ys.length
+  if (n < 2) return 0
+  let sx = 0, sy = 0, sxy = 0, sxx = 0
+  for (let i = 0; i < n; i++) {
+    sx += i; sy += ys[i]; sxy += i * ys[i]; sxx += i * i
+  }
+  const denom = n * sxx - sx * sx
+  if (denom === 0) return 0
+  return (n * sxy - sx * sy) / denom
+}
+
+function round2(v) {
+  return Math.round(v * 100) / 100
+}
+
 // Frame-time window summary — mirrors summarizeFpsWindow but in ms.
 // `high` is the averaged WORST `pctHigh` fraction (the 1%-HIGH frame
 // time, the ms analogue of the 1% low); `over` counts frames slower

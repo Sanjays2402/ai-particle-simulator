@@ -161,6 +161,8 @@ const {
   HEADROOM_HISTORY_TOP, HEADROOM_HISTORY_BOTTOM,
   buildHeadroomHistoryPoints, headroomHistoryAttr, headroomZeroLineY,
   headroomTrend,
+  // R38.A — ETA-to-budget-edge
+  headroomEtaToEdge, ETA_MAX_SEC,
 } = r35
 
 // --- constants ---
@@ -427,3 +429,84 @@ console.log(`PASS: fpsGraph — ${passed} assertions (sparkline geometry, band c
 }
 
 console.log(`PASS: fpsGraph R37.A — ${passed} total assertions (incl. budget-headroom history strip + trend)`)
+
+// === R38.A: ETA-to-budget-edge =======================================
+// Clean headroom-producing fps (headroom = 1 - 60/fps):
+//   240→0.75, 160→0.625, 120→0.5, 80→0.25, 60→0.0, 48→-0.25, 40→-0.5.
+{
+  // --- constant export ---
+  ok(Number.isFinite(ETA_MAX_SEC) && ETA_MAX_SEC > 0, 'ETA_MAX_SEC is a positive finite cap')
+
+  // --- degenerate inputs → no ETA ---
+  for (const bad of [[], [120], null, 'nope', undefined, 42]) {
+    const r = headroomEtaToEdge(bad)
+    eq(r.approaching, false, `degenerate ${JSON.stringify(bad)} → not approaching`)
+    eq(r.etaSec, null, `degenerate ${JSON.stringify(bad)} → null etaSec`)
+  }
+
+  // --- falling + above edge → concrete ETA ---
+  // [160, 120] → headroom [0.625, 0.5], slope -0.125/sample; at 250ms/
+  // sample that's -0.5/sec; current 0.5 → 0.5 / 0.5 = 1.0s to the edge.
+  const fall = headroomEtaToEdge([160, 120]) // default sampleMs 250
+  eq(fall.approaching, true, 'falling-above-edge window is approaching')
+  near(fall.etaSec, 1.0, 'ETA = currentHeadroom / |slope/sec| = 1.0s')
+  eq(fall.slopePerSec, -0.5, 'slope reads -0.5 headroom/sec at 250ms cadence')
+  ok(fall.currentHeadroom > 0, 'current headroom still positive (above edge)')
+
+  // A perfectly-linear longer window gives the same slope + ETA (robust
+  // to window length when the trend is linear).
+  const fall3 = headroomEtaToEdge([240, 160, 120]) // headroom 0.75,0.625,0.5
+  eq(fall3.approaching, true, 'linear 3-sample fall is approaching')
+  near(fall3.etaSec, 1.0, '3-sample linear fall → same 1.0s ETA')
+
+  // --- sampleMs scales the ETA: slower cadence → the same per-sample
+  // drop spans more real time, so MORE seconds to the edge. ---
+  const slowCadence = headroomEtaToEdge([160, 120], { sampleMs: 500 })
+  near(slowCadence.etaSec, 2.0, 'doubling the sample interval doubles the ETA')
+  eq(slowCadence.slopePerSec, -0.25, '500ms cadence halves the per-second slope')
+
+  // --- rising headroom (recovering) → no ETA ---
+  const rise = headroomEtaToEdge([120, 160]) // headroom 0.5 → 0.625
+  eq(rise.approaching, false, 'rising headroom is not approaching the edge')
+  eq(rise.etaSec, null, 'recovering window → null etaSec')
+  ok(rise.slopePerSec > 0, 'rising slope is positive')
+
+  // --- flat → no ETA (slope inside the dead-band) ---
+  const flatE = headroomEtaToEdge([120, 120, 120])
+  eq(flatE.approaching, false, 'flat window not approaching')
+  eq(flatE.slopePerSec, 0, 'flat window slope 0')
+
+  // --- already over budget → no ETA even if direction varies ---
+  eq(headroomEtaToEdge([48, 40]).approaching, false, 'over + falling → no ETA (already past edge)')
+  eq(headroomEtaToEdge([40, 48]).approaching, false, 'over + recovering → no ETA (still below edge)')
+  eq(headroomEtaToEdge([48, 40]).etaSec, null, 'over-budget window → null etaSec')
+
+  // --- minSlope dead-band arg: a real drop can be suppressed by a
+  // large dead-band, and surfaced by a tiny one. ---
+  eq(headroomEtaToEdge([160, 120], { minSlope: 5 }).approaching, false,
+    'huge dead-band suppresses even a steep drop')
+  ok(headroomEtaToEdge([160, 120], { minSlope: 0 }).approaching,
+    'zero dead-band surfaces the drop')
+
+  // --- junk samples filtered; all-junk → none ---
+  const withJunk = headroomEtaToEdge([NaN, 'x', null, 160, 120])
+  eq(withJunk.approaching, true, 'junk filtered, valid tail still approaching')
+  near(withJunk.etaSec, 1.0, 'junk does not tilt the ETA')
+  eq(headroomEtaToEdge([NaN, Infinity, 'x', null]).approaching, false, 'all-junk → not approaching')
+
+  // --- invariant: etaSec never exceeds the cap, never negative ---
+  for (const series of [[160, 120], [240, 80], [120, 61], [240, 160, 120, 61]]) {
+    const r = headroomEtaToEdge(series)
+    if (r.etaSec != null) {
+      ok(r.etaSec >= 0 && r.etaSec <= ETA_MAX_SEC, `ETA within [0, cap] for ${JSON.stringify(series)}`)
+    }
+  }
+
+  // --- purity: input not mutated ---
+  const src = [160, 120, 60]
+  const snap = JSON.stringify(src)
+  headroomEtaToEdge(src)
+  eq(JSON.stringify(src), snap, 'R38.A helper does not mutate input')
+}
+
+console.log(`PASS: fpsGraph R38.A — ${passed} total assertions (incl. ETA-to-budget-edge)`)

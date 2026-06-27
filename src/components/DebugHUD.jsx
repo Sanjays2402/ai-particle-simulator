@@ -7,7 +7,8 @@ import {
   summarizeFrameTimeWindow, frameMsBandColor, fpsToFrameMs,
   FRAME_MS_GRAPH_CEIL, FRAME_BUDGET_60, FRAME_BUDGET_30,
   frameBudgetHeadroom, headroomBandColor,
-  headroomHistoryAttr, headroomZeroLineY, headroomTrend,
+  headroomHistoryAttr, headroomZeroLineY, headroomTrend, headroomEtaToEdge,
+  ETA_MAX_SEC,
 } from '../lib/fpsGraph'
 
 // Performance debug HUD. Toggle with backtick (`) so it doesn't fight
@@ -163,6 +164,12 @@ export default function DebugHUD() {
   // the edge) is a warning → amber; flat is neutral.
   const trendColor = trend.dir === 'rising' ? '#86efac' : trend.dir === 'falling' ? '#fbbf24' : '#8a8aa0'
   const trendWord = trend.dir === 'rising' ? 'easing' : trend.dir === 'falling' ? 'loading' : 'steady'
+  // R38.A — extrapolate the headroom slope to a concrete "seconds until
+  // you cross the 16.7ms budget" warning. Only shows while genuinely
+  // falling AND still above the edge — a recovering or already-over
+  // scene has nothing urgent to say. The HUD samples at ~250ms, so we
+  // pass that cadence so the slope reads in real seconds.
+  const eta = headroomEtaToEdge(series, { sampleMs: 250 })
 
   return (
     <div style={{
@@ -274,6 +281,21 @@ export default function DebugHUD() {
                   <span style={{ fontWeight: 700, marginRight: 3 }}>{trendGlyph}</span>{trendWord}
                 </span>
               </div>
+              {/* R38.A — concrete "seconds to the budget edge" warning,
+                  extrapolated from the headroom slope. Only renders while
+                  genuinely falling AND still above the edge so it stays a
+                  signal, not noise. */}
+              {eta.approaching && eta.etaSec != null && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                  <span style={{ color: '#8a8aa0' }}>To edge</span>
+                  <span style={{
+                    color: eta.etaSec <= 3 ? '#f87171' : '#fbbf24',
+                    fontVariantNumeric: 'tabular-nums', fontWeight: 600,
+                  }}>
+                    ~{eta.etaSec >= ETA_MAX_SEC ? `${ETA_MAX_SEC}+` : eta.etaSec}s
+                  </span>
+                </div>
+              )}
               <svg width={HSW} height={HSH} style={{ display: 'block', borderRadius: 5, background: 'rgba(0,0,0,0.28)' }}>
                 {/* The budget edge — headroom crosses 0 here. Above is
                     healthy (green tint), below is over budget (red tint). */}
