@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import {
   ratioForId, computeFramingBars, describeFraming, labelForId,
-  computeCompositionGrid, polylineLength, spiralSweepKey,
+  computeCompositionGrid, polylineLength, spiralSweepKey, spiralSweepTimings,
 } from '../lib/framingGuides'
 import { useReducedMotion } from '../lib/useReducedMotion'
 
@@ -23,6 +23,7 @@ export default function FramingGuides() {
   const cycleFramingGrid = useStore(s => s.cycleFramingGrid)
   const spiralOrientation = useStore(s => s.spiralOrientation)
   const spiralSweepNonce = useStore(s => s.spiralSweepNonce)
+  const spiralSweepSpeed = useStore(s => s.spiralSweepSpeed)
   const reducedMotion = useReducedMotion()
 
   // Track the viewport so the bars recompute on resize / orientation
@@ -107,6 +108,10 @@ export default function FramingGuides() {
   // orientation (a corner change replays, as in R38.B) AND the replay
   // nonce (an explicit replay-button press replays for the same corner).
   const sweepKey = spiralSweepKey(spiralOrientation, spiralSweepNonce)
+  // R40.B — the sweep + eye-in durations for the chosen speed (Fast /
+  // Normal / Slow). 'normal' reproduces the original baked timings, so an
+  // existing user sees no change until they pick another speed.
+  const sweepT = spiralSweepTimings(spiralSweepSpeed)
 
   const label = describeFraming(framingGuideId, vp.w, vp.h)
   const barStyle = {
@@ -177,7 +182,7 @@ export default function FramingGuides() {
               style={spiralSweeping ? {
                 strokeDasharray: spiralLen,
                 strokeDashoffset: spiralLen,
-                animation: 'spiral-sweep 0.9s cubic-bezier(0.33,0.1,0.25,1) forwards',
+                animation: `spiral-sweep ${sweepT.sweepSec}s cubic-bezier(0.33,0.1,0.25,1) forwards`,
               } : undefined}
             />
           )}
@@ -187,7 +192,7 @@ export default function FramingGuides() {
               cx={spiralEye.x} cy={spiralEye.y} r={4}
               fill="rgba(236,72,153,0.92)" stroke="rgba(255,255,255,0.6)" strokeWidth={1}
               style={spiralSweeping ? {
-                animation: 'spiral-eye-in 0.4s ease-out 0.62s both',
+                animation: `spiral-eye-in ${sweepT.eyeSec}s ease-out ${sweepT.eyeDelaySec}s both`,
               } : undefined}
             />
           )}

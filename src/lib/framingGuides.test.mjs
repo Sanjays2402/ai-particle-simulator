@@ -4,6 +4,10 @@ import {
   labelForId, nextFramingId, computeFramingBars, describeFraming,
   // R39.B — on-demand spiral sweep replay
   SPIRAL_SWEEP_NONCE_WRAP, nextSweepNonce, spiralSweepKey,
+  // R40.B — spiral sweep speed control
+  SPIRAL_SWEEP_SPEEDS, SPIRAL_SWEEP_SPEED_DEFAULT,
+  isValidSpiralSweepSpeed, sanitizeSpiralSweepSpeed,
+  nextSpiralSweepSpeed, spiralSweepTimings,
 } from './framingGuides.js'
 
 let passed = 0
@@ -515,3 +519,73 @@ console.log(`PASS: framingGuides R38.B — ${passed} total assertions (incl. pol
 }
 
 console.log(`PASS: framingGuides R39.B — ${passed} total assertions (incl. on-demand spiral sweep replay)`)
+
+// --- R40.B: spiral sweep speed control --------------------------------
+{
+  // roster integrity: fast / normal / slow, ordered fast → slow.
+  eq(SPIRAL_SWEEP_SPEEDS.length, 3, 'speed: three speeds')
+  eq(SPIRAL_SWEEP_SPEEDS[0].id, 'fast', 'speed: first is fast')
+  eq(SPIRAL_SWEEP_SPEEDS[1].id, 'normal', 'speed: second is normal')
+  eq(SPIRAL_SWEEP_SPEEDS[2].id, 'slow', 'speed: third is slow')
+  eq(SPIRAL_SWEEP_SPEED_DEFAULT, 'normal', 'speed: default is normal')
+  for (const s of SPIRAL_SWEEP_SPEEDS) {
+    ok(typeof s.id === 'string' && s.id.length > 0, `speed ${s.id}: has id`)
+    ok(typeof s.label === 'string' && s.label.length > 0, `speed ${s.id}: has label`)
+    ok(Number.isFinite(s.sweepMs) && s.sweepMs > 0, `speed ${s.id}: positive sweepMs`)
+    ok(Number.isFinite(s.eyeDelayMs) && s.eyeDelayMs > 0, `speed ${s.id}: positive eyeDelayMs`)
+    ok(Number.isFinite(s.eyeMs) && s.eyeMs > 0, `speed ${s.id}: positive eyeMs`)
+    // The eye must start fading in BEFORE the sweep finishes so it lands
+    // on the curve, not after.
+    ok(s.eyeDelayMs < s.sweepMs, `speed ${s.id}: eye starts before sweep ends`)
+  }
+  // monotonic: fast < normal < slow on the sweep duration.
+  ok(SPIRAL_SWEEP_SPEEDS[0].sweepMs < SPIRAL_SWEEP_SPEEDS[1].sweepMs, 'speed: fast quicker than normal')
+  ok(SPIRAL_SWEEP_SPEEDS[1].sweepMs < SPIRAL_SWEEP_SPEEDS[2].sweepMs, 'speed: normal quicker than slow')
+
+  // back-compat: 'normal' reproduces the original baked timings (0.9s
+  // sweep / 0.62s eye-delay / 0.4s eye-in) so an existing user sees no
+  // change until they pick another speed.
+  {
+    const t = spiralSweepTimings('normal')
+    eq(t.sweepMs, 900, 'speed: normal sweepMs matches the original 0.9s')
+    eq(t.eyeDelayMs, 620, 'speed: normal eyeDelayMs matches the original 0.62s')
+    eq(t.eyeMs, 400, 'speed: normal eyeMs matches the original 0.4s')
+    eq(t.sweepSec, '0.9', 'speed: sweepSec seconds-form')
+    eq(t.eyeDelaySec, '0.62', 'speed: eyeDelaySec seconds-form')
+    eq(t.eyeSec, '0.4', 'speed: eyeSec seconds-form')
+  }
+  {
+    const t = spiralSweepTimings('slow')
+    eq(t.sweepMs, 1800, 'speed: slow sweepMs')
+    eq(t.sweepSec, '1.8', 'speed: slow sweepSec')
+  }
+  {
+    const t = spiralSweepTimings('fast')
+    eq(t.sweepSec, '0.45', 'speed: fast sweepSec keeps two decimals')
+  }
+
+  // validators.
+  ok(isValidSpiralSweepSpeed('fast'), 'speed: fast is valid')
+  ok(isValidSpiralSweepSpeed('slow'), 'speed: slow is valid')
+  ok(!isValidSpiralSweepSpeed('turbo'), 'speed: unknown is invalid')
+  ok(!isValidSpiralSweepSpeed(null), 'speed: null is invalid')
+  eq(sanitizeSpiralSweepSpeed('fast'), 'fast', 'speed: sanitize keeps a valid id')
+  eq(sanitizeSpiralSweepSpeed('turbo'), 'normal', 'speed: sanitize junk → default')
+  eq(sanitizeSpiralSweepSpeed(undefined), 'normal', 'speed: sanitize undefined → default')
+  eq(sanitizeSpiralSweepSpeed(42), 'normal', 'speed: sanitize number → default')
+
+  // cycle wraps fast → normal → slow → fast.
+  eq(nextSpiralSweepSpeed('fast'), 'normal', 'speed: fast → normal')
+  eq(nextSpiralSweepSpeed('normal'), 'slow', 'speed: normal → slow')
+  eq(nextSpiralSweepSpeed('slow'), 'fast', 'speed: slow wraps → fast')
+  eq(nextSpiralSweepSpeed('junk'), 'fast', 'speed: cycle from junk → first')
+
+  // junk id resolves to the default speed's timings (never crashes).
+  {
+    const t = spiralSweepTimings('nope')
+    eq(t.id, 'normal', 'speed: junk timings id is the default')
+    eq(t.sweepMs, 900, 'speed: junk timings = normal sweepMs')
+  }
+}
+
+console.log(`PASS: framingGuides R40.B — ${passed} total assertions (incl. spiral sweep speed control)`)

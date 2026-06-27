@@ -43,6 +43,8 @@ import {
   nextGridId as nextFramingGridId,
   sanitizeSpiralOrientation,
   nextSweepNonce,
+  sanitizeSpiralSweepSpeed,
+  nextSpiralSweepSpeed,
 } from './lib/framingGuides'
 // R38.K — per-motion calm gate sanitiser + toggle.
 import { sanitizeCalmGates, toggleCalmGate } from './lib/calmMode'
@@ -72,6 +74,7 @@ const FRAMING_GRID_KEY = 'particle-framing-grid-v1'
 // R37.B — golden-spiral orientation (which corner the eye converges
 // toward), own key so it round-trips independently of the grid mode.
 const SPIRAL_ORIENT_KEY = 'particle-spiral-orientation-v1'
+const SPIRAL_SWEEP_SPEED_KEY = 'particle-spiral-sweep-speed-v1'
 // R34.C — screenshot self-timer delay (seconds), own key.
 const SCREENSHOT_TIMER_KEY = 'particle-screenshot-timer-v1'
 // R35.C — screenshot burst count (frames per capture), own key.
@@ -569,6 +572,25 @@ export const useStore = create((set, get) => {
   // Transient (not persisted) — a sweep is an in-session animation.
   spiralSweepNonce: 0,
   replaySpiralSweep: () => set({ spiralSweepNonce: nextSweepNonce(get().spiralSweepNonce) }),
+
+  // R40.B — spiral sweep SPEED ('fast' | 'normal' | 'slow'). Scales the
+  // draw-on sweep + eye-in durations so a user can slow the reveal to
+  // study the golden curve or speed it up once they know it. 'normal'
+  // reproduces the original baked timings (back-compat). Persisted on its
+  // own key; only visible while the 'spiral' grid is active.
+  spiralSweepSpeed: (() => {
+    try { return sanitizeSpiralSweepSpeed(localStorage.getItem(SPIRAL_SWEEP_SPEED_KEY)) } catch { return 'normal' }
+  })(),
+  setSpiralSweepSpeed: (id) => {
+    const next = sanitizeSpiralSweepSpeed(id)
+    try { localStorage.setItem(SPIRAL_SWEEP_SPEED_KEY, next) } catch { /* quota / private mode */ }
+    set({ spiralSweepSpeed: next })
+  },
+  cycleSpiralSweepSpeed: () => {
+    const next = nextSpiralSweepSpeed(get().spiralSweepSpeed)
+    try { localStorage.setItem(SPIRAL_SWEEP_SPEED_KEY, next) } catch { /* */ }
+    set({ spiralSweepSpeed: next })
+  },
 
   // R35.E — Zen auto-orbit: when enabled and the screen is left alone in
   // zen mode, a slow camera auto-orbit eases in so a forgotten tab

@@ -443,3 +443,75 @@ export function spiralSweepKey(orientation, nonce) {
   const n = Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0
   return `spiral-${ori}-${n}`
 }
+
+// --- R40.B: spiral sweep speed control --------------------------------
+//
+// R38.B's draw-on sweep + R39.B's replay button both run the reveal at
+// one fixed pace (the CSS keyframe baked an 0.9s sweep / 0.4s eye-in).
+// Some users want to SLOW the draw-on to study how the golden curve is
+// constructed; others, once they know it, want it SNAPPY. This adds a
+// three-way speed control (Fast / Normal / Slow) that scales the sweep +
+// eye-in durations. 'normal' reproduces the exact pre-R40.B timings so an
+// existing user sees zero change until they pick another speed.
+//
+// The component composes these into inline `animation` shorthand strings
+// (the keyframes themselves are duration-agnostic — they just lerp
+// stroke-dashoffset / opacity), so threading a duration is all that's
+// needed; no CSS edit.
+
+// The selectable sweep speeds. `sweepMs` is the stroke-dash reveal
+// duration; `eyeDelayMs` is when the focal eye starts fading in (kept at
+// ~0.69x of the sweep, matching the original 0.62s-after-0.9s ratio so
+// the eye always lands just before the curve finishes); `eyeMs` is the
+// eye fade duration. Ordered fast → slow so the chip row reads naturally.
+export const SPIRAL_SWEEP_SPEEDS = [
+  { id: 'fast',   label: 'Fast',   sweepMs: 450, eyeDelayMs: 310, eyeMs: 240 },
+  { id: 'normal', label: 'Normal', sweepMs: 900, eyeDelayMs: 620, eyeMs: 400 },
+  { id: 'slow',   label: 'Slow',   sweepMs: 1800, eyeDelayMs: 1240, eyeMs: 600 },
+]
+
+const SWEEP_SPEED_BY_ID = new Map(SPIRAL_SWEEP_SPEEDS.map(s => [s.id, s]))
+
+// The default speed id — 'normal' reproduces the original baked timings.
+export const SPIRAL_SWEEP_SPEED_DEFAULT = 'normal'
+
+export function isValidSpiralSweepSpeed(id) {
+  return SWEEP_SPEED_BY_ID.has(id)
+}
+
+// Normalise a stored / incoming speed id; junk → the default ('normal').
+export function sanitizeSpiralSweepSpeed(id) {
+  return SWEEP_SPEED_BY_ID.has(id) ? id : SPIRAL_SWEEP_SPEED_DEFAULT
+}
+
+// Cycle to the next speed (wraps). Unknown id → first entry's id.
+export function nextSpiralSweepSpeed(id) {
+  const idx = SPIRAL_SWEEP_SPEEDS.findIndex(s => s.id === id)
+  if (idx < 0) return SPIRAL_SWEEP_SPEEDS[0].id
+  return SPIRAL_SWEEP_SPEEDS[(idx + 1) % SPIRAL_SWEEP_SPEEDS.length].id
+}
+
+// Resolve a speed id to its concrete timings (in milliseconds), as the
+// render-ready { sweepMs, eyeDelayMs, eyeMs } triple plus seconds-form
+// strings (`sweepSec` / `eyeDelaySec` / `eyeSec`) the component drops
+// straight into an `animation` shorthand. Junk id → the default speed's
+// timings. Pure; returns a fresh object each call.
+export function spiralSweepTimings(id) {
+  const s = SWEEP_SPEED_BY_ID.get(sanitizeSpiralSweepSpeed(id))
+  return {
+    id: s.id,
+    sweepMs: s.sweepMs,
+    eyeDelayMs: s.eyeDelayMs,
+    eyeMs: s.eyeMs,
+    // Seconds form (trim trailing zeros) for clean CSS animation strings.
+    sweepSec: msToSec(s.sweepMs),
+    eyeDelaySec: msToSec(s.eyeDelayMs),
+    eyeSec: msToSec(s.eyeMs),
+  }
+}
+
+function msToSec(ms) {
+  // 900 → "0.9", 1800 → "1.8", 450 → "0.45". Strip a trailing ".0".
+  const sec = ms / 1000
+  return String(Math.round(sec * 100) / 100)
+}

@@ -33,7 +33,7 @@ import {
   summarizeImportImpact as summarizeCrossfadeOverridesImpact,
 } from '../lib/crossfadeOverridesIO'
 import { ATTRACTOR_TYPES, MAX_ATTRACTORS, attractorTypeStyle, parsePositionInput, dropIndexForGap, stepKeyboardGapCursor, describeGapReorderAnnouncement } from '../lib/namedAttractors'
-import { FRAMING_RATIOS, FRAMING_GRIDS, SPIRAL_ORIENTATIONS } from '../lib/framingGuides'
+import { FRAMING_RATIOS, FRAMING_GRIDS, SPIRAL_ORIENTATIONS, SPIRAL_SWEEP_SPEEDS } from '../lib/framingGuides'
 import { showToast } from './Toast'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
@@ -78,6 +78,7 @@ export default function LeftSidebar() {
     framingGuideId, setFramingGuideId,
     framingGridId, setFramingGridId,
     spiralOrientation, cycleSpiralOrientation, replaySpiralSweep,
+    spiralSweepSpeed, setSpiralSweepSpeed,
   } = useStore()
 
   const exportGif = async () => {
@@ -326,31 +327,62 @@ export default function LeftSidebar() {
               active. A proper full-width button (vs a cramped chip glyph)
               so the affordance is discoverable + keyboard-reachable. */}
           {framingGridId === 'spiral' && (
-            <button
-              onClick={() => replaySpiralSweep()}
-              title="Re-run the spiral draw-on animation for the current eye corner"
-              style={{
-                marginTop: 8, width: '100%',
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
-                cursor: 'pointer', transition: 'all 0.15s ease-out',
-                fontFamily: 'Geist Mono, monospace',
-                background: 'rgba(168,85,247,0.1)',
-                color: '#e9d5ff',
-                border: '1px solid rgba(168,85,247,0.3)',
-              }}
-              onMouseEnter={e => {
-                e.currentTarget.style.background = 'rgba(168,85,247,0.2)'
-                e.currentTarget.style.borderColor = 'rgba(168,85,247,0.5)'
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.background = 'rgba(168,85,247,0.1)'
-                e.currentTarget.style.borderColor = 'rgba(168,85,247,0.3)'
-              }}
-            >
-              <span style={{ fontSize: 12, lineHeight: 1 }}>{'\u21BB'}</span>
-              Replay sweep
-            </button>
+            <>
+              <button
+                onClick={() => replaySpiralSweep()}
+                title="Re-run the spiral draw-on animation for the current eye corner"
+                style={{
+                  marginTop: 8, width: '100%',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+                  cursor: 'pointer', transition: 'all 0.15s ease-out',
+                  fontFamily: 'Geist Mono, monospace',
+                  background: 'rgba(168,85,247,0.1)',
+                  color: '#e9d5ff',
+                  border: '1px solid rgba(168,85,247,0.3)',
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.background = 'rgba(168,85,247,0.2)'
+                  e.currentTarget.style.borderColor = 'rgba(168,85,247,0.5)'
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.background = 'rgba(168,85,247,0.1)'
+                  e.currentTarget.style.borderColor = 'rgba(168,85,247,0.3)'
+                }}
+              >
+                <span style={{ fontSize: 12, lineHeight: 1 }}>{'\u21BB'}</span>
+                Replay sweep
+              </button>
+              {/* R40.B — sweep SPEED chips: scale the draw-on so a user can
+                  slow the reveal to study the golden curve or speed it up
+                  once they know it. Picking a speed also replays the sweep
+                  at the new pace so the change is immediately visible. */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, marginBottom: 5 }}>
+                <span style={{ fontSize: 10, color: '#7a7a90', fontWeight: 500 }}>Sweep speed</span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+                {SPIRAL_SWEEP_SPEEDS.map(s => {
+                  const active = spiralSweepSpeed === s.id
+                  return (
+                    <button key={s.id}
+                      onClick={() => { setSpiralSweepSpeed(s.id); replaySpiralSweep() }}
+                      title={`${s.label} draw-on (${(s.sweepMs / 1000).toString()}s)`}
+                      style={{
+                        padding: '5px 0', borderRadius: 7, fontSize: 10.5, fontWeight: 550,
+                        cursor: 'pointer', transition: 'all 0.15s ease-out',
+                        fontFamily: 'Geist Mono, monospace',
+                        background: active
+                          ? 'linear-gradient(135deg, rgba(168,85,247,0.22) 0%, rgba(236,72,153,0.18) 100%)'
+                          : 'rgba(255,255,255,0.03)',
+                        color: active ? '#f3e8ff' : '#8a8aa0',
+                        border: active ? '1px solid rgba(168,85,247,0.45)' : '1px solid rgba(255,255,255,0.05)',
+                        boxShadow: active ? '0 0 10px rgba(168,85,247,0.2)' : 'none',
+                      }}
+                    >{s.label}</button>
+                  )
+                })}
+              </div>
+            </>
           )}
           {/* R35.E — Zen auto-orbit: when on, leaving the screen alone in
               zen mode (press Z) eases in a slow ambient camera drift so a
