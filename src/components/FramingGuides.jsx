@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import {
   ratioForId, computeFramingBars, describeFraming, labelForId,
-  computeCompositionGrid, polylineLength,
+  computeCompositionGrid, polylineLength, spiralSweepKey,
 } from '../lib/framingGuides'
 import { useReducedMotion } from '../lib/useReducedMotion'
 
@@ -22,6 +22,7 @@ export default function FramingGuides() {
   const framingGridId = useStore(s => s.framingGridId)
   const cycleFramingGrid = useStore(s => s.cycleFramingGrid)
   const spiralOrientation = useStore(s => s.spiralOrientation)
+  const spiralSweepNonce = useStore(s => s.spiralSweepNonce)
   const reducedMotion = useReducedMotion()
 
   // Track the viewport so the bars recompute on resize / orientation
@@ -102,6 +103,10 @@ export default function FramingGuides() {
   // full spiral paints immediately.
   const spiralLen = spiralPts && !reducedMotion ? polylineLength(spiralPts) : 0
   const spiralSweeping = spiralLen > 0
+  // R39.B — the remount key that drives the one-shot sweep. Combines the
+  // orientation (a corner change replays, as in R38.B) AND the replay
+  // nonce (an explicit replay-button press replays for the same corner).
+  const sweepKey = spiralSweepKey(spiralOrientation, spiralSweepNonce)
 
   const label = describeFraming(framingGuideId, vp.w, vp.h)
   const barStyle = {
@@ -165,7 +170,7 @@ export default function FramingGuides() {
               is 0 so the full curve paints instantly with no animation. */}
           {spiralAttr && (
             <polyline
-              key={`spiral-${spiralOrientation}`}
+              key={sweepKey}
               points={spiralAttr} fill="none"
               stroke="rgba(168,85,247,0.55)" strokeWidth={1.4}
               strokeLinejoin="round" strokeLinecap="round"
@@ -178,7 +183,7 @@ export default function FramingGuides() {
           )}
           {spiralEye && (
             <circle
-              key={`spiral-eye-${spiralOrientation}`}
+              key={`${sweepKey}-eye`}
               cx={spiralEye.x} cy={spiralEye.y} r={4}
               fill="rgba(236,72,153,0.92)" stroke="rgba(255,255,255,0.6)" strokeWidth={1}
               style={spiralSweeping ? {

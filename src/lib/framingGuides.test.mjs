@@ -2,6 +2,8 @@
 import {
   FRAMING_RATIOS, isValidFramingId, sanitizeFramingId, ratioForId,
   labelForId, nextFramingId, computeFramingBars, describeFraming,
+  // R39.B — on-demand spiral sweep replay
+  SPIRAL_SWEEP_NONCE_WRAP, nextSweepNonce, spiralSweepKey,
 } from './framingGuides.js'
 
 let passed = 0
@@ -453,3 +455,63 @@ console.log(`PASS: framingGuides R37.B — ${passed} total assertions (incl. gol
 }
 
 console.log(`PASS: framingGuides R38.B — ${passed} total assertions (incl. polylineLength spiral sweep)`)
+
+// --- R39.B: on-demand spiral sweep replay -----------------------------
+{
+  // nextSweepNonce: monotonic step that always DIFFERS from its input
+  // (so the React key changes → the one-shot sweep remounts).
+  eq(nextSweepNonce(0), 1, 'nonce: 0 → 1')
+  eq(nextSweepNonce(1), 2, 'nonce: 1 → 2')
+  eq(nextSweepNonce(41), 42, 'nonce: steps by one')
+  // every value differs from its successor across a long run
+  {
+    let n = 0
+    let differsEveryStep = true
+    for (let i = 0; i < 2500; i++) {
+      const next = nextSweepNonce(n)
+      if (next === n) { differsEveryStep = false; break }
+      n = next
+    }
+    ok(differsEveryStep, 'nonce: never equals its input across a long run (forces remount)')
+  }
+  // wraps inside the bounded range (never grows unbounded)
+  eq(nextSweepNonce(SPIRAL_SWEEP_NONCE_WRAP - 1), 0, 'nonce: wraps at the cap')
+  ok(SPIRAL_SWEEP_NONCE_WRAP > 1 && Number.isInteger(SPIRAL_SWEEP_NONCE_WRAP), 'nonce wrap is a sane integer')
+  // defensive: junk / negative resets to 1 (NOT 0 — 0→0 would no-op a remount)
+  eq(nextSweepNonce(NaN), 1, 'nonce: NaN → 1')
+  eq(nextSweepNonce(Infinity), 1, 'nonce: Infinity → 1')
+  eq(nextSweepNonce(-5), 1, 'nonce: negative → 1')
+  eq(nextSweepNonce('x'), 1, 'nonce: non-numeric → 1')
+  eq(nextSweepNonce(undefined), 1, 'nonce: undefined → 1')
+  // fractional input floors before stepping
+  eq(nextSweepNonce(3.9), 4, 'nonce: fractional floors then steps')
+
+  // spiralSweepKey: combines orientation + nonce into a stable remount key.
+  eq(spiralSweepKey(0, 0), 'spiral-0-0', 'key: tl + nonce 0')
+  eq(spiralSweepKey(2, 7), 'spiral-2-7', 'key: br + nonce 7')
+  // a corner change OR a nonce bump both change the key (both replay)
+  ok(spiralSweepKey(0, 5) !== spiralSweepKey(1, 5), 'key: orientation change → new key')
+  ok(spiralSweepKey(0, 5) !== spiralSweepKey(0, 6), 'key: nonce bump → new key')
+  // identical inputs → identical key (no spurious remount)
+  eq(spiralSweepKey(3, 9), spiralSweepKey(3, 9), 'key: stable for identical inputs')
+  // orientation sanitised: string ids + out-of-range wrap, junk → 0
+  eq(spiralSweepKey('br', 1), `spiral-2-1`, 'key: string orientation id resolved to index')
+  eq(spiralSweepKey(4, 1), 'spiral-0-1', 'key: out-of-range orientation wraps (4 → 0)')
+  eq(spiralSweepKey(undefined, 1), 'spiral-0-1', 'key: junk orientation → 0')
+  // nonce sanitised in the key too: junk nonce → 0 component
+  eq(spiralSweepKey(1, NaN), 'spiral-1-0', 'key: NaN nonce → 0 component')
+  eq(spiralSweepKey(1, -3), 'spiral-1-0', 'key: negative nonce → 0 component')
+  eq(spiralSweepKey(1, 4.8), 'spiral-1-4', 'key: fractional nonce floored in key')
+  // a full replay sequence keeps producing distinct keys for one corner
+  {
+    let nonce = 0
+    const keys = new Set()
+    for (let i = 0; i < 6; i++) {
+      keys.add(spiralSweepKey(2, nonce))
+      nonce = nextSweepNonce(nonce)
+    }
+    eq(keys.size, 6, 'key: six replays on one corner → six distinct keys')
+  }
+}
+
+console.log(`PASS: framingGuides R39.B — ${passed} total assertions (incl. on-demand spiral sweep replay)`)

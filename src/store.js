@@ -42,6 +42,7 @@ import {
   sanitizeGridId as sanitizeFramingGridId,
   nextGridId as nextFramingGridId,
   sanitizeSpiralOrientation,
+  nextSweepNonce,
 } from './lib/framingGuides'
 // R38.K — per-motion calm gate sanitiser + toggle.
 import { sanitizeCalmGates, toggleCalmGate } from './lib/calmMode'
@@ -559,6 +560,15 @@ export const useStore = create((set, get) => {
     try { localStorage.setItem(SPIRAL_ORIENT_KEY, String(next)) } catch { /* */ }
     set({ spiralOrientation: next })
   },
+
+  // R39.B — spiral sweep replay nonce. The FramingGuides overlay keys the
+  // spiral polyline on (orientation, nonce); bumping the nonce remounts it
+  // so the R38.B one-shot "draw-on" sweep replays for the CURRENT corner
+  // without the user having to flip the eye or toggle the grid off/on. A
+  // replay button on the active Spiral chip calls replaySpiralSweep().
+  // Transient (not persisted) — a sweep is an in-session animation.
+  spiralSweepNonce: 0,
+  replaySpiralSweep: () => set({ spiralSweepNonce: nextSweepNonce(get().spiralSweepNonce) }),
 
   // R35.E — Zen auto-orbit: when enabled and the screen is left alone in
   // zen mode, a slow camera auto-orbit eases in so a forgotten tab

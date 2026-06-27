@@ -406,3 +406,40 @@ export function polylineLength(points) {
   }
   return total
 }
+
+// --- R39.B: on-demand spiral sweep replay -----------------------------
+//
+// R38.B replays the spiral "draw-on" sweep only when the orientation
+// changes (the polyline's React key embeds the orientation, so a corner
+// change remounts the element and restarts the CSS animation). But a
+// user who just wants to WATCH the sweep again — without flipping the eye
+// to a different corner — had no way to retrigger it short of toggling
+// the whole grid off and back on. This adds a "replay nonce": bumping it
+// changes the polyline's key, forcing the same one-shot remount/replay
+// for the CURRENT orientation. A small replay button on the active Spiral
+// chip bumps the nonce.
+
+// The nonce wraps inside a small range so a long session of replays can't
+// grow it unbounded (it only ever needs to DIFFER from its previous value
+// to force a remount). Any non-finite / negative input resets to 1 so a
+// corrupt value can't stall the remount (0 → 0 would be a no-op).
+export const SPIRAL_SWEEP_NONCE_WRAP = 1000
+
+export function nextSweepNonce(n) {
+  const v = Number(n)
+  if (!Number.isFinite(v) || v < 0) return 1
+  return (Math.floor(v) + 1) % SPIRAL_SWEEP_NONCE_WRAP
+}
+
+// Build the stable React key that drives the sweep remount. Combines the
+// (sanitised) orientation with the replay nonce so BOTH a corner change
+// and an explicit replay produce a fresh key → a fresh one-shot sweep.
+// Orientation flows through sanitizeSpiralOrientation so a junk value
+// can't produce an undefined-laden key; the nonce is floored + made
+// non-negative so the key is always a clean `spiral-<ori>-<nonce>`.
+export function spiralSweepKey(orientation, nonce) {
+  const ori = sanitizeSpiralOrientation(orientation)
+  const v = Number(nonce)
+  const n = Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0
+  return `spiral-${ori}-${n}`
+}
