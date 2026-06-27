@@ -17,12 +17,21 @@ import {
   duplicateView, buildCameraDuplicateActions,
   // R40.H — duplicate ALL saved views
   duplicateAllViews,
+  // R41.H — duplicate a SELECTED subset + shift-click range helper
+  duplicateViews, selectIdRange,
 } from './cameraViews.js'
 
 function assertEq(actual, expected, msg) {
   const a = JSON.stringify(actual), b = JSON.stringify(expected)
   if (a !== b) {
     console.error(`FAIL: ${msg} — got ${a} expected ${b}`)
+    process.exit(1)
+  }
+}
+
+function assertTrue(cond, msg) {
+  if (!cond) {
+    console.error(`FAIL: ${msg}`)
     process.exit(1)
   }
 }
@@ -836,3 +845,112 @@ console.log('PASS: duplicateView + buildCameraDuplicateActions — palette dupli
 }
 
 console.log('PASS: duplicateAllViews — fork the whole saved-view set (R40.H)')
+
+// --- R41.H: duplicateViews — fork a SELECTED subset --------------------
+{
+  const views = [
+    { id: 3, name: 'C', pos: [3, 0, 0], target: [0, 0, 0] },
+    { id: 2, name: 'B', pos: [2, 0, 0], target: [0, 0, 0] },
+    { id: 1, name: 'A', pos: [1, 0, 0], target: [0, 0, 0] },
+  ]
+  // select a subset (ids 3 + 1) → clones prepended in array order,
+  // named "<name> copy", fresh monotonic ids above the current max.
+  {
+    const out = duplicateViews(views, new Set([3, 1]))
+    assertEq(out.length, 5, 'dup-sel: 3 + 2 clones = 5')
+    assertEq(out[0].name, 'C copy', 'dup-sel: first clone is C (array order preserved)')
+    assertEq(out[1].name, 'A copy', 'dup-sel: second clone is A')
+    assertEq(out[0].id, 4, 'dup-sel: clone ids continue above max (4)')
+    assertEq(out[1].id, 5, 'dup-sel: second clone id 5')
+    // B (id 2, unselected) is NOT cloned; originals stay at the tail.
+    assertTrue(!out.some(v => v.name === 'B copy'), 'dup-sel: unselected B not cloned')
+    assertEq(out.slice(2).map(v => v.id), [3, 2, 1], 'dup-sel: originals follow in order')
+  }
+  // accepts a plain array of ids (not just a Set).
+  {
+    const out = duplicateViews(views, [2])
+    assertEq(out.length, 4, 'dup-sel: array idSet works (1 clone)')
+    assertEq(out[0].name, 'B copy', 'dup-sel: array-selected B cloned')
+  }
+  // accepts any iterable (e.g. a generator).
+  {
+    const gen = (function* () { yield 1; yield 3 })()
+    const out = duplicateViews(views, gen)
+    assertEq(out.length, 5, 'dup-sel: generator idSet works')
+  }
+  // deep-copies pos/target so editing a clone can't touch the original.
+  {
+    const out = duplicateViews(views, new Set([1]))
+    out[0].pos[0] = 999
+    assertEq(views[2].pos[0], 1, 'dup-sel: clone pos is a deep copy')
+  }
+  // selecting an id not present is ignored (only real selected clone).
+  {
+    const out = duplicateViews(views, new Set([1, 99]))
+    assertEq(out.length, 4, 'dup-sel: phantom id ignored, only A cloned')
+    assertEq(out[0].name, 'A copy', 'dup-sel: only the real selected view cloned')
+  }
+  // a position-corrupt selected view is skipped (no angle to restore).
+  {
+    const withBad = [
+      { id: 2, name: 'ok', pos: [1, 2, 3], target: [0, 0, 0] },
+      { id: 1, name: 'bad', pos: [1, 2] }, // too-short pos
+    ]
+    const out = duplicateViews(withBad, new Set([1, 2]))
+    assertEq(out.length, 3, 'dup-sel: corrupt selected view skipped (1 clone)')
+    assertEq(out[0].name, 'ok copy', 'dup-sel: only the angle-bearing one cloned')
+  }
+  // ref-equal-on-no-op: empty selection / non-iterable / no cloneable id.
+  {
+    assertTrue(duplicateViews(views, new Set()) === views, 'dup-sel: empty set → ref-equal')
+    assertTrue(duplicateViews(views, null) === views, 'dup-sel: non-iterable idSet → ref-equal')
+    assertTrue(duplicateViews(views, new Set([99])) === views, 'dup-sel: no matching id → ref-equal')
+  }
+  // non-array views → [].
+  assertEq(duplicateViews(null, new Set([1])), [], 'dup-sel: non-array views → []')
+  // respects MAX cap (freshest clones win; oldest originals fall off).
+  {
+    const six = []
+    for (let i = 6; i >= 1; i--) six.push({ id: i, name: `V${i}`, pos: [i, 0, 0], target: [0, 0, 0] })
+    const out = duplicateViews(six, new Set([6, 5, 4, 3, 2, 1]))
+    assertEq(out.length, CAMERA_VIEWS_MAX, 'dup-sel: result capped at MAX')
+    assertTrue(out[0].name.endsWith('copy'), 'dup-sel: a clone leads the capped result')
+  }
+  // purity: input array not mutated.
+  {
+    const src = [{ id: 1, name: 'A', pos: [1, 2, 3], target: [0, 0, 0] }]
+    const snap = JSON.stringify(src)
+    duplicateViews(src, new Set([1]))
+    assertEq(JSON.stringify(src), snap, 'dup-sel: does not mutate input')
+  }
+}
+
+console.log('PASS: duplicateViews — fork a selected subset (R41.H)')
+
+// --- R41.H: selectIdRange — shift-click range-select core --------------
+{
+  const ids = [30, 20, 10, 5] // display order (newest-first)
+  // inclusive range, anchor before target.
+  assertEq(selectIdRange(ids, 30, 10), [30, 20, 10], 'range: anchor→target inclusive')
+  // order-agnostic: same slice whichever end is the anchor.
+  assertEq(selectIdRange(ids, 10, 30), [30, 20, 10], 'range: target→anchor same slice')
+  // single-row range (anchor === target).
+  assertEq(selectIdRange(ids, 20, 20), [20], 'range: anchor==target → single id')
+  // full span.
+  assertEq(selectIdRange(ids, 30, 5), [30, 20, 10, 5], 'range: full span')
+  // anchor missing (e.g. the anchored row was deleted) → just the target.
+  assertEq(selectIdRange(ids, 999, 10), [10], 'range: missing anchor → lone target')
+  // target missing → [] (nothing to range to).
+  assertEq(selectIdRange(ids, 30, 999), [], 'range: missing target → []')
+  // non-array → [].
+  assertEq(selectIdRange(null, 1, 2), [], 'range: non-array → []')
+  // purity: input not mutated.
+  {
+    const src = [3, 2, 1]
+    const snap = JSON.stringify(src)
+    selectIdRange(src, 3, 1)
+    assertEq(JSON.stringify(src), snap, 'range: does not mutate input')
+  }
+}
+
+console.log('PASS: selectIdRange — shift-click range-select core (R41.H)')

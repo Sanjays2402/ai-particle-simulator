@@ -524,3 +524,93 @@ export function duplicateAllViews(views, nameFor) {
   return [...clones, ...views].slice(0, MAX)
 }
 
+// --- R41.H: duplicate a SELECTED subset of views ----------------------
+//
+// R39.H clones ONE view; R40.H clones ALL views. This is the middle
+// ground: clone just the views the user multi-selected, so they can fork
+// a chosen handful (e.g. three framings they're about to A/B) without
+// duplicating the whole set. Like duplicateAllViews, the selected clones
+// are minted with fresh monotonic ids, PREPENDED as a block in the
+// source order, "<name> copy"-named, and the whole result capped at MAX.
+//
+// `idSet` accepts a Set, an array, or any iterable of ids (mirrors
+// removeAttractors / removeSnapshots' input contract). Only views whose
+// id is in the set AND that carry a restorable angle are cloned;
+// position-corrupt selected views are skipped (a clone with no angle is
+// useless, same bar as duplicateView).
+//
+// Contract:
+//   - non-array views → [] (nothing to clone into)
+//   - empty / non-iterable idSet, or no selected view is cloneable →
+//     input ref unchanged (ref-equal-on-no-op so persistence can skip a
+//     redundant save)
+//   - each clone deep-copies pos/target so editing a copy can't mutate
+//     the original's coordinate arrays
+//   - selection order follows the views' array order (not the order ids
+//     were added to the set) so the cloned block is stable
+//   - capped at MAX (freshest clones win; oldest originals fall off)
+//   - input array + every source view's arrays never mutated
+export function duplicateViews(views, idSet, nameFor) {
+  if (!Array.isArray(views)) return []
+  // Normalise the id collection to a Set for O(1) membership; tolerate
+  // Set | Array | iterable (incl. generators). A non-iterable → empty.
+  let ids
+  if (idSet instanceof Set) ids = idSet
+  else if (idSet && typeof idSet[Symbol.iterator] === 'function') ids = new Set(idSet)
+  else ids = new Set()
+  if (ids.size === 0) return views // nothing selected → ref-equal
+  // The selected, angle-bearing views in array order.
+  const cloneable = views.filter(v =>
+    v && typeof v === 'object' &&
+    v.id !== null && v.id !== undefined &&
+    ids.has(v.id) &&
+    Array.isArray(v.pos) && v.pos.length >= 3 &&
+    v.pos.every(n => Number.isFinite(Number(n))),
+  )
+  if (cloneable.length === 0) return views // none selected-and-cloneable
+  let nextId = (views.reduce((m, v) => Math.max(m, (v && v.id) || 0), 0)) + 1
+  const now = Date.now()
+  const clones = cloneable.map(src => {
+    const baseName = (typeof src.name === 'string' && src.name.trim()) ? src.name.trim() : `View ${src.id}`
+    const name = (typeof nameFor === 'function' ? nameFor(src) : null) || `${baseName} copy`
+    const clone = {
+      id: nextId,
+      name,
+      pos: src.pos.slice(),
+      target: Array.isArray(src.target) ? src.target.slice() : src.target,
+      createdAt: now,
+    }
+    nextId += 1
+    return clone
+  })
+  return [...clones, ...views].slice(0, MAX)
+}
+
+// Compute the inclusive id range between an anchor and a target id,
+// given the ids in their DISPLAY order — the pure core of shift-click
+// range-select. Returns the contiguous slice of ids from anchor..target
+// (inclusive, in display order regardless of which came first), so a UI
+// can union it into the live selection set.
+//
+// Contract:
+//   - non-array orderedIds → [] (nothing to range over)
+//   - anchor or target not present in the list → [target] when target is
+//     present (a lone click extends to just the clicked row), else []
+//     (both missing → nothing)
+//   - anchor === target → [that id] (a single-row range)
+//   - order-agnostic: selecting bottom-then-top yields the same slice as
+//     top-then-bottom
+//   - never mutates the input
+export function selectIdRange(orderedIds, anchorId, targetId) {
+  if (!Array.isArray(orderedIds)) return []
+  const ai = orderedIds.indexOf(anchorId)
+  const ti = orderedIds.indexOf(targetId)
+  // Target must exist to range to it. If the anchor is gone (e.g. the
+  // anchored row was deleted), fall back to selecting just the target.
+  if (ti < 0) return []
+  if (ai < 0) return [orderedIds[ti]]
+  const lo = Math.min(ai, ti)
+  const hi = Math.max(ai, ti)
+  return orderedIds.slice(lo, hi + 1)
+}
+

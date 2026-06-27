@@ -6,7 +6,7 @@ import {
   loadCameraViews, saveCameraViews, appendView, removeView,
   renameView, buildCameraPaletteActions, buildCameraDeleteActions,
   buildCameraRenameActions, duplicateView, buildCameraDuplicateActions,
-  duplicateAllViews,
+  duplicateAllViews, duplicateViews, selectIdRange,
 } from '../lib/cameraViews'
 import { labelForId as framingLabelForId } from '../lib/framingGuides'
 import { formatCalmToast } from '../lib/calmMode'
@@ -26,6 +26,15 @@ export function CommandPalette({ onSettings }) {
   // R38.H — inline rename: which view's rename field is open, + its draft.
   const [renamingId, setRenamingId] = useState(null)
   const [renameDraft, setRenameDraft] = useState('')
+  // R41.H — multi-select duplicate: when `selecting` is on, the saved
+  // views render as a checkbox list (escaping cmdk's row model, the way
+  // the rename row does) so the user can pick a SUBSET to fork — the
+  // middle ground between R39.H (one view) and R40.H (all views).
+  // `selectedIds` is the chosen set; `anchorId` seeds shift-click range
+  // selection.
+  const [selecting, setSelecting] = useState(false)
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
+  const [anchorId, setAnchorId] = useState(null)
   const framingGuideId = useStore(s => s.framingGuideId)
   const cycleFramingGuide = useStore(s => s.cycleFramingGuide)
   const {
@@ -42,6 +51,11 @@ export function CommandPalette({ onSettings }) {
           // Always reset any half-typed rename when toggling the palette.
           setRenamingId(null)
           setRenameDraft('')
+          // R41.H — reset any in-progress multi-select on toggle so the
+          // palette never reopens mid-selection.
+          setSelecting(false)
+          setSelectedIds(new Set())
+          setAnchorId(null)
           return !o
         })
       }
@@ -151,12 +165,79 @@ export function CommandPalette({ onSettings }) {
     )
   }
 
+  // R41.H — multi-select duplicate (middle ground between R39.H's one and
+  // R40.H's all): toggle a view's membership in the selection set. A
+  // shift-click extends from the last anchor to the clicked row via the
+  // pure selectIdRange (display-order, inclusive); a plain click toggles
+  // just that row + reseats the anchor.
+  const toggleSelected = (viewId, shiftKey) => {
+    const orderedIds = cameraViews.map(v => v.id)
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (shiftKey && anchorId != null) {
+        // Range-select from the anchor to the clicked row (additive).
+        for (const id of selectIdRange(orderedIds, anchorId, viewId)) next.add(id)
+      } else if (next.has(viewId)) {
+        next.delete(viewId)
+      } else {
+        next.add(viewId)
+      }
+      return next
+    })
+    // A plain click reseats the anchor; a shift-click keeps the original
+    // anchor so successive shift-clicks grow from the same origin.
+    if (!shiftKey) setAnchorId(viewId)
+  }
+
+  // R41.H — fork just the selected subset. Pure duplicateViews
+  // (ref-equal-on-no-op when nothing selected is cloneable) does the
+  // work; persist + re-sync exactly like the other lifecycle actions,
+  // then leave selection mode.
+  const duplicateSelected = () => {
+    const current = loadCameraViews()
+    const next = duplicateViews(current, selectedIds)
+    setSelecting(false)
+    setSelectedIds(new Set())
+    setAnchorId(null)
+    if (next === current) return // none selected-and-cloneable
+    saveCameraViews(next)
+    setCameraViews(next)
+    window.dispatchEvent(new CustomEvent('particle:camera-views-changed'))
+    const added = next.length - current.length
+    showToast(
+      added > 0
+        ? `Duplicated ${added} selected view${added === 1 ? '' : 's'}`
+        : 'Views duplicated (some dropped at the cap)',
+      <Copy size={10} color="#fff" strokeWidth={2.4} />,
+    )
+  }
+
+  const enterSelectMode = () => {
+    setSelecting(true)
+    setSelectedIds(new Set())
+    setAnchorId(null)
+  }
+  const cancelSelectMode = () => {
+    setSelecting(false)
+    setSelectedIds(new Set())
+    setAnchorId(null)
+  }
+
   if (!open) return null
 
   const cameraActions = buildCameraPaletteActions(cameraViews)
   const deleteActions = buildCameraDeleteActions(cameraViews)
   const renameActions = buildCameraRenameActions(cameraViews)
   const duplicateActions = buildCameraDuplicateActions(cameraViews)
+  // R41.H — the angle-bearing (duplicable) views, in display order, for
+  // the multi-select panel + its "Duplicate (N)" gate. selectedIds may
+  // briefly hold ids that have since vanished; reconcile against the live
+  // list so the count never over-reports.
+  const duplicableViews = cameraViews.filter(v =>
+    v && v.id != null && Array.isArray(v.pos) && v.pos.length >= 3 &&
+    v.pos.every(n => Number.isFinite(Number(n))),
+  )
+  const selectedCount = duplicableViews.reduce((n, v) => n + (selectedIds.has(v.id) ? 1 : 0), 0)
 
   return (
     <div
@@ -366,10 +447,106 @@ export function CommandPalette({ onSettings }) {
                 />
               )
             ))}
+            {/* R41.H — multi-select duplicate: a SUBSET fork, the middle
+                ground between R39.H (one) and R40.H (all). When 2+
+                duplicable views exist, an entry row arms a checkbox list
+                (escaping cmdk like the rename row) so the user picks which
+                views to clone. Shift-click range-selects. */}
+            {!selecting && duplicableViews.length >= 2 && (
+              <Item
+                icon={Copy}
+                label="Duplicate Selected Views…"
+                sub={`Pick a subset of the ${duplicableViews.length} views to clone`}
+                keywords="camera view duplicate selected subset multi clone copy fork some pick choose"
+                onSelect={() => enterSelectMode()}
+              />
+            )}
+            {selecting && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  margin: '4px 0', padding: '10px 11px', borderRadius: 10,
+                  border: '1px solid rgba(168,85,247,0.4)',
+                  background: 'rgba(168,85,247,0.07)',
+                }}
+              >
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  marginBottom: 8,
+                }}>
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+                    textTransform: 'uppercase', color: '#a78bfa',
+                  }}>Select views to duplicate</span>
+                  <span style={{ fontSize: 10, color: '#8a8aa0', fontVariantNumeric: 'tabular-nums' }}>
+                    {selectedCount}/{duplicableViews.length}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 9 }}>
+                  {duplicableViews.map(v => {
+                    const on = selectedIds.has(v.id)
+                    const name = (typeof v.name === 'string' && v.name.trim()) ? v.name.trim() : `View ${v.id}`
+                    return (
+                      <button
+                        key={v.id}
+                        onClick={(e) => toggleSelected(v.id, e.shiftKey)}
+                        title="Click to toggle · Shift+click to select a range"
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          padding: '7px 9px', borderRadius: 8, cursor: 'pointer',
+                          textAlign: 'left',
+                          background: on ? 'rgba(168,85,247,0.16)' : 'rgba(255,255,255,0.03)',
+                          border: `1px solid ${on ? 'rgba(168,85,247,0.45)' : 'rgba(255,255,255,0.06)'}`,
+                          color: on ? '#e9d5ff' : '#9a9ab0',
+                          fontFamily: 'inherit', fontSize: 12.5, fontWeight: 500,
+                          transition: 'all 0.12s ease-out',
+                        }}
+                      >
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          width: 16, height: 16, borderRadius: 5, flexShrink: 0,
+                          background: on ? 'rgba(168,85,247,0.6)' : 'rgba(255,255,255,0.06)',
+                          border: `1px solid ${on ? 'rgba(168,85,247,0.7)' : 'rgba(255,255,255,0.14)'}`,
+                          color: '#fff', fontSize: 11, lineHeight: 1,
+                        }}>{on ? '\u2713' : ''}</span>
+                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button
+                    onClick={() => duplicateSelected()}
+                    disabled={selectedCount === 0}
+                    title={selectedCount === 0 ? 'Select at least one view' : `Clone the ${selectedCount} selected view${selectedCount === 1 ? '' : 's'}`}
+                    style={{
+                      flex: 1, padding: '6px 0', borderRadius: 7,
+                      background: selectedCount === 0
+                        ? 'rgba(255,255,255,0.04)'
+                        : 'linear-gradient(135deg, rgba(139,92,246,0.35) 0%, rgba(236,72,153,0.28) 100%)',
+                      border: `1px solid ${selectedCount === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(168,85,247,0.5)'}`,
+                      color: selectedCount === 0 ? '#6a6a80' : '#e9d5ff',
+                      cursor: selectedCount === 0 ? 'not-allowed' : 'pointer',
+                      fontFamily: 'inherit', fontSize: 12, fontWeight: 600, letterSpacing: '0.02em',
+                    }}
+                  >{selectedCount === 0 ? 'Duplicate' : `Duplicate (${selectedCount})`}</button>
+                  <button
+                    onClick={() => cancelSelectMode()}
+                    title="Cancel selection"
+                    style={{
+                      padding: '6px 14px', borderRadius: 7,
+                      background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)',
+                      color: '#9a9ab0', cursor: 'pointer',
+                      fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
+                    }}
+                  >Cancel</button>
+                </div>
+              </div>
+            )}
             {/* R40.H — fork the WHOLE set at once (clone every saved view
                 as "<name> copy"). Only when 2+ duplicable views exist —
                 with a single view the per-view duplicate above suffices. */}
-            {duplicateActions.length >= 2 && (
+            {!selecting && duplicateActions.length >= 2 && (
               <Item
                 icon={Copy}
                 label="Duplicate All Saved Views"
