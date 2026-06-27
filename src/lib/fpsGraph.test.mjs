@@ -14,6 +14,8 @@ import {
   sparklineSampleStats,
   // R41.A — full per-sample stats for a pinned ETA-history point
   etaHistorySampleStats,
+  // R41.D — one-line summary of a pinned perf sample (copy-to-clipboard)
+  formatPinnedSampleLine,
 } from './fpsGraph.js'
 
 let passed = 0
@@ -1028,3 +1030,47 @@ eq(sparklineSampleStats([60, 30], Infinity), null, 'pin: Infinity index → null
 }
 
 console.log(`PASS: fpsGraph R41.A — ${passed} total assertions (incl. pinned ETA-history sample readout)`)
+
+// --- R41.D: formatPinnedSampleLine — copy-ready one-line summary --------
+// Renders sparklineSampleStats' bundle into a paste-ready string. The
+// "·" separator is U+00B7; "—" placeholders are U+2014.
+{
+  const DOT = '\u00b7'
+  const DASH = '\u2014'
+  // a healthy sample: fps + frame-ms + age, no drop tag.
+  eq(formatPinnedSampleLine({ fps: 60, frameMs: 16.7, isDrop: false, secondsAgo: 0 }),
+    `60 fps ${DOT} 16.7 ms ${DOT} now`, 'fmt: healthy sample = fps/ms/now')
+  // a dropped sample appends a "drop" tag between ms and age.
+  eq(formatPinnedSampleLine({ fps: 24, frameMs: 41.7, isDrop: true, secondsAgo: 4 }),
+    `24 fps ${DOT} 41.7 ms ${DOT} drop ${DOT} 4s ago`, 'fmt: dropped sample includes drop tag')
+  // age > 0 reads "Ns ago"; 0 reads "now"; negative clamps to "now".
+  eq(formatPinnedSampleLine({ fps: 55, frameMs: 18.2, isDrop: false, secondsAgo: 7 }),
+    `55 fps ${DOT} 18.2 ms ${DOT} 7s ago`, 'fmt: positive age reads "Ns ago"')
+  eq(formatPinnedSampleLine({ fps: 58, frameMs: 17.2, isDrop: false, secondsAgo: -3 }),
+    `58 fps ${DOT} 17.2 ms ${DOT} now`, 'fmt: negative age clamps to now')
+  // a junk-fps sample renders fps + ms as em-dash but still reports age,
+  // and NEVER shows a drop tag (unknown is not a drop).
+  eq(formatPinnedSampleLine({ fps: null, frameMs: null, isDrop: false, secondsAgo: 2 }),
+    `${DASH} fps ${DOT} ${DASH} ms ${DOT} 2s ago`, 'fmt: junk fps → em-dash fps + ms, age kept')
+  // isDrop only honoured when STRICTLY true (a junk truthy never flags).
+  eq(formatPinnedSampleLine({ fps: 50, frameMs: 20, isDrop: 1, secondsAgo: 1 }),
+    `50 fps ${DOT} 20 ms ${DOT} 1s ago`, 'fmt: non-strict-true isDrop does not add drop tag')
+  // a real round-trip from sparklineSampleStats composes cleanly.
+  {
+    const stats = sparklineSampleStats([60, 24, 58], 1, { sampleMs: 1000 })
+    eq(formatPinnedSampleLine(stats), `24 fps ${DOT} 41.7 ms ${DOT} drop ${DOT} 1s ago`,
+      'fmt: round-trips a real sparklineSampleStats bundle')
+  }
+  // custom separator is honoured.
+  eq(formatPinnedSampleLine({ fps: 60, frameMs: 16.7, isDrop: false, secondsAgo: 0 }, { sep: ' | ' }),
+    '60 fps | 16.7 ms | now', 'fmt: custom separator')
+  // non-finite age → em-dash placeholder (never crashes / prints NaN).
+  eq(formatPinnedSampleLine({ fps: 60, frameMs: 16.7, isDrop: false, secondsAgo: NaN }),
+    `60 fps ${DOT} 16.7 ms ${DOT} ${DASH}`, 'fmt: NaN age → em-dash')
+  // defensive: null / undefined / non-object stats → '' (nothing to copy).
+  eq(formatPinnedSampleLine(null), '', 'fmt: null stats → empty string')
+  eq(formatPinnedSampleLine(undefined), '', 'fmt: undefined stats → empty string')
+  eq(formatPinnedSampleLine(42), '', 'fmt: non-object stats → empty string')
+}
+
+console.log(`PASS: fpsGraph R41.D — ${passed} total assertions (incl. copy-ready pinned sample line)`)

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { perfBudgetStatus, summarizePerfWindow } from '../lib/perfSuggest'
-import { buildBandedSparklineSegments, refLineY, FPS_GRAPH_CEIL, scrubSparkline, sparklineSampleStats } from '../lib/fpsGraph'
+import { buildBandedSparklineSegments, refLineY, FPS_GRAPH_CEIL, scrubSparkline, sparklineSampleStats, formatPinnedSampleLine } from '../lib/fpsGraph'
 
 // R36.D — live perf-budget status pill.
 //
@@ -28,6 +28,11 @@ import { buildBandedSparklineSegments, refLineY, FPS_GRAPH_CEIL, scrubSparkline,
 // (fps + frame-ms + drop flag + age) so a transient stutter can be
 // inspected at leisure, not just caught mid-hover. Clicking again (or the
 // panel's clear) drops the pin.
+//
+// R41.D — the pinned panel gains a "Copy" button that writes the pinned
+// sample's stats as a one-line string ("48 fps · 20.8 ms · drop · 4s
+// ago") to the clipboard, so a user filing a perf bug can paste the
+// exact moment instead of retyping it.
 //
 // Off by default; the whole component returns null when the preference is
 // off (zero cost). zen-hideable so it fades with the rest of the chrome.
@@ -56,6 +61,9 @@ export default function PerfBudgetPill() {
   // tracks its sample as the window scrolls, and clears itself once the
   // sample ages out of the window.
   const [pinnedIndex, setPinnedIndex] = useState(null)
+  // R41.D — brief "Copied" affordance after the copy button fires, so the
+  // user gets feedback the clipboard write landed. Auto-reverts.
+  const [copied, setCopied] = useState(false)
   const seriesRef = useRef([])
 
   useEffect(() => {
@@ -100,6 +108,9 @@ export default function PerfBudgetPill() {
   // mid-scrub the next time it opens. Also clear the pin — a pin is a
   // session-scoped inspection, not a persistent marker.
   useEffect(() => { if (!open) { setScrubX(null); setPinnedIndex(null) } }, [open])
+  // R41.D — reset the "Copied" affordance whenever the pinned sample
+  // changes (or clears) so it never sticks to a different / absent pin.
+  useEffect(() => { setCopied(false) }, [pinnedIndex])
 
   if (!enabled) return null
 
@@ -322,16 +333,43 @@ export default function PerfBudgetPill() {
                 }}>
                   Pinned · {pinned.secondsAgo === 0 ? 'now' : `${pinned.secondsAgo}s ago`}
                 </span>
-                <button
-                  onClick={() => setPinnedIndex(null)}
-                  title="Unpin this sample"
-                  style={{
-                    padding: '1px 7px', borderRadius: 5,
-                    background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)',
-                    color: '#9a9ab0', cursor: 'pointer', fontFamily: 'inherit',
-                    fontSize: 9, fontWeight: 600, letterSpacing: '0.04em',
-                  }}
-                >Clear</button>
+                <div style={{ display: 'inline-flex', gap: 5 }}>
+                  {/* R41.D — copy the pinned sample as a one-line string so
+                      a user filing a perf bug can paste the exact moment.
+                      navigator.clipboard is guarded; on success a brief
+                      "Copied" label confirms the write landed. */}
+                  <button
+                    onClick={() => {
+                      const line = formatPinnedSampleLine(pinned)
+                      if (!line) return
+                      const done = () => setCopied(true)
+                      try {
+                        const p = navigator.clipboard?.writeText?.(line)
+                        if (p && typeof p.then === 'function') p.then(done).catch(() => {})
+                        else done()
+                      } catch { /* clipboard blocked — no-op */ }
+                    }}
+                    title="Copy this sample's stats to the clipboard"
+                    style={{
+                      padding: '1px 7px', borderRadius: 5,
+                      background: copied ? 'rgba(134,239,172,0.16)' : 'rgba(255,255,255,0.05)',
+                      border: `1px solid ${copied ? 'rgba(134,239,172,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                      color: copied ? '#86efac' : '#9a9ab0', cursor: 'pointer', fontFamily: 'inherit',
+                      fontSize: 9, fontWeight: 600, letterSpacing: '0.04em',
+                      transition: 'all 0.14s ease-out',
+                    }}
+                  >{copied ? 'Copied' : 'Copy'}</button>
+                  <button
+                    onClick={() => setPinnedIndex(null)}
+                    title="Unpin this sample"
+                    style={{
+                      padding: '1px 7px', borderRadius: 5,
+                      background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)',
+                      color: '#9a9ab0', cursor: 'pointer', fontFamily: 'inherit',
+                      fontSize: 9, fontWeight: 600, letterSpacing: '0.04em',
+                    }}
+                  >Clear</button>
+                </div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <SummaryRow label="FPS" value={pinned.fps == null ? '—' : `${pinned.fps} fps`}

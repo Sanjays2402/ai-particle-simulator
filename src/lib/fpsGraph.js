@@ -747,6 +747,38 @@ export function sparklineSampleStats(samples, index, opts = {}) {
   return { index: idx, fps, frameMs, isDrop, secondsAgo }
 }
 
+// --- R41.D: one-line summary of a pinned perf sample -------------------
+//
+// R40.D pins a sparkline sample and shows its stats in a panel. This
+// formats that same { fps, frameMs, isDrop, secondsAgo } bundle into a
+// single, paste-ready line so a user filing a perf bug can copy the
+// exact moment to the clipboard ("48 fps · 20.8 ms · drop · 4s ago")
+// instead of retyping numbers off the panel.
+//
+// Pure: takes the stats object sparklineSampleStats returns and renders
+// a string. Defensive — a null/undefined stats (pin aged out) → ''; a
+// junk-fps sample (fps null) renders the fps + frame-ms as "—" but
+// still reports the age, so a copied line never lies about a sample it
+// couldn't read. The "drop" tag is only appended for a genuine
+// sub-floor sample, never for an unknown one. Age reads "now" at 0s.
+// `sep` is configurable (default " · ") for callers that want a
+// different delimiter.
+export function formatPinnedSampleLine(stats, opts = {}) {
+  if (!stats || typeof stats !== 'object') return ''
+  const sep = typeof opts.sep === 'string' ? opts.sep : ' \u00b7 '
+  const fpsPart = (stats.fps === null || stats.fps === undefined) ? '\u2014 fps' : `${stats.fps} fps`
+  const msPart = (stats.frameMs === null || stats.frameMs === undefined) ? '\u2014 ms' : `${stats.frameMs} ms`
+  const parts = [fpsPart, msPart]
+  // Only flag a real drop — an unknown (junk) sample is not a drop.
+  if (stats.isDrop === true) parts.push('drop')
+  const ageNum = Number(stats.secondsAgo)
+  const age = Number.isFinite(ageNum)
+    ? (ageNum <= 0 ? 'now' : `${Math.round(ageNum)}s ago`)
+    : '\u2014'
+  parts.push(age)
+  return parts.join(sep)
+}
+
 // --- R41.A: full per-sample stats for a PINNED ETA-history point -------
 //
 // R40.A scrubs the ETA-to-edge history strip under a moving cursor; this
