@@ -130,6 +130,11 @@ Existing capabilities (do not re-ship):
 - Perf-pill sparkline hover-scrub tooltip (R39.D, graduates R38.D). R38.D's band-coloured fps sparkline showed the SHAPE of the last ~12s but a user couldn't read an exact value off it. R39.D: hover the graph and a vertical guide line + a dot snap to the nearest sample, with a readout below showing that sample's exact fps (band-coloured) + how many seconds ago ("48 fps · 4s ago" / "now"). Pure lib/fpsGraph.js: scrubSparkline(samples, cursorX, opts) reverses buildSparklinePoints' even spacing to map a cursor x to the nearest sample, returning { index, fps, x, secondsAgo }; cursor over/undershoot clamps to the nearest edge (never null mid-graph); junk sample → fps null (tooltip shows "—") but a valid index+age so the guide still anchors; single-sample window pins to the right edge with no divide-by-zero. +31 asserts. PerfBudgetPill maps the on-screen pointer back into the responsive SVG's viewBox space (sparkline renders at 100% width) so the guide tracks precisely; a fixed-height readout row keeps the popover from jumping as the pointer enters/leaves; scrub clears when the popover closes.
 - Duplicate saved camera view (R39.H, graduates R38.H). Completes the palette saved-view lifecycle (save/restore/delete/rename/clear-all already shipped). DUPLICATE clones an existing view's camera angle as a new "<name> copy" view so a user can base a tweak on an existing framing without re-aiming the camera. Pure lib/cameraViews.js: duplicateView(views, id, nameFor?) finds the source by id, DEEP-copies its pos/target (so editing the copy can't mutate the original's coordinate arrays), mints a fresh monotonic id + derived name, and prepends (newest-first, MAX-capped like appendView); ref-equal-on-no-op for missing/absent id AND for a position-corrupt source (a clone with no angle to restore is useless). buildCameraDuplicateActions surfaces one palette action per CLONEABLE view (skips angle-less rows, unlike rename/delete which surface them for purging). +40 asserts incl. deep-copy isolation + MAX-cap tail drop + custom nameFor. CommandPalette renders the duplicate actions (Copy icon) after restore/delete; handler persists + fires particle:camera-views-changed so the RightSidebar re-syncs.
 - Calm-gate map export / import as portable JSON (R39.K, graduates R38.K). A user who chose WHICH motions calm mode pauses can now carry that preference between machines or share it, instead of re-picking by hand. NEW lib/calmGatesIO.js (kind=ai-particle-simulator/calm-gates, v1, 8 KB cap): buildExportPayload / serialize / parseImport / mergeImport / summarizeImportImpact / downloadCalmGatesFile — direct parallel to windOverridesIO. parseImport tolerates the full envelope AND a bare gates map (hand-rolled), and REJECTS a map with no recognised motion id (so an unrelated blob can't silently resolve to the all-default map + look like a success). mergeImport's MERGE mode only adopts deliberate opt-OUTs (incoming false) so a partial file can't re-gate a motion the user turned off; REPLACE adopts the sanitised map wholesale. +70 asserts. Store: setCalmGates(gates) (sanitised, persisted). TopBar calm-gates popover gains Export / Import buttons below the toggle list; import uses replace mode (the file IS the intended preference) + toasts how many motions changed.
+- Debug HUD ETA-history hover-scrub (R40.A, graduates R39.A). The R39.A ETA-to-edge history strip shows the seconds-to-edge TREND but a tuner couldn't read an exact value off a specific dip. R40.A adds a hover-scrub (parallel to R39.D's sparkline scrub): hovering the strip snaps a vertical guide line + dot to the nearest sample, with a readout below showing that sample's exact seconds-to-edge + how-long-ago ("~4.2s to edge · 3s ago"); a "not approaching" tick reads "safe" instead of a false 0s ETA. Pure lib/fpsGraph.js: scrubEtaHistory(history, cursorX, opts) reverses buildEtaHistoryPoints' even spacing to map a cursor x to the nearest sample, returning { index, etaSec, x, secondsAgo, approaching }; null markers guarded before Number() so a not-approaching tick never coerces to 0; cursor over/undershoot clamps to nearest edge; single-sample window pins to the right edge (no divide-by-zero). +31 asserts. DebugHUD sets pointerEvents:auto on the ETA strip (HUD root is pointer-events:none), maps the pointer into the strip's pixel space, renders the guide + dot + a readout row; scrub clears on pointer-leave.
+- Perf-pill click-to-pin per-sample stats (R40.D, graduates R39.D). R39.D scrubs the perf-pill sparkline (fps + age) under a moving cursor, but a transient stutter flashes past in one frame of hovering. R40.D lets the user CLICK a sample to pin it: a distinct ringed marker + dashed guide stays on the graph and a fixed inspector panel shows that sample's FULL per-sample stats — fps, equivalent frame time in ms, drop flag (< 30fps), and how long ago — so the moment can be studied at leisure. Clicking the pinned sample again (or the panel's Clear) drops it. Pure lib/fpsGraph.js: sparklineSampleStats(samples, index, opts) → { index, fps, frameMs, isDrop, secondsAgo }; frame ms is derived from the RAW (unrounded) fps so 59.6fps reads ~16.8ms not 17.0; a drop is strictly under the floor (30fps boundary is NOT a drop); junk samples read null with isDrop false so they never inflate the drop story; out-of-range / non-finite index → null. +27 asserts. PerfBudgetPill stores the pin as an INDEX (not a value) and shifts it as samples scroll off the front so it tracks the SAME moment, dropping the pin once that sample ages out; pin clears on popover / pill close. The marker reddens when the pinned sample is a drop.
+- Spiral sweep speed control — Fast / Normal / Slow (R40.B, graduates R39.B). R38.B's draw-on sweep + R39.B's replay ran at one fixed pace; R40.B adds a three-way speed control under the active Spiral grid so a user can slow the reveal to study how the golden curve is constructed, or speed it up once they know it. Picking a speed also replays the sweep at the new pace. 'normal' reproduces the original baked timings exactly (0.9s sweep / 0.62s eye-delay / 0.4s eye-in) so an existing user sees zero change until they pick another speed. Pure lib/framingGuides.js: SPIRAL_SWEEP_SPEEDS roster (fast/normal/slow, each sweepMs/eyeDelayMs/eyeMs — eyeDelay kept < sweep so the eye lands ON the curve), SPIRAL_SWEEP_SPEED_DEFAULT, isValid / sanitize / next helpers, spiralSweepTimings(id) returning the ms triple + seconds-form strings the component drops into the animation shorthand. +48 asserts. The CSS keyframes are duration-agnostic (just lerp stroke-dashoffset / opacity), so FramingGuides threads sweepT.sweepSec/eyeSec/eyeDelaySec into the inline animation strings — no keyframe edit. Store: spiralSweepSpeed persisted to particle-spiral-sweep-speed-v1.
+- Duplicate All Saved Views — bulk fork (R40.H, graduates R39.H). R39.H clones a SINGLE camera view; R40.H forks the WHOLE set in one command-palette action: every angle-bearing view gets a "<name> copy" clone so a user can fork an entire framing collection before a round of edits without duplicating each one by hand. The action only appears when 2+ duplicable views exist (with one, the per-view duplicate suffices). Pure lib/cameraViews.js: duplicateAllViews(views, nameFor?) clones every cloneable view (deep-copying pos/target so editing a copy can't mutate the original's arrays), mints fresh monotonic ids, and prepends the clone block preserving source order ("A,B" → "A copy,B copy,A,B"), capped at MAX so the freshest clones win and oldest originals fall off the tail. Ref-equal-on-no-op when nothing is cloneable; position-corrupt rows skipped. +25 asserts. CommandPalette duplicateAll handler persists + fires particle:camera-views-changed so the RightSidebar re-syncs; toast reports how many landed.
+- Calm-gate import live PREVIEW panel (R40.K, graduates R39.K). R39.K imported a calm-gate JSON file by applying it immediately (replace mode). R40.K stages the parsed map and shows a live preview FIRST (parallels the keymap / wind / crossfade import previews): a per-motion from→to diff (run/pause), a Merge / Replace mode toggle that recomputes the diff in place, and an Apply button gated on willChange > 0 so a no-op import can't be committed by accident. Cancel discards the staged import; closing the popover clears it too. Pure WIRE layer on the already-pinned calmGatesIO helpers — summarizeImportImpact (per-motion { from, to, changes } rows + willChange count) and mergeImport (merge adopts only deliberate opt-OUTs; replace adopts the whole sanitised map) were both regression-tested in R39.K, so no new lib code / no new tests; this slice is the UI that surfaces them. Merge defaults off — the file IS the intended preference — but the user can flip to Merge to non-destructively append only the motions the sender turned off.
 - (R34.A) Debug HUD live FPS sparkline graph — the 2s rolling fps window the HUD already sampled is now drawn as an SVG sparkline (168x34) with 60/30fps dashed reference lines + area fill + a band-coloured stroke (green/amber/red) that reddens live as fps drops, plus "1% low" (averaged worst 10% of the window) and a "Drops" count (samples under 30fps, shown only when > 0). Pure module lib/fpsGraph.js: buildSparklinePoints/sparklinePointsAttr (newest at right, junk samples collapse to floor, over-ceiling clamps to top), refLineY, summarizeFpsWindow, fpsBandColor (FPS_GRAPH_CEIL=70). Toggle the HUD with backtick as before.
 - (R34.B) Cinematic framing guides — toggleable letterbox/pillarbox bars mask the viewport to a chosen aspect ratio (2.39 / 16:9 / 3:2 / 1:1 / 4:5 / 9:16) for composing screenshots & recordings; visual-only (pointer-events:none, z below chrome above canvas), never changes what's captured. Chip row in LeftSidebar Camera section; [ clears / ] cycles; frame badge shows ratio + live pixel dims; 1px hairline on each bar's inner edge. Persisted (particle-framing-guide-v1). Pure module lib/framingGuides.js: FRAMING_RATIOS roster, computeFramingBars (mode none/letterbox/pillarbox + symmetric bar thickness, clamps junk dims to no-bars), sanitizeFramingId/nextFramingId/describeFraming. Store: framingGuideId + setFramingGuideId/cycleFramingGuide.
 - (R34.C) Screenshot self-timer — optional 3..2..1 countdown ring before capture so users can stage a clean frame; TopBar toggle next to the camera button cycles Off/3/5/10s with the active delay as a badge; applies to every screenshot entry point (button, S key, command palette); Escape cancels; reduced-motion aware. Persisted (particle-screenshot-timer-v1). Pure module lib/selfTimer.js: countdownState (remaining/secondsLeft=ceil/progress/done, clock-skew + junk safe → instant-done), TIMER_DELAYS roster + sanitizeTimerDelay (snaps to nearest), ringDashoffset. TopBar capture refactored to module-level captureScreenshotNow/requestScreenshot.
@@ -795,25 +800,12 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R39.N Minimap "frame all saved views" (carried R38.N)
 - [ ] R39.O Debug HUD compact/expanded toggle (carried R38.O)
 
-### Batch 40 — fresh frontend queue (graduations of Batch 39 + carried)
-- [ ] R40.A Debug HUD ETA history (R39.A): a hover-scrub on the ETA strip
-  (parallels R39.D's sparkline scrub) reading the exact seconds-to-edge +
-  how-long-ago for the sample under the cursor, so a tuner can pick a
-  specific dip off the trend line
-- [ ] R40.B Spiral sweep (R39.B): a sweep SPEED control (Fast / Normal /
-  Slow chips, persisted) so a user can slow the draw-on to study the curve
-  or speed it up once they know it — threads a duration var into the
-  spiral-sweep / spiral-eye-in keyframes
-- [ ] R40.D Perf-pill scrub (R39.D): a "jump to this moment" — clicking a
-  scrubbed sample pins a marker + shows the full per-sample stats (fps +
-  frame-ms + drop flag) in the popover so a transient stutter can be
-  inspected, not just hovered
-- [ ] R40.H Command palette views (R39.H): a "Duplicate all saved views"
-  bulk action (clone the whole set as "<name> copy") so a user can fork an
-  entire framing collection before a round of edits
-- [ ] R40.K Calm gates (R39.K): a live import PREVIEW panel before commit
-  (parallels the keymap/wind/crossfade import previews) — per-motion
-  from→to diff chips + merge/replace toggle + Apply gated on willChange>0
+### Batch 40 — fresh frontend queue (graduations of Batch 39 + carried)  (SHIPPED)
+- [x] **R40.A** Debug HUD ETA-history hover-scrub — fea5d86
+- [x] **R40.D** Perf-pill click-to-pin per-sample stats — 7114109
+- [x] **R40.B** Spiral sweep speed control (Fast/Normal/Slow) — 1fcfecd
+- [x] **R40.H** Duplicate All Saved Views (bulk fork) — adf0ba7
+- [x] **R40.K** Calm-gate import live PREVIEW panel — 991aef3
 - [ ] R40.C Self-timer burst review strip (carried R36.C→R39.C)
 - [ ] R40.E Zen "Now Playing" overlay (carried R36.E→R39.E)
 - [ ] R40.G Screenshot watermark / caption (carried R36.G→R39.G)
@@ -821,6 +813,33 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R40.M Framing guide custom aspect-ratio chip (carried R38.M/R39.M)
 - [ ] R40.N Minimap "frame all saved views" (carried R38.N/R39.N)
 - [ ] R40.O Debug HUD compact/expanded toggle (carried R38.O/R39.O)
+
+### Batch 41 — fresh frontend queue (graduations of Batch 40 + carried)
+- [ ] R41.A Debug HUD ETA-history (R40.A): a click-to-PIN on the ETA strip
+  (parallels R40.D's perf-pill pin) so a tuner can lock a specific dip's
+  seconds-to-edge + age on screen while they tweak, instead of holding the
+  hover; a distinct pin marker + a small pinned-readout line
+- [ ] R41.B Spiral sweep (R40.B): a sweep EASING control (ease-in / linear
+  / ease-out chips, persisted) layered on the Fast/Normal/Slow speed so a
+  user can shape HOW the draw-on accelerates, not just how long it takes —
+  swaps the cubic-bezier in the spiral-sweep animation string
+- [ ] R41.D Perf-pill pin (R40.D): "copy pinned stats" — a tiny button on
+  the pin panel that copies the pinned sample's fps/frame-ms/age as a
+  one-line string to the clipboard so a user filing a perf bug can paste
+  the exact moment
+- [ ] R41.H Saved views (R40.H): a "Duplicate selected views" — shift-click
+  multi-select rows in the palette, then fork just the chosen subset
+  (graduates R40.H's all-or-one with the middle ground)
+- [ ] R41.K Calm gates (R40.K): an import-preview "diff-only" filter toggle
+  that hides the unchanged rows so a large map's actual changes stand out
+  (parallels the keymap preview's changed-only view)
+- [ ] R41.C Self-timer burst review strip (carried R36.C→R40.C)
+- [ ] R41.E Zen "Now Playing" overlay (carried R36.E→R40.E)
+- [ ] R41.G Screenshot watermark / caption (carried R36.G→R40.G)
+- [ ] R41.L Shortcut cheat-sheet overlay (carried R36.L→R40.L)
+- [ ] R41.M Framing guide custom aspect-ratio chip (carried R38.M→R40.M)
+- [ ] R41.N Minimap "frame all saved views" (carried R38.N→R40.N)
+- [ ] R41.O Debug HUD compact/expanded toggle (carried R38.O→R40.O)
 
 ### Future queue carried from Batch 24 (still genuine, unshipped)
 - [ ] R25.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view
@@ -830,6 +849,47 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R25.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode)
 
 ## TICK LOG
+- 2026-06-27 07:31 PT — Batch 40 (5/5). Tick 40. Frontend-focus override
+  active. Shipped the five Batch-40 graduations — all genuinely-new
+  user-facing capability (NOT cosmetic filler); 4 add fresh pure tested
+  helpers, 1 (R40.K) is real UI on already-pinned logic (legit precedent —
+  same pattern as prior preview slices). NOTE: the trigger message's
+  "first tick / 31 unpushed commits / branch feature/autoship off LOCAL
+  HEAD / npm install" was STALE boilerplate AGAIN (4th tick running — same
+  false signal Batch 37/38/39 logged). Reality: repo in sync with origin
+  at c21bb9e (0 ahead / 0 behind), node_modules present, STATE.md
+  bootstrapped through tick 39, ZERO unpushed commits to preserve.
+  Followed the authoritative prompt: worked DIRECTLY ON main (the prompt
+  BANS feature branches — they don't show on the contribution graph), no
+  feature/autoship branch created.
+  Commits: fea5d86 (R40.A Debug HUD ETA-history hover-scrub — guide line +
+  dot + exact seconds-to-edge/age readout, "safe" for not-approaching
+  ticks), 7114109 (R40.D perf-pill click-to-pin per-sample stats — ringed
+  marker + fixed inspector panel with fps/frame-ms/drop-flag/age, pin
+  tracks its moment as the window scrolls), 1fcfecd (R40.B spiral sweep
+  speed control Fast/Normal/Slow — threads timings into the animation
+  strings, normal == original baked timings), adf0ba7 (R40.H Duplicate All
+  Saved Views — bulk fork the whole set as "<name> copy", MAX-capped),
+  991aef3 (R40.K calm-gate import live PREVIEW panel — per-motion from→to
+  diff + merge/replace toggle + Apply gated on willChange>0).
+  Pushed c21bb9e..991aef3 -> origin/main (verified fast-forward, 0 ahead /
+  0 behind after push).
+  Gates: lint EXACTLY at baseline (26 problems / 23 errors / 3 warnings —
+  all pre-existing in DebugHUD performance.now / ParticleCanvas / Toast /
+  TopBar glow+escapes / store no-empty+unused-e / SnapshotGallery /
+  Timeline / vite.config; proved via targeted eslint that every touched
+  file added ZERO new lint errors — the only "errors" on touched files are
+  the pre-existing performance.now-in-render baseline + TopBar's
+  generateExportHTML escapes, both line-shifted by my additions). Build:
+  green (~1.55s). Unit tests: ALL 47 test files pass; +131 fresh asserts
+  this batch (fpsGraph +58 across R40.A scrubEtaHistory + R40.D
+  sparklineSampleStats, framingGuides +48 R40.B sweep speeds, cameraViews
+  +25 R40.H duplicateAllViews; R40.K added no lib code so no new test —
+  it's a UI wire layer on R39.K's already-pinned summarizeImportImpact +
+  mergeImport).
+  Frontend-focus override honoured — all 5 slices are FRONTEND/UX (perf-HUD
+  data-viz scrub, perf-pill inspection pin, framing animation control,
+  palette bulk lifecycle, portable-preferences import preview).
 - 2026-06-27 03:44 PT — Batch 39 (5/5). Tick 39. Frontend-focus override
   active. Shipped the five Batch-39 graduations — all genuinely-new
   user-facing capability, each its own pure tested module (NOT cosmetic
