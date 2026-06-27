@@ -2,7 +2,7 @@
 import {
   FPS_GRAPH_CEIL, FPS_GOOD, FPS_OK,
   fpsBandColor, buildSparklinePoints, sparklinePointsAttr,
-  refLineY, summarizeFpsWindow,
+  refLineY, summarizeFpsWindow, buildBandedSparklineSegments,
 } from './fpsGraph.js'
 
 let passed = 0
@@ -510,3 +510,63 @@ console.log(`PASS: fpsGraph R37.A — ${passed} total assertions (incl. budget-h
 }
 
 console.log(`PASS: fpsGraph R38.A — ${passed} total assertions (incl. ETA-to-budget-edge)`)
+
+// === R38.D: buildBandedSparklineSegments =============================
+// Band colours: green >=55, amber >=30, red <30 (fpsBandColor).
+{
+  // --- degenerate inputs → [] ---
+  eq(buildBandedSparklineSegments([]).length, 0, 'empty → no segments')
+  eq(buildBandedSparklineSegments([60]).length, 0, 'single sample → no segments (no line)')
+  eq(buildBandedSparklineSegments(null).length, 0, 'null → no segments')
+  eq(buildBandedSparklineSegments('nope').length, 0, 'non-array → no segments')
+
+  // --- all one band → a single segment spanning every point ---
+  const allGood = buildBandedSparklineSegments([60, 58, 56, 60], { width: 100, height: 30 })
+  eq(allGood.length, 1, 'uniform-band window → one segment')
+  eq(allGood[0].color, '#86efac', 'all-good run is green')
+  eq(allGood[0].points.length, 4, 'segment covers all four points')
+  ok(typeof allGood[0].attr === 'string' && allGood[0].attr.includes(' '), 'segment carries an SVG attr string')
+
+  // --- a dip into red splits into runs; the boundary point is SHARED so
+  // the coloured lines connect with no gap ---
+  const dip = buildBandedSparklineSegments([60, 58, 20, 22, 60], { width: 100, height: 30 })
+  eq(dip.length, 3, 'green→red→green produces three segments')
+  eq(dip[0].color, '#86efac', 'first run green')
+  eq(dip[1].color, '#f87171', 'middle run red (the dip)')
+  eq(dip[2].color, '#86efac', 'last run green (recovery)')
+  // Shared-boundary contract: the last point of run k equals the first
+  // point of run k+1 so the polylines meet.
+  for (let k = 0; k < dip.length - 1; k++) {
+    const endPrev = dip[k].points[dip[k].points.length - 1]
+    const startNext = dip[k + 1].points[0]
+    near(endPrev.x, startNext.x, `segment ${k}/${k + 1} share boundary x`)
+    near(endPrev.y, startNext.y, `segment ${k}/${k + 1} share boundary y`)
+  }
+
+  // --- the x of every point increases left→right across the whole window
+  // regardless of how it's split (geometry preserved) ---
+  const flat = buildBandedSparklineSegments([60, 40, 20], { width: 90, height: 30 })
+  const allX = flat.flatMap(s => s.points.map(p => p.x))
+  for (let i = 1; i < allX.length; i++) ok(allX[i] >= allX[i - 1], 'x is monotonic across split segments')
+
+  // --- every band actually represented when destination samples sweep
+  // green→amber→red (segments are coloured by their destination sample) ---
+  const sweep = buildBandedSparklineSegments([60, 60, 40, 20], { width: 100, height: 30 })
+  const colors = sweep.map(s => s.color)
+  ok(colors.includes('#86efac') && colors.includes('#fbbf24') && colors.includes('#f87171'),
+    'green/amber/red all present when destinations span all bands')
+
+  // --- junk samples colour as red (fpsBandColor neutral) but never crash;
+  // segments stay finite ---
+  const withJunk = buildBandedSparklineSegments([60, NaN, 60], { width: 100, height: 30 })
+  ok(withJunk.every(s => s.points.every(p => Number.isFinite(p.x) && Number.isFinite(p.y))),
+    'junk sample never yields a non-finite point')
+
+  // --- purity: input not mutated ---
+  const src = [60, 20, 60]
+  const snap = JSON.stringify(src)
+  buildBandedSparklineSegments(src)
+  eq(JSON.stringify(src), snap, 'R38.D helper does not mutate input')
+}
+
+console.log(`PASS: fpsGraph R38.D — ${passed} total assertions (incl. band-coloured sparkline segments)`)

@@ -431,6 +431,49 @@ function round2(v) {
   return Math.round(v * 100) / 100
 }
 
+// --- R38.D: band-coloured sparkline segments -------------------------
+//
+// The plain sparkline (buildSparklinePoints) is a single-colour polyline.
+// For the perf-pill health popover we want the line itself to show WHERE
+// in the window the trouble was — a green run that dips into a red run
+// tells the story at a glance. This splits the points into consecutive
+// runs that share an fps band colour (green >=55 / amber >=30 / red),
+// each emitted as its own SVG `points` string so the caller draws one
+// <polyline> per colour.
+//
+// Adjacent runs SHARE their boundary point so the coloured segments
+// visually connect with no gap. We colour each LINE SEGMENT (the span
+// between two consecutive points) by its destination sample's band, then
+// group consecutive same-coloured segments into one polyline run — so a
+// run from segment a..b covers points [a-1 .. b]. Returns:
+//   [{ color, attr, points: [{x,y}...] }, ...]
+// Empty / single-sample / non-array inputs return [] (no line to draw —
+// the caller can fall back to a dot).
+export function buildBandedSparklineSegments(samples, opts = {}) {
+  const pts = buildSparklinePoints(samples, opts)
+  if (pts.length < 2) return []
+  const segments = []
+  let current = null
+  // Segment i connects pts[i-1] → pts[i]; colour it by the DESTINATION
+  // sample's band so a line dipping INTO red paints red.
+  for (let i = 1; i < pts.length; i++) {
+    const color = fpsBandColor(samples[i])
+    if (current && color === current.color) {
+      current.points.push(pts[i]) // extend the run
+    } else {
+      // New colour: open a run starting at the shared boundary (pts[i-1])
+      // so it visually connects to the previous run, then add pts[i].
+      current = { color, points: [pts[i - 1], pts[i]] }
+      segments.push(current)
+    }
+  }
+  return segments.map(s => ({
+    color: s.color,
+    points: s.points,
+    attr: s.points.map(p => `${round1(p.x)},${round1(p.y)}`).join(' '),
+  }))
+}
+
 // Frame-time window summary — mirrors summarizeFpsWindow but in ms.
 // `high` is the averaged WORST `pctHigh` fraction (the 1%-HIGH frame
 // time, the ms analogue of the 1% low); `over` counts frames slower

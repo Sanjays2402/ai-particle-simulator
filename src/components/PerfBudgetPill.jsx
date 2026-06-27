@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { perfBudgetStatus, summarizePerfWindow } from '../lib/perfSuggest'
+import { buildBandedSparklineSegments, refLineY, FPS_GRAPH_CEIL } from '../lib/fpsGraph'
 
 // R36.D — live perf-budget status pill.
 //
@@ -69,6 +70,15 @@ export default function PerfBudgetPill() {
 
   const status = perfBudgetStatus(fps)
   const summary = summarizePerfWindow(series)
+  // R38.D — the same ~12s window as a tiny band-coloured sparkline at the
+  // top of the popover so the summary shows SHAPE (where the dips were),
+  // not just numbers. Split into green/amber/red runs so a stutter paints
+  // red exactly where it happened.
+  const SPARK_W = 162, SPARK_H = 30
+  const sparkOpts = { ceil: FPS_GRAPH_CEIL, width: SPARK_W, height: SPARK_H }
+  const sparkSegments = buildBandedSparklineSegments(series, sparkOpts)
+  const spark60 = refLineY(60, sparkOpts)
+  const spark30 = refLineY(30, sparkOpts)
 
   return (
     <div
@@ -106,6 +116,31 @@ export default function PerfBudgetPill() {
               textTransform: 'uppercase', letterSpacing: '0.05em',
             }}>{summary.count > 0 ? summary.status.label : '—'}</span>
           </div>
+
+          {/* R38.D — band-coloured fps sparkline of the same window. Each
+              green/amber/red run is its own polyline so a dip paints red
+              exactly where it happened; the 60/30fps guide lines anchor
+              it. Only when there are enough samples to draw a line. */}
+          {sparkSegments.length > 0 && (
+            <svg
+              width={SPARK_W} height={SPARK_H}
+              style={{ display: 'block', width: '100%', height: SPARK_H, borderRadius: 5, background: 'rgba(0,0,0,0.28)', marginBottom: 9 }}
+              preserveAspectRatio="none"
+            >
+              {spark60 != null && (
+                <line x1={0} y1={spark60} x2={SPARK_W} y2={spark60}
+                  stroke="rgba(134,239,172,0.18)" strokeWidth={1} strokeDasharray="2 3" />
+              )}
+              {spark30 != null && (
+                <line x1={0} y1={spark30} x2={SPARK_W} y2={spark30}
+                  stroke="rgba(248,113,113,0.16)" strokeWidth={1} strokeDasharray="2 3" />
+              )}
+              {sparkSegments.map((seg, i) => (
+                <polyline key={i} points={seg.attr} fill="none" stroke={seg.color}
+                  strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+              ))}
+            </svg>
+          )}
 
           {summary.count > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
