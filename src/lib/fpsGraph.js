@@ -602,6 +602,64 @@ export function summarizeEtaHistory(history, opts = {}) {
   }
 }
 
+// --- R40.A: hover-scrub readout for the ETA-history strip --------------
+//
+// R39.D scrubs the fps sparkline; this is the parallel for the R39.A
+// ETA-to-edge history strip. The strip plots seconds-to-edge (with
+// "not approaching" ticks recorded as null and pinned to the safe
+// ceiling), so a tuner watching the deadline line dive toward the floor
+// wants to read the EXACT seconds-to-edge + how-long-ago for a specific
+// dip under the cursor — not just eyeball the slope.
+//
+// `cursorX` is the pointer x in the strip's pixel space (0..width). The
+// history is the same newest-LAST array buildEtaHistoryPoints draws. We
+// reverse that even spacing to snap the cursor to the nearest sample,
+// then report:
+//   { index, etaSec, x, secondsAgo, approaching }
+// where `index` is into the history array, `etaSec` is that sample's
+// seconds-to-edge (rounded to 0.1s; null when the tick was a "not
+// approaching" marker — the tooltip shows "safe"), `approaching` is
+// whether that tick was a genuine finite ETA, `x` is the snapped pixel
+// of the sample (so a guide line lands exactly on the point), and
+// `secondsAgo` is how long before now the sample was taken (its
+// distance from the newest sample x `sampleMs`, default 250 — the HUD's
+// 4Hz cadence).
+//
+// Returns null when there's nothing to scrub (empty / non-array history,
+// or a non-finite cursorX) so the caller hides the tooltip + guide.
+export function scrubEtaHistory(history, cursorX, opts = {}) {
+  if (!Array.isArray(history) || history.length === 0) return null
+  if (!Number.isFinite(cursorX)) return null
+  const width = Number.isFinite(opts.width) && opts.width > 0 ? opts.width : 100
+  const sampleMs = Number.isFinite(opts.sampleMs) && opts.sampleMs > 0 ? opts.sampleMs : 250
+  const n = history.length
+  // Reverse buildEtaHistoryPoints' even spacing: sample i sits at
+  // x = (i / (n-1)) * width (single sample pins to the right edge).
+  const stepDenom = n > 1 ? n - 1 : 1
+  // Clamp the cursor into the drawable range so an over/undershoot snaps
+  // to the first / last sample rather than returning null.
+  const cx = cursorX < 0 ? 0 : cursorX > width ? width : cursorX
+  const rawIdx = n > 1 ? Math.round((cx / width) * stepDenom) : 0
+  const index = rawIdx < 0 ? 0 : rawIdx > n - 1 ? n - 1 : rawIdx
+  const x = n > 1 ? (index / stepDenom) * width : width
+  // The sample value: a "not approaching" tick is null / undefined —
+  // guard before Number() (null → 0 would read as a real 0s ETA) so it
+  // resolves to a non-approaching marker the tooltip shows as "safe".
+  const rawSample = history[index]
+  let etaSec = null
+  let approaching = false
+  if (rawSample !== null && rawSample !== undefined) {
+    const v = Number(rawSample)
+    if (Number.isFinite(v) && v >= 0) {
+      etaSec = Math.round(v * 10) / 10
+      approaching = true
+    }
+  }
+  // Newest sample (last) is "now" (0s ago); each step left is +sampleMs.
+  const secondsAgo = Math.round(((n - 1 - index) * sampleMs) / 1000)
+  return { index, etaSec, x: round1(x), secondsAgo, approaching }
+}
+
 // --- R39.D: hover-scrub readout for a sparkline -----------------------
 //
 // The perf-pill popover sparkline (R38.D) shows the SHAPE of the last

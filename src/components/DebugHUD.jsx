@@ -10,6 +10,7 @@ import {
   headroomHistoryAttr, headroomZeroLineY, headroomTrend, headroomEtaToEdge,
   ETA_MAX_SEC,
   pushEtaHistory, etaHistoryAttr, summarizeEtaHistory, ETA_HISTORY_CEIL,
+  scrubEtaHistory,
 } from '../lib/fpsGraph'
 
 // Performance debug HUD. Toggle with backtick (`) so it doesn't fight
@@ -38,6 +39,12 @@ export default function DebugHUD() {
   // Held in state (mirrored from a ref) so the strip re-renders each tick.
   const [etaHistory, setEtaHistory] = useState([])
   const etaHistoryRef = useRef([])
+  // R40.A — hover-scrub over the ETA-history strip: the cursor x in the
+  // strip's pixel space (or null when the pointer is off it). Drives a
+  // vertical guide line + a dot + a readout of the exact seconds-to-edge
+  // + how-long-ago for the sample under the cursor, so a tuner can pick a
+  // specific dip off the trend line instead of eyeballing the slope.
+  const [etaScrubX, setEtaScrubX] = useState(null)
   const lastRef = useRef(performance.now())
   const accumRef = useRef(0)
   const framesRef = useRef(0)
@@ -205,6 +212,21 @@ export default function DebugHUD() {
     ? (etaSummary.urgent ? '#f87171' : '#fbbf24')
     : etaSummary.dir === 'rising' ? '#86efac' : '#8a8aa0'
   const etaTrendWord = etaSummary.dir === 'rising' ? 'pulling away' : etaSummary.dir === 'falling' ? 'closing in' : 'holding'
+  // R40.A — resolve the live hover-x to the nearest ETA sample so the
+  // tooltip + guide line read an exact seconds-to-edge + age off the
+  // strip. The HUD records one ETA per 250ms tick, so sampleMs=250 makes
+  // secondsAgo read in the HUD's real cadence. null when not hovering.
+  const etaScrub = etaScrubX != null
+    ? scrubEtaHistory(etaHistory, etaScrubX, { width: ETW, sampleMs: 250 })
+    : null
+  // The y of the scrubbed sample on the strip (for the dot): a finite ETA
+  // maps high→top / 0→floor exactly as buildEtaHistoryPoints does; a "not
+  // approaching" (null) tick pins to the safe ceiling (top, y=0).
+  const etaScrubY = etaScrub
+    ? (etaScrub.approaching
+        ? ETH - (Math.min(etaScrub.etaSec, ETA_HISTORY_CEIL) / ETA_HISTORY_CEIL) * ETH
+        : 0)
+    : null
 
   return (
     <div style={{
@@ -346,7 +368,18 @@ export default function DebugHUD() {
                       <span style={{ fontWeight: 700, marginRight: 3 }}>{etaTrendGlyph}</span>{etaTrendWord}
                     </span>
                   </div>
-                  <svg width={ETW} height={ETH} style={{ display: 'block', borderRadius: 5, background: 'rgba(0,0,0,0.28)', marginBottom: 6 }}>
+                  <svg width={ETW} height={ETH} style={{ display: 'block', borderRadius: 5, background: 'rgba(0,0,0,0.28)', marginBottom: etaScrub ? 0 : 6, cursor: 'crosshair', pointerEvents: 'auto' }}
+                    onPointerMove={(e) => {
+                      // Map the pointer into the strip's pixel space. The
+                      // SVG renders at its native ETW width, so a simple
+                      // offset from the bounding rect suffices.
+                      const rect = e.currentTarget.getBoundingClientRect()
+                      if (rect.width <= 0) return
+                      const localX = ((e.clientX - rect.left) / rect.width) * ETW
+                      setEtaScrubX(localX)
+                    }}
+                    onPointerLeave={() => setEtaScrubX(null)}
+                  >
                     {/* A faint baseline at the floor marks ETA=0 (you've
                         hit the budget edge) so a line diving toward it
                         reads as urgent at a glance. */}
@@ -354,7 +387,43 @@ export default function DebugHUD() {
                       stroke="rgba(248,113,113,0.28)" strokeWidth={1} strokeDasharray="2 3" />
                     <polyline points={etaAttr} fill="none" stroke={etaTrendColor}
                       strokeWidth={1.4} strokeLinejoin="round" strokeLinecap="round" />
+                    {/* R40.A — hover-scrub guide: a vertical line at the
+                        snapped sample x + a dot on the line so the user
+                        sees exactly which sample the readout is reading. */}
+                    {etaScrub && (
+                      <>
+                        <line x1={etaScrub.x} y1={0} x2={etaScrub.x} y2={ETH}
+                          stroke="rgba(255,255,255,0.32)" strokeWidth={1} />
+                        {etaScrubY != null && (
+                          <circle cx={etaScrub.x} cy={etaScrubY} r={2.4}
+                            fill="#fff" stroke="rgba(0,0,0,0.4)" strokeWidth={0.75} />
+                        )}
+                      </>
+                    )}
                   </svg>
+                  {/* R40.A — the scrub readout: exact seconds-to-edge +
+                      how-long-ago for the sample under the cursor. Only
+                      while hovering; a "safe" label for non-approaching
+                      ticks (no finite ETA). */}
+                  {etaScrub && (
+                    <div style={{
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      fontSize: 10, marginBottom: 6, marginTop: 2,
+                      fontVariantNumeric: 'tabular-nums',
+                    }}>
+                      <span style={{
+                        color: etaScrub.approaching
+                          ? (etaScrub.etaSec <= 3 ? '#f87171' : '#fbbf24')
+                          : '#86efac',
+                        fontWeight: 600,
+                      }}>
+                        {etaScrub.approaching ? `~${etaScrub.etaSec}s to edge` : 'safe'}
+                      </span>
+                      <span style={{ color: '#8a8aa0' }}>
+                        {etaScrub.secondsAgo === 0 ? 'now' : `${etaScrub.secondsAgo}s ago`}
+                      </span>
+                    </div>
+                  )}
                 </>
               )}
               <svg width={HSW} height={HSH} style={{ display: 'block', borderRadius: 5, background: 'rgba(0,0,0,0.28)' }}>

@@ -8,6 +8,8 @@ import {
   pushEtaHistory, buildEtaHistoryPoints, etaHistoryAttr, summarizeEtaHistory,
   // R39.D — hover-scrub readout for a sparkline
   scrubSparkline,
+  // R40.A — hover-scrub readout for the ETA-history strip
+  scrubEtaHistory,
 } from './fpsGraph.js'
 
 let passed = 0
@@ -788,3 +790,88 @@ console.log(`PASS: fpsGraph R39.A — ${passed} total assertions (incl. ETA-to-e
 }
 
 console.log(`PASS: fpsGraph R39.D — ${passed} total assertions (incl. sparkline hover-scrub readout)`)
+
+// --- R40.A: scrubEtaHistory — read an exact ETA + age off the strip ---
+{
+  // Even spacing over a 100px box: 5 samples at x = 0,25,50,75,100.
+  const hist = [12, 9, 6, 3, 1] // newest-last (1s to edge "now")
+  {
+    const r = scrubEtaHistory(hist, 0, { width: 100, sampleMs: 250 })
+    eq(r.index, 0, 'eta-scrub: cursor at left → oldest sample')
+    eq(r.etaSec, 12, 'eta-scrub: oldest etaSec read exactly')
+    eq(r.approaching, true, 'eta-scrub: finite sample is approaching')
+    near(r.x, 0, 'eta-scrub: oldest x at left edge')
+    eq(r.secondsAgo, 1, 'eta-scrub: 4 steps * 250ms = 1s ago')
+  }
+  {
+    const r = scrubEtaHistory(hist, 100, { width: 100, sampleMs: 250 })
+    eq(r.index, 4, 'eta-scrub: cursor at right → newest sample')
+    eq(r.etaSec, 1, 'eta-scrub: newest etaSec')
+    eq(r.secondsAgo, 0, 'eta-scrub: newest is "now"')
+    near(r.x, 100, 'eta-scrub: newest x at right edge')
+  }
+  {
+    // Cursor near the middle snaps to the nearest sample (x=50 → idx 2).
+    const r = scrubEtaHistory(hist, 52, { width: 100 })
+    eq(r.index, 2, 'eta-scrub: mid cursor snaps to nearest sample')
+    eq(r.etaSec, 6, 'eta-scrub: mid sample etaSec')
+    near(r.x, 50, 'eta-scrub: snapped x lands on the sample')
+  }
+}
+// "not approaching" ticks are null markers, NOT a 0s ETA — they read as
+// non-approaching (tooltip shows "safe"), with a valid index + age so
+// the guide still anchors.
+{
+  const hist = [null, 8, null, 4, null]
+  {
+    const r = scrubEtaHistory(hist, 0, { width: 100 })
+    eq(r.index, 0, 'eta-scrub: lands on the null tick')
+    eq(r.etaSec, null, 'eta-scrub: null tick → null etaSec (not 0)')
+    eq(r.approaching, false, 'eta-scrub: null tick is not approaching')
+  }
+  {
+    const r = scrubEtaHistory(hist, 25, { width: 100 })
+    eq(r.etaSec, 8, 'eta-scrub: finite tick beside nulls reads exactly')
+    eq(r.approaching, true, 'eta-scrub: finite tick approaching')
+  }
+}
+// over/undershoot clamps to nearest edge (never null mid-strip).
+{
+  const hist = [10, 5, 2]
+  eq(scrubEtaHistory(hist, -40, { width: 100 }).index, 0, 'eta-scrub: undershoot clamps to oldest')
+  eq(scrubEtaHistory(hist, 9000, { width: 100 }).index, 2, 'eta-scrub: overshoot clamps to newest')
+}
+// single-sample history: any cursor resolves to that lone sample at the
+// right edge, 0s ago (no divide-by-zero).
+{
+  const r = scrubEtaHistory([7], 40, { width: 80 })
+  eq(r.index, 0, 'eta-scrub: single sample → index 0')
+  eq(r.etaSec, 7, 'eta-scrub: single sample etaSec')
+  eq(r.secondsAgo, 0, 'eta-scrub: single sample is "now"')
+  near(r.x, 80, 'eta-scrub: single sample pins to right edge')
+}
+// fractional ETA rounds to 0.1s.
+{
+  const r = scrubEtaHistory([4.27], 10, { width: 50 })
+  eq(r.etaSec, 4.3, 'eta-scrub: etaSec rounds to 0.1s')
+}
+// custom sampleMs scales secondsAgo (HUD default is 250ms).
+{
+  const r = scrubEtaHistory([9, 6, 3, 1], 0, { width: 90 })
+  eq(r.index, 0, 'eta-scrub: oldest of 4')
+  eq(r.secondsAgo, 1, 'eta-scrub: default 250ms cadence → 3 steps = 0.75s ≈ 1s')
+}
+// defensive: empty / non-array / non-finite cursor → null.
+eq(scrubEtaHistory([], 50), null, 'eta-scrub: empty history → null')
+eq(scrubEtaHistory(null, 50), null, 'eta-scrub: non-array history → null')
+eq(scrubEtaHistory([10, 5], NaN), null, 'eta-scrub: NaN cursor → null')
+eq(scrubEtaHistory([10, 5], Infinity, { width: 100 }), null, 'eta-scrub: Infinity cursor → null')
+// purity: input not mutated.
+{
+  const src = [12, null, 4]
+  const snap = JSON.stringify(src)
+  scrubEtaHistory(src, 50, { width: 100 })
+  eq(JSON.stringify(src), snap, 'eta-scrub: does not mutate input')
+}
+
+console.log(`PASS: fpsGraph R40.A — ${passed} total assertions (incl. ETA-history hover-scrub readout)`)
