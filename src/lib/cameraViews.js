@@ -309,3 +309,37 @@ export function buildCameraPaletteActions(views) {
   return out
 }
 
+// --- R37.H: command-palette saved-view DELETE actions ----------------
+//
+// R36.H surfaced RESTORE actions; this completes the saved-view
+// lifecycle in the palette by building a parallel DELETE action per view
+// (plus the component adds a static "Save current camera view"). Keeping
+// the whole lifecycle in the palette means a power user never has to open
+// the RightSidebar to manage views.
+//
+// Same defensive contract as buildCameraPaletteActions: non-array → [];
+// rows missing a usable id are skipped (a deletable row must carry the id
+// the remove call needs). A view with a corrupt position is still
+// DELETABLE (unlike restore, which needs a valid pos) — in fact a
+// position-corrupt view is exactly the kind a user wants to be able to
+// purge from the palette — so we only require a present id here. Order
+// preserved (newest-first, as stored).
+export function buildCameraDeleteActions(views) {
+  if (!Array.isArray(views)) return []
+  const out = []
+  for (const v of views) {
+    if (!v || typeof v !== 'object') continue
+    if (v.id === null || v.id === undefined) continue
+    const name = (typeof v.name === 'string' && v.name.trim()) ? v.name.trim() : `View ${v.id}`
+    out.push({
+      id: `cam-del-${v.id}`,
+      kind: 'delete-view',
+      label: `Delete view: ${name}`,
+      sub: 'Remove this saved camera view',
+      keywords: `camera view delete remove ${name}`.toLowerCase(),
+      viewId: v.id,
+    })
+  }
+  return out
+}
+

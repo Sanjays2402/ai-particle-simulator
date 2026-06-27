@@ -2,11 +2,16 @@ import { useEffect, useState } from 'react'
 import { Command } from 'cmdk'
 import { useStore } from '../store'
 import { presets } from '../presets'
-import { loadCameraViews, buildCameraPaletteActions } from '../lib/cameraViews'
+import {
+  loadCameraViews, saveCameraViews, appendView, removeView,
+  buildCameraPaletteActions, buildCameraDeleteActions,
+} from '../lib/cameraViews'
 import { labelForId as framingLabelForId } from '../lib/framingGuides'
+import { showToast } from './Toast'
 import {
   Play, Pause, Shuffle, Camera, Link2, Download, Settings as Cog,
   Magnet, Mic, RotateCcw, Maximize2, Sparkles, Eye, Video, Crop, Wind,
+  Save, Trash2,
 } from 'lucide-react'
 
 export function CommandPalette({ onSettings }) {
@@ -45,9 +50,38 @@ export function CommandPalette({ onSettings }) {
     if (api && view && view.pos) api.set({ pos: view.pos, target: view.target })
   }
 
+  // R37.H — save the CURRENT camera as a new view straight from the
+  // palette, and delete a saved view by id. Both persist + fire the
+  // shared `particle:camera-views-changed` event so the RightSidebar
+  // list re-syncs without a refresh — the whole saved-view lifecycle
+  // (save / restore / delete) now lives in the palette.
+  const saveCurrentView = () => {
+    const api = window.__particleCamera
+    if (!api) { showToast('Camera not ready yet'); return }
+    const state = api.get()
+    const current = loadCameraViews()
+    const name = `View ${(current.reduce((m, v) => Math.max(m, v.id || 0), 0)) + 1}`
+    const next = appendView(current, { name, pos: state.pos, target: state.target })
+    saveCameraViews(next)
+    setCameraViews(next)
+    window.dispatchEvent(new CustomEvent('particle:camera-views-changed'))
+    showToast(`Saved "${name}"`, <Camera size={10} color="#fff" strokeWidth={2.4} />)
+  }
+
+  const deleteView = (viewId) => {
+    const current = loadCameraViews()
+    const next = removeView(current, viewId)
+    if (next === current) return
+    saveCameraViews(next)
+    setCameraViews(next)
+    window.dispatchEvent(new CustomEvent('particle:camera-views-changed'))
+    showToast('View deleted', <Trash2 size={10} color="#fff" strokeWidth={2.4} />)
+  }
+
   if (!open) return null
 
   const cameraActions = buildCameraPaletteActions(cameraViews)
+  const deleteActions = buildCameraDeleteActions(cameraViews)
 
   return (
     <div
@@ -123,7 +157,9 @@ export function CommandPalette({ onSettings }) {
           </Command.Group>
 
           {/* R36.H — Camera group: saved views + zen + framing as
-              searchable actions so power users never touch the sidebar. */}
+              searchable actions so power users never touch the sidebar.
+              R37.H — plus save-current + per-view delete so the whole
+              saved-view lifecycle lives in the palette. */}
           <Command.Group heading="Camera" style={groupHeading}>
             <Item icon={Eye} label="Enter Zen Mode" shortcut="Z" onSelect={run(() => window.dispatchEvent(new CustomEvent('particle:toggle-zen')))} />
             <Item
@@ -139,6 +175,14 @@ export function CommandPalette({ onSettings }) {
               sub="Pause auto-rotate, shake, hue-cycle & zen orbit"
               onSelect={run(() => useStore.getState().setCalmMode(!useStore.getState().calmMode))}
             />
+            {/* R37.H — save the current camera as a new view. */}
+            <Item
+              icon={Save}
+              label="Save Current Camera View"
+              sub="Snapshot the current camera angle"
+              keywords="camera view save store new"
+              onSelect={run(saveCurrentView)}
+            />
             {cameraActions.length === 0 ? (
               <Item icon={Video} label="No saved views yet" sub="Press V on the scene to save the current camera" onSelect={() => {}} />
             ) : (
@@ -153,6 +197,17 @@ export function CommandPalette({ onSettings }) {
                 />
               ))
             )}
+            {/* R37.H — per-view delete actions (only when views exist). */}
+            {deleteActions.map(a => (
+              <Item
+                key={a.id}
+                icon={Trash2}
+                label={a.label}
+                sub={a.sub}
+                keywords={a.keywords}
+                onSelect={run(() => deleteView(a.viewId))}
+              />
+            ))}
           </Command.Group>
 
           <Command.Group heading="Presets" style={groupHeading}>

@@ -9,6 +9,8 @@ import {
   resolveTouchTargetWithGaps, TOUCH_GAP_TOLERANCE_PX,
   // R36.H — command-palette camera action builder
   buildCameraPaletteActions,
+  // R37.H — command-palette saved-view DELETE action builder
+  buildCameraDeleteActions,
 } from './cameraViews.js'
 
 function assertEq(actual, expected, msg) {
@@ -489,3 +491,67 @@ console.log('PASS: resolveTouchTargetWithGaps — gap-aware touch hit-test (R28.
 }
 
 console.log('PASS: buildCameraPaletteActions — command-palette camera actions (R36.H, ~22 asserts)')
+
+// === R37.H: buildCameraDeleteActions =================================
+{
+  // Non-array → [].
+  assertEq(buildCameraDeleteActions(null), [], 'null → empty')
+  assertEq(buildCameraDeleteActions(undefined), [], 'undefined → empty')
+  assertEq(buildCameraDeleteActions('nope'), [], 'string → empty')
+  assertEq(buildCameraDeleteActions([]), [], 'empty list → empty')
+
+  // One view → one delete action carrying the id + a readable label.
+  const one = buildCameraDeleteActions([{ id: 7, name: 'Hero', pos: [1, 2, 3] }])
+  assertEq(one.length, 1, 'one view → one delete action')
+  assertEq(one[0].kind, 'delete-view', 'kind is delete-view')
+  assertEq(one[0].id, 'cam-del-7', 'stable action id from view id')
+  assertEq(one[0].viewId, 7, 'carries the view id for the remove call')
+  assertEq(one[0].label, 'Delete view: Hero', 'label names the view')
+
+  // Order preserved (newest-first as stored).
+  const many = buildCameraDeleteActions([
+    { id: 3, name: 'c', pos: [0, 0, 0] },
+    { id: 2, name: 'b', pos: [0, 0, 0] },
+    { id: 1, name: 'a', pos: [0, 0, 0] },
+  ])
+  assertEq(many.map(a => a.viewId), [3, 2, 1], 'delete actions keep stored order')
+
+  // Missing/blank name falls back to "View <id>".
+  const noName = buildCameraDeleteActions([{ id: 9, pos: [0, 0, 0] }])
+  assertEq(noName[0].label, 'Delete view: View 9', 'missing name → View <id>')
+  const blankName = buildCameraDeleteActions([{ id: 4, name: '   ', pos: [0, 0, 0] }])
+  assertEq(blankName[0].label, 'Delete view: View 4', 'blank name → View <id>')
+
+  // id 0 is a legitimate id (falsy but defined) — must NOT be dropped.
+  const zero = buildCameraDeleteActions([{ id: 0, name: 'Zero', pos: [0, 0, 0] }])
+  assertEq(zero.length, 1, 'id 0 is valid (not treated as missing)')
+  assertEq(zero[0].id, 'cam-del-0', 'id 0 builds a stable delete id')
+
+  // Rows with no usable id are skipped.
+  const missingId = buildCameraDeleteActions([
+    { name: 'no id', pos: [0, 0, 0] },
+    { id: null, name: 'null id', pos: [0, 0, 0] },
+    { id: 5, name: 'ok', pos: [0, 0, 0] },
+  ])
+  assertEq(missingId.map(a => a.viewId), [5], 'rows without an id are skipped')
+
+  // A position-CORRUPT view is still DELETABLE (unlike restore) — exactly
+  // the row a user wants to be able to purge from the palette.
+  const corruptPos = buildCameraDeleteActions([
+    { id: 11, name: 'broken', pos: [NaN] },
+    { id: 12, name: 'noPos' },
+  ])
+  assertEq(corruptPos.map(a => a.viewId), [11, 12], 'corrupt/missing pos still deletable')
+
+  // Corrupt non-object rows skipped, valid kept.
+  const mixed = buildCameraDeleteActions([null, 5, { id: 8, name: 'keep', pos: [0, 0, 0] }, undefined])
+  assertEq(mixed.map(a => a.viewId), [8], 'non-object rows skipped')
+
+  // Purity: input not mutated.
+  const src = [{ id: 1, name: 'X', pos: [1, 2, 3] }]
+  const snapshot = JSON.stringify(src)
+  buildCameraDeleteActions(src)
+  assertEq(JSON.stringify(src), snapshot, 'input views not mutated')
+}
+
+console.log('PASS: buildCameraDeleteActions — command-palette saved-view delete actions (R37.H, ~18 asserts)')
