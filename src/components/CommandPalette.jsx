@@ -7,6 +7,7 @@ import {
   buildCameraPaletteActions, buildCameraDeleteActions,
 } from '../lib/cameraViews'
 import { labelForId as framingLabelForId } from '../lib/framingGuides'
+import { formatCalmToast } from '../lib/calmMode'
 import { showToast } from './Toast'
 import {
   Play, Pause, Shuffle, Camera, Link2, Download, Settings as Cog,
@@ -173,7 +174,19 @@ export function CommandPalette({ onSettings }) {
               icon={Wind}
               label={`${useStore.getState().calmMode ? 'Disable' : 'Enable'} Calm Mode`}
               sub="Pause auto-rotate, shake, hue-cycle & zen orbit"
-              onSelect={run(() => useStore.getState().setCalmMode(!useStore.getState().calmMode))}
+              onSelect={run(() => {
+                const next = !useStore.getState().calmMode
+                useStore.getState().setCalmMode(next)
+                // R37.K — name what the gate changed (same toast as TopBar).
+                const t = formatCalmToast(next)
+                showToast(
+                  <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 1, lineHeight: 1.3 }}>
+                    <span style={{ fontWeight: 600 }}>{t.title}</span>
+                    <span style={{ fontSize: 11, color: '#9a9ab0' }}>{t.detail}</span>
+                  </span>,
+                  <Wind size={10} color="#fff" strokeWidth={2.4} />,
+                )
+              })}
             />
             {/* R37.H — save the current camera as a new view. */}
             <Item

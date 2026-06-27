@@ -1,7 +1,7 @@
 // calmMode: global "calm mode" master gate over the ambient camera/colour
 // motions (R36.K). Run via: node --test src/lib/calmMode.test.mjs
 import {
-  CALM_GATED_MOTIONS, resolveCalm, describeCalmState,
+  CALM_GATED_MOTIONS, resolveCalm, describeCalmState, formatCalmToast,
 } from './calmMode.js'
 
 let passed = 0
@@ -76,3 +76,38 @@ ok(resolveCalm(false, {}) === true, 'truthy object calm coerces to a real boolea
 }
 
 console.log(`PASS: calmMode — ${passed} assertions (R36.K master gate over auto-rotate / shake / hue-cycle / zen-orbit)`)
+
+// --- R37.K: formatCalmToast ---
+{
+  const on = formatCalmToast(true)
+  eq(on.count, 4, 'turning on: four motions named')
+  eq(on.title, 'Calmed 4 motions', 'turning on: headline counts motions')
+  // Detail names every gated motion's label, so the toast is legible.
+  for (const m of CALM_GATED_MOTIONS) {
+    ok(on.detail.includes(m.label), `detail names "${m.label}"`)
+  }
+  // Oxford "&" joins the last item; with 4 items there are commas + an &.
+  ok(on.detail.includes('&'), 'detail joins the last label with &')
+  ok(on.detail.includes(','), 'detail comma-separates the first labels')
+
+  const off = formatCalmToast(false)
+  eq(off.title, 'Motion resumed', 'turning off: resumed headline')
+  eq(off.count, 4, 'turning off: still reports the gated count')
+  eq(off.detail, on.detail, 'detail list is the same set on/off')
+
+  // Falsy / coerced args resolve cleanly (turningOn is read as boolean).
+  eq(formatCalmToast(0).title, 'Motion resumed', 'falsy arg → resumed')
+  eq(formatCalmToast(1).title, 'Calmed 4 motions', 'truthy arg → calmed')
+  eq(formatCalmToast(undefined).title, 'Motion resumed', 'undefined → resumed')
+
+  // Purity: fresh object each call; mutating a result can't corrupt the
+  // roster the next call reads from.
+  const a = formatCalmToast(true)
+  const b = formatCalmToast(true)
+  ok(a !== b, 'fresh object each call')
+  a.title = 'tamper'
+  eq(formatCalmToast(true).title, 'Calmed 4 motions', 'mutating a result does not affect later calls')
+  eq(CALM_GATED_MOTIONS.length, 4, 'roster untouched by formatCalmToast')
+}
+
+console.log(`PASS: calmMode R37.K — ${passed} total assertions (incl. formatCalmToast)`)

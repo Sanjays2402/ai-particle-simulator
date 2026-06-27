@@ -55,3 +55,47 @@ export function describeCalmState(reducedMotion, calmMode) {
     motions: active ? CALM_GATED_MOTIONS.map(m => m.id) : [],
   }
 }
+
+// --- R37.K: calm-mode auto-fading toast ------------------------------
+//
+// The R36.K toggle changes FOUR things at once (auto-rotate, shake,
+// hue-cycle, zen orbit) but does it silently — a user clicking it has no
+// confirmation of what just happened. This builds a short, render-ready
+// toast descriptor naming what was paused (or resumed) so the one-click
+// gate is legible.
+//
+// Returns:
+//   { title, detail, count }
+// where `title` is the headline ("Calmed 4 motions" / "Motion resumed"),
+// `detail` is a comma list of the gated motion labels (so the user sees
+// EXACTLY what changed), and `count` is the number of motions affected.
+//
+// `turningOn` true → the "paused" message; false → the "resumed"
+// message. Pure; reads the labels off CALM_GATED_MOTIONS so it can never
+// drift from the actual gated set. The label list joins with an Oxford
+// "&" on the last item for a natural read.
+export function formatCalmToast(turningOn) {
+  const labels = CALM_GATED_MOTIONS.map(m => m.label)
+  const count = labels.length
+  const detail = joinLabels(labels)
+  if (turningOn) {
+    return {
+      title: `Calmed ${count} motion${count === 1 ? '' : 's'}`,
+      detail,
+      count,
+    }
+  }
+  return {
+    title: 'Motion resumed',
+    detail,
+    count,
+  }
+}
+
+// Join a list of labels into a human phrase: "a", "a & b", "a, b & c".
+function joinLabels(labels) {
+  if (!Array.isArray(labels) || labels.length === 0) return ''
+  if (labels.length === 1) return labels[0]
+  if (labels.length === 2) return `${labels[0]} & ${labels[1]}`
+  return `${labels.slice(0, -1).join(', ')} & ${labels[labels.length - 1]}`
+}

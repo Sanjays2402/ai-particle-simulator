@@ -6,6 +6,8 @@ import { captureFromCanvas, appendSnapshot, loadSnapshots, saveSnapshots } from 
 import { createLoop, DEMO_LOOPS } from '../lib/demoAudioLoops'
 import { loadKeymap, resolveAction } from '../lib/keymap'
 import { TIMER_DELAYS, labelForDelay, BURST_COUNTS, labelForBurst } from '../lib/selfTimer'
+import { formatCalmToast } from '../lib/calmMode'
+import { showToast } from './Toast'
 import {
   Play, Pause, RotateCcw, Maximize2, Shuffle, Magnet, Camera, Link2,
   Mic, Download, Settings, Repeat, Sparkles, Zap, Paintbrush, Send, Images, Music2, Timer, Layers, Wind,
@@ -657,9 +659,24 @@ function BurstBtn({ count, onCycle }) {
 function CalmModeBtn() {
   const calmMode = useStore(s => s.calmMode)
   const setCalmMode = useStore(s => s.setCalmMode)
+  // R37.K — naming what the one-click gate changed. The toggle silently
+  // affects four motions; the auto-fading toast names them so the user
+  // sees exactly what was paused / resumed.
+  const onToggle = () => {
+    const next = !calmMode
+    setCalmMode(next)
+    const t = formatCalmToast(next)
+    showToast(
+      <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 1, lineHeight: 1.3 }}>
+        <span style={{ fontWeight: 600 }}>{t.title}</span>
+        <span style={{ fontSize: 11, color: '#9a9ab0' }}>{t.detail}</span>
+      </span>,
+      <Wind size={10} color="#fff" strokeWidth={2.4} />,
+    )
+  }
   return (
     <Btn
-      onClick={() => setCalmMode(!calmMode)}
+      onClick={onToggle}
       active={calmMode}
       title={calmMode
         ? 'Calm mode ON — auto-rotate, shake, hue-cycle & zen orbit paused. Click to resume.'
