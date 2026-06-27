@@ -515,3 +515,62 @@ function msToSec(ms) {
   const sec = ms / 1000
   return String(Math.round(sec * 100) / 100)
 }
+
+// --- R41.B: spiral sweep easing control --------------------------------
+//
+// R40.B scales HOW LONG the draw-on sweep takes (Fast / Normal / Slow);
+// this shapes HOW it accelerates across that time. The sweep is a single
+// CSS `animation` whose timing function was a fixed cubic-bezier baked
+// into the component string; this lifts that curve into a selectable,
+// persisted choice so a user can make the curve sprint to the eye
+// (ease-in), draw at a constant pace (linear), or glide to a stop
+// (ease-out) — layered on top of, and orthogonal to, the speed control.
+//
+// We expose THREE named curves. 'ease-out' reproduces the EXACT
+// pre-R41.B baked cubic-bezier(0.33,0.1,0.25,1) — a decelerating curve
+// that settles into the focal eye — so it is the DEFAULT and an existing
+// user sees zero change until they pick another easing. The component
+// drops `cssFor(id)` straight into the `animation` shorthand in place of
+// the old literal; the keyframes themselves are timing-function-agnostic
+// (they only lerp stroke-dashoffset), so no CSS edit is needed.
+
+// The selectable sweep easings. `css` is the CSS timing-function token
+// spliced into the animation shorthand. Ordered ease-in → linear →
+// ease-out (accelerating → constant → decelerating) so the chip row
+// reads as a natural progression.
+export const SPIRAL_SWEEP_EASINGS = [
+  { id: 'ease-in',  label: 'In',  css: 'cubic-bezier(0.5,0,0.9,0.35)', hint: 'Slow start, sprint to the eye' },
+  { id: 'linear',   label: 'Linear', css: 'linear',                    hint: 'Constant draw-on pace' },
+  { id: 'ease-out', label: 'Out', css: 'cubic-bezier(0.33,0.1,0.25,1)', hint: 'Glide to a stop at the eye' },
+]
+
+const SWEEP_EASING_BY_ID = new Map(SPIRAL_SWEEP_EASINGS.map(e => [e.id, e]))
+
+// The default easing id — 'ease-out' reproduces the original baked
+// cubic-bezier(0.33,0.1,0.25,1) so existing users see no change.
+export const SPIRAL_SWEEP_EASING_DEFAULT = 'ease-out'
+
+export function isValidSpiralSweepEasing(id) {
+  return SWEEP_EASING_BY_ID.has(id)
+}
+
+// Normalise a stored / incoming easing id; junk → the default.
+export function sanitizeSpiralSweepEasing(id) {
+  return SWEEP_EASING_BY_ID.has(id) ? id : SPIRAL_SWEEP_EASING_DEFAULT
+}
+
+// Cycle to the next easing (wraps). Unknown id → first entry's id.
+export function nextSpiralSweepEasing(id) {
+  const idx = SPIRAL_SWEEP_EASINGS.findIndex(e => e.id === id)
+  if (idx < 0) return SPIRAL_SWEEP_EASINGS[0].id
+  return SPIRAL_SWEEP_EASINGS[(idx + 1) % SPIRAL_SWEEP_EASINGS.length].id
+}
+
+// Resolve an easing id to its CSS timing-function token (the string the
+// component splices into the `animation` shorthand). Junk id → the
+// default easing's token, which is the exact pre-R41.B baked curve so a
+// corrupt value can never change an existing user's sweep feel.
+export function spiralSweepEasingCss(id) {
+  const e = SWEEP_EASING_BY_ID.get(sanitizeSpiralSweepEasing(id))
+  return e.css
+}

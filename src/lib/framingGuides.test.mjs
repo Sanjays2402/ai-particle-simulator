@@ -8,6 +8,10 @@ import {
   SPIRAL_SWEEP_SPEEDS, SPIRAL_SWEEP_SPEED_DEFAULT,
   isValidSpiralSweepSpeed, sanitizeSpiralSweepSpeed,
   nextSpiralSweepSpeed, spiralSweepTimings,
+  // R41.B — spiral sweep easing control
+  SPIRAL_SWEEP_EASINGS, SPIRAL_SWEEP_EASING_DEFAULT,
+  isValidSpiralSweepEasing, sanitizeSpiralSweepEasing,
+  nextSpiralSweepEasing, spiralSweepEasingCss,
 } from './framingGuides.js'
 
 let passed = 0
@@ -588,4 +592,55 @@ console.log(`PASS: framingGuides R39.B — ${passed} total assertions (incl. on-
   }
 }
 
-console.log(`PASS: framingGuides R40.B — ${passed} total assertions (incl. spiral sweep speed control)`)
+// --- R41.B: spiral sweep easing control --------------------------------
+// Three named curves; 'ease-out' reproduces the EXACT pre-R41.B baked
+// cubic-bezier(0.33,0.1,0.25,1) so it's the default + back-compat.
+{
+  eq(SPIRAL_SWEEP_EASINGS.length, 3, 'easing: three easings')
+  eq(SPIRAL_SWEEP_EASINGS[0].id, 'ease-in', 'easing: first is ease-in')
+  eq(SPIRAL_SWEEP_EASINGS[1].id, 'linear', 'easing: second is linear')
+  eq(SPIRAL_SWEEP_EASINGS[2].id, 'ease-out', 'easing: third is ease-out')
+  // every entry carries a css token + a hint.
+  for (const e of SPIRAL_SWEEP_EASINGS) {
+    ok(typeof e.css === 'string' && e.css.length > 0, `easing: ${e.id} has a css token`)
+    ok(typeof e.label === 'string' && e.label.length > 0, `easing: ${e.id} has a label`)
+    ok(typeof e.hint === 'string' && e.hint.length > 0, `easing: ${e.id} has a hint`)
+  }
+  // default is ease-out, and its css is the exact original baked curve.
+  eq(SPIRAL_SWEEP_EASING_DEFAULT, 'ease-out', 'easing: default is ease-out')
+  eq(spiralSweepEasingCss('ease-out'), 'cubic-bezier(0.33,0.1,0.25,1)',
+    'easing: ease-out reproduces the original baked cubic-bezier (back-compat)')
+  eq(spiralSweepEasingCss(SPIRAL_SWEEP_EASING_DEFAULT), 'cubic-bezier(0.33,0.1,0.25,1)',
+    'easing: default css == the baked curve')
+  // linear maps to the plain keyword (a CSS-legal timing function).
+  eq(spiralSweepEasingCss('linear'), 'linear', 'easing: linear css token')
+  // validators.
+  ok(isValidSpiralSweepEasing('ease-in'), 'easing: ease-in is valid')
+  ok(isValidSpiralSweepEasing('linear'), 'easing: linear is valid')
+  ok(!isValidSpiralSweepEasing('bounce'), 'easing: unknown is invalid')
+  ok(!isValidSpiralSweepEasing(null), 'easing: null is invalid')
+  ok(!isValidSpiralSweepEasing(undefined), 'easing: undefined is invalid')
+  // sanitize: keep valid, junk → default (so a corrupt value never
+  // silently changes an existing user's sweep feel).
+  eq(sanitizeSpiralSweepEasing('ease-in'), 'ease-in', 'easing: sanitize keeps a valid id')
+  eq(sanitizeSpiralSweepEasing('bounce'), 'ease-out', 'easing: sanitize junk → default')
+  eq(sanitizeSpiralSweepEasing(undefined), 'ease-out', 'easing: sanitize undefined → default')
+  eq(sanitizeSpiralSweepEasing(7), 'ease-out', 'easing: sanitize number → default')
+  // junk css resolves to the default's token (the baked curve) — never
+  // crashes, never returns undefined into the animation string.
+  eq(spiralSweepEasingCss('bounce'), 'cubic-bezier(0.33,0.1,0.25,1)',
+    'easing: junk css → the baked default curve')
+  eq(spiralSweepEasingCss(null), 'cubic-bezier(0.33,0.1,0.25,1)', 'easing: null css → default')
+  // cycle wraps ease-in → linear → ease-out → ease-in.
+  eq(nextSpiralSweepEasing('ease-in'), 'linear', 'easing: ease-in → linear')
+  eq(nextSpiralSweepEasing('linear'), 'ease-out', 'easing: linear → ease-out')
+  eq(nextSpiralSweepEasing('ease-out'), 'ease-in', 'easing: ease-out wraps → ease-in')
+  eq(nextSpiralSweepEasing('junk'), 'ease-in', 'easing: cycle from junk → first')
+  // every easing's css is a distinct token (no two chips feel the same).
+  {
+    const tokens = new Set(SPIRAL_SWEEP_EASINGS.map(e => e.css))
+    eq(tokens.size, SPIRAL_SWEEP_EASINGS.length, 'easing: all css tokens are distinct')
+  }
+}
+
+console.log(`PASS: framingGuides R41.B — ${passed} total assertions (incl. spiral sweep easing control)`)

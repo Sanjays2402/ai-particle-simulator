@@ -45,6 +45,8 @@ import {
   nextSweepNonce,
   sanitizeSpiralSweepSpeed,
   nextSpiralSweepSpeed,
+  sanitizeSpiralSweepEasing,
+  nextSpiralSweepEasing,
 } from './lib/framingGuides'
 // R38.K — per-motion calm gate sanitiser + toggle.
 import { sanitizeCalmGates, toggleCalmGate } from './lib/calmMode'
@@ -75,6 +77,7 @@ const FRAMING_GRID_KEY = 'particle-framing-grid-v1'
 // toward), own key so it round-trips independently of the grid mode.
 const SPIRAL_ORIENT_KEY = 'particle-spiral-orientation-v1'
 const SPIRAL_SWEEP_SPEED_KEY = 'particle-spiral-sweep-speed-v1'
+const SPIRAL_SWEEP_EASING_KEY = 'particle-spiral-sweep-easing-v1'
 // R34.C — screenshot self-timer delay (seconds), own key.
 const SCREENSHOT_TIMER_KEY = 'particle-screenshot-timer-v1'
 // R35.C — screenshot burst count (frames per capture), own key.
@@ -590,6 +593,25 @@ export const useStore = create((set, get) => {
     const next = nextSpiralSweepSpeed(get().spiralSweepSpeed)
     try { localStorage.setItem(SPIRAL_SWEEP_SPEED_KEY, next) } catch { /* */ }
     set({ spiralSweepSpeed: next })
+  },
+
+  // R41.B — spiral sweep EASING: shapes HOW the draw-on accelerates
+  // (ease-in / linear / ease-out), orthogonal to the R40.B speed. The
+  // default 'ease-out' reproduces the original baked cubic-bezier so an
+  // existing user sees no change. Persisted on its own key; only visible
+  // while the 'spiral' grid is active.
+  spiralSweepEasing: (() => {
+    try { return sanitizeSpiralSweepEasing(localStorage.getItem(SPIRAL_SWEEP_EASING_KEY)) } catch { return 'ease-out' }
+  })(),
+  setSpiralSweepEasing: (id) => {
+    const next = sanitizeSpiralSweepEasing(id)
+    try { localStorage.setItem(SPIRAL_SWEEP_EASING_KEY, next) } catch { /* quota / private mode */ }
+    set({ spiralSweepEasing: next })
+  },
+  cycleSpiralSweepEasing: () => {
+    const next = nextSpiralSweepEasing(get().spiralSweepEasing)
+    try { localStorage.setItem(SPIRAL_SWEEP_EASING_KEY, next) } catch { /* */ }
+    set({ spiralSweepEasing: next })
   },
 
   // R35.E — Zen auto-orbit: when enabled and the screen is left alone in

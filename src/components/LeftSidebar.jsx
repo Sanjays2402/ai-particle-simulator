@@ -33,7 +33,7 @@ import {
   summarizeImportImpact as summarizeCrossfadeOverridesImpact,
 } from '../lib/crossfadeOverridesIO'
 import { ATTRACTOR_TYPES, MAX_ATTRACTORS, attractorTypeStyle, parsePositionInput, dropIndexForGap, stepKeyboardGapCursor, describeGapReorderAnnouncement } from '../lib/namedAttractors'
-import { FRAMING_RATIOS, FRAMING_GRIDS, SPIRAL_ORIENTATIONS, SPIRAL_SWEEP_SPEEDS } from '../lib/framingGuides'
+import { FRAMING_RATIOS, FRAMING_GRIDS, SPIRAL_ORIENTATIONS, SPIRAL_SWEEP_SPEEDS, SPIRAL_SWEEP_EASINGS } from '../lib/framingGuides'
 import { showToast } from './Toast'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
@@ -79,6 +79,7 @@ export default function LeftSidebar() {
     framingGridId, setFramingGridId,
     spiralOrientation, cycleSpiralOrientation, replaySpiralSweep,
     spiralSweepSpeed, setSpiralSweepSpeed,
+    spiralSweepEasing, setSpiralSweepEasing,
   } = useStore()
 
   const exportGif = async () => {
@@ -379,6 +380,36 @@ export default function LeftSidebar() {
                         boxShadow: active ? '0 0 10px rgba(168,85,247,0.2)' : 'none',
                       }}
                     >{s.label}</button>
+                  )
+                })}
+              </div>
+              {/* R41.B — sweep EASING chips: shape HOW the draw-on
+                  accelerates (ease-in sprints to the eye, linear holds a
+                  constant pace, ease-out glides to a stop). Orthogonal to
+                  the speed above; 'ease-out' is the original baked curve.
+                  Picking an easing also replays so the change is visible. */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, marginBottom: 5 }}>
+                <span style={{ fontSize: 10, color: '#7a7a90', fontWeight: 500 }}>Sweep easing</span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+                {SPIRAL_SWEEP_EASINGS.map(e => {
+                  const active = spiralSweepEasing === e.id
+                  return (
+                    <button key={e.id}
+                      onClick={() => { setSpiralSweepEasing(e.id); replaySpiralSweep() }}
+                      title={`${e.hint}`}
+                      style={{
+                        padding: '5px 0', borderRadius: 7, fontSize: 10.5, fontWeight: 550,
+                        cursor: 'pointer', transition: 'all 0.15s ease-out',
+                        fontFamily: 'Geist Mono, monospace',
+                        background: active
+                          ? 'linear-gradient(135deg, rgba(168,85,247,0.22) 0%, rgba(236,72,153,0.18) 100%)'
+                          : 'rgba(255,255,255,0.03)',
+                        color: active ? '#f3e8ff' : '#8a8aa0',
+                        border: active ? '1px solid rgba(168,85,247,0.45)' : '1px solid rgba(255,255,255,0.05)',
+                        boxShadow: active ? '0 0 10px rgba(168,85,247,0.2)' : 'none',
+                      }}
+                    >{e.label}</button>
                   )
                 })}
               </div>

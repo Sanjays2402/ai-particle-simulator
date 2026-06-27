@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import {
   ratioForId, computeFramingBars, describeFraming, labelForId,
   computeCompositionGrid, polylineLength, spiralSweepKey, spiralSweepTimings,
+  spiralSweepEasingCss,
 } from '../lib/framingGuides'
 import { useReducedMotion } from '../lib/useReducedMotion'
 
@@ -24,6 +25,7 @@ export default function FramingGuides() {
   const spiralOrientation = useStore(s => s.spiralOrientation)
   const spiralSweepNonce = useStore(s => s.spiralSweepNonce)
   const spiralSweepSpeed = useStore(s => s.spiralSweepSpeed)
+  const spiralSweepEasing = useStore(s => s.spiralSweepEasing)
   const reducedMotion = useReducedMotion()
 
   // Track the viewport so the bars recompute on resize / orientation
@@ -112,6 +114,11 @@ export default function FramingGuides() {
   // Normal / Slow). 'normal' reproduces the original baked timings, so an
   // existing user sees no change until they pick another speed.
   const sweepT = spiralSweepTimings(spiralSweepSpeed)
+  // R41.B — the sweep's CSS timing-function for the chosen easing
+  // (ease-in / linear / ease-out), spliced into the animation shorthand
+  // below. 'ease-out' reproduces the original baked cubic-bezier so an
+  // existing user sees no change until they pick another easing.
+  const sweepEasingCss = spiralSweepEasingCss(spiralSweepEasing)
 
   const label = describeFraming(framingGuideId, vp.w, vp.h)
   const barStyle = {
@@ -182,7 +189,7 @@ export default function FramingGuides() {
               style={spiralSweeping ? {
                 strokeDasharray: spiralLen,
                 strokeDashoffset: spiralLen,
-                animation: `spiral-sweep ${sweepT.sweepSec}s cubic-bezier(0.33,0.1,0.25,1) forwards`,
+                animation: `spiral-sweep ${sweepT.sweepSec}s ${sweepEasingCss} forwards`,
               } : undefined}
             />
           )}
