@@ -6,6 +6,8 @@ import {
   // R39.A — ETA-to-edge history strip
   ETA_HISTORY_CEIL, ETA_HISTORY_MAX,
   pushEtaHistory, buildEtaHistoryPoints, etaHistoryAttr, summarizeEtaHistory,
+  // R39.D — hover-scrub readout for a sparkline
+  scrubSparkline,
 } from './fpsGraph.js'
 
 let passed = 0
@@ -703,3 +705,86 @@ console.log(`PASS: fpsGraph R38.D — ${passed} total assertions (incl. band-col
 }
 
 console.log(`PASS: fpsGraph R39.A — ${passed} total assertions (incl. ETA-to-edge history strip)`)
+
+// --- R39.D: hover-scrub readout for a sparkline -----------------------
+{
+  // A 5-sample window over a 100px-wide sparkline at 1Hz. Samples are
+  // newest-LAST, so index 4 is "now" (0s ago), index 0 is 4s ago.
+  const samples = [60, 50, 40, 30, 20]
+  const W = 100, SAMPLE_MS = 1000
+  // cursor at the right edge → newest sample (index 4, 0s ago).
+  {
+    const r = scrubSparkline(samples, 100, { width: W, sampleMs: SAMPLE_MS })
+    ok(r !== null, 'scrub: right-edge cursor → a result')
+    eq(r.index, 4, 'scrub: right edge → newest sample index')
+    eq(r.fps, 20, 'scrub: right edge → newest fps')
+    eq(r.secondsAgo, 0, 'scrub: newest sample is 0s ago')
+    near(r.x, 100, 'scrub: snapped x at the right edge')
+  }
+  // cursor at the left edge → oldest sample (index 0, 4s ago).
+  {
+    const r = scrubSparkline(samples, 0, { width: W, sampleMs: SAMPLE_MS })
+    eq(r.index, 0, 'scrub: left edge → oldest sample index')
+    eq(r.fps, 60, 'scrub: left edge → oldest fps')
+    eq(r.secondsAgo, 4, 'scrub: oldest of 5 @1Hz is 4s ago')
+    near(r.x, 0, 'scrub: snapped x at the left edge')
+  }
+  // cursor mid-sparkline snaps to the NEAREST sample (25px → index 1).
+  {
+    const r = scrubSparkline(samples, 25, { width: W, sampleMs: SAMPLE_MS })
+    eq(r.index, 1, 'scrub: 25px over 4 gaps → nearest sample index 1')
+    eq(r.fps, 50, 'scrub: index-1 fps')
+    eq(r.secondsAgo, 3, 'scrub: index 1 of 5 is 3s ago')
+    near(r.x, 25, 'scrub: snapped x lands on the sample, not the cursor')
+  }
+  // exact midpoint (50px → index 2, the centre sample).
+  {
+    const r = scrubSparkline(samples, 50, { width: W, sampleMs: SAMPLE_MS })
+    eq(r.index, 2, 'scrub: 50px → centre sample index 2')
+    eq(r.secondsAgo, 2, 'scrub: centre of 5 is 2s ago')
+  }
+  // overshoot clamps to the nearest edge rather than returning null.
+  {
+    const over = scrubSparkline(samples, 999, { width: W })
+    eq(over.index, 4, 'scrub: cursor past right edge clamps to newest')
+    const under = scrubSparkline(samples, -50, { width: W })
+    eq(under.index, 0, 'scrub: cursor before left edge clamps to oldest')
+  }
+  // single-sample window: any cursor resolves to that lone sample at the
+  // right edge, 0s ago (no divide-by-zero).
+  {
+    const r = scrubSparkline([42], 80, { width: 160 })
+    eq(r.index, 0, 'scrub: single sample → index 0')
+    eq(r.fps, 42, 'scrub: single sample fps')
+    eq(r.secondsAgo, 0, 'scrub: single sample is "now"')
+    near(r.x, 160, 'scrub: single sample pins to right edge')
+  }
+  // junk sample under the cursor → fps null (tooltip shows "—") but a
+  // valid index + secondsAgo so the guide line still anchors.
+  {
+    const r = scrubSparkline([60, NaN, 30], 50, { width: 100 })
+    eq(r.index, 1, 'scrub: lands on the junk sample')
+    eq(r.fps, null, 'scrub: junk sample → null fps')
+    eq(r.secondsAgo, 1, 'scrub: junk sample still reports an age')
+  }
+  // custom sampleMs (e.g. the HUD's 250ms cadence) scales secondsAgo.
+  {
+    const r = scrubSparkline([60, 50, 40, 30], 0, { width: 90, sampleMs: 250 })
+    eq(r.index, 0, 'scrub: oldest of 4')
+    eq(r.secondsAgo, 1, 'scrub: 3 steps * 250ms = 0.75s → rounds to 1s')
+  }
+  // defensive: empty / non-array / non-finite cursor → null.
+  eq(scrubSparkline([], 50), null, 'scrub: empty samples → null')
+  eq(scrubSparkline(null, 50), null, 'scrub: non-array samples → null')
+  eq(scrubSparkline([60, 30], NaN), null, 'scrub: NaN cursor → null')
+  eq(scrubSparkline([60, 30], Infinity, { width: 100 }), null, 'scrub: Infinity cursor → null')
+  // purity: input not mutated.
+  {
+    const src = [60, 40, 20]
+    const snap = JSON.stringify(src)
+    scrubSparkline(src, 50, { width: 100 })
+    eq(JSON.stringify(src), snap, 'scrub: does not mutate input')
+  }
+}
+
+console.log(`PASS: fpsGraph R39.D — ${passed} total assertions (incl. sparkline hover-scrub readout)`)

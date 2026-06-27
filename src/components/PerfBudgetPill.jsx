@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { perfBudgetStatus, summarizePerfWindow } from '../lib/perfSuggest'
-import { buildBandedSparklineSegments, refLineY, FPS_GRAPH_CEIL } from '../lib/fpsGraph'
+import { buildBandedSparklineSegments, refLineY, FPS_GRAPH_CEIL, scrubSparkline } from '../lib/fpsGraph'
 
 // R36.D — live perf-budget status pill.
 //
@@ -36,6 +36,11 @@ export default function PerfBudgetPill() {
   // popover re-renders as fresh samples land while it's open.
   const [series, setSeries] = useState([])
   const [open, setOpen] = useState(false)
+  // R39.D — hover-scrub: the cursor x over the popover sparkline (in the
+  // SVG's pixel space), or null when the pointer is off it. Drives a
+  // vertical guide line + a tooltip reading the exact fps + seconds-ago
+  // for the sample under the cursor.
+  const [scrubX, setScrubX] = useState(null)
   const seriesRef = useRef([])
 
   useEffect(() => {
@@ -64,7 +69,10 @@ export default function PerfBudgetPill() {
 
   // Close the popover whenever the pill itself is disabled so it doesn't
   // linger as an orphan.
-  useEffect(() => { if (!enabled) setOpen(false) }, [enabled])
+  useEffect(() => { if (!enabled) { setOpen(false); setScrubX(null) } }, [enabled])
+  // Drop any hover-scrub when the popover closes so it doesn't reappear
+  // mid-scrub the next time it opens.
+  useEffect(() => { if (!open) setScrubX(null) }, [open])
 
   if (!enabled) return null
 
@@ -79,6 +87,28 @@ export default function PerfBudgetPill() {
   const sparkSegments = buildBandedSparklineSegments(series, sparkOpts)
   const spark60 = refLineY(60, sparkOpts)
   const spark30 = refLineY(30, sparkOpts)
+  // R39.D — resolve the live hover-x to the nearest sample (fps +
+  // seconds-ago) so the tooltip + guide line read an exact value off the
+  // sparkline. The pill samples at 1Hz, so the default sampleMs=1000
+  // makes secondsAgo read in whole seconds. null when not hovering.
+  const scrub = scrubX != null ? scrubSparkline(series, scrubX, { width: SPARK_W, sampleMs: 1000 }) : null
+  // The y of the scrubbed sample on the sparkline (for the dot) — found by
+  // walking the segments for the point at the snapped index. Cheap: the
+  // segments already carry every point.
+  let scrubY = null
+  if (scrub) {
+    const flat = []
+    for (const seg of sparkSegments) for (const p of seg.points) flat.push(p)
+    // Segments share boundary points, so dedupe by x to index by sample.
+    if (flat.length) {
+      // Nearest point to the snapped x.
+      let best = flat[0]
+      for (const p of flat) {
+        if (Math.abs(p.x - scrub.x) < Math.abs(best.x - scrub.x)) best = p
+      }
+      scrubY = best.y
+    }
+  }
 
   return (
     <div
@@ -124,8 +154,19 @@ export default function PerfBudgetPill() {
           {sparkSegments.length > 0 && (
             <svg
               width={SPARK_W} height={SPARK_H}
-              style={{ display: 'block', width: '100%', height: SPARK_H, borderRadius: 5, background: 'rgba(0,0,0,0.28)', marginBottom: 9 }}
+              style={{ display: 'block', width: '100%', height: SPARK_H, borderRadius: 5, background: 'rgba(0,0,0,0.28)', marginBottom: 9, cursor: 'crosshair' }}
               preserveAspectRatio="none"
+              viewBox={`0 0 ${SPARK_W} ${SPARK_H}`}
+              onPointerMove={(e) => {
+                // Map the pointer to the SVG's internal coordinate space:
+                // the SVG renders at 100% width (responsive) so the on-
+                // screen px must be scaled back to the SPARK_W viewBox.
+                const rect = e.currentTarget.getBoundingClientRect()
+                if (rect.width <= 0) return
+                const localX = ((e.clientX - rect.left) / rect.width) * SPARK_W
+                setScrubX(localX)
+              }}
+              onPointerLeave={() => setScrubX(null)}
             >
               {spark60 != null && (
                 <line x1={0} y1={spark60} x2={SPARK_W} y2={spark60}
@@ -139,7 +180,48 @@ export default function PerfBudgetPill() {
                 <polyline key={i} points={seg.attr} fill="none" stroke={seg.color}
                   strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
               ))}
+              {/* R39.D — hover-scrub guide: a vertical line at the snapped
+                  sample x + a dot on the line so the user sees exactly
+                  which sample the tooltip is reading. */}
+              {scrub && (
+                <>
+                  <line x1={scrub.x} y1={0} x2={scrub.x} y2={SPARK_H}
+                    stroke="rgba(255,255,255,0.35)" strokeWidth={1} />
+                  {scrubY != null && (
+                    <circle cx={scrub.x} cy={scrubY} r={2.6}
+                      fill="#fff" stroke="rgba(0,0,0,0.4)" strokeWidth={0.75} />
+                  )}
+                </>
+              )}
             </svg>
+          )}
+
+          {/* R39.D — the scrub readout: exact fps + how-long-ago for the
+              sample under the cursor. Sits directly below the sparkline
+              so the eye doesn't travel; fixed height so the layout doesn't
+              jump as the pointer enters / leaves. */}
+          {sparkSegments.length > 0 && (
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              height: 15, marginBottom: 8, marginTop: -3,
+              fontSize: 10, fontFamily: 'inherit',
+              opacity: scrub ? 1 : 0.42, transition: 'opacity 0.12s ease-out',
+            }}>
+              {scrub ? (
+                <>
+                  <span style={{
+                    color: scrub.fps == null ? '#7a7a90'
+                      : scrub.fps >= 55 ? '#86efac' : scrub.fps >= 30 ? '#fbbf24' : '#f87171',
+                    fontWeight: 700, fontVariantNumeric: 'tabular-nums',
+                  }}>{scrub.fps == null ? '—' : `${scrub.fps} fps`}</span>
+                  <span style={{ color: '#8a8aa0', fontVariantNumeric: 'tabular-nums' }}>
+                    {scrub.secondsAgo === 0 ? 'now' : `${scrub.secondsAgo}s ago`}
+                  </span>
+                </>
+              ) : (
+                <span style={{ color: '#6a6a80', letterSpacing: '0.02em' }}>Hover the graph to scrub</span>
+              )}
+            </div>
           )}
 
           {summary.count > 0 ? (

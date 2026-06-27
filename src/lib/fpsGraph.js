@@ -602,6 +602,50 @@ export function summarizeEtaHistory(history, opts = {}) {
   }
 }
 
+// --- R39.D: hover-scrub readout for a sparkline -----------------------
+//
+// The perf-pill popover sparkline (R38.D) shows the SHAPE of the last
+// ~12s but a user can't read an exact value off it. This resolves a
+// horizontal cursor position over the sparkline to the nearest sample so
+// the popover can show a tooltip: "48 fps · 4s ago" for the point under
+// the cursor, with the x-pixel to anchor a vertical guide line + dot.
+//
+// `cursorX` is the pointer x in the SVG's pixel space (0..width). The
+// samples are the same newest-LAST array the sparkline draws. We map the
+// cursor to the nearest sample by reversing buildSparklinePoints' even
+// spacing, then report:
+//   { index, fps, x, secondsAgo }
+// where `index` is into the samples array, `fps` is that sample's value
+// (rounded; junk → null so the tooltip can show "—"), `x` is the snapped
+// pixel of that sample (so the guide line lands exactly on the point),
+// and `secondsAgo` is how long before now that sample was taken —
+// derived from its distance from the newest (right-most) sample times
+// `sampleMs` (default 1000, the perf pill's 1Hz cadence).
+//
+// Returns null when there's nothing to scrub (empty / non-array samples,
+// or a non-finite cursorX) so the caller hides the tooltip.
+export function scrubSparkline(samples, cursorX, opts = {}) {
+  if (!Array.isArray(samples) || samples.length === 0) return null
+  if (!Number.isFinite(cursorX)) return null
+  const width = Number.isFinite(opts.width) && opts.width > 0 ? opts.width : 100
+  const sampleMs = Number.isFinite(opts.sampleMs) && opts.sampleMs > 0 ? opts.sampleMs : 1000
+  const n = samples.length
+  // Reverse the even spacing buildSparklinePoints uses: sample i sits at
+  // x = (i / (n-1)) * width (single sample pins to the right edge).
+  const stepDenom = n > 1 ? n - 1 : 1
+  // Clamp the cursor into the drawable range so an over/undershoot snaps
+  // to the first / last sample rather than returning null.
+  const cx = cursorX < 0 ? 0 : cursorX > width ? width : cursorX
+  const rawIdx = n > 1 ? Math.round((cx / width) * stepDenom) : 0
+  const index = rawIdx < 0 ? 0 : rawIdx > n - 1 ? n - 1 : rawIdx
+  const x = n > 1 ? (index / stepDenom) * width : width
+  const raw = Number(samples[index])
+  const fps = Number.isFinite(raw) && raw >= 0 ? Math.round(raw) : null
+  // Newest sample (last) is "now" (0s ago); each step left is +sampleMs.
+  const secondsAgo = Math.round(((n - 1 - index) * sampleMs) / 1000)
+  return { index, fps, x: round1(x), secondsAgo }
+}
+
 // Frame-time window summary — mirrors summarizeFpsWindow but in ms.
 // `high` is the averaged WORST `pctHigh` fraction (the 1%-HIGH frame
 // time, the ms analogue of the 1% low); `over` counts frames slower
