@@ -120,6 +120,11 @@ Existing capabilities (do not re-ship):
 - Hotkey UNDO chain badge fades non-linearly (R28.43, graduates R27.43). Pre-R28.43 the fade was linear which read as "already expiring" by t=250ms — too rushed for the human's decision lag. R28.43 reshapes the t→t' progression via easeInCubic (t' = t^3): at t=0.5 the colour has only walked 12.5% toward grey, so the badge reads as ~bright through the first 500ms then accelerates to grey emphatically in the last 500ms. Roadmap requirement met: "fade slower in the first 500ms, faster in the last 500ms — non-linear curve". New constants in midiPresets.js: `HOTKEY_CHAIN_FADE_CURVES=['linear','easeOutCubic','easeInCubic']`, `HOTKEY_CHAIN_FADE_CURVE_DEFAULT='linear'` (preserves R27.43 backwards-compat — every existing call site / pinned test unchanged), `HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED='easeInCubic'` (named export so a future curve swap touches one file). New pure helper `applyHotkeyChainFadeCurve(t, curve)` — endpoint anchoring guaranteed across every curve (f(0)=0, f(1)=1); monotonicity preserved; non-finite t → 0; out-of-range clamps to endpoints; unknown curve falls through to linear. `fadeDirectionColor` extended with optional curve param threaded through Toast.jsx's existing fade-tick interval. MidiPanel.showHotkeyTransferToast passes the recommended curve into badge.fade.
 - Clamp popover preview chips become per-cell wipe buttons (R28.45, graduates R27.45). Pre-R28.45 the chips just LISTED affected attractors; R28.45 makes each chip an actionable button — tap any chip to clear JUST that one attractor's per-cell override on the current field, without leaving the popover or dropping every other attractor's override along with it. Pure wire layer — no new lib helpers; delegates to the existing `setClampWarnAttractorFieldOverride(overrides, id, field, null)` with its ref-equal-on-no-op + sanitize-and-prune contract pinned across R24.40/R25.45/R26.45/R27.45. UI: chips swap `<span>` → `<button type="button">` with onClick wired to onClearAttractorCell(id); disabled when no handler attached (read-only callers see no affordance); cursor: pointer + soft indigo hover lift; small × glyph appended to clickable chips for discoverability; tooltips differentiate read-only vs clickable-live vs clickable-stale; e.stopPropagation() prevents bubble to popover surface; native button styling reset so visually identical to pre-R28.45 span baseline.
 - MidiPanel binding-group gap-drop zones reachable via touch long-press drag (R28.20, graduates R26.20 + R27.20 combined). Pre-R28.20 desktop users had gap-drop zones (R27.20) and touch users had row-drop drag (R26.20), but the gap-drop zones were touch-unreachable — 4-18px wide pixel strips are too narrow for a thumb. R28.20 introduces a gap-AWARE touch hit-test that returns a discriminated union { kind: 'row' | 'gap', idx | gapIdx } with 12px tolerance bands around each row boundary. New pure helper `resolveTouchTargetWithGaps(y, ranges, opts)` in cameraViews.js (parallel to R22.12's resolveTouchTargetIdx): gap takes precedence at boundaries (two-pass scan — gap bands first, then row hits — so a touch sitting at a row's edge always resolves to insert-here intent); above-row-0 + within-tolerance-of-midpoint + trailing-zone-below-last-row all return gap targets; everything else falls through to row hit-test. Custom tolerance via opts.tolerancePx (default `TOUCH_GAP_TOLERANCE_PX=12`); handles partial-corrupt ranges via valid-index pair walk so gap math survives ghost entries. MidiPanel.onGroupTouchMove routes the discriminator to setGapOverGroupIdx vs setDragOverGroupIdx; touchend reads both — gap wins via dropIndexForGap, else falls through to R26.20 row-mode drop path.
+- Debug HUD ETA-to-budget-edge readout (R38.A, graduates R37.A). The ms-view trend pill says headroom is "loading" (falling) but not how urgent; R38.A extrapolates the headroom slope to a concrete "~Ns until you cross the 16.7ms budget" warning, shown ONLY while genuinely falling AND still above the edge (a recovering / flat / already-over scene yields no ETA). Slope is a least-squares fit over the live 2s window so one noisy frame doesn't whipsaw the estimate; sampleMs (250 = HUD cadence) converts the per-sample slope to real seconds; minSlope dead-band guards against noise; "To edge" row turns red at <=3s. Pure lib/fpsGraph.js: headroomEtaToEdge -> { approaching, etaSec, slopePerSec, currentHeadroom } + ETA_MAX_SEC cap + linregSlope. +39 asserts (linear-fall ETA, cadence scaling, rising/flat/over-budget all yield none, dead-band, junk filtering, cap + non-negative invariant, purity).
+- Golden-spiral one-shot draw-on sweep (R38.B, graduates R37.B). The R37.B golden spiral appeared instantly; now it traces itself once on enable / orientation-change so the eye follows the curve to the focal "eye" dot. The polyline sets strokeDasharray + strokeDashoffset to its own pixel length and animates the offset to 0 (SVG line-reveal), then the eye dot fades in as the sweep lands. Keyed on spiralOrientation so React remounts + replays on every corner change; entering/leaving spiral mode remounts it naturally. Derived entirely at render (no state/effect/ref) so it stays lint-clean and never triggers a setState-in-effect cascade. Reduced-motion users get the full curve at once — spiralLen resolves to 0 under RM so no anim style is applied. Pure lib/framingGuides.js: polylineLength (segment-distance sum; skips non-finite points). +17 asserts. CSS: spiral-sweep + spiral-eye-in keyframes.
+- Perf-pill popover band-coloured fps sparkline (R38.D, graduates R37.D). The R37.D health popover showed avg/1%-low/drops as numbers; now a tiny sparkline of the same ~12s window sits at the top so the summary shows SHAPE — where the dips were. The line is split into green (>=55) / amber (>=30) / red runs so a stutter paints red exactly where it happened; 60/30fps guide lines anchor it; only renders once there are >=2 samples. Pure lib/fpsGraph.js: buildBandedSparklineSegments — colours each line SEGMENT by its destination sample's band, groups consecutive same-colour segments into one polyline run, shares boundary points so runs connect with no gap. +22 asserts (uniform-band single run, green-red-green dip splits into 3 with shared boundaries, x monotonic across splits, all-band sweep, junk-finite, purity).
+- Command palette rename saved view inline + clear-all-views (R38.H, graduates R37.H). Completes the saved-camera-view lifecycle in the palette (R37.H had save/restore/delete). RENAME swaps the row to an autofocused inline input seeded with the view's current name (Enter commits, Esc cancels — no window.prompt); CLEAR ALL wipes every view in one action (only shown when views exist). Pure lib/cameraViews.js: renameView (set name by id with ref-equal-on-no-op contract — blank-after-trim / identical-name / missing-id all return input ref so persistence skips a redundant save; trims; never mutates) + buildCameraRenameActions (carries viewId + currentName to seed the field; position-corrupt views still renameable). ~30 asserts.
+- Per-motion calm-mode gating (R38.K, graduates R37.K). R36.K's calm toggle was all-or-nothing (paused all 4 ambient motions together); now the user can choose WHICH of auto-rotate / camera-shake / hue-cycle / zen-orbit calm mode pauses. Long-press (or right-click) the TopBar calm button opens a per-motion popover with a toggle per motion + a gated count; a short tap still flips calm on/off. The gated set persists (particle-calm-gates-v1). Pure lib/calmMode.js: CALM_MOTION_IDS + defaultCalmGates / sanitizeCalmGates (partial map completes to all-gated, unknown keys dropped, coerces) / toggleCalmGate (fresh map, no-mutate) / resolveCalmFor (reduced-motion ALWAYS suppresses; calm suppresses only gated motions; unknown id fails safe to gated) / countGatedMotions. Back-compat invariant PINNED: with default gates, resolveCalmFor === resolveCalm for every (reduced, calm, motion) combo. +71 asserts. All 4 consumers rewired to resolveCalmFor (ParticleCanvas hue/shake/auto-rotate, ZenMode orbit); store calmGates slice + toggleCalmGate action.
 - (R34.A) Debug HUD live FPS sparkline graph — the 2s rolling fps window the HUD already sampled is now drawn as an SVG sparkline (168x34) with 60/30fps dashed reference lines + area fill + a band-coloured stroke (green/amber/red) that reddens live as fps drops, plus "1% low" (averaged worst 10% of the window) and a "Drops" count (samples under 30fps, shown only when > 0). Pure module lib/fpsGraph.js: buildSparklinePoints/sparklinePointsAttr (newest at right, junk samples collapse to floor, over-ceiling clamps to top), refLineY, summarizeFpsWindow, fpsBandColor (FPS_GRAPH_CEIL=70). Toggle the HUD with backtick as before.
 - (R34.B) Cinematic framing guides — toggleable letterbox/pillarbox bars mask the viewport to a chosen aspect ratio (2.39 / 16:9 / 3:2 / 1:1 / 4:5 / 9:16) for composing screenshots & recordings; visual-only (pointer-events:none, z below chrome above canvas), never changes what's captured. Chip row in LeftSidebar Camera section; [ clears / ] cycles; frame badge shows ratio + live pixel dims; 1px hairline on each bar's inner edge. Persisted (particle-framing-guide-v1). Pure module lib/framingGuides.js: FRAMING_RATIOS roster, computeFramingBars (mode none/letterbox/pillarbox + symmetric bar thickness, clamps junk dims to no-bars), sanitizeFramingId/nextFramingId/describeFraming. Store: framingGuideId + setFramingGuideId/cycleFramingGuide.
 - (R34.C) Screenshot self-timer — optional 3..2..1 countdown ring before capture so users can stage a clean frame; TopBar toggle next to the camera button cycles Off/3/5/10s with the active delay as a badge; applies to every screenshot entry point (button, S key, command palette); Escape cancels; reduced-motion aware. Persisted (particle-screenshot-timer-v1). Pure module lib/selfTimer.js: countdownState (remaining/secondsLeft=ceil/progress/done, clock-skew + junk safe → instant-done), TIMER_DELAYS roster + sanitizeTimerDelay (snaps to nearest), ringDashoffset. TopBar capture refactored to module-level captureScreenshotNow/requestScreenshot.
@@ -714,22 +719,29 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R37.L Shortcut cheat-sheet overlay (carried R36.L)
 
 ### Batch 38 — fresh frontend queue (graduations of Batch 37 + carried)
-- [ ] R38.A Debug HUD headroom trend (R37.A): a numeric "ETA to edge"
-  readout — extrapolate the current headroom slope to estimate how many
-  seconds until the user crosses the 16.7ms budget at the present trend
-  (only while falling), so a heavy-scene tuner gets a concrete warning
-- [ ] R38.B Golden spiral (R37.B): a subtle animated "sweep" that traces
-  the spiral path once on enable / orientation-change (reduced-motion
-  aware, one-shot) so the eye follows the curve to the focal point
-- [ ] R38.D Perf-pill popover (R37.D): a tiny inline fps sparkline of the
-  same ~12s window at the top of the health popover (reuse fpsGraph
-  sparkline helpers) so the summary shows shape, not just numbers
-- [ ] R38.H Command palette (R37.H): a "Rename saved view" palette action
-  (inline text entry) + "Clear all saved views" so rename/wipe join the
-  save/restore/delete lifecycle already in the palette
-- [ ] R38.K Calm mode (R37.K): a per-motion toggle popover on the calm
+- [x] R38.A Debug HUD headroom trend (R37.A): a numeric "ETA to edge"
+  readout — extrapolate the headroom slope (least-squares fit) to "~Ns
+  until you cross the 16.7ms budget", shown only while genuinely falling
+  AND still above the edge; red at <=3s (lib/fpsGraph.js headroomEtaToEdge
+  + ETA_MAX_SEC, +39 asserts) — a0567af
+- [x] R38.B Golden spiral (R37.B): a subtle animated "sweep" that traces
+  the spiral path once on enable / orientation-change (stroke-dash reveal
+  + eye fade-in, keyed on orientation so it remounts/replays; reduced-
+  motion aware → spiralLen 0 = no anim) (lib/framingGuides.js
+  polylineLength, +17 asserts) — 36463be
+- [x] R38.D Perf-pill popover (R37.D): a tiny inline fps sparkline of the
+  same ~12s window, band-coloured (green/amber/red runs) so a dip paints
+  red exactly where it happened (lib/fpsGraph.js
+  buildBandedSparklineSegments, +22 asserts) — 3a3ad01
+- [x] R38.H Command palette (R37.H): a "Rename saved view" palette action
+  (inline text entry, Enter/Esc) + "Clear all saved views" so
+  rename/wipe join the save/restore/delete lifecycle (lib/cameraViews.js
+  renameView + buildCameraRenameActions, ~30 asserts) — 7f0ac8f
+- [x] R38.K Calm mode (R37.K): a per-motion toggle popover on the calm
   button (long-press / right-click) so a user can choose WHICH of the
-  four motions calm mode gates, instead of all-or-nothing
+  four motions calm mode gates, instead of all-or-nothing (lib/calmMode.js
+  resolveCalmFor + sanitizeCalmGates + toggleCalmGate + countGatedMotions,
+  +71 asserts; back-compat invariant pinned) — 2f8f3e5
 - [ ] R38.C Self-timer burst review strip (carried R36.C/R37.C)
 - [ ] R38.E Zen "Now Playing" overlay (carried R36.E/R37.E)
 - [ ] R38.G Screenshot watermark / caption (carried R36.G/R37.G)
@@ -741,6 +753,30 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R38.O Debug HUD: a compact/expanded toggle (one key) that collapses
   to just the sparkline + fps number for an unobtrusive perf glance
 
+### Batch 39 — fresh frontend queue (graduations of Batch 38 + carried)
+- [ ] R39.A Debug HUD ETA (R38.A): a tiny ETA history strip / sparkline of
+  the seconds-to-edge so a tuner sees whether the deadline is approaching
+  faster or stabilising, not just the instant number
+- [ ] R39.B Golden spiral sweep (R38.B): a replay button / hover-to-retrace
+  affordance on the LeftSidebar Spiral chip so a user can re-run the sweep
+  on demand without toggling the grid off and on
+- [ ] R39.D Perf-pill sparkline (R38.D): a hover-scrub tooltip on the
+  popover sparkline showing the exact fps + how-many-seconds-ago for the
+  sample under the cursor
+- [ ] R39.H Command palette views (R38.H): a "Duplicate saved view" action
+  (clone an angle as a new named view) so a user can base a tweak on an
+  existing framing without re-aiming the camera
+- [ ] R39.K Calm gates (R38.K): export/import the per-motion calm-gate map
+  as a portable JSON envelope (parallels the wind/crossfade overrides IO)
+  so a user can carry their calm preferences between machines
+- [ ] R39.C Self-timer burst review strip (carried R36.C/R37.C/R38.C)
+- [ ] R39.E Zen "Now Playing" overlay (carried R36.E/R37.E/R38.E)
+- [ ] R39.G Screenshot watermark / caption (carried R36.G/R37.G/R38.G)
+- [ ] R39.L Shortcut cheat-sheet overlay (carried R36.L/R37.L/R38.L)
+- [ ] R39.M Framing guide custom aspect-ratio chip (carried R38.M)
+- [ ] R39.N Minimap "frame all saved views" (carried R38.N)
+- [ ] R39.O Debug HUD compact/expanded toggle (carried R38.O)
+
 ### Future queue carried from Batch 24 (still genuine, unshipped)
 - [ ] R25.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view
 - [ ] R25.08 Minimap: hover a saved-view dot for ~1s shows a thumbnail preview (canvas2D sample of the scene from that camera)
@@ -749,6 +785,56 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R25.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode)
 
 ## TICK LOG
+- 2026-06-26 21:28 PT — Batch 38 (5/5). Tick 38. Frontend-focus override
+  active. Shipped the five Batch-38 graduations — all genuinely-new
+  user-facing capability, each its own pure tested module (NOT cosmetic
+  filler). NOTE: the trigger message's "31 unpushed commits / first tick /
+  branch feature/autoship / npm install" was STALE boilerplate AGAIN —
+  repo was already in sync (0/0 vs origin at 98f4573), node_modules
+  present (185 pkgs), STATE.md bootstrapped through tick 37. There were
+  ZERO unpushed commits to preserve. Followed the authoritative prompt:
+  shipped DIRECTLY ON main (feature branches don't show on the
+  contribution graph), no feature/autoship branch created.
+  Commits: a0567af (R38.A Debug HUD ETA-to-budget-edge readout —
+  least-squares headroom slope extrapolated to "~Ns to the 16.7ms edge",
+  only while falling + above edge), 36463be (R38.B golden-spiral one-shot
+  draw-on sweep — stroke-dash reveal + eye fade-in, reduced-motion aware),
+  3a3ad01 (R38.D perf-pill popover band-coloured fps sparkline — green/
+  amber/red runs), 7f0ac8f (R38.H palette rename-saved-view inline +
+  clear-all-views), 2f8f3e5 (R38.K per-motion calm gating — long-press
+  popover picks WHICH of the 4 motions calm pauses; back-compat invariant
+  pinned).
+  Pushed 98f4573..2f8f3e5 -> origin/main (verify after push).
+  Gates: lint EXACTLY at baseline (26 problems / 23 errors / 3 warnings —
+  all pre-existing in DebugHUD performance.now / ParticleCanvas unused-
+  vars+impure / Toast / TopBar glow+escapes / store unused-e / SnapshotGallery
+  / Timeline / vite.config; proved via targeted eslint that every NEW lib
+  + the FramingGuides/PerfBudgetPill/CommandPalette/TopBar/ZenMode edits
+  lint 100% clean — the only errors in my touched files are line-shifted
+  pre-existing ones). Build: green (~830ms). Tests: ALL 46 files pass;
+  ~179 fresh asserts this batch (fpsGraph +61 across R38.A+R38.D,
+  framingGuides +17, cameraViews +30, calmMode +71).
+  - R38.A extended lib/fpsGraph.js (headroomEtaToEdge + ETA_MAX_SEC +
+    linregSlope/round2) + DebugHUD "To edge" row in the ms-view trend
+    section (red at <=3s).
+  - R38.B added lib/framingGuides.js polylineLength + FramingGuides
+    stroke-dash sweep (keyed on spiralOrientation so it remounts/replays;
+    spiralLen=0 under reduced-motion disables the anim) + spiral-sweep /
+    spiral-eye-in keyframes in index.css.
+  - R38.D added lib/fpsGraph.js buildBandedSparklineSegments (per-segment
+    band colour, shared boundary points) + PerfBudgetPill popover-top
+    sparkline (one polyline per colour run + 60/30 guide lines).
+  - R38.H added lib/cameraViews.js renameView + buildCameraRenameActions
+    + CommandPalette inline rename field (Enter/Esc) + Clear All action.
+  - R38.K added lib/calmMode.js CALM_MOTION_IDS / defaultCalmGates /
+    sanitizeCalmGates / toggleCalmGate / resolveCalmFor / countGatedMotions
+    + store calmGates slice (persisted) + rewired all 4 consumers
+    (ParticleCanvas hue/shake/auto-rotate, ZenMode orbit) to resolveCalmFor
+    + TopBar calm-button long-press/right-click per-motion popover.
+  Frontend-focus override honoured — all 5 are FRONTEND/UX (perf HUD viz,
+  photo-composition animation, perf-overlay shape, palette power-user
+  surface, motion-gate granularity). dist/ gitignored — no build artifacts
+  pushed.
 - 2026-06-26 17:07 PT — Batch 37 (5/5). Tick 37. Frontend-focus override
   active. Shipped the five Batch-37 features — all genuinely-new
   user-facing capability, each its own pure tested module (NOT cosmetic
