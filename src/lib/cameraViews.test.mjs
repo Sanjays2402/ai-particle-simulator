@@ -11,6 +11,8 @@ import {
   buildCameraPaletteActions,
   // R37.H — command-palette saved-view DELETE action builder
   buildCameraDeleteActions,
+  // R38.H — rename + clear-all saved views
+  renameView, buildCameraRenameActions,
 } from './cameraViews.js'
 
 function assertEq(actual, expected, msg) {
@@ -555,3 +557,82 @@ console.log('PASS: buildCameraPaletteActions — command-palette camera actions 
 }
 
 console.log('PASS: buildCameraDeleteActions — command-palette saved-view delete actions (R37.H, ~18 asserts)')
+
+// === R38.H: renameView + buildCameraRenameActions ====================
+{
+  const base = [
+    { id: 3, name: 'Wide', pos: [1, 2, 3], target: [0, 0, 0] },
+    { id: 2, name: 'Close', pos: [4, 5, 6], target: [0, 0, 0] },
+    { id: 1, name: 'Top', pos: [0, 9, 0], target: [0, 0, 0] },
+  ]
+
+  // --- happy path: renames the matched row, leaves others alone ---
+  const renamed = renameView(base, 2, 'Hero')
+  assertEq(renamed.find(v => v.id === 2).name, 'Hero', 'matched row renamed')
+  assertEq(renamed.find(v => v.id === 3).name, 'Wide', 'other rows untouched')
+  assertEq(renamed.length, 3, 'rename preserves length')
+  // Position payload survives the rename.
+  assertEq(renamed.find(v => v.id === 2).pos, [4, 5, 6], 'rename keeps pos/target')
+
+  // --- name is trimmed ---
+  assertEq(renameView(base, 1, '  Sky  ').find(v => v.id === 1).name, 'Sky', 'new name is trimmed')
+
+  // --- ref-equal-on-no-op contract ---
+  if (renameView(base, 2, 'Close') !== base) { console.error('FAIL: identical name should be ref-equal no-op'); process.exit(1) }
+  if (renameView(base, 999, 'Nope') !== base) { console.error('FAIL: missing id should be ref-equal no-op'); process.exit(1) }
+  if (renameView(base, null, 'X') !== base) { console.error('FAIL: null id should be ref-equal no-op'); process.exit(1) }
+  if (renameView(base, undefined, 'X') !== base) { console.error('FAIL: undefined id should be ref-equal no-op'); process.exit(1) }
+  // Blank-after-trim is rejected — a view must keep a usable label.
+  if (renameView(base, 2, '   ') !== base) { console.error('FAIL: blank name should be ref-equal no-op'); process.exit(1) }
+  if (renameView(base, 2, '') !== base) { console.error('FAIL: empty name should be ref-equal no-op'); process.exit(1) }
+  if (renameView(base, 2, 42) !== base) { console.error('FAIL: non-string name should be ref-equal no-op'); process.exit(1) }
+
+  // --- id 0 is a valid id (falsy but defined) ---
+  const withZero = [{ id: 0, name: 'Origin', pos: [0, 0, 0], target: [0, 0, 0] }]
+  assertEq(renameView(withZero, 0, 'Home').find(v => v.id === 0).name, 'Home', 'id 0 is renameable')
+
+  // --- non-array → [] ---
+  assertEq(renameView(null, 1, 'X'), [], 'non-array → []')
+  assertEq(renameView('nope', 1, 'X'), [], 'string → []')
+
+  // --- purity: input not mutated ---
+  const src = [{ id: 1, name: 'Orig', pos: [1, 2, 3], target: [0, 0, 0] }]
+  const snapshot = JSON.stringify(src)
+  renameView(src, 1, 'Changed')
+  assertEq(JSON.stringify(src), snapshot, 'renameView does not mutate input')
+
+  // --- buildCameraRenameActions ---
+  const actions = buildCameraRenameActions(base)
+  assertEq(actions.length, 3, 'one rename action per view')
+  assertEq(actions.map(a => a.viewId), [3, 2, 1], 'order preserved (newest-first)')
+  assertEq(actions[0].kind, 'rename-view', 'kind is rename-view')
+  assertEq(actions[0].id, 'cam-ren-3', 'stable action id')
+  assertEq(actions[0].label, 'Rename view: Wide', 'label names the view')
+  assertEq(actions[0].currentName, 'Wide', 'currentName seeds the inline edit')
+
+  // Missing/blank name → "View <id>" fallback in label + currentName.
+  const noName = buildCameraRenameActions([{ id: 9, pos: [0, 0, 0] }])
+  assertEq(noName[0].label, 'Rename view: View 9', 'missing name → View <id>')
+  assertEq(noName[0].currentName, 'View 9', 'currentName falls back to View <id>')
+
+  // A position-CORRUPT view is still RENAMEABLE (only id required).
+  const corruptPos = buildCameraRenameActions([{ id: 11, name: 'broken', pos: [NaN] }, { id: 12, name: 'noPos' }])
+  assertEq(corruptPos.map(a => a.viewId), [11, 12], 'corrupt/missing pos still renameable')
+
+  // id 0 valid; rows without an id or non-object rows skipped.
+  const zero = buildCameraRenameActions([{ id: 0, name: 'Zero', pos: [0, 0, 0] }])
+  assertEq(zero[0].id, 'cam-ren-0', 'id 0 builds a stable rename id')
+  const mixed = buildCameraRenameActions([null, 5, { id: 8, name: 'keep', pos: [0, 0, 0] }, { name: 'noid' }])
+  assertEq(mixed.map(a => a.viewId), [8], 'non-object / no-id rows skipped')
+
+  // non-array → []
+  assertEq(buildCameraRenameActions(null), [], 'non-array → []')
+
+  // Purity: builder doesn't mutate input.
+  const src2 = [{ id: 1, name: 'X', pos: [1, 2, 3] }]
+  const snap2 = JSON.stringify(src2)
+  buildCameraRenameActions(src2)
+  assertEq(JSON.stringify(src2), snap2, 'builder does not mutate input')
+}
+
+console.log('PASS: renameView + buildCameraRenameActions — palette rename/clear lifecycle (R38.H, ~30 asserts)')

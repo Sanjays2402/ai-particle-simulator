@@ -4,7 +4,8 @@ import { useStore } from '../store'
 import { presets } from '../presets'
 import {
   loadCameraViews, saveCameraViews, appendView, removeView,
-  buildCameraPaletteActions, buildCameraDeleteActions,
+  renameView, buildCameraPaletteActions, buildCameraDeleteActions,
+  buildCameraRenameActions,
 } from '../lib/cameraViews'
 import { labelForId as framingLabelForId } from '../lib/framingGuides'
 import { formatCalmToast } from '../lib/calmMode'
@@ -12,7 +13,7 @@ import { showToast } from './Toast'
 import {
   Play, Pause, Shuffle, Camera, Link2, Download, Settings as Cog,
   Magnet, Mic, RotateCcw, Maximize2, Sparkles, Eye, Video, Crop, Wind,
-  Save, Trash2,
+  Save, Trash2, Pencil,
 } from 'lucide-react'
 
 export function CommandPalette({ onSettings }) {
@@ -21,6 +22,9 @@ export function CommandPalette({ onSettings }) {
   // storage each time the palette opens so a view saved this session
   // shows up without a refresh.
   const [cameraViews, setCameraViews] = useState([])
+  // R38.H — inline rename: which view's rename field is open, + its draft.
+  const [renamingId, setRenamingId] = useState(null)
+  const [renameDraft, setRenameDraft] = useState('')
   const framingGuideId = useStore(s => s.framingGuideId)
   const cycleFramingGuide = useStore(s => s.cycleFramingGuide)
   const {
@@ -34,6 +38,9 @@ export function CommandPalette({ onSettings }) {
         setOpen(o => {
           // Refresh the saved-view list as we open so it's current.
           if (!o) setCameraViews(loadCameraViews())
+          // Always reset any half-typed rename when toggling the palette.
+          setRenamingId(null)
+          setRenameDraft('')
           return !o
         })
       }
@@ -79,10 +86,40 @@ export function CommandPalette({ onSettings }) {
     showToast('View deleted', <Trash2 size={10} color="#fff" strokeWidth={2.4} />)
   }
 
+  // R38.H — rename a saved view inline (no window.prompt), and clear all
+  // saved views at once, completing the saved-view lifecycle in the
+  // palette. `renamingId` opens an inline text field on one rename row;
+  // committing runs the pure renameView (ref-equal-on-no-op skips a
+  // redundant save) and re-syncs the RightSidebar via the shared event.
+  const commitRename = (viewId) => {
+    const name = renameDraft.trim()
+    if (!name) { setRenamingId(null); return }
+    const current = loadCameraViews()
+    const next = renameView(current, viewId, name)
+    setRenamingId(null)
+    setRenameDraft('')
+    if (next === current) return // no-op (blank / identical / missing)
+    saveCameraViews(next)
+    setCameraViews(next)
+    window.dispatchEvent(new CustomEvent('particle:camera-views-changed'))
+    showToast(`Renamed to "${name}"`, <Pencil size={10} color="#fff" strokeWidth={2.4} />)
+  }
+
+  const clearAllViews = () => {
+    const current = loadCameraViews()
+    if (current.length === 0) return
+    saveCameraViews([])
+    setCameraViews([])
+    window.dispatchEvent(new CustomEvent('particle:camera-views-changed'))
+    showToast(`Cleared ${current.length} saved view${current.length === 1 ? '' : 's'}`,
+      <Trash2 size={10} color="#fff" strokeWidth={2.4} />)
+  }
+
   if (!open) return null
 
   const cameraActions = buildCameraPaletteActions(cameraViews)
   const deleteActions = buildCameraDeleteActions(cameraViews)
+  const renameActions = buildCameraRenameActions(cameraViews)
 
   return (
     <div
@@ -221,6 +258,73 @@ export function CommandPalette({ onSettings }) {
                 onSelect={run(() => deleteView(a.viewId))}
               />
             ))}
+            {/* R38.H — per-view rename: selecting the row opens an inline
+                text field (Enter commits, Esc cancels) so a power user can
+                relabel a view without leaving the palette or hitting a
+                window.prompt. */}
+            {renameActions.map(a => (
+              renamingId === a.viewId ? (
+                <div
+                  key={a.id}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    padding: '10px 12px', borderRadius: 10,
+                    border: '1px solid rgba(168,85,247,0.4)',
+                    background: 'rgba(168,85,247,0.08)', margin: '2px 0',
+                  }}
+                >
+                  <span style={{
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    width: 26, height: 26, borderRadius: 8,
+                    background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)',
+                  }}>
+                    <Pencil size={14} strokeWidth={2} color="#c084fc" />
+                  </span>
+                  <input
+                    autoFocus
+                    value={renameDraft}
+                    maxLength={40}
+                    onChange={(e) => setRenameDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      e.stopPropagation()
+                      if (e.key === 'Enter') { e.preventDefault(); commitRename(a.viewId) }
+                      else if (e.key === 'Escape') { e.preventDefault(); setRenamingId(null); setRenameDraft('') }
+                    }}
+                    placeholder={a.currentName}
+                    style={{
+                      flex: 1, background: 'rgba(0,0,0,0.25)',
+                      border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8,
+                      outline: 'none', color: '#f2f2f5', fontSize: 13, fontWeight: 500,
+                      padding: '6px 10px', fontFamily: 'inherit',
+                    }}
+                  />
+                  <button
+                    onClick={() => commitRename(a.viewId)}
+                    style={renameBtn}
+                  >Save</button>
+                </div>
+              ) : (
+                <Item
+                  key={a.id}
+                  icon={Pencil}
+                  label={a.label}
+                  sub={a.sub}
+                  keywords={a.keywords}
+                  onSelect={() => { setRenamingId(a.viewId); setRenameDraft(a.currentName) }}
+                />
+              )
+            ))}
+            {/* R38.H — wipe every saved view at once (only when some exist). */}
+            {cameraActions.length > 0 && (
+              <Item
+                icon={Trash2}
+                label="Clear All Saved Views"
+                sub={`Delete all ${cameraActions.length} saved camera view${cameraActions.length === 1 ? '' : 's'}`}
+                keywords="camera view clear all delete remove wipe reset"
+                onSelect={run(clearAllViews)}
+              />
+            )}
           </Command.Group>
 
           <Command.Group heading="Presets" style={groupHeading}>
@@ -261,6 +365,14 @@ const kbd = {
   fontSize: 10, color: '#8a8aa0',
 }
 const kbdSm = { ...kbd, padding: '1px 5px', fontSize: 9 }
+
+const renameBtn = {
+  padding: '5px 12px', borderRadius: 7,
+  background: 'linear-gradient(135deg, rgba(139,92,246,0.3) 0%, rgba(236,72,153,0.25) 100%)',
+  border: '1px solid rgba(168,85,247,0.5)',
+  color: '#e9d5ff', cursor: 'pointer',
+  fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
+}
 
 function Item({ icon: Icon, emoji, label, sub, shortcut, keywords, onSelect }) {
   return (

@@ -343,3 +343,61 @@ export function buildCameraDeleteActions(views) {
   return out
 }
 
+// --- R38.H: rename + clear-all saved views ---------------------------
+//
+// R37.H added save / restore / delete to the palette; this completes the
+// lifecycle with RENAME (inline text entry) and CLEAR-ALL. `renameView`
+// is the pure rename: set a view's name by id, with the same ref-equal-
+// on-no-op contract the other mutators use so the persistence layer can
+// skip a redundant save.
+//
+// Contract:
+//   - non-array → [] (nothing to rename into; callers persist [])
+//   - missing / nullish id, or id not present → input ref unchanged
+//   - the new name is trimmed; a blank-after-trim name is REJECTED
+//     (returns the input ref unchanged — a view must keep a usable
+//     label, and the UI shows `View <id>` for empties anyway)
+//   - renaming to the identical (trimmed) name is a no-op → ref unchanged
+//   - only the matched row is replaced (fresh object); all others keep
+//     their identity so React reconciliation stays cheap
+//   - input array never mutated
+export function renameView(views, id, newName) {
+  if (!Array.isArray(views)) return []
+  if (id === null || id === undefined) return views
+  const trimmed = typeof newName === 'string' ? newName.trim() : ''
+  if (!trimmed) return views // blank name rejected — keep the old label
+  let changed = false
+  const next = views.map(v => {
+    if (!v || v.id !== id) return v
+    if (v.name === trimmed) return v // identical → no-op for this row
+    changed = true
+    return { ...v, name: trimmed }
+  })
+  return changed ? next : views
+}
+
+// Build a parallel RENAME action per view for the palette. Carries the
+// viewId + the current name (so the UI can seed the inline edit field).
+// Same defensive contract as buildCameraDeleteActions: a position-corrupt
+// view is still renameable (only a usable id is required). Order
+// preserved (newest-first, as stored).
+export function buildCameraRenameActions(views) {
+  if (!Array.isArray(views)) return []
+  const out = []
+  for (const v of views) {
+    if (!v || typeof v !== 'object') continue
+    if (v.id === null || v.id === undefined) continue
+    const name = (typeof v.name === 'string' && v.name.trim()) ? v.name.trim() : `View ${v.id}`
+    out.push({
+      id: `cam-ren-${v.id}`,
+      kind: 'rename-view',
+      label: `Rename view: ${name}`,
+      sub: 'Give this saved camera view a new name',
+      keywords: `camera view rename relabel ${name}`.toLowerCase(),
+      viewId: v.id,
+      currentName: name,
+    })
+  }
+  return out
+}
+
