@@ -10,6 +10,8 @@ import {
   scrubSparkline,
   // R40.A — hover-scrub readout for the ETA-history strip
   scrubEtaHistory,
+  // R40.D — full per-sample stats for a pinned sparkline point
+  sparklineSampleStats,
 } from './fpsGraph.js'
 
 let passed = 0
@@ -875,3 +877,78 @@ eq(scrubEtaHistory([10, 5], Infinity, { width: 100 }), null, 'eta-scrub: Infinit
 }
 
 console.log(`PASS: fpsGraph R40.A — ${passed} total assertions (incl. ETA-history hover-scrub readout)`)
+
+// --- R40.D: sparklineSampleStats — pin a sample's full stats ----------
+{
+  // A 5-sample window, newest-last. 60fps "now", a 24fps drop two ago.
+  const series = [58, 60, 24, 55, 60]
+  {
+    const r = sparklineSampleStats(series, 2, { sampleMs: 1000 })
+    eq(r.index, 2, 'pin: index echoed')
+    eq(r.fps, 24, 'pin: fps read exactly')
+    eq(r.isDrop, true, 'pin: 24fps is a drop (< 30)')
+    near(r.frameMs, 41.7, 'pin: 24fps → ~41.7ms frame', 0.1)
+    eq(r.secondsAgo, 2, 'pin: two samples before now at 1Hz = 2s ago')
+  }
+  {
+    const r = sparklineSampleStats(series, 4)
+    eq(r.fps, 60, 'pin: newest fps')
+    eq(r.isDrop, false, 'pin: 60fps is not a drop')
+    eq(r.secondsAgo, 0, 'pin: newest is "now"')
+    near(r.frameMs, 16.7, 'pin: 60fps → ~16.7ms', 0.1)
+  }
+}
+// boundary: exactly at the 30fps floor is NOT a drop (drop = strictly under).
+{
+  const r = sparklineSampleStats([30, 60], 0)
+  eq(r.isDrop, false, 'pin: 30fps (floor) is not a drop')
+}
+{
+  const r = sparklineSampleStats([29, 60], 0)
+  eq(r.isDrop, true, 'pin: 29fps is a drop')
+}
+// custom dropFloor (e.g. a 55fps "smooth" threshold).
+{
+  const r = sparklineSampleStats([40, 60], 0, { dropFloor: 55 })
+  eq(r.isDrop, true, 'pin: 40fps is a drop under a 55fps floor')
+}
+// frame ms is derived from the RAW (unrounded) fps.
+{
+  const r = sparklineSampleStats([59.6], 0)
+  eq(r.fps, 60, 'pin: 59.6fps rounds to 60 for display')
+  near(r.frameMs, 16.8, 'pin: but frameMs uses raw 59.6 → ~16.8ms', 0.1)
+}
+// junk sample → fps + frameMs null, isDrop false (unknown, not a drop),
+// but a valid index + age so the pin marker still anchors.
+{
+  const r = sparklineSampleStats([60, NaN, 30], 1)
+  eq(r.fps, null, 'pin: junk sample → null fps')
+  eq(r.frameMs, null, 'pin: junk sample → null frameMs')
+  eq(r.isDrop, false, 'pin: junk sample is not a drop')
+  eq(r.secondsAgo, 1, 'pin: junk sample still reports an age')
+}
+// custom sampleMs (e.g. 250ms HUD cadence) scales the age.
+{
+  const r = sparklineSampleStats([60, 50, 40, 30], 0, { sampleMs: 250 })
+  eq(r.secondsAgo, 1, 'pin: 3 steps * 250ms = 0.75s → rounds to 1s')
+}
+// index resolution: floors a fractional index, rejects out-of-range.
+{
+  eq(sparklineSampleStats([60, 50, 40], 1.9).index, 1, 'pin: fractional index floors')
+  eq(sparklineSampleStats([60, 50, 40], 3), null, 'pin: index past the end → null')
+  eq(sparklineSampleStats([60, 50, 40], -1), null, 'pin: negative index → null')
+}
+// defensive: empty / non-array / non-finite index → null.
+eq(sparklineSampleStats([], 0), null, 'pin: empty series → null')
+eq(sparklineSampleStats(null, 0), null, 'pin: non-array → null')
+eq(sparklineSampleStats([60, 30], NaN), null, 'pin: NaN index → null')
+eq(sparklineSampleStats([60, 30], Infinity), null, 'pin: Infinity index → null')
+// purity: input not mutated.
+{
+  const src = [60, 24, 55]
+  const snap = JSON.stringify(src)
+  sparklineSampleStats(src, 1)
+  eq(JSON.stringify(src), snap, 'pin: does not mutate input')
+}
+
+console.log(`PASS: fpsGraph R40.D — ${passed} total assertions (incl. pinned per-sample stats)`)

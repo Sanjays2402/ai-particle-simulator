@@ -704,6 +704,49 @@ export function scrubSparkline(samples, cursorX, opts = {}) {
   return { index, fps, x: round1(x), secondsAgo }
 }
 
+// --- R40.D: full per-sample stats for a pinned sparkline point --------
+//
+// R39.D's scrubSparkline reads the fps + age under a moving cursor. But a
+// transient stutter flashes past in one frame of hovering — a user wants
+// to PIN it and inspect the full picture. This resolves a sample index
+// into the complete stat bundle the perf-pill popover can render in a
+// fixed panel: the fps, the equivalent frame time in ms, whether that
+// sample counts as a drop (< the 30fps floor), and how long ago it was.
+//
+// Unlike scrubSparkline (which maps a cursor x → index), this takes an
+// already-resolved `index` (typically the `index` field scrubSparkline
+// returned at click time) so a pin is stable even as fresh samples push
+// the series — the caller pins the VALUE, not the position. Returns:
+//   { index, fps, frameMs, isDrop, secondsAgo }
+// where `fps` is the rounded reading (null for a junk sample, with
+// frameMs null + isDrop false so the panel shows "—"), `frameMs` is the
+// 0.1ms-rounded frame time, `isDrop` flags a sample under `dropFloor`
+// (default 30fps), and `secondsAgo` is the sample's age at `sampleMs`
+// cadence (default 1000 — the perf pill's 1Hz loop).
+//
+// Returns null when the index is out of range / non-finite or the series
+// is empty so the caller can drop a stale pin.
+export function sparklineSampleStats(samples, index, opts = {}) {
+  if (!Array.isArray(samples) || samples.length === 0) return null
+  if (!Number.isFinite(index)) return null
+  const idx = Math.floor(index)
+  if (idx < 0 || idx > samples.length - 1) return null
+  const sampleMs = Number.isFinite(opts.sampleMs) && opts.sampleMs > 0 ? opts.sampleMs : 1000
+  const dropFloor = Number.isFinite(opts.dropFloor) && opts.dropFloor > 0 ? opts.dropFloor : FPS_OK
+  const n = samples.length
+  const raw = Number(samples[idx])
+  const valid = Number.isFinite(raw) && raw >= 0
+  const fps = valid ? Math.round(raw) : null
+  // Frame time from the RAW (unrounded) fps so a 59.6fps sample reads
+  // ~16.8ms, not the 17.0ms a pre-rounded 59 would give. Junk → null.
+  const frameMs = valid ? round1(fpsToFrameMs(raw)) : null
+  // A drop is a real sub-floor reading; a junk sample is "unknown", not a
+  // drop, so it never inflates the drop story.
+  const isDrop = valid && raw < dropFloor
+  const secondsAgo = Math.round(((n - 1 - idx) * sampleMs) / 1000)
+  return { index: idx, fps, frameMs, isDrop, secondsAgo }
+}
+
 // Frame-time window summary — mirrors summarizeFpsWindow but in ms.
 // `high` is the averaged WORST `pctHigh` fraction (the 1%-HIGH frame
 // time, the ms analogue of the 1% low); `over` counts frames slower

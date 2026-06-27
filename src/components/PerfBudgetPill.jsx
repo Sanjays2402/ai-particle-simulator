@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { perfBudgetStatus, summarizePerfWindow } from '../lib/perfSuggest'
-import { buildBandedSparklineSegments, refLineY, FPS_GRAPH_CEIL, scrubSparkline } from '../lib/fpsGraph'
+import { buildBandedSparklineSegments, refLineY, FPS_GRAPH_CEIL, scrubSparkline, sparklineSampleStats } from '../lib/fpsGraph'
 
 // R36.D — live perf-budget status pill.
 //
@@ -19,6 +19,15 @@ import { buildBandedSparklineSegments, refLineY, FPS_GRAPH_CEIL, scrubSparkline 
 // the old dismiss path. The pill keeps a short rolling fps window
 // (sampled by the same 1Hz loop that drives the live light) so the
 // summary is ready the instant the popover opens.
+//
+// R39.D — hovering the popover sparkline scrubs a guide line + dot to the
+// nearest sample with a "48 fps · 4s ago" readout.
+//
+// R40.D — clicking a scrubbed sample PINS it: a distinct marker stays on
+// the graph and a stats panel shows that sample's full per-sample stats
+// (fps + frame-ms + drop flag + age) so a transient stutter can be
+// inspected at leisure, not just caught mid-hover. Clicking again (or the
+// panel's clear) drops the pin.
 //
 // Off by default; the whole component returns null when the preference is
 // off (zero cost). zen-hideable so it fades with the rest of the chrome.
@@ -41,6 +50,12 @@ export default function PerfBudgetPill() {
   // vertical guide line + a tooltip reading the exact fps + seconds-ago
   // for the sample under the cursor.
   const [scrubX, setScrubX] = useState(null)
+  // R40.D — a pinned sample index (or null). Clicking a scrubbed point on
+  // the sparkline pins it so its full stats stay on screen; we store the
+  // INDEX (not the value) and re-resolve the stats every render so a pin
+  // tracks its sample as the window scrolls, and clears itself once the
+  // sample ages out of the window.
+  const [pinnedIndex, setPinnedIndex] = useState(null)
   const seriesRef = useRef([])
 
   useEffect(() => {
@@ -55,9 +70,20 @@ export default function PerfBudgetPill() {
         setFps(sample)
         // Push into the rolling window (newest last, capped to WINDOW).
         const next = seriesRef.current.concat(sample)
-        if (next.length > WINDOW) next.splice(0, next.length - WINDOW)
+        const dropped = next.length > WINDOW ? next.length - WINDOW : 0
+        if (dropped > 0) next.splice(0, dropped)
         seriesRef.current = next
         setSeries(next)
+        // R40.D — when samples scroll off the front, shift the pin by the
+        // same amount so it stays on the SAME moment; once that moment
+        // scrolls off the window entirely, drop the pin.
+        if (dropped > 0) {
+          setPinnedIndex(p => {
+            if (p == null) return null
+            const shifted = p - dropped
+            return shifted < 0 ? null : shifted
+          })
+        }
         frames = 0
         last = t
       }
@@ -69,10 +95,11 @@ export default function PerfBudgetPill() {
 
   // Close the popover whenever the pill itself is disabled so it doesn't
   // linger as an orphan.
-  useEffect(() => { if (!enabled) { setOpen(false); setScrubX(null) } }, [enabled])
+  useEffect(() => { if (!enabled) { setOpen(false); setScrubX(null); setPinnedIndex(null) } }, [enabled])
   // Drop any hover-scrub when the popover closes so it doesn't reappear
-  // mid-scrub the next time it opens.
-  useEffect(() => { if (!open) setScrubX(null) }, [open])
+  // mid-scrub the next time it opens. Also clear the pin — a pin is a
+  // session-scoped inspection, not a persistent marker.
+  useEffect(() => { if (!open) { setScrubX(null); setPinnedIndex(null) } }, [open])
 
   if (!enabled) return null
 
@@ -107,6 +134,28 @@ export default function PerfBudgetPill() {
         if (Math.abs(p.x - scrub.x) < Math.abs(best.x - scrub.x)) best = p
       }
       scrubY = best.y
+    }
+  }
+
+  // R40.D — the pinned sample's full stats (fps + frame-ms + drop + age),
+  // re-resolved every render so the pin tracks its sample as the window
+  // scrolls. null once the sample has aged out. The pill samples at 1Hz,
+  // so the default sampleMs=1000 reads secondsAgo in whole seconds.
+  const pinned = pinnedIndex != null ? sparklineSampleStats(series, pinnedIndex, { sampleMs: 1000 }) : null
+  // The pin marker position on the sparkline: even spacing means sample i
+  // sits at x = (i / (n-1)) * SPARK_W. Walk the flat points for its y.
+  let pinX = null, pinY = null
+  if (pinned) {
+    const n = series.length
+    pinX = n > 1 ? (pinned.index / (n - 1)) * SPARK_W : SPARK_W
+    const flat = []
+    for (const seg of sparkSegments) for (const p of seg.points) flat.push(p)
+    if (flat.length) {
+      let best = flat[0]
+      for (const p of flat) {
+        if (Math.abs(p.x - pinX) < Math.abs(best.x - pinX)) best = p
+      }
+      pinY = best.y
     }
   }
 
@@ -167,6 +216,19 @@ export default function PerfBudgetPill() {
                 setScrubX(localX)
               }}
               onPointerLeave={() => setScrubX(null)}
+              onClick={(e) => {
+                // R40.D — click pins the sample under the cursor so its
+                // full stats stay on screen for inspection. Clicking the
+                // already-pinned sample toggles it off. We resolve the
+                // index from the click x (independent of the live scrub
+                // state) so a tap lands precisely.
+                const rect = e.currentTarget.getBoundingClientRect()
+                if (rect.width <= 0) return
+                const localX = ((e.clientX - rect.left) / rect.width) * SPARK_W
+                const hit = scrubSparkline(series, localX, { width: SPARK_W, sampleMs: 1000 })
+                if (!hit) return
+                setPinnedIndex(p => (p === hit.index ? null : hit.index))
+              }}
             >
               {spark60 != null && (
                 <line x1={0} y1={spark60} x2={SPARK_W} y2={spark60}
@@ -180,6 +242,22 @@ export default function PerfBudgetPill() {
                 <polyline key={i} points={seg.attr} fill="none" stroke={seg.color}
                   strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
               ))}
+              {/* R40.D — the pinned sample marker: a persistent vertical
+                  line + ringed dot (distinct from the hover dot) so the
+                  inspected moment stays visible while the user reads the
+                  stats panel. Drawn UNDER the live hover guide so a fresh
+                  hover still reads on top. */}
+              {pinned && pinX != null && (
+                <>
+                  <line x1={pinX} y1={0} x2={pinX} y2={SPARK_H}
+                    stroke={pinned.isDrop ? 'rgba(248,113,113,0.7)' : 'rgba(167,139,250,0.7)'}
+                    strokeWidth={1} strokeDasharray="2 2" />
+                  {pinY != null && (
+                    <circle cx={pinX} cy={pinY} r={3.4}
+                      fill="none" stroke={pinned.isDrop ? '#f87171' : '#a78bfa'} strokeWidth={1.6} />
+                  )}
+                </>
+              )}
               {/* R39.D — hover-scrub guide: a vertical line at the snapped
                   sample x + a dot on the line so the user sees exactly
                   which sample the tooltip is reading. */}
@@ -219,8 +297,52 @@ export default function PerfBudgetPill() {
                   </span>
                 </>
               ) : (
-                <span style={{ color: '#6a6a80', letterSpacing: '0.02em' }}>Hover the graph to scrub</span>
+                <span style={{ color: '#6a6a80', letterSpacing: '0.02em' }}>Hover to scrub · click to pin</span>
               )}
+            </div>
+          )}
+
+          {/* R40.D — pinned-sample inspector: a fixed panel showing the
+              full per-sample stats of the pinned moment (fps + frame-ms +
+              drop flag + age) so a transient stutter caught while hovering
+              can be studied. A clear button drops the pin. */}
+          {pinned && (
+            <div style={{
+              marginBottom: 9, padding: '7px 9px', borderRadius: 8,
+              background: pinned.isDrop ? 'rgba(248,113,113,0.08)' : 'rgba(167,139,250,0.08)',
+              border: `1px solid ${pinned.isDrop ? 'rgba(248,113,113,0.3)' : 'rgba(167,139,250,0.3)'}`,
+            }}>
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                marginBottom: 6,
+              }}>
+                <span style={{
+                  fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+                  color: pinned.isDrop ? '#f87171' : '#a78bfa',
+                }}>
+                  Pinned · {pinned.secondsAgo === 0 ? 'now' : `${pinned.secondsAgo}s ago`}
+                </span>
+                <button
+                  onClick={() => setPinnedIndex(null)}
+                  title="Unpin this sample"
+                  style={{
+                    padding: '1px 7px', borderRadius: 5,
+                    background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)',
+                    color: '#9a9ab0', cursor: 'pointer', fontFamily: 'inherit',
+                    fontSize: 9, fontWeight: 600, letterSpacing: '0.04em',
+                  }}
+                >Clear</button>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <SummaryRow label="FPS" value={pinned.fps == null ? '—' : `${pinned.fps} fps`}
+                  color={pinned.fps == null ? '#7a7a90'
+                    : pinned.fps >= 55 ? '#86efac' : pinned.fps >= 30 ? '#fbbf24' : '#f87171'} />
+                <SummaryRow label="Frame time" value={pinned.frameMs == null ? '—' : `${pinned.frameMs} ms`}
+                  color={pinned.frameMs == null ? '#7a7a90'
+                    : pinned.frameMs <= 16.7 ? '#86efac' : pinned.frameMs <= 33.3 ? '#fbbf24' : '#f87171'} />
+                <SummaryRow label="Drop (<30)" value={pinned.fps == null ? '—' : pinned.isDrop ? 'yes' : 'no'}
+                  color={pinned.isDrop ? '#f87171' : '#8a8aa0'} />
+              </div>
             </div>
           )}
 
