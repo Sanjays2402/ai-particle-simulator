@@ -5,6 +5,7 @@ import {
   classifyZenKey, nextZenState, shouldHideCursor, zenOrbitSpeed,
 } from '../lib/zenMode'
 import { resolveReducedMotion } from '../lib/reducedMotion'
+import { resolveCalmFor } from '../lib/calmMode'
 
 // Zen mode controller — distraction-free, full-bleed particles.
 //
@@ -112,11 +113,12 @@ export default function ZenMode() {
       }
       // Ambient orbit: only when the preference is on AND motion isn't
       // reduced (a drifting camera is exactly the kind of motion the
-      // reduced-motion setting exists to suppress) AND calm mode is off
-      // (R36.K — calm mode gates the ambient orbit too). zenOrbitSpeed is
-      // 0 until the stillness window passes, then eases in.
+      // reduced-motion setting exists to suppress) AND calm mode isn't
+      // gating the zen orbit (R36.K → R38.K per-motion: calm gates it only
+      // when the user keeps zenOrbit in the gated set, default yes).
+      // zenOrbitSpeed is 0 until the stillness window passes, then eases in.
       const st = useStore.getState()
-      const wantOrbit = st.zenAutoOrbit && !reduced && !st.calmMode
+      const wantOrbit = st.zenAutoOrbit && !resolveCalmFor('zenOrbit', reduced, st.calmMode, st.calmGates)
       const speed = wantOrbit ? zenOrbitSpeed(true, true, lastMoveRef.current, now) : 0
       st.setZenAmbientOrbitSpeed(speed)
       raf = requestAnimationFrame(loop)

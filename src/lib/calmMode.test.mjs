@@ -2,6 +2,8 @@
 // motions (R36.K). Run via: node --test src/lib/calmMode.test.mjs
 import {
   CALM_GATED_MOTIONS, resolveCalm, describeCalmState, formatCalmToast,
+  CALM_MOTION_IDS, defaultCalmGates, sanitizeCalmGates, toggleCalmGate,
+  resolveCalmFor, countGatedMotions,
 } from './calmMode.js'
 
 let passed = 0
@@ -111,3 +113,90 @@ console.log(`PASS: calmMode — ${passed} assertions (R36.K master gate over aut
 }
 
 console.log(`PASS: calmMode R37.K — ${passed} total assertions (incl. formatCalmToast)`)
+
+// --- R38.K: per-motion calm gating ---
+{
+  // CALM_MOTION_IDS mirrors the roster ids exactly.
+  eq(CALM_MOTION_IDS.length, 4, 'four motion ids')
+  for (const m of CALM_GATED_MOTIONS) ok(CALM_MOTION_IDS.includes(m.id), `roster id ${m.id} in CALM_MOTION_IDS`)
+
+  // defaultCalmGates: every motion gated (true), fresh object each call.
+  const d = defaultCalmGates()
+  for (const id of CALM_MOTION_IDS) eq(d[id], true, `default gates ${id} on`)
+  ok(defaultCalmGates() !== defaultCalmGates(), 'fresh default object each call')
+
+  // sanitizeCalmGates: completes a partial map (missing keys default to
+  // gated=true), drops unknown keys, coerces values to bool.
+  {
+    const s = sanitizeCalmGates({ autoRotate: false })
+    eq(s.autoRotate, false, 'explicit false preserved')
+    eq(s.cameraShake, true, 'missing key defaults to gated (true)')
+    eq(s.hueCycle, true, 'missing key hueCycle defaults true')
+    eq(s.zenOrbit, true, 'missing key zenOrbit defaults true')
+    eq(Object.keys(s).sort().join(','), [...CALM_MOTION_IDS].sort().join(','), 'only known keys present')
+  }
+  eq(sanitizeCalmGates({ autoRotate: 0, hueCycle: 1 }).autoRotate, false, 'falsy coerces to false')
+  eq(sanitizeCalmGates({ autoRotate: 0, hueCycle: 1 }).hueCycle, true, 'truthy coerces to true')
+  eq(sanitizeCalmGates({ bogus: true }).autoRotate, true, 'unknown key ignored, defaults applied')
+  ok(!('bogus' in sanitizeCalmGates({ bogus: true })), 'unknown key dropped')
+  // Non-object → all-true default.
+  for (const bad of [null, undefined, 'x', 42, []]) {
+    const s = sanitizeCalmGates(bad)
+    eq(countGatedMotions(s), 4, `non-object ${JSON.stringify(bad)} → all gated`)
+  }
+
+  // toggleCalmGate: flips one, fresh object, never mutates input.
+  {
+    const before = defaultCalmGates()
+    const after = toggleCalmGate(before, 'hueCycle')
+    eq(after.hueCycle, false, 'toggle flips hueCycle off')
+    eq(before.hueCycle, true, 'input not mutated by toggle')
+    eq(after.autoRotate, true, 'other gates untouched')
+    eq(toggleCalmGate(after, 'hueCycle').hueCycle, true, 'toggling again flips back on')
+    // Unknown id → no flip (but still a sanitised fresh map).
+    const noop = toggleCalmGate(before, 'bogus')
+    eq(countGatedMotions(noop), 4, 'unknown id toggles nothing')
+  }
+
+  // countGatedMotions.
+  eq(countGatedMotions(defaultCalmGates()), 4, 'all gated → 4')
+  eq(countGatedMotions({ autoRotate: false, cameraShake: false }), 2, 'two off → 2 (rest default on)')
+  eq(countGatedMotions(sanitizeCalmGates({ autoRotate: false, cameraShake: false, hueCycle: false, zenOrbit: false })), 0, 'all off → 0')
+
+  // resolveCalmFor: reduced ALWAYS suppresses regardless of gates.
+  const allOff = { autoRotate: false, cameraShake: false, hueCycle: false, zenOrbit: false }
+  for (const id of CALM_MOTION_IDS) {
+    eq(resolveCalmFor(id, true, false, allOff), true, `${id}: reduced motion always suppresses (even with gate off)`)
+    eq(resolveCalmFor(id, true, true, allOff), true, `${id}: reduced + calm always suppresses`)
+  }
+  // Calm OFF → never suppresses (gates irrelevant).
+  for (const id of CALM_MOTION_IDS) eq(resolveCalmFor(id, false, false, defaultCalmGates()), false, `${id}: no calm, no reduced → not suppressed`)
+
+  // Calm ON, default gates → suppresses every motion (== R36.K behaviour).
+  for (const id of CALM_MOTION_IDS) eq(resolveCalmFor(id, false, true, defaultCalmGates()), true, `${id}: calm + default gates suppresses`)
+
+  // Calm ON, a motion opted OUT → that motion runs, others still gated.
+  {
+    const keepHue = sanitizeCalmGates({ hueCycle: false })
+    eq(resolveCalmFor('hueCycle', false, true, keepHue), false, 'opted-out hueCycle runs under calm')
+    eq(resolveCalmFor('autoRotate', false, true, keepHue), true, 'autoRotate still gated')
+    eq(resolveCalmFor('cameraShake', false, true, keepHue), true, 'cameraShake still gated')
+    eq(resolveCalmFor('zenOrbit', false, true, keepHue), true, 'zenOrbit still gated')
+  }
+
+  // Unknown motion id under calm → fail safe to gated (true).
+  eq(resolveCalmFor('bogus', false, true, defaultCalmGates()), true, 'unknown id under calm fails safe to gated')
+  eq(resolveCalmFor('bogus', false, false, defaultCalmGates()), false, 'unknown id with calm off → not suppressed')
+
+  // Back-compat invariant: with default gates, resolveCalmFor === resolveCalm
+  // for every (reduced, calm) combo and every motion.
+  for (const r of [false, true]) for (const c of [false, true]) for (const id of CALM_MOTION_IDS) {
+    eq(resolveCalmFor(id, r, c, defaultCalmGates()), resolveCalm(r, c),
+      `default gates: resolveCalmFor(${id},${r},${c}) === resolveCalm(${r},${c})`)
+  }
+
+  // Defensive: missing gates arg → treated as all-true default.
+  eq(resolveCalmFor('autoRotate', false, true), true, 'no gates arg → default all-gated')
+}
+
+console.log(`PASS: calmMode R38.K — ${passed} total assertions (incl. per-motion gating)`)

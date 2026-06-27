@@ -43,6 +43,8 @@ import {
   nextGridId as nextFramingGridId,
   sanitizeSpiralOrientation,
 } from './lib/framingGuides'
+// R38.K — per-motion calm gate sanitiser + toggle.
+import { sanitizeCalmGates, toggleCalmGate } from './lib/calmMode'
 // R34.C — screenshot self-timer delay sanitiser + default.
 import {
   sanitizeTimerDelay as sanitizeTimerDelayHelper,
@@ -79,6 +81,7 @@ const ZEN_AUTO_ORBIT_KEY = 'particle-zen-auto-orbit-v1'
 const PERF_PILL_KEY = 'particle-perf-pill-v1'
 // R36.K — global calm-mode master toggle, own key.
 const CALM_MODE_KEY = 'particle-calm-mode-v1'
+const CALM_GATES_KEY = 'particle-calm-gates-v1'
 const PERSIST_FIELDS = [
   'particleCount', 'speed', 'glowIntensity', 'visualStyle',
   'theme', 'trails', 'mouseAttract', 'attractStrength',
@@ -730,6 +733,22 @@ export const useStore = create((set, get) => {
     // Turning calm mode on also zeroes any in-flight zen ambient orbit so
     // a drifting camera stops the instant the user hits the switch.
     set(next ? { calmMode: true, zenAmbientOrbitSpeed: 0 } : { calmMode: false })
+  },
+
+  // R38.K — per-motion calm gates: which of the four motions calm mode
+  // actually pauses. Default all-true (calm gates everything, == R36.K
+  // behaviour) until the user opts a motion out via the calm-button
+  // popover. A complete { autoRotate, cameraShake, hueCycle, zenOrbit }
+  // bool map; consumers call resolveCalmFor(id, reduced, calm, gates).
+  // Persisted as JSON on its own key.
+  calmGates: (() => {
+    try { return sanitizeCalmGates(JSON.parse(localStorage.getItem(CALM_GATES_KEY))) }
+    catch { return sanitizeCalmGates(null) }
+  })(),
+  toggleCalmGate: (id) => {
+    const next = toggleCalmGate(get().calmGates, id)
+    try { localStorage.setItem(CALM_GATES_KEY, JSON.stringify(next)) } catch { /* quota / private mode */ }
+    set({ calmGates: next })
   },
 
   // Slideshow mode — rotate through filtered/favourited presets on a

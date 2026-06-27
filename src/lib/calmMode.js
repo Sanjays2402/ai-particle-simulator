@@ -99,3 +99,72 @@ function joinLabels(labels) {
   if (labels.length === 2) return `${labels[0]} & ${labels[1]}`
   return `${labels.slice(0, -1).join(', ')} & ${labels[labels.length - 1]}`
 }
+
+// --- R38.K: per-motion calm gating -----------------------------------
+//
+// R36.K's calm toggle is all-or-nothing — it gates all four motions
+// together. Some users want auto-rotate paused but keep the hue-cycle
+// drift, etc. This lets calm mode gate only a CHOSEN SUBSET of the four
+// motions. The chosen set is a map { autoRotate, cameraShake, hueCycle,
+// zenOrbit } of booleans; a motion is gated by calm mode only when its
+// flag is true. Default (and the back-compat shape) is all-true so an
+// existing user's calm toggle behaves exactly as before.
+
+// The canonical id list, derived from the roster so it never drifts.
+export const CALM_MOTION_IDS = CALM_GATED_MOTIONS.map(m => m.id)
+
+// A fresh all-true gate map (every motion gated) — the default.
+export function defaultCalmGates() {
+  const out = {}
+  for (const id of CALM_MOTION_IDS) out[id] = true
+  return out
+}
+
+// Sanitise a persisted / partial gate map into a complete { id: bool }
+// map over exactly the known motion ids. Unknown keys are dropped;
+// missing keys default to true (gated) so a map saved before a new motion
+// was added still gates the newcomer — calm mode should err toward
+// calming. Non-object input → all-true default. Pure; fresh object.
+export function sanitizeCalmGates(raw) {
+  const base = defaultCalmGates()
+  if (!raw || typeof raw !== 'object') return base
+  for (const id of CALM_MOTION_IDS) {
+    // Only override the default when the key is explicitly present, so a
+    // partial map (e.g. just { autoRotate: false }) keeps the rest gated.
+    if (Object.prototype.hasOwnProperty.call(raw, id)) base[id] = !!raw[id]
+  }
+  return base
+}
+
+// Toggle one motion's gate in a map, returning a FRESH map (never mutates
+// the input). Unknown id → the input is sanitised + returned unchanged in
+// effect (no key flips) so a stale id from an old UI can't corrupt state.
+export function toggleCalmGate(gates, id) {
+  const next = sanitizeCalmGates(gates)
+  if (CALM_MOTION_IDS.includes(id)) next[id] = !next[id]
+  return next
+}
+
+// The per-motion gate the consumers call: should THIS specific motion be
+// suppressed right now? Reduced motion ALWAYS suppresses (accessibility
+// is absolute and not subset-able). Calm mode suppresses only when it's
+// on AND this motion is in the gated set. Coerces args defensively.
+//
+// This is a strict refinement of resolveCalm: with the default all-true
+// gates, resolveCalmFor(id, r, c) === resolveCalm(r, c) for every id, so
+// existing behaviour is preserved until a user opts a motion out.
+export function resolveCalmFor(motionId, reducedMotion, calmMode, gates) {
+  if (reducedMotion) return true
+  if (!calmMode) return false
+  const g = sanitizeCalmGates(gates)
+  // An unknown motion id defaults to gated (true) so a typo at a call
+  // site fails safe toward calming rather than silently leaking motion.
+  return CALM_MOTION_IDS.includes(motionId) ? g[motionId] : true
+}
+
+// Count how many of the four motions calm mode is currently gating (for
+// the toggle's tooltip / toast: "Calming 2 of 4 motions"). Pure.
+export function countGatedMotions(gates) {
+  const g = sanitizeCalmGates(gates)
+  return CALM_MOTION_IDS.reduce((n, id) => n + (g[id] ? 1 : 0), 0)
+}

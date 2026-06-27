@@ -6,7 +6,7 @@ import { captureFromCanvas, appendSnapshot, loadSnapshots, saveSnapshots } from 
 import { createLoop, DEMO_LOOPS } from '../lib/demoAudioLoops'
 import { loadKeymap, resolveAction } from '../lib/keymap'
 import { TIMER_DELAYS, labelForDelay, BURST_COUNTS, labelForBurst } from '../lib/selfTimer'
-import { formatCalmToast } from '../lib/calmMode'
+import { formatCalmToast, CALM_GATED_MOTIONS, countGatedMotions } from '../lib/calmMode'
 import { showToast } from './Toast'
 import {
   Play, Pause, RotateCcw, Maximize2, Shuffle, Magnet, Camera, Link2,
@@ -656,12 +656,22 @@ function BurstBtn({ count, onCycle }) {
 // zen ambient orbit) so the user can instantly settle a busy scene
 // without touching four controls or their accessibility setting. Reads
 // the store directly so it stays a self-contained toolbar button.
+// R38.K — long-press (or right-click) opens a per-motion popover so the
+// user can choose WHICH of the four motions calm mode pauses, instead of
+// all-or-nothing. A short tap still toggles calm mode.
 function CalmModeBtn() {
   const calmMode = useStore(s => s.calmMode)
   const setCalmMode = useStore(s => s.setCalmMode)
+  const calmGates = useStore(s => s.calmGates)
+  const toggleGate = useStore(s => s.toggleCalmGate)
+  const [open, setOpen] = useState(false)
+  const pressTimer = useRef(0)
+  const longPressed = useRef(false)
+  const gatedCount = countGatedMotions(calmGates)
+
   // R37.K — naming what the one-click gate changed. The toggle silently
-  // affects four motions; the auto-fading toast names them so the user
-  // sees exactly what was paused / resumed.
+  // affects the gated motions; the auto-fading toast names them so the
+  // user sees exactly what was paused / resumed.
   const onToggle = () => {
     const next = !calmMode
     setCalmMode(next)
@@ -674,17 +684,146 @@ function CalmModeBtn() {
       <Wind size={10} color="#fff" strokeWidth={2.4} />,
     )
   }
+
+  // Long-press (450ms) opens the per-motion popover; a release before
+  // that fires the normal toggle. Tracked with a ref so the click handler
+  // can tell a long-press from a tap and not double-fire.
+  const startPress = () => {
+    longPressed.current = false
+    clearTimeout(pressTimer.current)
+    pressTimer.current = setTimeout(() => { longPressed.current = true; setOpen(true) }, 450)
+  }
+  const endPress = () => clearTimeout(pressTimer.current)
+  const onClick = () => {
+    clearTimeout(pressTimer.current)
+    if (longPressed.current) { longPressed.current = false; return } // long-press already opened the popover
+    onToggle()
+  }
+
+  const title = calmMode
+    ? `Calm mode ON — pausing ${gatedCount} of ${CALM_GATED_MOTIONS.length} motions. Click to resume · long-press to choose which.`
+    : `Calm mode — pause ${gatedCount} of ${CALM_GATED_MOTIONS.length} ambient motions at once. Long-press to choose which.`
+
   return (
-    <Btn
-      onClick={onToggle}
-      active={calmMode}
-      title={calmMode
-        ? 'Calm mode ON — auto-rotate, shake, hue-cycle & zen orbit paused. Click to resume.'
-        : 'Calm mode — pause auto-rotate, camera shake, hue-cycle & zen orbit at once'}
-    >
-      <Wind size={14} strokeWidth={2.2} />
-    </Btn>
+    <div style={{ position: 'relative', display: 'inline-flex' }}>
+      <button
+        onClick={onClick}
+        onPointerDown={startPress}
+        onPointerUp={endPress}
+        onPointerLeave={endPress}
+        onContextMenu={(e) => { e.preventDefault(); setOpen(o => !o) }}
+        title={title}
+        style={calmBtnStyle(calmMode)}
+        onMouseEnter={e => {
+          if (!calmMode) {
+            e.currentTarget.style.background = 'rgba(255,255,255,0.08)'
+            e.currentTarget.style.borderColor = 'rgba(168,85,247,0.3)'
+            e.currentTarget.style.color = '#fff'
+          }
+        }}
+        onMouseLeave={e => {
+          if (!calmMode) {
+            e.currentTarget.style.background = 'rgba(255,255,255,0.035)'
+            e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)'
+            e.currentTarget.style.color = '#c8c8d0'
+          }
+        }}
+      >
+        <Wind size={14} strokeWidth={2.2} />
+      </button>
+
+      {/* R38.K — per-motion gate popover. Each row toggles whether calm
+          mode pauses that motion. A backdrop closes it on outside click. */}
+      {open && (
+        <>
+          <div
+            onClick={() => setOpen(false)}
+            style={{ position: 'fixed', inset: 0, zIndex: 60 }}
+          />
+          <div style={{
+            position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 61,
+            width: 196, padding: '10px 11px',
+            borderRadius: 12,
+            background: 'linear-gradient(135deg, rgba(18,18,28,0.97) 0%, rgba(22,14,32,0.97) 100%)',
+            border: '1px solid rgba(168,85,247,0.3)',
+            backdropFilter: 'blur(16px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(16px) saturate(140%)',
+            boxShadow: '0 14px 36px rgba(0,0,0,0.5), 0 0 18px rgba(168,85,247,0.18)',
+            animation: 'demo-pop 0.14s ease-out',
+          }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              marginBottom: 8, paddingBottom: 7, borderBottom: '1px solid rgba(255,255,255,0.07)',
+            }}>
+              <span style={{
+                fontSize: 9, fontWeight: 700, letterSpacing: '0.12em',
+                textTransform: 'uppercase', color: '#a78bfa',
+              }}>Calm gates</span>
+              <span style={{ fontSize: 9.5, color: '#8a8aa0', fontVariantNumeric: 'tabular-nums' }}>
+                {gatedCount}/{CALM_GATED_MOTIONS.length}
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {CALM_GATED_MOTIONS.map(m => {
+                const on = !!calmGates[m.id]
+                return (
+                  <button
+                    key={m.id}
+                    onClick={() => toggleGate(m.id)}
+                    title={on ? `Calm mode pauses ${m.label}` : `${m.label} keeps running under calm mode`}
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                      padding: '7px 9px', borderRadius: 8, cursor: 'pointer',
+                      background: on ? 'rgba(168,85,247,0.14)' : 'rgba(255,255,255,0.03)',
+                      border: `1px solid ${on ? 'rgba(168,85,247,0.4)' : 'rgba(255,255,255,0.06)'}`,
+                      color: on ? '#e9d5ff' : '#9a9ab0',
+                      fontFamily: 'inherit', fontSize: 12, fontWeight: 500,
+                      transition: 'all 0.14s ease-out',
+                    }}
+                  >
+                    <span>{m.label}</span>
+                    <span style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      width: 30, height: 16, borderRadius: 999,
+                      background: on ? 'rgba(168,85,247,0.55)' : 'rgba(255,255,255,0.1)',
+                      position: 'relative', transition: 'background 0.14s ease-out', flexShrink: 0,
+                    }}>
+                      <span style={{
+                        position: 'absolute', top: 2, left: on ? 16 : 2,
+                        width: 12, height: 12, borderRadius: '50%',
+                        background: '#fff', transition: 'left 0.14s cubic-bezier(0.2,0.8,0.2,1)',
+                      }} />
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+            <div style={{ fontSize: 10, color: '#6a6a80', marginTop: 8, lineHeight: 1.4 }}>
+              Choose which motions calm mode pauses.
+            </div>
+          </div>
+        </>
+      )}
+    </div>
   )
+}
+
+// Calm button base style — mirrors the shared Btn look so it sits flush
+// in the toolbar even though it needs its own element for the popover +
+// long-press handlers.
+function calmBtnStyle(active) {
+  return {
+    width: 30, height: 30,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    borderRadius: 9, fontSize: 13, cursor: 'pointer',
+    transition: 'all 0.18s cubic-bezier(0.2, 0.8, 0.2, 1)',
+    background: active
+      ? 'linear-gradient(135deg, rgba(139,92,246,0.25) 0%, rgba(236,72,153,0.2) 100%)'
+      : 'rgba(255,255,255,0.035)',
+    color: active ? '#e9d5ff' : '#c8c8d0',
+    border: active ? '1px solid rgba(168,85,247,0.5)' : '1px solid rgba(255,255,255,0.05)',
+    boxShadow: active ? '0 0 16px rgba(168,85,247,0.35), inset 0 1px 0 rgba(255,255,255,0.08)' : 'none',
+  }
 }
 
 function Btn({ children, onClick, title, active }) {

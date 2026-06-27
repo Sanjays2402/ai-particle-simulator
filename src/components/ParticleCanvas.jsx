@@ -7,7 +7,7 @@ import { useStore, THEMES } from '../store'
 import { cameraShakeOffset } from '../lib/cameraShake'
 import { smoothstep } from '../lib/crossfade'
 import { resolveReducedMotion } from '../lib/reducedMotion'
-import { resolveCalm } from '../lib/calmMode'
+import { resolveCalmFor } from '../lib/calmMode'
 import { windVector, applyWind } from '../lib/wind'
 import { resolveTheme as resolveActiveTheme } from '../lib/customThemes'
 import { applyNoise } from '../lib/noiseDeformer'
@@ -308,7 +308,9 @@ function Particles() {
       useStore.getState().reducedMotionMode,
       useStore.getState().osPrefersReducedMotion,
     )
-    const motionCalm = resolveCalm(reducedMotion, useStore.getState().calmMode)
+    // R38.K — per-motion calm gate: calm mode suppresses hue-cycle only
+    // when the user keeps hueCycle in the gated set (default yes).
+    const motionCalm = resolveCalmFor('hueCycle', reducedMotion, useStore.getState().calmMode, useStore.getState().calmGates)
     const hueCycleOffset = (hueCycleEnabled && !motionCalm)
       ? ((t * (hueCycleSpeed / 60)) % 1 + 1) % 1
       : 0
@@ -713,8 +715,9 @@ function CameraShakeFX() {
       lastOffset.current = [0, 0]
     }
     if (!cameraShake || !audioReactive) return
-    // R36.K — calm mode (or reduced motion) suppresses the shake.
-    if (resolveCalm(resolveReducedMotion(reducedMotionMode, osPrefersReducedMotion), calmMode)) return
+    // R36.K/R38.K — calm mode (or reduced motion) suppresses the shake,
+    // gated per-motion so a user can keep shake while calming the rest.
+    if (resolveCalmFor('cameraShake', resolveReducedMotion(reducedMotionMode, osPrefersReducedMotion), calmMode, useStore.getState().calmGates)) return
     const impulse =
       audioMode === 'beat' ? audioBeat :
       audioMode === 'bass' ? audioBass :
@@ -742,8 +745,11 @@ function CameraControls() {
   // R36.K — calm mode gates the user's auto-rotate the same way reduced
   // motion does (calm OR reduced → no auto-rotate). The zen ambient orbit
   // is already forced to 0 upstream when calm mode is on.
+  // R38.K — per-motion: only when the user keeps autoRotate in the gated
+  // set (default yes).
   const calmMode = useStore(s => s.calmMode)
-  const reduced = resolveCalm(resolveReducedMotion(reducedMotionMode, osPrefersReducedMotion), calmMode)
+  const calmGates = useStore(s => s.calmGates)
+  const reduced = resolveCalmFor('autoRotate', resolveReducedMotion(reducedMotionMode, osPrefersReducedMotion), calmMode, calmGates)
   // R35.E — ambient zen auto-orbit: a transient speed the ZenMode
   // controller writes when the screen is left alone in zen mode. When
   // > 0 it drives the orbit even if the user's own autoRotate is off,
