@@ -7,7 +7,7 @@ import { createLoop, DEMO_LOOPS } from '../lib/demoAudioLoops'
 import { loadKeymap, resolveAction } from '../lib/keymap'
 import { TIMER_DELAYS, labelForDelay, BURST_COUNTS, labelForBurst } from '../lib/selfTimer'
 import { formatCalmToast, CALM_GATED_MOTIONS, countGatedMotions } from '../lib/calmMode'
-import { downloadCalmGatesFile, parseImport as parseCalmGatesImport, mergeImport as mergeCalmGatesImport } from '../lib/calmGatesIO'
+import { downloadCalmGatesFile, parseImport as parseCalmGatesImport, mergeImport as mergeCalmGatesImport, summarizeImportImpact as summarizeCalmGatesImpact } from '../lib/calmGatesIO'
 import { showToast } from './Toast'
 import {
   Play, Pause, RotateCcw, Maximize2, Shuffle, Magnet, Camera, Link2,
@@ -670,6 +670,13 @@ function CalmModeBtn() {
   const pressTimer = useRef(0)
   const longPressed = useRef(false)
   const gatedCount = countGatedMotions(calmGates)
+  // R40.K — staged import for the live PREVIEW panel: the parsed gate map
+  // + source filename held BEFORE commit so the user sees a per-motion
+  // from->to diff and picks merge vs replace, instead of the old
+  // apply-on-pick flow. null when no import is staged. Parallels the
+  // keymap / wind / crossfade import previews.
+  const [pendingImport, setPendingImport] = useState(null)
+  const [importMode, setImportMode] = useState('replace')
 
   // R39.K — export the live calm-gate map as a portable JSON envelope so
   // a user can carry their per-motion calm preferences to another machine
@@ -682,9 +689,11 @@ function CalmModeBtn() {
     )
   }
 
-  // R39.K — import a calm-gate envelope from a .json file. Replace mode
-  // (the file IS the user's intended preference) with a sanitised map, so
-  // a hand-edited file can't inject junk. Reports how many motions flipped.
+  // R39.K / R40.K — import a calm-gate envelope from a .json file. Rather
+  // than apply immediately (R39.K), STAGE the parsed map so the popover
+  // shows a live preview of the per-motion from->to diff first; the user
+  // then picks merge vs replace and commits. A hand-edited file can't
+  // inject junk (parseImport sanitises). Reports parse errors inline.
   const importGates = () => {
     const input = document.createElement('input')
     input.type = 'file'
@@ -696,20 +705,41 @@ function CalmModeBtn() {
         const text = await file.text()
         const res = parseCalmGatesImport(text)
         if (!res.ok) { showToast(`Import failed: ${res.error}`); return }
-        const merged = mergeCalmGatesImport(calmGates, res.gates, 'replace')
-        setCalmGates(merged.gates)
-        showToast(
-          merged.changed > 0
-            ? `Calm gates imported — ${merged.changed} motion${merged.changed === 1 ? '' : 's'} changed`
-            : 'Calm gates imported — already matched',
-          <Wind size={10} color="#fff" strokeWidth={2.4} />,
-        )
+        // Stage for preview (default replace — the file IS the intended
+        // preference, matching R39.K's old direct behaviour).
+        setImportMode('replace')
+        setPendingImport({ gates: res.gates, filename: file.name || 'import.json' })
+        setOpen(true)
       } catch (e) {
         showToast(`Import error: ${e.message || 'unknown'}`)
       }
     }
     input.click()
   }
+
+  // R40.K — commit the staged import under the chosen mode. Gated on
+  // willChange > 0 in the UI so this only fires when something actually
+  // changes. Reports how many motions flipped.
+  const applyStagedImport = () => {
+    if (!pendingImport) return
+    const merged = mergeCalmGatesImport(calmGates, pendingImport.gates, importMode)
+    setCalmGates(merged.gates)
+    setPendingImport(null)
+    showToast(
+      merged.changed > 0
+        ? `Calm gates imported — ${merged.changed} motion${merged.changed === 1 ? '' : 's'} changed`
+        : 'Calm gates imported — already matched',
+      <Wind size={10} color="#fff" strokeWidth={2.4} />,
+    )
+  }
+
+  const cancelStagedImport = () => setPendingImport(null)
+  // R40.K — the live dry-run diff for the staged import under the chosen
+  // mode. Recomputed each render so flipping merge/replace updates the
+  // preview in place. null when nothing is staged.
+  const importPreview = pendingImport
+    ? summarizeCalmGatesImpact(calmGates, pendingImport.gates, importMode)
+    : null
 
   // R37.K — naming what the one-click gate changed. The toggle silently
   // affects the gated motions; the auto-fading toast names them so the
@@ -779,7 +809,7 @@ function CalmModeBtn() {
       {open && (
         <>
           <div
-            onClick={() => setOpen(false)}
+            onClick={() => { setOpen(false); setPendingImport(null) }}
             style={{ position: 'fixed', inset: 0, zIndex: 60 }}
           />
           <div style={{
@@ -855,6 +885,116 @@ function CalmModeBtn() {
                 style={calmIoBtnStyle}
               >Import</button>
             </div>
+
+            {/* R40.K — live import PREVIEW panel: before committing an
+                imported gate map, show a per-motion from->to diff + a
+                merge/replace toggle, with Apply gated on willChange > 0.
+                Parallels the keymap / wind / crossfade import previews so
+                the workflow stays consistent. */}
+            {pendingImport && importPreview && (
+              <div style={{
+                marginTop: 9, padding: '9px 10px', borderRadius: 9,
+                background: 'rgba(168,85,247,0.07)',
+                border: '1px solid rgba(168,85,247,0.28)',
+              }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  marginBottom: 7,
+                }}>
+                  <span style={{
+                    fontSize: 9, fontWeight: 700, letterSpacing: '0.1em',
+                    textTransform: 'uppercase', color: '#a78bfa',
+                  }}>Import preview</span>
+                  <span style={{
+                    fontSize: 9, color: '#8a8aa0', maxWidth: 96, overflow: 'hidden',
+                    textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }} title={pendingImport.filename}>{pendingImport.filename}</span>
+                </div>
+
+                {/* Merge / Replace mode toggle — recomputes the diff in place. */}
+                <div style={{
+                  display: 'flex', gap: 2, marginBottom: 8, padding: 2,
+                  borderRadius: 7, background: 'rgba(0,0,0,0.25)',
+                }}>
+                  {['merge', 'replace'].map(mode => {
+                    const active = importMode === mode
+                    return (
+                      <button key={mode}
+                        onClick={() => setImportMode(mode)}
+                        title={mode === 'merge'
+                          ? 'Only adopt motions the file deliberately turned OFF'
+                          : 'Adopt the whole imported map'}
+                        style={{
+                          flex: 1, padding: '4px 0', borderRadius: 5,
+                          background: active ? 'rgba(168,85,247,0.3)' : 'transparent',
+                          border: active ? '1px solid rgba(168,85,247,0.5)' : '1px solid transparent',
+                          color: active ? '#e9d5ff' : '#8a8aa0', cursor: 'pointer',
+                          fontFamily: 'inherit', fontSize: 10, fontWeight: 600,
+                          textTransform: 'capitalize', letterSpacing: '0.02em',
+                          transition: 'all 0.14s ease-out',
+                        }}
+                      >{mode}</button>
+                    )
+                  })}
+                </div>
+
+                {/* Per-motion from->to diff. Changed rows highlight; an
+                    unchanged row stays muted so the eye lands on what flips. */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 8 }}>
+                  {importPreview.rows.map(row => (
+                    <div key={row.id} style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      gap: 8, padding: '4px 7px', borderRadius: 6,
+                      background: row.changes ? 'rgba(168,85,247,0.1)' : 'transparent',
+                      opacity: row.changes ? 1 : 0.5,
+                    }}>
+                      <span style={{ fontSize: 11, color: row.changes ? '#e9d5ff' : '#9a9ab0', fontWeight: 500 }}>
+                        {row.label}
+                      </span>
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 5,
+                        fontSize: 9.5, fontFamily: 'Geist Mono, monospace',
+                      }}>
+                        <span style={{ color: row.from ? '#86efac' : '#6a6a80' }}>{row.from ? 'pause' : 'run'}</span>
+                        <span style={{ color: '#6a6a80' }}>{'\u2192'}</span>
+                        <span style={{
+                          color: row.changes ? (row.to ? '#86efac' : '#fbbf24') : '#6a6a80',
+                          fontWeight: row.changes ? 700 : 400,
+                        }}>{row.to ? 'pause' : 'run'}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button
+                    onClick={applyStagedImport}
+                    disabled={importPreview.willChange === 0}
+                    title={importPreview.willChange === 0
+                      ? 'Nothing would change under this mode'
+                      : `Apply — ${importPreview.willChange} motion${importPreview.willChange === 1 ? '' : 's'} change`}
+                    style={{
+                      flex: 1, padding: '5px 0', borderRadius: 7,
+                      background: importPreview.willChange === 0
+                        ? 'rgba(255,255,255,0.04)'
+                        : 'linear-gradient(135deg, rgba(139,92,246,0.35) 0%, rgba(236,72,153,0.28) 100%)',
+                      border: `1px solid ${importPreview.willChange === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(168,85,247,0.5)'}`,
+                      color: importPreview.willChange === 0 ? '#6a6a80' : '#e9d5ff',
+                      cursor: importPreview.willChange === 0 ? 'not-allowed' : 'pointer',
+                      fontFamily: 'inherit', fontSize: 11, fontWeight: 600, letterSpacing: '0.02em',
+                    }}
+                  >
+                    {importPreview.willChange === 0 ? 'No change' : `Apply (${importPreview.willChange})`}
+                  </button>
+                  <button
+                    onClick={cancelStagedImport}
+                    title="Discard this import"
+                    style={{ ...calmIoBtnStyle, flex: 0, padding: '5px 12px' }}
+                  >Cancel</button>
+                </div>
+              </div>
+            )}
+
             <div style={{ fontSize: 10, color: '#6a6a80', marginTop: 8, lineHeight: 1.4 }}>
               Choose which motions calm mode pauses.
             </div>
