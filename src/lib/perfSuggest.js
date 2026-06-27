@@ -182,6 +182,60 @@ export function perfBudgetStatus(fps) {
   return { ...PERF_PILL_STATUS.bad, fps: rounded }
 }
 
+// --- R37.D: perf-pill click-to-popover health summary ----------------
+//
+// The pill (R36.D) shows the INSTANT fps light. Clicking it should open a
+// one-glance health summary BEFORE the user commits to opening the full
+// Debug HUD — the same "1% low" + drop-count gamers check, computed from
+// a short rolling window the pill samples while it's open. This pure
+// helper turns that window into a render-ready descriptor so the pill
+// component stays a thin renderer and the math is unit-tested.
+//
+// Returns:
+//   { avg, min, low, drops, count, status }
+// where `low` is the averaged worst `pctLow` fraction (the "1% low",
+// default worst 10%), `drops` counts samples under the OK floor (30fps),
+// and `status` is the perfBudgetStatus of the AVERAGE fps so the
+// popover's headline colour agrees with the window, not a single frame.
+// Junk-tolerant; an empty / all-junk window returns a zeroed summary
+// with a neutral status so the popover can show a friendly "warming up".
+export const PERF_SUMMARY_PCT_LOW = 0.1
+
+export function summarizePerfWindow(fpsSamples, opts = {}) {
+  const pctLow = Number.isFinite(opts.pctLow) && opts.pctLow > 0 && opts.pctLow <= 1
+    ? opts.pctLow
+    : PERF_SUMMARY_PCT_LOW
+  const okFloor = Number.isFinite(opts.okFloor) ? opts.okFloor : PERF_PILL_OK
+  const empty = { avg: 0, min: 0, low: 0, drops: 0, count: 0, status: { ...PERF_PILL_STATUS.none, fps: 0 } }
+  if (!Array.isArray(fpsSamples) || fpsSamples.length === 0) return empty
+  const valid = []
+  for (const s of fpsSamples) {
+    const v = Number(s)
+    if (Number.isFinite(v) && v > 0) valid.push(v)
+  }
+  if (valid.length === 0) return empty
+  let min = Infinity, sum = 0, drops = 0
+  for (const v of valid) {
+    if (v < min) min = v
+    sum += v
+    if (v < okFloor) drops++
+  }
+  const avg = sum / valid.length
+  const sorted = valid.slice().sort((a, b) => a - b)
+  const lowN = Math.max(1, Math.round(sorted.length * pctLow))
+  let lowSum = 0
+  for (let i = 0; i < lowN; i++) lowSum += sorted[i]
+  const low = lowSum / lowN
+  return {
+    avg: Math.round(avg),
+    min: Math.round(min),
+    low: Math.round(low),
+    drops,
+    count: valid.length,
+    status: perfBudgetStatus(avg),
+  }
+}
+
 // --- R35.D: post-FX lighter-touch alternative ------------------------
 //
 // Dropping particle count is the big hammer. Often a cheaper fix is to

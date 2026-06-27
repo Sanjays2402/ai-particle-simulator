@@ -53,8 +53,15 @@ export default function DebugHUD() {
         }
       }
     }
+    // R37.D — the perf pill's "Debug HUD" button opens the HUD via this
+    // event so it doesn't have to synthesise a keystroke.
+    const onToggle = () => setVisible(v => !v)
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('particle:toggle-debug-hud', onToggle)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('particle:toggle-debug-hud', onToggle)
+    }
   }, [])
 
   useEffect(() => {

@@ -5,6 +5,8 @@ import {
   markSuggestionHandled,
   // R36.D — live perf-budget status pill
   perfBudgetStatus, PERF_PILL_GOOD, PERF_PILL_OK,
+  // R37.D — perf-pill health summary
+  summarizePerfWindow, PERF_SUMMARY_PCT_LOW,
 } from './perfSuggest.js'
 
 let passed = 0
@@ -324,3 +326,63 @@ eq(POSTFX_EFFECTS[0].id, 'dof', 'depth-of-field is heaviest (first)')
 }
 
 console.log(`PASS: perfSuggest — ${passed} assertions (sustained-low detection, anti-nag cooldown, tier mapping, R35.D post-FX remedy, R36.D status pill)`)
+
+// === R37.D: perf-pill health summary =================================
+{
+  eq(PERF_SUMMARY_PCT_LOW, 0.1, 'default 1%-low fraction is worst 10%')
+
+  // Empty / non-array → zeroed summary with neutral status.
+  const empty = summarizePerfWindow([])
+  eq(empty.count, 0, 'empty window → count 0')
+  eq(empty.avg, 0, 'empty window → avg 0')
+  eq(empty.drops, 0, 'empty window → drops 0')
+  eq(empty.status.level, 'none', 'empty window → neutral status')
+  eq(summarizePerfWindow(null).count, 0, 'non-array → empty summary')
+  eq(summarizePerfWindow('nope').count, 0, 'string → empty summary')
+
+  // A steady 60fps window: avg 60, min 60, no drops, good status.
+  const steady = summarizePerfWindow([60, 60, 60, 60, 60])
+  eq(steady.avg, 60, 'steady 60 → avg 60')
+  eq(steady.min, 60, 'steady 60 → min 60')
+  eq(steady.drops, 0, 'steady 60 → no drops')
+  eq(steady.count, 5, 'counts all valid samples')
+  eq(steady.status.level, 'good', 'steady 60 → good status')
+  eq(steady.status.label, 'Smooth', 'good status labelled Smooth')
+
+  // A window with a couple of bad frames: drops counts sub-30fps frames.
+  const bumpy = summarizePerfWindow([60, 60, 25, 60, 20, 60, 60, 60, 60, 60])
+  eq(bumpy.drops, 2, 'two sub-30fps frames counted as drops')
+  ok(bumpy.min === 20, 'min is the worst single frame')
+  ok(bumpy.low <= bumpy.avg, '1% low is at or below the average')
+  // avg ~ (60*8 + 25 + 20)/10 = 52.5 → rounds to 53 → tight (>=30 <55).
+  eq(bumpy.status.level, 'ok', 'sub-55 average reads tight')
+
+  // The 1% low isolates the worst fraction, not the single worst frame.
+  // Worst 10% of 10 samples = 1 sample → equals min here.
+  const lows = summarizePerfWindow([10, 20, 30, 40, 50, 60, 70, 80, 90, 100])
+  eq(lows.low, 10, 'worst-10% of 10 samples is the single worst (10)')
+  // With a custom 50% pctLow, the low averages the bottom half.
+  const halfLow = summarizePerfWindow([10, 20, 30, 40, 50, 60, 70, 80, 90, 100], { pctLow: 0.5 })
+  eq(halfLow.low, 30, 'bottom-half average is (10+20+30+40+50)/5 = 30')
+
+  // Junk samples are filtered out of every figure.
+  const junky = summarizePerfWindow([60, NaN, Infinity, 0, -5, 'x', null, 60])
+  eq(junky.count, 2, 'only the two valid 60s count')
+  eq(junky.avg, 60, 'junk filtered from the average')
+  eq(junky.drops, 0, 'junk not counted as drops')
+  eq(summarizePerfWindow([NaN, Infinity, 'x']).count, 0, 'all-junk → empty summary')
+
+  // Status follows the AVERAGE, not any single frame: one bad frame in a
+  // sea of 60s still reads good on average.
+  const oneSpike = summarizePerfWindow([60, 60, 60, 60, 60, 60, 60, 60, 60, 28])
+  eq(oneSpike.drops, 1, 'the single spike is a drop')
+  eq(oneSpike.status.level, 'good', 'one spike does not drag the average out of good')
+
+  // Purity: input not mutated (the internal sort works on a copy).
+  const src = [50, 10, 90, 30]
+  const snap = JSON.stringify(src)
+  summarizePerfWindow(src)
+  eq(JSON.stringify(src), snap, 'summarizePerfWindow does not mutate input')
+}
+
+console.log(`PASS: perfSuggest R37.D — ${passed} total assertions (incl. perf-pill health summary)`)
