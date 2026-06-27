@@ -188,6 +188,11 @@ Existing capabilities (do not re-ship):
 - Interactive fade-preview swatch — click to replay (R31.43). Graduates R30.43's ambient-loop-only swatch — clicking now replays the fade once on demand. FadeCurvePreviewSwatch gains an `interactive` prop: renders as its OWN button (sibling of the cycle chip, never nested — no button-in-button) so a click bumps playToken which re-keys the anim effect: normal motion restarts the ambient loop from elapsed 0 (fresh full fade); reduced-motion runs exactly ONE self-clearing pass (the only way a RM user can feel the curve at all). Same fadeDirectionColor projector the live badge uses. Cycle chip keeps glyph + label.
 - Clamp Select-all toggle: tri-state none/some/all (R31.45). Graduates R30.45's binary toggle — a hand-picked partial selection (3 of 7) no longer looks identical to an empty one. New pure helper `clampSelectAllTriState(selectedCount, totalCount)` in midiMap.js returns 'none' | 'some' | 'all' (defensive: non-finite/negative coerce to 0, over-count caps at 'all', floors fractional). Toggle gains an indicator box: empty outline (none), amber indeterminate dash (some), indigo check (all) — bg/border/text follow the same three tiers; label still flips None<->All. ~17 fresh asserts.
 - Attractor list keyboard reorder + aria-live narration (R31.20). Graduates R30.20 (MidiPanel binding-group narration) to the LeftSidebar named-attractor list, which had the same silent-to-SR gap (its R18.19/R19.19 gap-drop was mouse/touch-only). The #N badge is now a tabIndex=0 role=button keyboard grab handle: Enter/Space (or an arrow) lifts, Arrow up/down walk a drop cursor through the gap zones, Enter commits, Escape cancels. describeGapReorderAnnouncement (pinned) phrases each step into a visually-hidden aria-live=polite region; the lifted badge pulses indigo + glow and the keyboard cursor lights the SAME gap strips (incl. trailing move-to-end) the mouse uses. Pure wire layer on stepKeyboardGapCursor + dropIndexForGap + moveNamedAttractorByIndex (all already pinned). A stale lift is gated out at render via a derived liftActive flag (no setState-in-effect — lint stays at baseline). Chevrons + drag + jump-to-position all stay alongside.
+- (R37.A) Debug HUD budget-headroom history strip + trend — the same 2s fps window the HUD already samples, replotted as a tiny signed strip around a centre zero-line (the 16.7ms budget edge): above the line is free budget (green-tint band), below is over budget (red-tint band). A trend pill (rising "easing" / falling "loading" / flat "steady" arrow) compares older-half vs newer-half average headroom with a 0.04 dead-band so a steady scene reads flat. Lives in the ms view under the R36.A budget bar. Pure lib/fpsGraph.js: buildHeadroomHistoryPoints / headroomHistoryAttr (each fps sample run through frameBudgetHeadroom so the strip matches the live bar; newest at right; junk pins to the over-budget floor), headroomZeroLineY, headroomTrend, HEADROOM_HISTORY_TOP/BOTTOM.
+- (R37.B) Golden (Fibonacci) spiral composition grid — a 7th framing-guide grid mode ('spiral') drawing the classical S-curve guide that winds to a focal "eye" dot. buildGoldenSpiral walks the nested-square construction inside a normalised golden RECTANGLE (width 1, height 1/phi) so the curve actually spirals, then stretches to fit any (offset, non-square) frame; 8 quarter-turn arcs (12 segments each), depth-clamped to 14. Four orientations (tl/tr/br/bl) place the eye in any corner — the LeftSidebar Spiral chip doubles as a rotate control (click again to cycle the eye, corner badge shows TL/TR/BR/BL). Pure lib/framingGuides.js: SPIRAL_ORIENTATIONS + sanitizeSpiralOrientation (string id OR numeric index, wraps a monotonic counter), computeCompositionGrid now returns a stable spiral[] field on every path. Store spiralOrientation persisted to particle-spiral-orientation-v1.
+- (R37.D) Perf-pill click-to-popover health summary — clicking the R36.D live perf pill opens a one-glance health popover (avg fps / 1% low / worst frame / drops over a rolling ~12s window) BEFORE the user opens the full Debug HUD; headline status word colours to the WINDOW AVERAGE so a transient spike doesn't mislabel. Footer has a "Debug HUD" button (opens via a new particle:toggle-debug-hud event) + a "Hide" link (old dismiss path). Pure lib/perfSuggest.js: summarizePerfWindow(samples, opts) -> { avg, min, low, drops, count, status } (worst-pctLow average, sub-okFloor drop count, junk-filtered, sorts on a copy), PERF_SUMMARY_PCT_LOW.
+- (R37.H) Command palette save-current-view + per-view delete — completes the saved-camera-view lifecycle inside Cmd-K: "Save Current Camera View" snapshots the live camera angle into a new view; one "Delete view: <name>" action per saved view. Both persist + fire particle:camera-views-changed so the RightSidebar list re-syncs without a refresh. Pure lib/cameraViews.js: buildCameraDeleteActions(views) parallels buildCameraPaletteActions but carries viewId for the remove call; a position-CORRUPT view stays DELETABLE (unlike restore which needs a valid pos) since a broken row is exactly what a user wants to purge; id 0 valid; non-array/missing-id defensive; input never mutated.
+- (R37.K) Calm-mode auto-fading toast naming what was paused — the R36.K calm toggle silently gates four motions; now every flip fires a toast naming exactly what changed ("Calmed 4 motions" + "Auto-rotate, Camera shake, Hue cycle & Zen auto-orbit" / "Motion resumed"). Wired into BOTH the TopBar Wind button and the command-palette Calm Mode action. Pure lib/calmMode.js: formatCalmToast(turningOn) -> { title, detail, count } reads labels off CALM_GATED_MOTIONS so it never drifts; detail Oxford-"&"-joins; turningOn coerced to boolean; pure + fresh object each call.
 
 ## Roadmap (Cake's queue — never overlap with shipped list above)
 
@@ -680,25 +685,61 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
   twice) grouped by area, reading the live remapped keys
 
 ### Batch 37 — fresh frontend queue (graduations of Batch 36 + carried)
-- [ ] R37.A Debug HUD budget bar (R36.A): a short rolling-history strip of the
-  budget headroom (last ~2s) beside the live bar so a user sees whether they're
-  trending toward or away from the 16.7ms edge, not just the instant value
-- [ ] R37.B Composition grid (R36.B): a "harmonious triangle" / golden-spiral
-  (phi spiral, 4 quadrant orientations) overlay mode for classical S-curve
-  composition
-- [ ] R37.D Perf pill (R36.D): clicking the pill opens a tiny popover with the
-  1%-low + drop count from the same window (a one-glance health summary) before
-  the user commits to opening the full Debug HUD
-- [ ] R37.H Command palette Camera group (R36.H): add "Save current view" +
-  per-view delete as palette actions so the whole saved-view lifecycle lives in
-  the palette, not just restore
-- [ ] R37.K Calm mode (R36.K): a brief auto-fading toast when calm mode flips on
-  ("Calmed 4 motions") naming what was paused, using describeCalmState, so the
-  one-click gate is legible (it currently changes 4 things silently)
+- [x] R37.A Debug HUD budget-headroom history strip + trend — the live 2s
+  window replotted SIGNED around a centre zero-line (above=free budget /
+  below=over) with a rising/falling/flat trend pill so the user sees
+  direction, not just the instant value (lib/fpsGraph.js
+  buildHeadroomHistoryPoints/headroomHistoryAttr/headroomZeroLineY/
+  headroomTrend, +39 asserts) — 83459cc
+- [x] R37.B Golden (Fibonacci) spiral composition grid — 7th grid mode;
+  nested-square construction inside a golden RECTANGLE so it actually
+  spirals, stretches to any frame, 4 corner orientations (Spiral chip
+  doubles as a rotate control); pink focal "eye" dot (lib/framingGuides.js
+  buildGoldenSpiral + SPIRAL_ORIENTATIONS + sanitizeSpiralOrientation,
+  +35 asserts) — 2605a0b
+- [x] R37.D Perf-pill click-to-popover health summary — clicking the pill
+  opens avg / 1% low / worst-frame / drops from a rolling ~12s window
+  before the user opens the full HUD; "Debug HUD" + "Hide" footer
+  (lib/perfSuggest.js summarizePerfWindow, +26 asserts) — 0eb76f9
+- [x] R37.H Command palette save-current-view + per-view delete — whole
+  saved-view lifecycle (save/restore/delete) now in the palette; fires
+  particle:camera-views-changed so the RightSidebar re-syncs
+  (lib/cameraViews.js buildCameraDeleteActions, +18 asserts) — c657397
+- [x] R37.K Calm-mode auto-fading toast naming what was paused — "Calmed
+  4 motions" + the motion labels, on both TopBar + palette entry points
+  (lib/calmMode.js formatCalmToast, +17 asserts) — e5f3059
 - [ ] R37.C Self-timer burst review strip (carried R36.C)
 - [ ] R37.E Zen "Now Playing" overlay (carried R36.E)
 - [ ] R37.G Screenshot watermark / caption (carried R36.G)
 - [ ] R37.L Shortcut cheat-sheet overlay (carried R36.L)
+
+### Batch 38 — fresh frontend queue (graduations of Batch 37 + carried)
+- [ ] R38.A Debug HUD headroom trend (R37.A): a numeric "ETA to edge"
+  readout — extrapolate the current headroom slope to estimate how many
+  seconds until the user crosses the 16.7ms budget at the present trend
+  (only while falling), so a heavy-scene tuner gets a concrete warning
+- [ ] R38.B Golden spiral (R37.B): a subtle animated "sweep" that traces
+  the spiral path once on enable / orientation-change (reduced-motion
+  aware, one-shot) so the eye follows the curve to the focal point
+- [ ] R38.D Perf-pill popover (R37.D): a tiny inline fps sparkline of the
+  same ~12s window at the top of the health popover (reuse fpsGraph
+  sparkline helpers) so the summary shows shape, not just numbers
+- [ ] R38.H Command palette (R37.H): a "Rename saved view" palette action
+  (inline text entry) + "Clear all saved views" so rename/wipe join the
+  save/restore/delete lifecycle already in the palette
+- [ ] R38.K Calm mode (R37.K): a per-motion toggle popover on the calm
+  button (long-press / right-click) so a user can choose WHICH of the
+  four motions calm mode gates, instead of all-or-nothing
+- [ ] R38.C Self-timer burst review strip (carried R36.C/R37.C)
+- [ ] R38.E Zen "Now Playing" overlay (carried R36.E/R37.E)
+- [ ] R38.G Screenshot watermark / caption (carried R36.G/R37.G)
+- [ ] R38.L Shortcut cheat-sheet overlay (carried R36.L/R37.L)
+- [ ] R38.M Framing guide ratio (R34.B): a custom user-entered aspect
+  ratio chip (type "21:9" / "2.0") alongside the preset ratios, persisted
+- [ ] R38.N Minimap: a one-tap "frame all saved views" that fits the orbit
+  so every saved-view dot is visible at once
+- [ ] R38.O Debug HUD: a compact/expanded toggle (one key) that collapses
+  to just the sparkline + fps number for an unobtrusive perf glance
 
 ### Future queue carried from Batch 24 (still genuine, unshipped)
 - [ ] R25.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view
@@ -708,6 +749,51 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R25.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode)
 
 ## TICK LOG
+- 2026-06-26 17:07 PT — Batch 37 (5/5). Tick 37. Frontend-focus override
+  active. Shipped the five Batch-37 features — all genuinely-new
+  user-facing capability, each its own pure tested module (NOT cosmetic
+  filler). NOTE: the trigger message's "31 unpushed commits / first tick
+  / branch feature/autoship / npm install" was STALE boilerplate AGAIN —
+  repo was already in sync (0/0 vs origin), node_modules present,
+  STATE.md bootstrapped through tick 36. Followed the authoritative
+  prompt: shipped DIRECTLY ON main (feature branches don't show on the
+  contribution graph), no feature/autoship branch created.
+  Commits: 83459cc (R37.A Debug HUD budget-headroom history strip +
+  rising/falling trend pill), 2605a0b (R37.B golden Fibonacci spiral
+  composition grid + 4 corner orientations), 0eb76f9 (R37.D perf-pill
+  click-to-popover health summary — avg/1%-low/drops), c657397 (R37.H
+  command-palette save-current-view + per-view delete), e5f3059 (R37.K
+  calm-mode auto-fading toast naming the 4 paused motions).
+  Pushed 27f2cd9..e5f3059 -> origin/main (verified fast-forward, 0 ahead
+  / 0 behind).
+  Gates: lint EXACTLY at baseline (26 problems / 23 errors / 3 warnings —
+  all pre-existing in DebugHUD performance.now / LeftSidebar setState-in-
+  effect / TopBar glow+escapes / store unused-e / Toast / ParticleCanvas
+  / vite.config; proved via targeted eslint that every NEW lib + the
+  PerfBudgetPill rewrite + CommandPalette lint 100% clean — the only
+  errors in my touched files are line-shifted pre-existing ones). Build:
+  green (~737ms). Tests: ALL 46 files pass; ~135 fresh asserts this batch
+  (fpsGraph +39, framingGuides +35, perfSuggest +26, cameraViews +18,
+  calmMode +17).
+  - R37.A extended lib/fpsGraph.js (buildHeadroomHistoryPoints /
+    headroomHistoryAttr / headroomZeroLineY / headroomTrend) + DebugHUD
+    signed history strip + trend pill in the ms view.
+  - R37.B extended lib/framingGuides.js (buildGoldenSpiral inside a
+    golden RECTANGLE + SPIRAL_ORIENTATIONS + sanitizeSpiralOrientation,
+    computeCompositionGrid stable spiral[] field) + FramingGuides
+    polyline+eye render + LeftSidebar Spiral chip rotate-on-reclick +
+    store spiralOrientation (particle-spiral-orientation-v1).
+  - R37.D new lib helper summarizePerfWindow + PerfBudgetPill rewritten
+    to a click-to-popover health summary (rolling 12s window) + new
+    particle:toggle-debug-hud event in DebugHUD.
+  - R37.H new lib helper buildCameraDeleteActions + CommandPalette
+    Save-current + per-view Delete items (fire particle:camera-views-
+    changed).
+  - R37.K new lib helper formatCalmToast + TopBar CalmModeBtn + palette
+    Calm action both fire the naming toast.
+  Frontend-focus override honoured — all 5 are FRONTEND/UX (perf HUD viz,
+  photo composition, opt-in perf overlay, palette power-user surface,
+  motion-gate legibility). dist/ gitignored — no build artifacts pushed.
 - 2026-06-26 11:08 PT — Batch 36 (5/5). Tick 36. Frontend-focus override
   active. Shipped five genuinely-new frontend features from the Batch-36
   queue (NOT cosmetic graduations — each its own demo-able capability with
