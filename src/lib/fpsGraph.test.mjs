@@ -12,6 +12,8 @@ import {
   scrubEtaHistory,
   // R40.D — full per-sample stats for a pinned sparkline point
   sparklineSampleStats,
+  // R41.A — full per-sample stats for a pinned ETA-history point
+  etaHistorySampleStats,
 } from './fpsGraph.js'
 
 let passed = 0
@@ -951,4 +953,78 @@ eq(sparklineSampleStats([60, 30], Infinity), null, 'pin: Infinity index → null
   eq(JSON.stringify(src), snap, 'pin: does not mutate input')
 }
 
-console.log(`PASS: fpsGraph R40.D — ${passed} total assertions (incl. pinned per-sample stats)`)
+// --- R41.A: etaHistorySampleStats — pinned ETA-history sample readout ---
+// Parallels sparklineSampleStats but for the ETA strip: resolve a pinned
+// INDEX into { index, etaSec, approaching, secondsAgo }, with null ticks
+// ("not approaching") reading as a "safe" marker, not a real 0s ETA.
+{
+  // history newest-LAST: [oldest ... newest]. 250ms cadence (HUD's 4Hz).
+  const hist = [12, 9, null, 6, 3]
+  // newest sample (index 4) is "now" (0s ago).
+  {
+    const s = etaHistorySampleStats(hist, 4, { sampleMs: 250 })
+    eq(s.index, 4, 'eta-pin: newest index echoed')
+    eq(s.etaSec, 3, 'eta-pin: newest etaSec')
+    ok(s.approaching === true, 'eta-pin: finite tick is approaching')
+    eq(s.secondsAgo, 0, 'eta-pin: newest is now (0s ago)')
+  }
+  // an older finite sample reads its age from the distance to newest.
+  {
+    const s = etaHistorySampleStats(hist, 0, { sampleMs: 250 })
+    eq(s.etaSec, 12, 'eta-pin: oldest etaSec')
+    eq(s.secondsAgo, 1, 'eta-pin: oldest is (5-1-0)*250ms = 1s ago')
+  }
+  // a "not approaching" (null) tick → etaSec null + approaching false
+  // (guarded before Number() so null doesn't become a real 0s ETA).
+  {
+    const s = etaHistorySampleStats(hist, 2, { sampleMs: 250 })
+    eq(s.etaSec, null, 'eta-pin: null tick → etaSec null')
+    ok(s.approaching === false, 'eta-pin: null tick is not approaching')
+    eq(s.secondsAgo, 1, 'eta-pin: null tick age still resolves ((5-1-2)*250=0.5→1s)')
+  }
+  // etaSec is rounded to 0.1s from the raw stored value.
+  {
+    const s = etaHistorySampleStats([4.27], 0, { sampleMs: 250 })
+    eq(s.etaSec, 4.3, 'eta-pin: etaSec rounded to 0.1s')
+    eq(s.secondsAgo, 0, 'eta-pin: single-sample is now')
+  }
+  // explicit 0s ETA (at the edge) is a REAL approaching sample, not null.
+  {
+    const s = etaHistorySampleStats([0, 5], 0, { sampleMs: 250 })
+    eq(s.etaSec, 0, 'eta-pin: 0s ETA preserved as a real at-the-edge sample')
+    ok(s.approaching === true, 'eta-pin: 0s ETA is approaching (not a null marker)')
+  }
+  // negative / non-finite stored values resolve to non-approaching.
+  {
+    const s = etaHistorySampleStats([-3, 5], 0)
+    eq(s.etaSec, null, 'eta-pin: negative stored value → not approaching')
+    ok(s.approaching === false, 'eta-pin: negative is not approaching')
+  }
+  // default cadence is 250ms when no opts given (the HUD's tick rate).
+  {
+    const s = etaHistorySampleStats([10, 8, 6], 0)
+    eq(s.secondsAgo, 1, 'eta-pin: default sampleMs=250 → (3-1-0)*250=0.5→1s ago')
+  }
+  // defensive: empty / non-array / out-of-range / non-finite → null.
+  eq(etaHistorySampleStats([], 0), null, 'eta-pin: empty history → null')
+  eq(etaHistorySampleStats(null, 0), null, 'eta-pin: non-array → null')
+  eq(etaHistorySampleStats([3, 6], 2), null, 'eta-pin: index past end → null')
+  eq(etaHistorySampleStats([3, 6], -1), null, 'eta-pin: negative index → null')
+  eq(etaHistorySampleStats([3, 6], NaN), null, 'eta-pin: NaN index → null')
+  eq(etaHistorySampleStats([3, 6], Infinity), null, 'eta-pin: Infinity index → null')
+  // floors a fractional index (a click resolves to a whole sample).
+  {
+    const s = etaHistorySampleStats([9, 6, 3], 1.8)
+    eq(s.index, 1, 'eta-pin: fractional index floored')
+    eq(s.etaSec, 6, 'eta-pin: floored index reads the right sample')
+  }
+  // purity: input not mutated.
+  {
+    const src = [12, null, 6, 3]
+    const snap = JSON.stringify(src)
+    etaHistorySampleStats(src, 2, { sampleMs: 250 })
+    eq(JSON.stringify(src), snap, 'eta-pin: does not mutate input')
+  }
+}
+
+console.log(`PASS: fpsGraph R41.A — ${passed} total assertions (incl. pinned ETA-history sample readout)`)

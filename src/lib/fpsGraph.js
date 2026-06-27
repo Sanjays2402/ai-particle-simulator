@@ -747,6 +747,53 @@ export function sparklineSampleStats(samples, index, opts = {}) {
   return { index: idx, fps, frameMs, isDrop, secondsAgo }
 }
 
+// --- R41.A: full per-sample stats for a PINNED ETA-history point -------
+//
+// R40.A scrubs the ETA-to-edge history strip under a moving cursor; this
+// is the parallel of R40.D's sparklineSampleStats but for the ETA strip:
+// resolve an already-pinned INDEX into the full readout the HUD keeps on
+// screen while the user tweaks. R40.A only lived for the duration of a
+// hover — a tuner who spots a specific dip wants to PIN it and read its
+// exact seconds-to-edge + age while they change the scene, instead of
+// holding the pointer perfectly still.
+//
+// Like sparklineSampleStats, this takes an INDEX (typically the `index`
+// scrubEtaHistory returned at click time), not a value, so a pin is
+// stable as fresh ticks push the series — the caller pins the MOMENT and
+// shifts the index as samples scroll off the front (and drops the pin
+// once the moment ages out of the window). Returns:
+//   { index, etaSec, approaching, secondsAgo }
+// where `etaSec` is the 0.1s-rounded seconds-to-edge (null when the tick
+// was a "not approaching" marker — the readout shows "safe"),
+// `approaching` flags a genuine finite ETA, and `secondsAgo` is the
+// sample's age at `sampleMs` cadence (default 250 — the HUD's 4Hz loop).
+//
+// Returns null when the index is out of range / non-finite or the
+// history is empty so the caller can drop a stale pin.
+export function etaHistorySampleStats(history, index, opts = {}) {
+  if (!Array.isArray(history) || history.length === 0) return null
+  if (!Number.isFinite(index)) return null
+  const idx = Math.floor(index)
+  if (idx < 0 || idx > history.length - 1) return null
+  const sampleMs = Number.isFinite(opts.sampleMs) && opts.sampleMs > 0 ? opts.sampleMs : 250
+  const n = history.length
+  // A "not approaching" tick is null / undefined — guard before Number()
+  // (null → 0 would read as a real 0s "at the edge" ETA) so it resolves
+  // to a non-approaching marker the readout shows as "safe".
+  const raw = history[idx]
+  let etaSec = null
+  let approaching = false
+  if (raw !== null && raw !== undefined) {
+    const v = Number(raw)
+    if (Number.isFinite(v) && v >= 0) {
+      etaSec = Math.round(v * 10) / 10
+      approaching = true
+    }
+  }
+  const secondsAgo = Math.round(((n - 1 - idx) * sampleMs) / 1000)
+  return { index: idx, etaSec, approaching, secondsAgo }
+}
+
 // Frame-time window summary — mirrors summarizeFpsWindow but in ms.
 // `high` is the averaged WORST `pctHigh` fraction (the 1%-HIGH frame
 // time, the ms analogue of the 1% low); `over` counts frames slower

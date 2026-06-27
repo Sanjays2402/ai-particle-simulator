@@ -10,7 +10,7 @@ import {
   headroomHistoryAttr, headroomZeroLineY, headroomTrend, headroomEtaToEdge,
   ETA_MAX_SEC,
   pushEtaHistory, etaHistoryAttr, summarizeEtaHistory, ETA_HISTORY_CEIL,
-  scrubEtaHistory,
+  scrubEtaHistory, etaHistorySampleStats,
 } from '../lib/fpsGraph'
 
 // Performance debug HUD. Toggle with backtick (`) so it doesn't fight
@@ -45,6 +45,13 @@ export default function DebugHUD() {
   // + how-long-ago for the sample under the cursor, so a tuner can pick a
   // specific dip off the trend line instead of eyeballing the slope.
   const [etaScrubX, setEtaScrubX] = useState(null)
+  // R41.A — click-to-PIN on the ETA strip (parallels R40.D's perf-pill
+  // pin). Clicking a scrubbed dip locks its seconds-to-edge + age on
+  // screen while the user tweaks, instead of holding the hover. We store
+  // the INDEX (not the value) and re-resolve the stats every render so a
+  // pin tracks its sample as the window scrolls, shifting the index when
+  // ticks scroll off the front and clearing once the moment ages out.
+  const [pinnedEtaIndex, setPinnedEtaIndex] = useState(null)
   const lastRef = useRef(performance.now())
   const accumRef = useRef(0)
   const framesRef = useRef(0)
@@ -119,11 +126,25 @@ export default function DebugHUD() {
         // recovers. Mirror ref → state so the strip re-renders.
         const tickFps = samplesRef.current.map(s => s.fps)
         const tickEta = headroomEtaToEdge(tickFps, { sampleMs: 250 })
+        const prevEtaLen = etaHistoryRef.current.length
         etaHistoryRef.current = pushEtaHistory(
           etaHistoryRef.current,
           tickEta.approaching ? tickEta.etaSec : null,
         )
         setEtaHistory(etaHistoryRef.current)
+        // R41.A — when the ETA window is full, each push drops one sample
+        // off the FRONT. Shift the pin by that amount so it stays on the
+        // SAME moment; once that moment scrolls off the window entirely,
+        // drop the pin. (pushEtaHistory concats exactly one sample, so
+        // dropped = prevLen + 1 - newLen.)
+        const etaDropped = prevEtaLen + 1 - etaHistoryRef.current.length
+        if (etaDropped > 0) {
+          setPinnedEtaIndex(p => {
+            if (p == null) return null
+            const shifted = p - etaDropped
+            return shifted < 0 ? null : shifted
+          })
+        }
 
         accumRef.current = 0
         framesRef.current = 0
@@ -132,6 +153,13 @@ export default function DebugHUD() {
     }
     raf = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(raf)
+  }, [visible])
+
+  // R41.A — a pin is a session-scoped inspection, not a persistent
+  // marker: drop it (and any hover-scrub) whenever the HUD is hidden so
+  // it doesn't reappear stale when the user toggles the HUD back open.
+  useEffect(() => {
+    if (!visible) { setPinnedEtaIndex(null); setEtaScrubX(null) }
   }, [visible])
 
   if (!visible) return null
@@ -227,6 +255,26 @@ export default function DebugHUD() {
         ? ETH - (Math.min(etaScrub.etaSec, ETA_HISTORY_CEIL) / ETA_HISTORY_CEIL) * ETH
         : 0)
     : null
+  // R41.A — the pinned ETA sample's stats (seconds-to-edge + age),
+  // re-resolved every render so the pin tracks its moment as the strip
+  // scrolls. null once the sample has aged out of the window. The strip
+  // records one ETA per 250ms tick, so sampleMs=250 reads the age in the
+  // HUD's real cadence.
+  const etaPinned = pinnedEtaIndex != null
+    ? etaHistorySampleStats(etaHistory, pinnedEtaIndex, { sampleMs: 250 })
+    : null
+  // The pin marker's x/y on the strip: even spacing means sample i sits
+  // at x = (i / (n-1)) * ETW (single sample pins to the right edge); a
+  // finite ETA maps high→top / 0→floor exactly as buildEtaHistoryPoints
+  // does, a "not approaching" (null) tick pins to the safe ceiling (top).
+  let etaPinX = null, etaPinY = null
+  if (etaPinned) {
+    const n = etaHistory.length
+    etaPinX = n > 1 ? (etaPinned.index / (n - 1)) * ETW : ETW
+    etaPinY = etaPinned.approaching
+      ? ETH - (Math.min(etaPinned.etaSec, ETA_HISTORY_CEIL) / ETA_HISTORY_CEIL) * ETH
+      : 0
+  }
 
   return (
     <div style={{
@@ -368,7 +416,7 @@ export default function DebugHUD() {
                       <span style={{ fontWeight: 700, marginRight: 3 }}>{etaTrendGlyph}</span>{etaTrendWord}
                     </span>
                   </div>
-                  <svg width={ETW} height={ETH} style={{ display: 'block', borderRadius: 5, background: 'rgba(0,0,0,0.28)', marginBottom: etaScrub ? 0 : 6, cursor: 'crosshair', pointerEvents: 'auto' }}
+                  <svg width={ETW} height={ETH} style={{ display: 'block', borderRadius: 5, background: 'rgba(0,0,0,0.28)', marginBottom: (etaScrub || etaPinned) ? 0 : 6, cursor: 'crosshair', pointerEvents: 'auto' }}
                     onPointerMove={(e) => {
                       // Map the pointer into the strip's pixel space. The
                       // SVG renders at its native ETW width, so a simple
@@ -379,6 +427,20 @@ export default function DebugHUD() {
                       setEtaScrubX(localX)
                     }}
                     onPointerLeave={() => setEtaScrubX(null)}
+                    onClick={(e) => {
+                      // R41.A — click pins the sample under the cursor so
+                      // its seconds-to-edge + age stay on screen while the
+                      // user tweaks. Clicking the already-pinned sample
+                      // toggles it off. Resolve the index from the click x
+                      // (independent of the live scrub) so a tap lands
+                      // precisely even on a touch device with no hover.
+                      const rect = e.currentTarget.getBoundingClientRect()
+                      if (rect.width <= 0) return
+                      const localX = ((e.clientX - rect.left) / rect.width) * ETW
+                      const hit = scrubEtaHistory(etaHistory, localX, { width: ETW, sampleMs: 250 })
+                      if (!hit) return
+                      setPinnedEtaIndex(p => (p === hit.index ? null : hit.index))
+                    }}
                   >
                     {/* A faint baseline at the floor marks ETA=0 (you've
                         hit the budget edge) so a line diving toward it
@@ -387,6 +449,23 @@ export default function DebugHUD() {
                       stroke="rgba(248,113,113,0.28)" strokeWidth={1} strokeDasharray="2 3" />
                     <polyline points={etaAttr} fill="none" stroke={etaTrendColor}
                       strokeWidth={1.4} strokeLinejoin="round" strokeLinecap="round" />
+                    {/* R41.A — the pinned sample marker: a persistent
+                        dashed vertical line + ringed dot (distinct from
+                        the solid hover guide) so the inspected moment
+                        stays visible while the user reads the pinned
+                        readout. Drawn UNDER the live hover guide so a
+                        fresh hover still reads on top. */}
+                    {etaPinned && etaPinX != null && (
+                      <>
+                        <line x1={etaPinX} y1={0} x2={etaPinX} y2={ETH}
+                          stroke={etaPinned.approaching ? 'rgba(251,191,36,0.7)' : 'rgba(134,239,172,0.6)'}
+                          strokeWidth={1} strokeDasharray="2 2" />
+                        {etaPinY != null && (
+                          <circle cx={etaPinX} cy={etaPinY} r={3.2}
+                            fill="none" stroke={etaPinned.approaching ? '#fbbf24' : '#86efac'} strokeWidth={1.5} />
+                        )}
+                      </>
+                    )}
                     {/* R40.A — hover-scrub guide: a vertical line at the
                         snapped sample x + a dot on the line so the user
                         sees exactly which sample the readout is reading. */}
@@ -408,7 +487,7 @@ export default function DebugHUD() {
                   {etaScrub && (
                     <div style={{
                       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                      fontSize: 10, marginBottom: 6, marginTop: 2,
+                      fontSize: 10, marginBottom: etaPinned ? 2 : 6, marginTop: 2,
                       fontVariantNumeric: 'tabular-nums',
                     }}>
                       <span style={{
@@ -421,6 +500,53 @@ export default function DebugHUD() {
                       </span>
                       <span style={{ color: '#8a8aa0' }}>
                         {etaScrub.secondsAgo === 0 ? 'now' : `${etaScrub.secondsAgo}s ago`}
+                      </span>
+                    </div>
+                  )}
+                  {/* R41.A — the PINNED readout: the locked sample's exact
+                      seconds-to-edge + age, held on screen (independent of
+                      the hover) with an inline clear so a tuner can change
+                      the scene while keeping the dip's numbers in view. A
+                      "PIN" tag + amber/green accent distinguishes it from
+                      the transient hover readout above. */}
+                  {etaPinned && (
+                    <div style={{
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      fontSize: 10, marginBottom: 6, marginTop: 2, gap: 8,
+                      padding: '3px 6px', borderRadius: 5,
+                      background: etaPinned.approaching ? 'rgba(251,191,36,0.1)' : 'rgba(134,239,172,0.08)',
+                      border: `1px solid ${etaPinned.approaching ? 'rgba(251,191,36,0.3)' : 'rgba(134,239,172,0.28)'}`,
+                      fontVariantNumeric: 'tabular-nums',
+                    }}>
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 5,
+                        color: etaPinned.approaching
+                          ? (etaPinned.etaSec <= 3 ? '#f87171' : '#fbbf24')
+                          : '#86efac',
+                        fontWeight: 600,
+                      }}>
+                        <span style={{
+                          fontSize: 7.5, fontWeight: 700, letterSpacing: '0.08em',
+                          padding: '0 3px', borderRadius: 3,
+                          background: 'rgba(255,255,255,0.08)', color: '#c8c8d0',
+                        }}>PIN</span>
+                        {etaPinned.approaching ? `~${etaPinned.etaSec}s to edge` : 'safe'}
+                      </span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                        <span style={{ color: '#8a8aa0' }}>
+                          {etaPinned.secondsAgo === 0 ? 'now' : `${etaPinned.secondsAgo}s ago`}
+                        </span>
+                        <button
+                          onClick={() => setPinnedEtaIndex(null)}
+                          title="Unpin this sample"
+                          style={{
+                            padding: '0 5px', borderRadius: 4, lineHeight: 1.5,
+                            background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                            color: '#9a9ab0', cursor: 'pointer', fontFamily: 'inherit',
+                            fontSize: 8.5, fontWeight: 600, letterSpacing: '0.04em',
+                            pointerEvents: 'auto',
+                          }}
+                        >Clear</button>
                       </span>
                     </div>
                   )}
