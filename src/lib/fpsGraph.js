@@ -474,6 +474,134 @@ export function buildBandedSparklineSegments(samples, opts = {}) {
   }))
 }
 
+// --- R39.A: ETA-to-edge history strip ---------------------------------
+//
+// R38.A surfaces the INSTANT "seconds until you cross the budget edge".
+// But a single number can't tell a tuner whether the deadline is rushing
+// AT them (each tick the ETA shrinks — the scene is degrading faster and
+// faster) or STABILISING (the ETA holds / grows — they've found a level
+// the frame can sustain). This records a short rolling history of the
+// ETA readout and plots it so the DIRECTION of the deadline is legible.
+//
+// The y-axis is seconds-to-edge: a high ETA (plenty of runway) sits at
+// the TOP, ETA=0 (you've hit the edge) at the FLOOR — so a line sloping
+// DOWN toward the floor means the edge is rushing at you, matching the
+// "dips = trouble" silhouette every other strip in the HUD uses. When
+// the scene isn't approaching the edge at all (rising headroom, or
+// already over) there's no finite ETA — those ticks pin to the ceiling
+// (safe / no urgency) so the line climbs back to the top as a scene
+// recovers, rather than leaving a confusing gap.
+
+// Seconds-to-edge ceiling for the plot — ETAs longer than this read as
+// "plenty of runway" and pin to the top. 30s is comfortably past the
+// point where a tuner would care about the countdown.
+export const ETA_HISTORY_CEIL = 30
+// How many ETA samples to keep. The HUD samples at ~250ms, so 24 samples
+// is a ~6s rolling history — long enough to read a trend, short enough to
+// react to a change the user just made.
+export const ETA_HISTORY_MAX = 24
+
+// Append one ETA reading to the rolling history, returning a FRESH array
+// capped at `maxLen` (oldest dropped). A finite, non-negative number is
+// kept as-is; anything else (null when not approaching, NaN, Infinity,
+// negative) is recorded as null — a "no urgency" tick the plot pins to
+// the safe ceiling. Never mutates the input array.
+export function pushEtaHistory(history, etaSec, maxLen = ETA_HISTORY_MAX) {
+  const cap = Number.isFinite(maxLen) && maxLen > 0 ? Math.floor(maxLen) : ETA_HISTORY_MAX
+  const prev = Array.isArray(history) ? history : []
+  // null / undefined explicitly mean "not approaching" — coercing them
+  // through Number() would turn null into 0 (a real "at the edge" sample),
+  // so guard before the numeric check.
+  const v = (etaSec === null || etaSec === undefined) ? NaN : Number(etaSec)
+  const sample = Number.isFinite(v) && v >= 0 ? v : null
+  const next = prev.concat(sample)
+  if (next.length > cap) next.splice(0, next.length - cap)
+  return next
+}
+
+// Clamp an ETA value for plotting: null / undefined / non-finite /
+// negative → ceil (safe, plots at the top); otherwise clamp into
+// [0, ceil]. null/undefined are guarded before Number() so a "not
+// approaching" tick doesn't coerce to 0 and plot at the floor.
+function clampEtaForPlot(eta, ceil) {
+  if (eta === null || eta === undefined) return ceil
+  const v = Number(eta)
+  if (!Number.isFinite(v) || v < 0) return ceil
+  return v > ceil ? ceil : v
+}
+
+// Map an ETA history array to {x, y} points in a width x height box.
+// Newest sample at the right edge. High ETA (safe) → small y (top); ETA
+// 0 (at the edge) → y=height (floor). Returns [] for empty / non-array.
+export function buildEtaHistoryPoints(history, opts = {}) {
+  if (!Array.isArray(history) || history.length === 0) return []
+  const ceil = Number.isFinite(opts.ceil) && opts.ceil > 0 ? opts.ceil : ETA_HISTORY_CEIL
+  const width = Number.isFinite(opts.width) && opts.width > 0 ? opts.width : 100
+  const height = Number.isFinite(opts.height) && opts.height > 0 ? opts.height : 24
+  const n = history.length
+  const stepDenom = n > 1 ? n - 1 : 1
+  const out = []
+  for (let i = 0; i < n; i++) {
+    const eta = clampEtaForPlot(history[i], ceil)
+    const x = n > 1 ? (i / stepDenom) * width : width
+    const y = height - (eta / ceil) * height
+    out.push({ x, y })
+  }
+  return out
+}
+
+// The ETA-history points as an SVG `points="x,y x,y"` string. '' when empty.
+export function etaHistoryAttr(history, opts = {}) {
+  const pts = buildEtaHistoryPoints(history, opts)
+  if (pts.length === 0) return ''
+  return pts.map(p => `${round1(p.x)},${round1(p.y)}`).join(' ')
+}
+
+// Summarise the ETA history into a trend the HUD can label. Looks ONLY
+// at the finite (genuinely-approaching) samples so a long stretch of
+// "not approaching" nulls doesn't fake a trend. Returns:
+//   { hasData, dir, latest, count, urgent }
+// where `dir` is:
+//   'falling'  — ETA shrinking → the edge is rushing AT you (bad)
+//   'rising'   — ETA growing → you're stabilising / pulling away (good)
+//   'flat'     — holding steady within the dead-band
+// `latest` is the most recent finite ETA (or null); `urgent` is true
+// when that latest ETA is at/under `urgentAt` seconds. A dead-band
+// (default 0.5s) keeps sampling noise from flickering the direction.
+export function summarizeEtaHistory(history, opts = {}) {
+  const none = { hasData: false, dir: 'flat', latest: null, count: 0, urgent: false }
+  if (!Array.isArray(history) || history.length === 0) return none
+  const deadband = Number.isFinite(opts.deadband) && opts.deadband >= 0 ? opts.deadband : 0.5
+  const urgentAt = Number.isFinite(opts.urgentAt) && opts.urgentAt > 0 ? opts.urgentAt : 3
+  const finite = []
+  for (const h of history) {
+    // null / undefined are "not approaching" markers, not a 0s ETA —
+    // guard before Number() (which turns null into 0) so they don't
+    // count as real at-the-edge samples.
+    if (h === null || h === undefined) continue
+    const v = Number(h)
+    if (Number.isFinite(v) && v >= 0) finite.push(v)
+  }
+  if (finite.length === 0) return none
+  const latest = finite[finite.length - 1]
+  let dir = 'flat'
+  if (finite.length >= 2) {
+    const mid = Math.floor(finite.length / 2)
+    const older = finite.slice(0, mid)
+    const newer = finite.slice(finite.length - mid)
+    const avg = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length
+    const delta = avg(newer) - avg(older) // positive = ETA growing = stabilising
+    dir = delta > deadband ? 'rising' : delta < -deadband ? 'falling' : 'flat'
+  }
+  return {
+    hasData: true,
+    dir,
+    latest: Math.round(latest * 10) / 10,
+    count: finite.length,
+    urgent: latest <= urgentAt,
+  }
+}
+
 // Frame-time window summary — mirrors summarizeFpsWindow but in ms.
 // `high` is the averaged WORST `pctHigh` fraction (the 1%-HIGH frame
 // time, the ms analogue of the 1% low); `over` counts frames slower

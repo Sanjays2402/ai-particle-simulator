@@ -9,6 +9,7 @@ import {
   frameBudgetHeadroom, headroomBandColor,
   headroomHistoryAttr, headroomZeroLineY, headroomTrend, headroomEtaToEdge,
   ETA_MAX_SEC,
+  pushEtaHistory, etaHistoryAttr, summarizeEtaHistory, ETA_HISTORY_CEIL,
 } from '../lib/fpsGraph'
 
 // Performance debug HUD. Toggle with backtick (`) so it doesn't fight
@@ -31,6 +32,12 @@ export default function DebugHUD() {
   // to the same ~2s window the numeric stats use.
   const [series, setSeries] = useState([])
   const samplesRef = useRef([]) // [{ t, fps }] last ~2 seconds
+  // R39.A — rolling history of the ETA-to-budget-edge readout so the HUD
+  // can show whether the deadline is rushing AT the user (ETA shrinking)
+  // or stabilising (ETA holding / growing), not just the instant number.
+  // Held in state (mirrored from a ref) so the strip re-renders each tick.
+  const [etaHistory, setEtaHistory] = useState([])
+  const etaHistoryRef = useRef([])
   const lastRef = useRef(performance.now())
   const accumRef = useRef(0)
   const framesRef = useRef(0)
@@ -97,6 +104,19 @@ export default function DebugHUD() {
         // Feed the sparkline with the same windowed series (raw fps,
         // newest last) so the graph and the numeric readout never drift.
         setSeries(samplesRef.current.map(s => s.fps))
+
+        // R39.A — record this tick's ETA-to-edge into the rolling history.
+        // We compute it from the same fps window the live readout uses (at
+        // the HUD's 250ms cadence). A "not approaching" tick records null
+        // so the strip shows a gap-free climb back to safe when a scene
+        // recovers. Mirror ref → state so the strip re-renders.
+        const tickFps = samplesRef.current.map(s => s.fps)
+        const tickEta = headroomEtaToEdge(tickFps, { sampleMs: 250 })
+        etaHistoryRef.current = pushEtaHistory(
+          etaHistoryRef.current,
+          tickEta.approaching ? tickEta.etaSec : null,
+        )
+        setEtaHistory(etaHistoryRef.current)
 
         accumRef.current = 0
         framesRef.current = 0
@@ -170,6 +190,21 @@ export default function DebugHUD() {
   // scene has nothing urgent to say. The HUD samples at ~250ms, so we
   // pass that cadence so the slope reads in real seconds.
   const eta = headroomEtaToEdge(series, { sampleMs: 250 })
+  // R39.A — the rolling ETA history as a tiny strip + a trend read so the
+  // user sees whether the deadline is rushing AT them (ETA falling) or
+  // stabilising (ETA holding/rising). Only meaningful once we've recorded
+  // at least one genuinely-approaching tick.
+  const ETW = HSW, ETH = 18
+  const etaOpts = { width: ETW, height: ETH, ceil: ETA_HISTORY_CEIL }
+  const etaAttr = etaHistoryAttr(etaHistory, etaOpts)
+  const etaSummary = summarizeEtaHistory(etaHistory)
+  const etaTrendGlyph = etaSummary.dir === 'rising' ? '\u2197' : etaSummary.dir === 'falling' ? '\u2198' : '\u2192'
+  // Falling ETA (edge rushing at you) is the warning state → amber/red;
+  // rising (pulling away) is good → green; flat is neutral.
+  const etaTrendColor = etaSummary.dir === 'falling'
+    ? (etaSummary.urgent ? '#f87171' : '#fbbf24')
+    : etaSummary.dir === 'rising' ? '#86efac' : '#8a8aa0'
+  const etaTrendWord = etaSummary.dir === 'rising' ? 'pulling away' : etaSummary.dir === 'falling' ? 'closing in' : 'holding'
 
   return (
     <div style={{
@@ -295,6 +330,32 @@ export default function DebugHUD() {
                     ~{eta.etaSec >= ETA_MAX_SEC ? `${ETA_MAX_SEC}+` : eta.etaSec}s
                   </span>
                 </div>
+              )}
+              {/* R39.A — ETA-to-edge HISTORY strip: the last several
+                  seconds of the "seconds to edge" readout plotted so the
+                  user reads the deadline's DIRECTION. A line sloping down
+                  toward the floor = the edge is closing in; climbing back
+                  to the top = the scene is recovering / pulling away. A
+                  "closing in" / "pulling away" pill names the trend. Only
+                  renders once at least one approaching tick was recorded. */}
+              {etaSummary.hasData && etaAttr && (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                    <span style={{ color: '#8a8aa0' }}>Edge trend</span>
+                    <span style={{ color: etaTrendColor, fontVariantNumeric: 'tabular-nums' }}>
+                      <span style={{ fontWeight: 700, marginRight: 3 }}>{etaTrendGlyph}</span>{etaTrendWord}
+                    </span>
+                  </div>
+                  <svg width={ETW} height={ETH} style={{ display: 'block', borderRadius: 5, background: 'rgba(0,0,0,0.28)', marginBottom: 6 }}>
+                    {/* A faint baseline at the floor marks ETA=0 (you've
+                        hit the budget edge) so a line diving toward it
+                        reads as urgent at a glance. */}
+                    <line x1={0} y1={ETH - 0.5} x2={ETW} y2={ETH - 0.5}
+                      stroke="rgba(248,113,113,0.28)" strokeWidth={1} strokeDasharray="2 3" />
+                    <polyline points={etaAttr} fill="none" stroke={etaTrendColor}
+                      strokeWidth={1.4} strokeLinejoin="round" strokeLinecap="round" />
+                  </svg>
+                </>
               )}
               <svg width={HSW} height={HSH} style={{ display: 'block', borderRadius: 5, background: 'rgba(0,0,0,0.28)' }}>
                 {/* The budget edge — headroom crosses 0 here. Above is

@@ -3,6 +3,9 @@ import {
   FPS_GRAPH_CEIL, FPS_GOOD, FPS_OK,
   fpsBandColor, buildSparklinePoints, sparklinePointsAttr,
   refLineY, summarizeFpsWindow, buildBandedSparklineSegments,
+  // R39.A — ETA-to-edge history strip
+  ETA_HISTORY_CEIL, ETA_HISTORY_MAX,
+  pushEtaHistory, buildEtaHistoryPoints, etaHistoryAttr, summarizeEtaHistory,
 } from './fpsGraph.js'
 
 let passed = 0
@@ -570,3 +573,133 @@ console.log(`PASS: fpsGraph R38.A — ${passed} total assertions (incl. ETA-to-b
 }
 
 console.log(`PASS: fpsGraph R38.D — ${passed} total assertions (incl. band-coloured sparkline segments)`)
+
+// --- R39.A: ETA-to-edge history strip ---------------------------------
+{
+  // pushEtaHistory: finite non-negative kept; junk → null; FIFO cap.
+  eq(JSON.stringify(pushEtaHistory([], 5)), '[5]', 'push: first finite sample kept')
+  eq(JSON.stringify(pushEtaHistory([5], 3)), '[5,3]', 'push: second finite appended')
+  eq(JSON.stringify(pushEtaHistory([5], null)), '[5,null]', 'push: null (not approaching) → null tick')
+  eq(JSON.stringify(pushEtaHistory([5], NaN)), '[5,null]', 'push: NaN → null tick')
+  eq(JSON.stringify(pushEtaHistory([5], Infinity)), '[5,null]', 'push: Infinity → null tick')
+  eq(JSON.stringify(pushEtaHistory([5], -2)), '[5,null]', 'push: negative → null tick')
+  eq(JSON.stringify(pushEtaHistory([5], 0)), '[5,0]', 'push: zero (at the edge) is a real sample')
+  // non-array prev → treated as empty
+  eq(JSON.stringify(pushEtaHistory(null, 4)), '[4]', 'push: non-array prev → fresh [v]')
+  eq(JSON.stringify(pushEtaHistory(undefined, 4)), '[4]', 'push: undefined prev → fresh [v]')
+  // FIFO cap drops oldest
+  {
+    const capped = pushEtaHistory([1, 2, 3], 4, 3)
+    eq(JSON.stringify(capped), '[2,3,4]', 'push: cap drops oldest to maxLen')
+  }
+  // overflow cap normalises a long list down to maxLen
+  eq(pushEtaHistory([1, 2, 3, 4, 5], 6, 3).length, 3, 'push: long list trimmed to cap')
+  // invalid maxLen → default cap (don't crash, don't truncate to 0)
+  ok(pushEtaHistory([1], 2, 0).length === 2, 'push: zero maxLen falls back to default (no truncation)')
+  ok(pushEtaHistory([1], 2, NaN).length === 2, 'push: NaN maxLen falls back to default')
+  // purity: input array not mutated
+  {
+    const src = [1, 2]
+    const snap = JSON.stringify(src)
+    pushEtaHistory(src, 3)
+    eq(JSON.stringify(src), snap, 'push: does not mutate input')
+  }
+
+  // buildEtaHistoryPoints: high ETA → top (small y); 0 → floor.
+  {
+    const pts = buildEtaHistoryPoints([ETA_HISTORY_CEIL, 0], { width: 100, height: 20, ceil: ETA_HISTORY_CEIL })
+    eq(pts.length, 2, 'points: one per sample')
+    near(pts[0].y, 0, 'points: ceil ETA pins to top (y=0)')
+    near(pts[1].y, 20, 'points: ETA 0 pins to floor (y=height)')
+    near(pts[0].x, 0, 'points: oldest at left edge')
+    near(pts[1].x, 100, 'points: newest at right edge')
+  }
+  // ETA above ceil clamps to top; null/junk samples pin to ceil (top = safe)
+  {
+    const pts = buildEtaHistoryPoints([999, null, NaN], { width: 100, height: 20, ceil: 30 })
+    near(pts[0].y, 0, 'points: ETA above ceil clamps to top')
+    near(pts[1].y, 0, 'points: null tick plots at safe ceiling (top)')
+    near(pts[2].y, 0, 'points: NaN tick plots at safe ceiling (top)')
+  }
+  // single sample pins to the right edge (no divide-by-zero)
+  {
+    const pts = buildEtaHistoryPoints([10], { width: 80, height: 20 })
+    eq(pts.length, 1, 'points: single sample → one point')
+    near(pts[0].x, 80, 'points: single sample sits at right edge')
+  }
+  // empty / non-array → []
+  eq(buildEtaHistoryPoints([]).length, 0, 'points: empty → []')
+  eq(buildEtaHistoryPoints(null).length, 0, 'points: non-array → []')
+  // attr string: '' when empty, "x,y x,y" when not
+  eq(etaHistoryAttr([]), '', 'attr: empty → empty string')
+  ok(/^[\d.]+,[\d.]+ [\d.]+,[\d.]+$/.test(etaHistoryAttr([10, 5], { width: 100, height: 20 })),
+    'attr: two samples → "x,y x,y" string')
+
+  // summarizeEtaHistory: trend direction over the finite samples.
+  {
+    const none = summarizeEtaHistory([])
+    eq(none.hasData, false, 'summary: empty → no data')
+    eq(none.dir, 'flat', 'summary: empty → flat')
+    eq(none.latest, null, 'summary: empty → null latest')
+  }
+  // all-null (never approaching) → no data
+  {
+    const s = summarizeEtaHistory([null, null, null])
+    eq(s.hasData, false, 'summary: all-null → no data')
+  }
+  // falling ETA (edge rushing at you): older big, newer small
+  {
+    const s = summarizeEtaHistory([20, 18, 8, 5, 3])
+    eq(s.hasData, true, 'summary: falling → has data')
+    eq(s.dir, 'falling', 'summary: shrinking ETA → falling (edge approaching)')
+    eq(s.latest, 3, 'summary: latest is the newest finite ETA')
+    eq(s.urgent, true, 'summary: latest <= 3s → urgent')
+  }
+  // rising ETA (pulling away / stabilising): older small, newer big
+  {
+    const s = summarizeEtaHistory([3, 5, 12, 18, 24])
+    eq(s.dir, 'rising', 'summary: growing ETA → rising (stabilising)')
+    eq(s.urgent, false, 'summary: comfortable latest → not urgent')
+  }
+  // flat within dead-band
+  {
+    const s = summarizeEtaHistory([10, 10.1, 9.9, 10.05])
+    eq(s.dir, 'flat', 'summary: steady ETA within dead-band → flat')
+  }
+  // nulls interleaved don't fake a trend — only finite samples count
+  {
+    const s = summarizeEtaHistory([20, null, 18, null, 4, 3])
+    eq(s.dir, 'falling', 'summary: ignores null gaps, reads finite trend')
+    eq(s.count, 4, 'summary: count is finite samples only')
+  }
+  // single finite sample → flat (no two halves to compare) but has data
+  {
+    const s = summarizeEtaHistory([2])
+    eq(s.hasData, true, 'summary: single finite → has data')
+    eq(s.dir, 'flat', 'summary: single sample → flat')
+    eq(s.urgent, true, 'summary: single 2s sample → urgent')
+  }
+  // custom urgentAt threshold honoured
+  {
+    const s = summarizeEtaHistory([5], { urgentAt: 6 })
+    eq(s.urgent, true, 'summary: custom urgentAt=6 marks 5s urgent')
+  }
+  // junk (NaN/Infinity/negative) filtered out of the finite series
+  {
+    const s = summarizeEtaHistory([NaN, Infinity, -3, 10])
+    eq(s.count, 1, 'summary: junk filtered, only finite counted')
+    eq(s.latest, 10, 'summary: latest is the lone finite value')
+  }
+  // constants sane
+  ok(ETA_HISTORY_CEIL > 0 && Number.isFinite(ETA_HISTORY_CEIL), 'ETA_HISTORY_CEIL finite positive')
+  ok(ETA_HISTORY_MAX > 0 && Number.isInteger(ETA_HISTORY_MAX), 'ETA_HISTORY_MAX positive integer')
+  // purity: summarize doesn't mutate
+  {
+    const src = [20, 10, 5]
+    const snap = JSON.stringify(src)
+    summarizeEtaHistory(src)
+    eq(JSON.stringify(src), snap, 'summary: does not mutate input')
+  }
+}
+
+console.log(`PASS: fpsGraph R39.A — ${passed} total assertions (incl. ETA-to-edge history strip)`)
