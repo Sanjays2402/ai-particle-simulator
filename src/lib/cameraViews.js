@@ -401,3 +401,75 @@ export function buildCameraRenameActions(views) {
   return out
 }
 
+// --- R39.H: duplicate a saved view -----------------------------------
+//
+// R37.H/R38.H gave the palette save / restore / delete / rename / clear.
+// This adds DUPLICATE: clone an existing view's camera angle as a NEW
+// named view, so a user can base a tweak on an existing framing without
+// re-aiming the camera from scratch. The clone gets a fresh id + a
+// "<name> copy" label and is inserted at the FRONT (newest-first, like
+// appendView), with the same MAX cap.
+//
+// `duplicateView` is the pure clone: find the source view by id, deep-
+// copy its pos/target (so editing the copy can't mutate the original's
+// arrays), give it a fresh monotonic id + a derived name, and prepend.
+//
+// Contract:
+//   - non-array views → [] (nothing to clone into)
+//   - missing / nullish id, or id not present → input ref unchanged
+//     (ref-equal-on-no-op so persistence can skip a redundant save)
+//   - a source view missing a usable pos is NOT cloneable (a duplicate
+//     with no angle to restore is useless) → input ref unchanged
+//   - the clone's name is `nameFor(source)` when provided, else
+//     "<source name> copy"; collisions are fine (names aren't unique)
+//   - inserted at the front, capped at MAX (oldest falls off)
+//   - input array + the source view's arrays never mutated
+export function duplicateView(views, id, nameFor) {
+  if (!Array.isArray(views)) return []
+  if (id === null || id === undefined) return views
+  const src = views.find(v => v && typeof v === 'object' && v.id === id)
+  if (!src) return views
+  // A clone needs a restorable angle — same bar buildCameraPaletteActions
+  // uses for a "restore" action.
+  if (!Array.isArray(src.pos) || src.pos.length < 3) return views
+  if (!src.pos.every(n => Number.isFinite(Number(n)))) return views
+  const newId = (views.reduce((m, v) => Math.max(m, (v && v.id) || 0), 0)) + 1
+  const baseName = (typeof src.name === 'string' && src.name.trim()) ? src.name.trim() : `View ${src.id}`
+  const name = (typeof nameFor === 'function' ? nameFor(src) : null) || `${baseName} copy`
+  const clone = {
+    id: newId,
+    name,
+    // Deep-copy the coordinate arrays so the copy is fully independent.
+    pos: src.pos.slice(),
+    target: Array.isArray(src.target) ? src.target.slice() : src.target,
+    createdAt: Date.now(),
+  }
+  return [clone, ...views].slice(0, MAX)
+}
+
+// Build a DUPLICATE action per view for the palette. Only views with a
+// restorable angle are duplicable (a copy with no pos is useless), so
+// this skips position-corrupt rows — unlike rename/delete, which surface
+// them so a user can purge them. Carries the source viewId. Order
+// preserved (newest-first, as stored).
+export function buildCameraDuplicateActions(views) {
+  if (!Array.isArray(views)) return []
+  const out = []
+  for (const v of views) {
+    if (!v || typeof v !== 'object') continue
+    if (v.id === null || v.id === undefined) continue
+    if (!Array.isArray(v.pos) || v.pos.length < 3) continue
+    if (!v.pos.every(n => Number.isFinite(Number(n)))) continue
+    const name = (typeof v.name === 'string' && v.name.trim()) ? v.name.trim() : `View ${v.id}`
+    out.push({
+      id: `cam-dup-${v.id}`,
+      kind: 'duplicate-view',
+      label: `Duplicate view: ${name}`,
+      sub: 'Clone this camera angle as a new view',
+      keywords: `camera view duplicate clone copy ${name}`.toLowerCase(),
+      viewId: v.id,
+    })
+  }
+  return out
+}
+

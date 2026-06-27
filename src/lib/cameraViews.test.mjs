@@ -13,6 +13,8 @@ import {
   buildCameraDeleteActions,
   // R38.H — rename + clear-all saved views
   renameView, buildCameraRenameActions,
+  // R39.H — duplicate a saved view
+  duplicateView, buildCameraDuplicateActions,
 } from './cameraViews.js'
 
 function assertEq(actual, expected, msg) {
@@ -636,3 +638,119 @@ console.log('PASS: buildCameraDeleteActions — command-palette saved-view delet
 }
 
 console.log('PASS: renameView + buildCameraRenameActions — palette rename/clear lifecycle (R38.H, ~30 asserts)')
+
+// --- R39.H: duplicateView + buildCameraDuplicateActions --------------
+{
+  const base = [
+    { id: 3, name: 'Front', pos: [1, 2, 3], target: [0, 0, 0], createdAt: 100 },
+    { id: 1, name: 'Side', pos: [4, 5, 6], target: [1, 1, 1], createdAt: 50 },
+  ]
+
+  // Happy path: clone by id → fresh id, "<name> copy", prepended front.
+  {
+    const out = duplicateView(base, 3)
+    assertEq(out.length, 3, 'duplicate: list grows by one')
+    assertEq(out[0].id, 4, 'duplicate: clone gets a fresh monotonic id (max+1)')
+    assertEq(out[0].name, 'Front copy', 'duplicate: default name is "<name> copy"')
+    assertEq(out[0].pos, [1, 2, 3], 'duplicate: clone carries the source pos')
+    assertEq(out[0].target, [0, 0, 0], 'duplicate: clone carries the source target')
+    assertEq(out[1].id, 3, 'duplicate: original stays in place after the clone')
+  }
+
+  // Deep-copy: editing the clone's arrays must not touch the original.
+  {
+    const out = duplicateView(base, 3)
+    out[0].pos[0] = 999
+    assertEq(base[0].pos[0], 1, 'duplicate: clone pos is a deep copy (original untouched)')
+    out[0].target[0] = 888
+    assertEq(base[0].target[0], 0, 'duplicate: clone target is a deep copy')
+  }
+
+  // Custom nameFor callback overrides the default name.
+  {
+    const out = duplicateView(base, 1, (src) => `${src.name} (v2)`)
+    assertEq(out[0].name, 'Side (v2)', 'duplicate: nameFor callback names the clone')
+  }
+  // nameFor returning falsy falls back to the default "<name> copy".
+  {
+    const out = duplicateView(base, 1, () => '')
+    assertEq(out[0].name, 'Side copy', 'duplicate: empty nameFor → default copy name')
+  }
+
+  // Source with no usable name → "View <id> copy".
+  {
+    const noName = [{ id: 7, pos: [0, 1, 2], target: [0, 0, 0] }]
+    const out = duplicateView(noName, 7)
+    assertEq(out[0].name, 'View 7 copy', 'duplicate: nameless source → "View N copy"')
+  }
+
+  // ref-equal-on-no-op: missing id / not-present id / nullish id.
+  assertEq(duplicateView(base, 99) === base, true, 'duplicate: id not present → input ref unchanged')
+  assertEq(duplicateView(base, null) === base, true, 'duplicate: null id → input ref unchanged')
+  assertEq(duplicateView(base, undefined) === base, true, 'duplicate: undefined id → input ref unchanged')
+
+  // Position-corrupt source is NOT cloneable (a copy with no angle is useless).
+  {
+    const corrupt = [{ id: 2, name: 'broken', pos: [NaN, 1, 2] }, { id: 5, name: 'noPos' }]
+    assertEq(duplicateView(corrupt, 2) === corrupt, true, 'duplicate: NaN pos source → no clone, ref unchanged')
+    assertEq(duplicateView(corrupt, 5) === corrupt, true, 'duplicate: missing pos source → no clone, ref unchanged')
+    const shortPos = [{ id: 6, name: 'short', pos: [1, 2] }]
+    assertEq(duplicateView(shortPos, 6) === shortPos, true, 'duplicate: <3-element pos → no clone')
+  }
+
+  // non-array → [].
+  assertEq(duplicateView(null, 1), [], 'duplicate: non-array → []')
+
+  // MAX cap: duplicating when the list is full drops the oldest tail.
+  {
+    const full = []
+    for (let i = 1; i <= CAMERA_VIEWS_MAX; i++) full.push({ id: i, name: `V${i}`, pos: [i, i, i], target: [0, 0, 0] })
+    const out = duplicateView(full, 1)
+    assertEq(out.length, CAMERA_VIEWS_MAX, 'duplicate: stays capped at MAX')
+    assertEq(out[0].name, 'V1 copy', 'duplicate: clone is at the front')
+    assertEq(out[out.length - 1].id, CAMERA_VIEWS_MAX - 1, 'duplicate: oldest tail dropped at the cap')
+  }
+
+  // Purity: duplicate doesn't mutate the input array.
+  {
+    const src = [{ id: 1, name: 'A', pos: [1, 2, 3], target: [0, 0, 0] }]
+    const snap = JSON.stringify(src)
+    duplicateView(src, 1)
+    assertEq(JSON.stringify(src), snap, 'duplicate: does not mutate input array')
+  }
+
+  // buildCameraDuplicateActions: one action per CLONEABLE view.
+  {
+    const acts = buildCameraDuplicateActions(base)
+    assertEq(acts.map(a => a.viewId), [3, 1], 'dup actions: one per view, order preserved')
+    assertEq(acts[0].id, 'cam-dup-3', 'dup actions: stable action id')
+    assertEq(acts[0].kind, 'duplicate-view', 'dup actions: kind tag')
+    assertEq(acts[0].label, 'Duplicate view: Front', 'dup actions: label names the source')
+    assertEq(/duplicate/.test(acts[0].keywords) && /clone/.test(acts[0].keywords), true, 'dup actions: searchable keywords')
+  }
+  // Position-corrupt views are SKIPPED (unlike rename/delete) — a copy
+  // with no angle is useless.
+  {
+    const acts = buildCameraDuplicateActions([
+      { id: 9, name: 'good', pos: [1, 2, 3] },
+      { id: 10, name: 'broken', pos: [NaN] },
+      { id: 11, name: 'noPos' },
+    ])
+    assertEq(acts.map(a => a.viewId), [9], 'dup actions: position-corrupt views skipped')
+  }
+  // non-object / no-id rows skipped; non-array → [].
+  {
+    const acts = buildCameraDuplicateActions([null, 5, { id: 8, name: 'keep', pos: [0, 0, 0] }, { name: 'noid' }])
+    assertEq(acts.map(a => a.viewId), [8], 'dup actions: junk rows skipped')
+    assertEq(buildCameraDuplicateActions(null), [], 'dup actions: non-array → []')
+  }
+  // Purity: builder doesn't mutate input.
+  {
+    const src = [{ id: 1, name: 'X', pos: [1, 2, 3] }]
+    const snap = JSON.stringify(src)
+    buildCameraDuplicateActions(src)
+    assertEq(JSON.stringify(src), snap, 'dup actions: builder does not mutate input')
+  }
+}
+
+console.log('PASS: duplicateView + buildCameraDuplicateActions — palette duplicate lifecycle (R39.H)')

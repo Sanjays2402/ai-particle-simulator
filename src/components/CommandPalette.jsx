@@ -5,7 +5,7 @@ import { presets } from '../presets'
 import {
   loadCameraViews, saveCameraViews, appendView, removeView,
   renameView, buildCameraPaletteActions, buildCameraDeleteActions,
-  buildCameraRenameActions,
+  buildCameraRenameActions, duplicateView, buildCameraDuplicateActions,
 } from '../lib/cameraViews'
 import { labelForId as framingLabelForId } from '../lib/framingGuides'
 import { formatCalmToast } from '../lib/calmMode'
@@ -13,7 +13,7 @@ import { showToast } from './Toast'
 import {
   Play, Pause, Shuffle, Camera, Link2, Download, Settings as Cog,
   Magnet, Mic, RotateCcw, Maximize2, Sparkles, Eye, Video, Crop, Wind,
-  Save, Trash2, Pencil,
+  Save, Trash2, Pencil, Copy,
 } from 'lucide-react'
 
 export function CommandPalette({ onSettings }) {
@@ -115,11 +115,27 @@ export function CommandPalette({ onSettings }) {
       <Trash2 size={10} color="#fff" strokeWidth={2.4} />)
   }
 
+  // R39.H — duplicate a saved view: clone its camera angle as a new
+  // "<name> copy" view so a user can base a tweak on an existing framing
+  // without re-aiming the camera. Pure duplicateView (ref-equal-on-no-op)
+  // does the clone; we persist + re-sync the RightSidebar via the shared
+  // event, exactly like the other lifecycle actions.
+  const duplicateViewById = (viewId) => {
+    const current = loadCameraViews()
+    const next = duplicateView(current, viewId)
+    if (next === current) return // not present / not cloneable (no angle)
+    saveCameraViews(next)
+    setCameraViews(next)
+    window.dispatchEvent(new CustomEvent('particle:camera-views-changed'))
+    showToast(`Duplicated "${next[0].name}"`, <Copy size={10} color="#fff" strokeWidth={2.4} />)
+  }
+
   if (!open) return null
 
   const cameraActions = buildCameraPaletteActions(cameraViews)
   const deleteActions = buildCameraDeleteActions(cameraViews)
   const renameActions = buildCameraRenameActions(cameraViews)
+  const duplicateActions = buildCameraDuplicateActions(cameraViews)
 
   return (
     <div
@@ -256,6 +272,20 @@ export function CommandPalette({ onSettings }) {
                 sub={a.sub}
                 keywords={a.keywords}
                 onSelect={run(() => deleteView(a.viewId))}
+              />
+            ))}
+            {/* R39.H — per-view duplicate: clone an existing angle as a
+                new "<name> copy" view so a user can base a tweak on an
+                existing framing without re-aiming the camera. Only
+                cloneable (angle-bearing) views surface here. */}
+            {duplicateActions.map(a => (
+              <Item
+                key={a.id}
+                icon={Copy}
+                label={a.label}
+                sub={a.sub}
+                keywords={a.keywords}
+                onSelect={run(() => duplicateViewById(a.viewId))}
               />
             ))}
             {/* R38.H — per-view rename: selecting the row opens an inline
