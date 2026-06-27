@@ -272,6 +272,17 @@ button:focus-visible {
 .logo-mark > * { position: relative; z-index: 1; }
 @keyframes logo-rotate { to { transform: rotate(360deg); } }
 
+/* R38.B: golden-spiral one-shot "draw-on" sweep. The polyline sets
+   strokeDasharray + strokeDashoffset = its own pixel length, then this
+   animates the offset to 0 so the curve reveals from start to the focal
+   eye. forwards holds the fully-drawn state. Gated to non-reduced-motion
+   in the component (no animation style is applied under RM). */
+@keyframes spiral-sweep { to { stroke-dashoffset: 0; } }
+@keyframes spiral-eye-in {
+  from { opacity: 0; transform: scale(0.4); transform-box: fill-box; transform-origin: center; }
+  to   { opacity: 1; transform: scale(1);   transform-box: fill-box; transform-origin: center; }
+}
+
 /* v2 iter 02: pill section labels with subtle gradient bg */
 .section-label-v2 {
   display: inline-flex; align-items: center; gap: 6px;

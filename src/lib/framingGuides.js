@@ -379,3 +379,30 @@ export function buildGoldenSpiral(frameX, frameY, frameW, frameH, orientation, d
   }
   return out
 }
+
+// --- R38.B: spiral sweep animation length -----------------------------
+//
+// To animate the spiral "drawing itself" once on enable / orientation
+// change, the FramingGuides overlay uses the SVG stroke-dash trick:
+// set strokeDasharray + strokeDashoffset to the polyline's total length,
+// then transition the offset to 0 so the line reveals from start to eye.
+// That needs the exact path length in pixels. This pure helper sums the
+// segment lengths of a [{x,y}, ...] polyline so the component doesn't
+// have to measure the DOM node (which would force a layout + a ref).
+//
+// Defensive: non-array / < 2 points → 0 (nothing to reveal); segments
+// with non-finite coords are skipped so a single bad point can't poison
+// the whole length into NaN.
+export function polylineLength(points) {
+  if (!Array.isArray(points) || points.length < 2) return 0
+  let total = 0
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]
+    const b = points[i]
+    if (!a || !b) continue
+    const ax = Number(a.x), ay = Number(a.y), bx = Number(b.x), by = Number(b.y)
+    if (![ax, ay, bx, by].every(Number.isFinite)) continue
+    total += Math.hypot(bx - ax, by - ay)
+  }
+  return total
+}

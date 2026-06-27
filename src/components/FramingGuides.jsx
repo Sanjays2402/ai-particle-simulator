@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import {
   ratioForId, computeFramingBars, describeFraming, labelForId,
-  computeCompositionGrid,
+  computeCompositionGrid, polylineLength,
 } from '../lib/framingGuides'
+import { useReducedMotion } from '../lib/useReducedMotion'
 
 // Cinematic framing guides overlay. Renders letterbox / pillarbox bars
 // that mask the viewport down to the chosen aspect ratio so the user
@@ -21,6 +22,7 @@ export default function FramingGuides() {
   const framingGridId = useStore(s => s.framingGridId)
   const cycleFramingGrid = useStore(s => s.cycleFramingGrid)
   const spiralOrientation = useStore(s => s.spiralOrientation)
+  const reducedMotion = useReducedMotion()
 
   // Track the viewport so the bars recompute on resize / orientation
   // change. Initialised from window so the first paint is already
@@ -59,6 +61,16 @@ export default function FramingGuides() {
     return () => window.removeEventListener('keydown', onKey)
   }, [cycleFramingGuide, setFramingGuideId, cycleFramingGrid])
 
+  // R38.B — one-shot spiral "draw-on" sweep. The spiral polyline reveals
+  // itself via a stroke-dash animation that runs ONCE per mount. We key
+  // the polyline (and its focal eye) on the orientation so React remounts
+  // it — restarting the CSS animation — whenever the eye corner changes;
+  // because the polyline only renders in spiral mode, leaving and
+  // returning to spiral also remounts it naturally → a fresh sweep. No
+  // state / effect / ref needed (keeps this lint-clean + avoids a
+  // setState-in-effect cascade). Reduced-motion users get the full curve
+  // at once — see spiralLen below, which is 0 under RM so no anim runs.
+
   const ratio = ratioForId(framingGuideId)
   // The grid can draw even with no ratio active (full-viewport frame) so
   // a user gets rule-of-thirds without committing to a crop.
@@ -85,6 +97,11 @@ export default function FramingGuides() {
   const spiralPts = grid && grid.spiral && grid.spiral.length > 0 ? grid.spiral : null
   const spiralAttr = spiralPts ? spiralPts.map(p => `${Math.round(p.x * 10) / 10},${Math.round(p.y * 10) / 10}`).join(' ') : ''
   const spiralEye = spiralPts ? spiralPts[spiralPts.length - 1] : null
+  // R38.B — total path length so the stroke-dash reveal knows how far to
+  // draw. Reduced motion (or no points) → 0 disables the sweep and the
+  // full spiral paints immediately.
+  const spiralLen = spiralPts && !reducedMotion ? polylineLength(spiralPts) : 0
+  const spiralSweeping = spiralLen > 0
 
   const label = describeFraming(framingGuideId, vp.w, vp.h)
   const barStyle = {
@@ -140,15 +157,34 @@ export default function FramingGuides() {
           {/* R37.B — golden (Fibonacci) spiral: the classical S-curve
               guide. A smooth quarter-arc polyline winding to a focal
               "eye" dot a user can place a subject on for the strongest
-              emphasis. The eye corner is set by spiralOrientation. */}
+              emphasis. The eye corner is set by spiralOrientation.
+              R38.B — on enable / orientation change the line "draws
+              itself" once via a stroke-dash reveal (key={sweepKey}
+              remounts it so the one-shot animation restarts); the eye
+              dot fades in as the sweep lands. Reduced motion → spiralLen
+              is 0 so the full curve paints instantly with no animation. */}
           {spiralAttr && (
-            <polyline points={spiralAttr} fill="none"
+            <polyline
+              key={`spiral-${spiralOrientation}`}
+              points={spiralAttr} fill="none"
               stroke="rgba(168,85,247,0.55)" strokeWidth={1.4}
-              strokeLinejoin="round" strokeLinecap="round" />
+              strokeLinejoin="round" strokeLinecap="round"
+              style={spiralSweeping ? {
+                strokeDasharray: spiralLen,
+                strokeDashoffset: spiralLen,
+                animation: 'spiral-sweep 0.9s cubic-bezier(0.33,0.1,0.25,1) forwards',
+              } : undefined}
+            />
           )}
           {spiralEye && (
-            <circle cx={spiralEye.x} cy={spiralEye.y} r={4}
-              fill="rgba(236,72,153,0.92)" stroke="rgba(255,255,255,0.6)" strokeWidth={1} />
+            <circle
+              key={`spiral-eye-${spiralOrientation}`}
+              cx={spiralEye.x} cy={spiralEye.y} r={4}
+              fill="rgba(236,72,153,0.92)" stroke="rgba(255,255,255,0.6)" strokeWidth={1}
+              style={spiralSweeping ? {
+                animation: 'spiral-eye-in 0.4s ease-out 0.62s both',
+              } : undefined}
+            />
           )}
           {grid.points.map((p, i) => (
             <circle key={`p${i}`} cx={p.x} cy={p.y} r={3}

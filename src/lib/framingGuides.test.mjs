@@ -140,6 +140,8 @@ const {
   nextGridId, computeCompositionGrid,
   // R37.B — golden spiral
   SPIRAL_ORIENTATIONS, sanitizeSpiralOrientation, buildGoldenSpiral,
+  // R38.B — spiral sweep length
+  polylineLength,
 } = r35b
 
 // --- grid roster integrity ---
@@ -401,3 +403,53 @@ console.log(`PASS: framingGuides — ${passed} assertions (letterbox/pillarbox g
 }
 
 console.log(`PASS: framingGuides R37.B — ${passed} total assertions (incl. golden spiral + 4 orientations)`)
+
+// === R38.B: polylineLength (spiral sweep reveal distance) =============
+{
+  // --- empty / degenerate → 0 ---
+  eq(polylineLength([]), 0, 'empty → 0')
+  eq(polylineLength([{ x: 1, y: 1 }]), 0, 'single point → 0 (no segment)')
+  eq(polylineLength(null), 0, 'null → 0')
+  eq(polylineLength('nope'), 0, 'non-array → 0')
+  eq(polylineLength(undefined), 0, 'undefined → 0')
+
+  // --- straight segments: sums Euclidean distance ---
+  near(polylineLength([{ x: 0, y: 0 }, { x: 3, y: 4 }]), 5, '3-4-5 triangle → 5')
+  near(polylineLength([{ x: 0, y: 0 }, { x: 10, y: 0 }]), 10, 'horizontal 10')
+  near(polylineLength([{ x: 0, y: 0 }, { x: 0, y: 7 }]), 7, 'vertical 7')
+  // Multi-segment: 0,0 → 3,4 (len 5) → 3,4+12=16 down (len 12) → total 17.
+  near(polylineLength([{ x: 0, y: 0 }, { x: 3, y: 4 }, { x: 3, y: 16 }]), 17, 'two segments sum')
+
+  // --- zero-length (repeated point) contributes 0 ---
+  near(polylineLength([{ x: 5, y: 5 }, { x: 5, y: 5 }, { x: 8, y: 9 }]), 5,
+    'duplicate point adds 0, then 3-4-5 → 5')
+
+  // --- junk coords in a segment are skipped, not poisoning the sum ---
+  // A junk point at the END skips only the last segment; the clean
+  // leading segment (0,0 → 3,4 = 5) still counts.
+  near(polylineLength([{ x: 0, y: 0 }, { x: 3, y: 4 }, { x: NaN, y: 1 }]),
+    5, 'trailing NaN point skips its segment; clean lead counts', 0.001)
+  // A junk point in the MIDDLE skips BOTH adjacent segments (it can't be
+  // an endpoint of any drawable segment).
+  eq(polylineLength([{ x: 0, y: 0 }, { x: NaN, y: 1 }, { x: 3, y: 4 }]), 0,
+    'mid NaN point skips both its segments → 0')
+  near(polylineLength([{ x: 0, y: 0 }, null, { x: 0, y: 6 }]),
+    0, 'null mid-point skips both adjacent segments', 0.001)
+  ok(Number.isFinite(polylineLength([{ x: 0, y: 0 }, { x: Infinity, y: 0 }, { x: 0, y: 5 }])),
+    'Infinity coord never yields a non-finite length')
+
+  // --- a real spiral has a positive, finite length that GROWS with the
+  // frame (a bigger frame → a longer curve to reveal) ---
+  const small = polylineLength(buildGoldenSpiral(0, 0, 100, 100, 'tl', 8))
+  const big = polylineLength(buildGoldenSpiral(0, 0, 300, 300, 'tl', 8))
+  ok(small > 0 && Number.isFinite(small), 'spiral has positive finite length')
+  ok(big > small, 'a 3x-larger frame yields a longer spiral path')
+
+  // --- purity: input not mutated ---
+  const src = [{ x: 1, y: 2 }, { x: 3, y: 4 }]
+  const snap = JSON.stringify(src)
+  polylineLength(src)
+  eq(JSON.stringify(src), snap, 'polylineLength does not mutate input')
+}
+
+console.log(`PASS: framingGuides R38.B — ${passed} total assertions (incl. polylineLength spiral sweep)`)
