@@ -7,6 +7,7 @@ import { createLoop, DEMO_LOOPS } from '../lib/demoAudioLoops'
 import { loadKeymap, resolveAction } from '../lib/keymap'
 import { TIMER_DELAYS, labelForDelay, BURST_COUNTS, labelForBurst } from '../lib/selfTimer'
 import { formatCalmToast, CALM_GATED_MOTIONS, countGatedMotions } from '../lib/calmMode'
+import { downloadCalmGatesFile, parseImport as parseCalmGatesImport, mergeImport as mergeCalmGatesImport } from '../lib/calmGatesIO'
 import { showToast } from './Toast'
 import {
   Play, Pause, RotateCcw, Maximize2, Shuffle, Magnet, Camera, Link2,
@@ -664,10 +665,51 @@ function CalmModeBtn() {
   const setCalmMode = useStore(s => s.setCalmMode)
   const calmGates = useStore(s => s.calmGates)
   const toggleGate = useStore(s => s.toggleCalmGate)
+  const setCalmGates = useStore(s => s.setCalmGates)
   const [open, setOpen] = useState(false)
   const pressTimer = useRef(0)
   const longPressed = useRef(false)
   const gatedCount = countGatedMotions(calmGates)
+
+  // R39.K — export the live calm-gate map as a portable JSON envelope so
+  // a user can carry their per-motion calm preferences to another machine
+  // (parallels the wind / crossfade overrides IO).
+  const exportGates = () => {
+    const name = downloadCalmGatesFile(calmGates)
+    showToast(
+      name ? 'Calm gates exported' : 'Export failed — check console',
+      <Wind size={10} color="#fff" strokeWidth={2.4} />,
+    )
+  }
+
+  // R39.K — import a calm-gate envelope from a .json file. Replace mode
+  // (the file IS the user's intended preference) with a sanitised map, so
+  // a hand-edited file can't inject junk. Reports how many motions flipped.
+  const importGates = () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'application/json,.json'
+    input.onchange = async () => {
+      const file = input.files?.[0]
+      if (!file) return
+      try {
+        const text = await file.text()
+        const res = parseCalmGatesImport(text)
+        if (!res.ok) { showToast(`Import failed: ${res.error}`); return }
+        const merged = mergeCalmGatesImport(calmGates, res.gates, 'replace')
+        setCalmGates(merged.gates)
+        showToast(
+          merged.changed > 0
+            ? `Calm gates imported — ${merged.changed} motion${merged.changed === 1 ? '' : 's'} changed`
+            : 'Calm gates imported — already matched',
+          <Wind size={10} color="#fff" strokeWidth={2.4} />,
+        )
+      } catch (e) {
+        showToast(`Import error: ${e.message || 'unknown'}`)
+      }
+    }
+    input.click()
+  }
 
   // R37.K — naming what the one-click gate changed. The toggle silently
   // affects the gated motions; the auto-fading toast names them so the
@@ -798,6 +840,21 @@ function CalmModeBtn() {
                 )
               })}
             </div>
+            {/* R39.K — export / import the gate map as a portable JSON
+                envelope so a user can carry calm preferences between
+                machines (parallels the wind / crossfade overrides IO). */}
+            <div style={{ display: 'flex', gap: 6, marginTop: 9 }}>
+              <button
+                onClick={exportGates}
+                title="Save these calm-gate choices to a .json file"
+                style={calmIoBtnStyle}
+              >Export</button>
+              <button
+                onClick={importGates}
+                title="Load calm-gate choices from a .json file"
+                style={calmIoBtnStyle}
+              >Import</button>
+            </div>
             <div style={{ fontSize: 10, color: '#6a6a80', marginTop: 8, lineHeight: 1.4 }}>
               Choose which motions calm mode pauses.
             </div>
@@ -806,6 +863,16 @@ function CalmModeBtn() {
       )}
     </div>
   )
+}
+
+// R39.K — the small Export / Import buttons in the calm-gates popover.
+const calmIoBtnStyle = {
+  flex: 1, padding: '5px 0', borderRadius: 7,
+  background: 'rgba(255,255,255,0.04)',
+  border: '1px solid rgba(255,255,255,0.08)',
+  color: '#c8c8d0', cursor: 'pointer',
+  fontFamily: 'inherit', fontSize: 11, fontWeight: 600,
+  letterSpacing: '0.02em',
 }
 
 // Calm button base style — mirrors the shared Btn look so it sits flush

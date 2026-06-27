@@ -760,6 +760,14 @@ export const useStore = create((set, get) => {
     try { localStorage.setItem(CALM_GATES_KEY, JSON.stringify(next)) } catch { /* quota / private mode */ }
     set({ calmGates: next })
   },
+  // R39.K — replace the whole gate map at once (used by the calm-gates
+  // import: a merged/replaced map from a portable JSON envelope). Runs
+  // through sanitizeCalmGates so a hand-edited file can't inject junk.
+  setCalmGates: (gates) => {
+    const next = sanitizeCalmGates(gates)
+    try { localStorage.setItem(CALM_GATES_KEY, JSON.stringify(next)) } catch { /* quota / private mode */ }
+    set({ calmGates: next })
+  },
 
   // Slideshow mode — rotate through filtered/favourited presets on a
   // timer. `slideshowOrder` is one of 'sequence' | 'shuffle' | 'favourites'.
