@@ -163,6 +163,11 @@ Existing capabilities (do not re-ship):
 - Screenshot caption: click a preview corner to set the anchor (R45.G) — the watermark popover's live preview frame is directly manipulable; click a corner to place the caption there. screenshotWatermark.anchorFromPreviewPoint(x,y,w,h) quadrant-splits (midline biases lower/right, degenerate box -> null); TopBar draws 4 faint L-bracket corner hotspots, active one glows.
 - Saved-views two-click "Range" mode (R45.H) — a header "Range" toggle arms an explicit two-click range select (no modifier; touch-friendly): click first row, then last, to select the block. cameraViews.rangeClick is the pure arm/complete state machine (reuses selectIdRange, stale-anchor re-arm); palette shows an armed hint + pending-anchor ring. Shift-click additive path kept.
 - Minimap "Fit selected" button (R45.N) — frames ONLY the live palette multi-selection from the minimap itself, reachable without opening the palette. store selectedViewIds transient mirror (no-op-skip); palette publishes its selection while in select mode + clears on exit; Minimap reuses framingForSelectedViews + a shared applyFitMove eased-tween; indigo "Fit N" button distinct from green FIT-all.
+- Pinned ratio chips show drag-time slot-order badges (R46.M) — while a pinned aspect-ratio chip is being dragged, every pinned chip wears a tiny 1-based "N" order badge previewing the slot it would land in at the current hover target (a sortable-list affordance), so the whole target order reads at a glance not just the one drop highlight. framingGuides.projectedPinnedOrder(count, from, to) mirrors movePinnedRatio's splice (identity on no-drag/count<2/OOB/non-finite; always a permutation of 1..n); badges render only mid-drag, dragged chip's badge emphasised violet.
+- Zen Now-Playing surfaces the spiral eye's corner (R46.E) — when the active composition grid is the golden SPIRAL, the card's grid line also documents which corner the eye converges toward ("Spiral · Top-left") so two recordings guided by opposite-corner spirals are distinguishable. framingGuides.spiralCornerLabel(o) (junk-tolerant, non-empty + unique) + zenMode.formatGridDetail(label, detail, opts) (pure "<label> · <detail>" combiner parallel to formatGridLabel; blank/off base -> '', blank detail -> base only, maxLen-bounded). Only the spiral grid passes a detail; maxLen lifted to 26 so "Spiral · Bottom-right" fits.
+- Screenshot caption: drag across the preview to place it (R46.G) — graduates the R45.G click-a-corner with a drag: press + slide the pointer and the anchor follows the quadrant under it, snapping corner-to-corner across the midlines (feels like dragging the pill). screenshotWatermark.nextAnchorOnDrag(current,x,y,w,h) built on anchorFromPreviewPoint, returns the SAME ref when not crossing a midline (skip 60Hz setState) and current unchanged on degenerate box. TopBar onPointerDown/Move/Up/Cancel with pointer capture + touchAction:none; a plain press-release still works like the R45.G click.
+- Saved-views "range from here" per-row arm (R46.H) — graduates the R45.H header Range toggle; a user arms the range anchor DIRECTLY on a row (right-click on desktop / 450ms touch long-press) so they can say "range from here" without reaching for the header; the next plain click completes the inclusive block via the existing rangeClick. cameraViews.armRangeAnchor(orderedIds, rowId) -> rowId when selectable else null. CommandPalette row onContextMenu + touch long-press (move-cancel guard, post-press click swallowed so the hold doesn't also toggle).
+- Minimap dims non-selected dots while a selection is live (R46.N) — graduates the R45.N "Fit selected" button; when a palette multi-selection is live the minimap fades NON-selected green dots to 28% and gives selected dots a thin indigo ring, so the chosen subset (exactly what "Fit N" frames) reads at a glance. minimap.markerSelectionState(id, idSet) -> 'none'|'selected'|'unselected' (Set|Array|iterable) + markerSelectionAlpha + MARKER_DIM_ALPHA. Minimap mirrors selectedViewIds into a ref via an effect (rAF loop reads it live without re-subscribing; written in an effect not during render for lint-cleanliness); hovered dot always full-strength.
 - (R36.H) Command palette "Camera" group — saved camera views + zen + framing + calm mode reachable from Cmd-K without opening the RightSidebar. Pure lib/cameraViews.js: buildCameraPaletteActions(views) -> searchable {id, kind, label, sub (rounded x,y,z), keywords, view} descriptors; defensive (non-array -> [], corrupt/missing-id/short-or-nonfinite-pos rows skipped so a bad localStorage blob can't inject a crash-on-restore action; id 0 valid; order preserved; input never mutated). CommandPalette Camera group: Enter Zen, Cycle Framing Guide (live ratio in sub), toggle Calm Mode, one searchable restore-row per saved view via window.__particleCamera. Item gains a keywords prop wired to cmdk fuzzy search; view list re-reads on each palette open; empty-state points at V quick-save.
 - (R36.K) Global "calm mode" master toggle — one TopBar Wind-icon button (also in the command palette) gates the four ambient camera/colour motions at once (auto-rotate, audio camera-shake, hue-cycle drift, zen ambient auto-orbit) so a user can instantly settle a busy scene before a screenshot, WITHOUT touching the accessibility reduced-motion setting or four separate controls. Pure lib/calmMode.js: CALM_GATED_MOTIONS roster + resolveCalm(reducedMotion, calmMode) (OR gate each consumer calls — calm can only ADD suppression, never re-enable what reduced-motion turned off; coerces args so a stray object never leaks) + describeCalmState() projector. Wired into all 3 ParticleCanvas consumers (hue-cycle, camera-shake, CameraControls auto-rotate) + ZenMode ambient-orbit rAF. Store calmMode persisted to particle-calm-mode-v1; setter also zeroes any in-flight zen orbit.
 - Spectrum peak-hold trail per-bar frequency-coloured tint PALETTE chip rail (R21.21). Graduates R20.13's single warm→cool ramp with 5 curated palettes selectable via a new chip in the WaveformOverlay header. Chip only renders when the existing tint chip is ON (the palette is meaningless when the trail inherits the bar's hue); warmCool stays first in cycle so an existing tint user's click target unchanged. Palettes: warmCool (R20.13 default, bass red-orange / treble blue-violet), rainbow (full 0→360 sweep), cool (260→180 indigo→teal for twilight presets), warm (0→50 red→amber for fire/embers), mono (215→195 narrow grey band, brightness-only map). New lib helpers in waveform.js: `PEAK_TRAIL_PALETTES` roster + `PEAK_TRAIL_PALETTE_NAMES` chip-cycle order + `isValidTrailPalette(name)` defensive-against-prototype-pollution + `nextTrailPalette(current)` wraparound + `peakTrailHueForBarIndexPalette(barIndex, totalBars, paletteName)` palette-aware hue projector with identical defensive contract as R20.13. INVARIANT pinned in tests: palette-aware call with 'warmCool' equals legacy peakTrailHueForBarIndex for every bar, so users with tint ON who never touch the chip see zero behavioural change. Store: spectrumPeakTrailPalette persisted to `spectrum-peak-trail-palette-v1`, default 'warmCool', corrupt values resolve via isValidTrailPalette. UI: tiny palette chip at left:188 in WaveformOverlay header wears the active palette's 3-stop linear-gradient as its own background so the chip visually previews the palette it controls.
@@ -909,23 +914,53 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R45.D Perf-pill copy-all-window-stats button (carried R42.D→R44.D)
 - [ ] R45.K Calm-gate import per-row apply (carried R42.K→R44.K)
 
+### Batch 46 — fresh frontend queue (graduations of Batch 45 + carried)  (SHIPPED)
+- [x] **R46.M** Drag-time slot-order badges on the pinned ratio chips — 5096013
+- [x] **R46.E** Zen Now-Playing surfaces the spiral eye's corner — 87aa50e
+- [x] **R46.G** Drag the caption across the preview to place it — 7b2a36b
+- [x] **R46.H** "Range from here" — arm the range anchor from a row — 50ba4d9
+- [x] **R46.N** Minimap dims non-selected dots while a selection is live — 8d7f15c
+
+
 ### Batch 46 — fresh frontend queue (graduations of Batch 45 + carried)
-- [ ] R46.M Pinned ratios (R45.M): a tiny numeric "1/N" order badge on each
+- [x] R46.M Pinned ratios (R45.M): a tiny numeric "1/N" order badge on each
   pinned chip while dragging so the user sees the target slot as they move.
-- [ ] R46.E Zen Now-Playing (R45.E): also surface the active SPIRAL
+  — 5096013 (framingGuides.projectedPinnedOrder + LeftSidebar drag badges)
+- [x] R46.E Zen Now-Playing (R45.E): also surface the active SPIRAL
   ORIENTATION (corner) when the spiral grid is the chosen composition guide.
-- [ ] R46.G Caption preview (R45.G): drag (not just click) the pill across
+  — 87aa50e (framingGuides.spiralCornerLabel + zenMode.formatGridDetail)
+- [x] R46.G Caption preview (R45.G): drag (not just click) the pill across
   the preview to set the anchor — pointer-move maps continuously to corners.
-- [ ] R46.H Range mode (R45.H): a "Range from here" affordance on each ROW
+  — 7b2a36b (screenshotWatermark.nextAnchorOnDrag + TopBar pointer-drag)
+- [x] R46.H Range mode (R45.H): a "Range from here" affordance on each ROW
   (right-click / long-press) so the anchor can be set without the header.
-- [ ] R46.N Fit selected (R45.N): the minimap dims the NON-selected green
+  — 50ba4d9 (cameraViews.armRangeAnchor + CommandPalette row gestures)
+- [x] R46.N Fit selected (R45.N): the minimap dims the NON-selected green
   dots while a selection is live so the user sees what "Fit selected" frames.
-- [ ] R45.C Self-timer burst review strip (carried R36.C→R45.C)
-- [ ] R45.O Debug HUD compact/expanded toggle (carried R38.O→R45.O)
-- [ ] R45.B Spiral sweep easing preview glyph (carried R42.B→R45.B)
-- [ ] R45.A Debug HUD copy-pinned-ETA button (carried R42.A→R45.A)
-- [ ] R45.D Perf-pill copy-all-window-stats button (carried R42.D→R45.D)
-- [ ] R45.K Calm-gate import per-row apply (carried R42.K→R45.K)
+  — 8d7f15c (minimap.markerSelectionState/Alpha + Minimap dot dimming)
+
+### Batch 47 — fresh frontend queue (graduations of Batch 46 + carried)
+- [ ] R47.M Pinned ratios (R46.M): while dragging, also show a thin insert
+  caret BETWEEN chips at the projected drop gap (not just per-chip badges)
+  so the landing position reads even when chips are tightly packed.
+- [ ] R47.E Zen Now-Playing (R46.E): when the framing CROP is custom, show
+  the numeric ratio (e.g. "2.35") on the same line as the crop label so a
+  recording documents the exact custom aspect, not just "Custom".
+- [ ] R47.G Caption preview (R46.G): while dragging the caption, show a live
+  ghost pill that follows the pointer between corner snaps (a drag preview)
+  so the placement gesture has continuous visual feedback.
+- [ ] R47.H Range mode (R46.H): after a "range from here" anchor is armed,
+  paint a faint connector down the rows from the anchor to the hovered row
+  so the pending block is previewed before the completing click.
+- [ ] R47.N Fit selected (R46.N): the minimap "Fit N" button label also
+  shows a tiny dot-count glyph cluster matching the dimmed/lit dots so the
+  button and the map agree at a glance on what's framed.
+- [ ] R45.C Self-timer burst review strip (carried R36.C→R46.C)
+- [ ] R45.O Debug HUD compact/expanded toggle (carried R38.O→R46.O)
+- [ ] R45.B Spiral sweep easing preview glyph (carried R42.B→R46.B)
+- [ ] R45.A Debug HUD copy-pinned-ETA button (carried R42.A→R46.A)
+- [ ] R45.D Perf-pill copy-all-window-stats button (carried R42.D→R46.D)
+- [ ] R45.K Calm-gate import per-row apply (carried R42.K→R46.K)
 
 ### Future queue carried from Batch 24 (still genuine, unshipped)
 - [ ] R25.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view
@@ -935,6 +970,62 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R25.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode)
 
 ## TICK LOG
+- 2026-06-28 13:42 PT — Batch 46 (5/5). Tick 46. Frontend-focus override
+  active. Shipped FIVE genuinely-new user-facing features, each a clean
+  graduation of a tick-45 feature, spread across 5 distinct lib + component
+  pairs (framingGuides+LeftSidebar, framingGuides/zenMode+ZenMode,
+  screenshotWatermark+TopBar, cameraViews+CommandPalette, minimap+Minimap)
+  so no two overlap. Each adds a fresh pure tested helper + real UI wiring.
+  NOTE: the trigger message's "31 unpushed commits / first tick / branch
+  feature/autoship off LOCAL HEAD / npm install" was STALE boilerplate
+  AGAIN (10th tick running — same false signal Batch 37-45 logged).
+  Reality: repo in sync with origin at d8f9fde (0 ahead / 0 behind),
+  node_modules present (185 entries), STATE.md bootstrapped through tick
+  45, ZERO unpushed commits to preserve. Followed the AUTHORITATIVE prompt:
+  worked DIRECTLY ON main (the prompt BANS feature branches — they don't
+  show on the contribution graph), pushed straight to origin/main.
+  Non-destructive since main==origin/main, so the operator's "preserve
+  commits" intent is met.
+  Commits: 5096013 (R46.M drag-time slot-order badges on pinned ratio chips
+  — framingGuides.projectedPinnedOrder[mirrors movePinnedRatio splice,
+  identity on no-drag/OOB, always a 1..n permutation]; LeftSidebar renders
+  a top-centered "N" badge on each pinned chip mid-drag, dragged chip's
+  emphasised violet, wrapper -> position:relative/overflow:visible),
+  87aa50e (R46.E zen spiral corner — framingGuides.spiralCornerLabel[junk-
+  tolerant, non-empty+unique] + zenMode.formatGridDetail["<label> · <detail>"
+  combiner parallel to formatGridLabel]; ZenMode appends the corner only
+  when grid==='spiral', maxLen 26), 7b2a36b (R46.G drag-place caption —
+  screenshotWatermark.nextAnchorOnDrag[built on anchorFromPreviewPoint,
+  same-ref on no-cross to skip 60Hz setState, current-unchanged on bad
+  box]; TopBar onClick -> onPointerDown/Move/Up/Cancel + pointer capture +
+  touchAction:none + draggingAnchor ref gate), 50ba4d9 (R46.H range-from-
+  here — cameraViews.armRangeAnchor[rowId if selectable else null];
+  CommandPalette row onContextMenu + 450ms touch long-press, post-press
+  click swallowed, composes with rangeClick], 8d7f15c (R46.N minimap dim
+  non-selected — minimap.markerSelectionState[Set|Array|iterable ->
+  none/selected/unselected] + markerSelectionAlpha + MARKER_DIM_ALPHA;
+  Minimap mirrors selectedViewIds into a ref VIA AN EFFECT (not during
+  render — lint-clean) so the rAF loop reads it live, dims unselected to
+  28% + indigo ring on selected, hovered always full).
+  Pushed d8f9fde..8d7f15c -> origin/main (verified fast-forward, 0 ahead /
+  0 behind after push).
+  Gates (batch, once): lint EXACTLY at baseline (26 problems / 23 errors /
+  3 warnings — all pre-existing; proved repo-wide count unchanged; my 10
+  touched lib/component files lint clean — caught + fixed ONE net-new
+  react-hooks/refs error mid-R46.N by moving the ref mirror from a render-
+  time write into a useEffect before committing). Build: green (~0.78s,
+  2436 modules). Unit tests: 48 files ALL pass (count unchanged — extended
+  5 existing test files in place); +113 fresh asserts (framingGuides +41
+  [R46.M order +28, R46.E corner +13], zenMode +13 R46.E, screenshotWater-
+  mark +15 R46.G, cameraViews +18 R46.H, minimap +19 R46.N).
+  RUNTIME SMOKE TEST: loaded the dev build in a real browser (Chrome
+  DevTools MCP) — app mounts (canvas 1200x863 + 358 buttons). Dynamically
+  imported all 5 new lib modules from the live bundle + exercised every new
+  pure helper (projectedPinnedOrder [4,1,2,3], spiralCornerLabel, format-
+  GridDetail, nextAnchorOnDrag same-ref + cross + bad-box, armRangeAnchor
+  valid/stray/empty, markerSelectionState + alpha) — ALL_OK true. Console:
+  ONLY the pre-existing ParticleCanvas `_recFrameCount` this-binding error
+  (UNTOUCHED file, logged since Batch 44); ZERO new errors from this tick.
 - 2026-06-28 10:02 PT — Batch 45 (5/5). Tick 45. Frontend-focus override
   active. Shipped FIVE genuinely-new user-facing features, each a clean
   graduation of a tick-44 feature, spread across 5 distinct libs +
