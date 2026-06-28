@@ -23,6 +23,8 @@ import {
   removeViews,
   // R43.H — select-all / clear header state
   countSelected, allIdsSelected, someIdsSelected, toggleSelectAll,
+  // R44.H — invert selection
+  invertSelection,
 } from './cameraViews.js'
 
 function assertEq(actual, expected, msg) {
@@ -1063,3 +1065,57 @@ console.log('PASS: removeViews — bulk-delete a selected subset (R42.H)')
 }
 
 console.log('PASS: select-all / clear header state — countSelected/all/some/toggleSelectAll (R43.H)')
+
+// --- R44.H: invert selection -----------------------------------------
+{
+  const ids = [10, 20, 30]
+  // none selected → invert selects all (equivalent to select-all).
+  {
+    const out = invertSelection(ids, new Set())
+    assertEq([...out].sort((a, b) => a - b), [10, 20, 30], 'invert: none → all')
+  }
+  // all selected → invert clears (equivalent to clear).
+  {
+    const out = invertSelection(ids, new Set([10, 20, 30]))
+    assertEq([...out], [], 'invert: all → none')
+  }
+  // partial → the complement: {20} ticked → {10, 30}.
+  {
+    const out = invertSelection(ids, new Set([20]))
+    assertEq([...out].sort((a, b) => a - b), [10, 30], 'invert: {20} → {10,30}')
+  }
+  // "all but these three" workflow: tick two, invert → the rest.
+  {
+    const out = invertSelection(ids, new Set([10, 30]))
+    assertEq([...out], [20], 'invert: {10,30} → {20}')
+  }
+  // double-invert is the identity (within the selectable set).
+  {
+    const start = new Set([10])
+    const once = invertSelection(ids, start)
+    const twice = invertSelection(ids, once)
+    assertEq([...twice].sort((a, b) => a - b), [10], 'invert: double-invert is identity')
+  }
+  // stale ids in the incoming set neither survive nor block valid flips.
+  {
+    const out = invertSelection(ids, new Set([20, 99]))
+    assertEq([...out].sort((a, b) => a - b), [10, 30], 'invert: stale id 99 ignored')
+    assertTrue(!out.has(99), 'invert: stale id never leaks into result')
+  }
+  // accepts an array selection (toIdSet normalises).
+  {
+    const out = invertSelection(ids, [10, 20])
+    assertEq([...out], [30], 'invert: array selection → complement')
+  }
+  // empty / non-array ordered ids → empty set.
+  assertEq([...invertSelection([], new Set([10]))], [], 'invert: empty list → empty')
+  assertEq([...invertSelection(null, new Set([10]))], [], 'invert: non-array list → empty')
+  // returns a FRESH set (never an input ref).
+  {
+    const sel = new Set([10])
+    const out = invertSelection(ids, sel)
+    assertTrue(out !== sel, 'invert: returns a fresh set')
+  }
+}
+
+console.log('PASS: invert selection — complement / double-invert identity / stale-id reconcile (R44.H)')

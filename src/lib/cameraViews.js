@@ -712,3 +712,24 @@ export function toggleSelectAll(orderedIds, selected) {
   return new Set(orderedIds)
 }
 
+// --- R44.H: invert selection -----------------------------------------
+//
+// The R43.H header gives select-all / clear. Inverting is the natural
+// companion: a user who wants "all but these three" ticks the three then
+// inverts, instead of ticking all the rest by hand. This returns a fresh
+// Set holding exactly the selectable ids that are NOT currently selected
+// (reconciled against orderedIds so a stale id in the incoming set neither
+// survives nor blocks a valid id from flipping in). Pure; never mutates.
+//   - empty / non-array orderedIds → empty Set
+//   - none selected → all selected (equivalent to select-all)
+//   - all selected → none selected (equivalent to clear)
+export function invertSelection(orderedIds, selected) {
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) return new Set()
+  const ids = toIdSet(selected)
+  const next = new Set()
+  for (const id of orderedIds) {
+    if (!ids.has(id)) next.add(id)
+  }
+  return next
+}
+

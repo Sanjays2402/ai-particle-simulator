@@ -10,6 +10,8 @@ import {
   removeViews,
   // R43.H — select-all / clear header state
   allIdsSelected, someIdsSelected, toggleSelectAll,
+  // R44.H — invert selection
+  invertSelection,
 } from '../lib/cameraViews'
 import { labelForId as framingLabelForId } from '../lib/framingGuides'
 import { formatCalmToast } from '../lib/calmMode'
@@ -203,6 +205,21 @@ export function CommandPalette({ onSettings }) {
         v.pos.every(n => Number.isFinite(Number(n))))
       .map(v => v.id)
     setSelectedIds(prev => toggleSelectAll(orderedIds, prev))
+    setAnchorId(null)
+  }
+
+  // R44.H — invert the selection: flip every selectable view's checked
+  // state in one click. Lets a user pick "all but these three" by ticking
+  // the three then inverting, instead of ticking the rest by hand. Pure
+  // invertSelection reconciles against the live duplicable-view ids so a
+  // stale id can't leak in. Resets the shift-click anchor (a bulk flip has
+  // no single origin row).
+  const invertSelected = () => {
+    const orderedIds = cameraViews
+      .filter(v => v && v.id != null && Array.isArray(v.pos) && v.pos.length >= 3 &&
+        v.pos.every(n => Number.isFinite(Number(n))))
+      .map(v => v.id)
+    setSelectedIds(prev => invertSelection(orderedIds, prev))
     setAnchorId(null)
   }
 
@@ -533,34 +550,56 @@ export function CommandPalette({ onSettings }) {
                     {selectedCount}/{duplicableViews.length}
                   </span>
                 </div>
-                {/* R43.H — select-all / clear header: one click checks
-                    every view (or clears when all are checked). The box
-                    shows a check when all are selected, a dash when some
-                    are. Saves ticking each row to act on "all but one". */}
-                <button
-                  onClick={toggleAllSelected}
-                  title={allSelected ? 'Clear selection' : 'Select all views'}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 9, width: '100%',
-                    padding: '6px 9px', borderRadius: 8, marginBottom: 7, cursor: 'pointer',
-                    textAlign: 'left',
-                    background: 'rgba(255,255,255,0.02)',
-                    border: '1px solid rgba(255,255,255,0.05)',
-                    color: '#c4b5fd', fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600,
-                    transition: 'all 0.12s ease-out',
-                  }}
-                >
-                  <span style={{
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    width: 16, height: 16, borderRadius: 5, flexShrink: 0,
-                    background: (allSelected || someSelected) ? 'rgba(168,85,247,0.6)' : 'rgba(255,255,255,0.06)',
-                    border: `1px solid ${(allSelected || someSelected) ? 'rgba(168,85,247,0.7)' : 'rgba(255,255,255,0.14)'}`,
-                    color: '#fff', fontSize: 11, lineHeight: 1,
-                  }}>{allSelected ? '\u2713' : someSelected ? '\u2212' : ''}</span>
-                  <span style={{ flex: 1, color: '#a78bfa', letterSpacing: '0.02em' }}>
-                    {allSelected ? 'Clear all' : 'Select all'}
-                  </span>
-                </button>
+                {/* R43.H — select-all / clear header + R44.H — invert.
+                    Select-all checks every view (or clears when all are
+                    checked); the box shows a check when all are selected, a
+                    dash when some. Invert flips every view's state so a user
+                    can pick "all but these three" by ticking three then
+                    inverting. */}
+                <div style={{ display: 'flex', gap: 6, marginBottom: 7 }}>
+                  <button
+                    onClick={toggleAllSelected}
+                    title={allSelected ? 'Clear selection' : 'Select all views'}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 9, flex: 1,
+                      padding: '6px 9px', borderRadius: 8, cursor: 'pointer',
+                      textAlign: 'left',
+                      background: 'rgba(255,255,255,0.02)',
+                      border: '1px solid rgba(255,255,255,0.05)',
+                      color: '#c4b5fd', fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600,
+                      transition: 'all 0.12s ease-out',
+                    }}
+                  >
+                    <span style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      width: 16, height: 16, borderRadius: 5, flexShrink: 0,
+                      background: (allSelected || someSelected) ? 'rgba(168,85,247,0.6)' : 'rgba(255,255,255,0.06)',
+                      border: `1px solid ${(allSelected || someSelected) ? 'rgba(168,85,247,0.7)' : 'rgba(255,255,255,0.14)'}`,
+                      color: '#fff', fontSize: 11, lineHeight: 1,
+                    }}>{allSelected ? '\u2713' : someSelected ? '\u2212' : ''}</span>
+                    <span style={{ flex: 1, color: '#a78bfa', letterSpacing: '0.02em' }}>
+                      {allSelected ? 'Clear all' : 'Select all'}
+                    </span>
+                  </button>
+                  {/* R44.H — invert: flip every view's checked state. */}
+                  <button
+                    onClick={invertSelected}
+                    title="Invert selection — check the unchecked, uncheck the checked"
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                      padding: '6px 12px', borderRadius: 8, cursor: 'pointer',
+                      background: 'rgba(255,255,255,0.02)',
+                      border: '1px solid rgba(255,255,255,0.05)',
+                      color: '#a78bfa', fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600,
+                      letterSpacing: '0.02em', flexShrink: 0,
+                      transition: 'all 0.12s ease-out',
+                    }}
+                  >
+                    {/* Two half-filled squares glyph cue for "swap states". */}
+                    <span aria-hidden="true" style={{ fontSize: 12, lineHeight: 1 }}>{'\u21c4'}</span>
+                    Invert
+                  </button>
+                </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 9 }}>
                   {duplicableViews.map(v => {
                     const on = selectedIds.has(v.id)
