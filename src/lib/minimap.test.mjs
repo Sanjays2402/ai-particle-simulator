@@ -5,6 +5,9 @@ import {
   DEFAULT_SCENE_HALF, MIN_SCENE_HALF, MAX_SCENE_HALF,
   pickSceneHalf, projectXZ, sampleScene, lookDirXZ, unprojectXZ, scaleLabelFor,
   projectSavedViews, pickNearestMarker, tooltipPlacement,
+  // R42.N — frame all saved views
+  framingForViews, fitCameraDistance, frameViewsCameraMove,
+  FIT_MIN_DIST, FIT_MAX_DIST, FIT_DEFAULT_DIR,
 } from './minimap.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -250,4 +253,109 @@ eq(scaleLabelFor(NaN), `${DEFAULT_SCENE_HALF}u`, 'NaN → default')
   eq(tooltipPlacement(null, 132), null, 'null marker → null')
 }
 
-console.log(`PASS: minimap — pickSceneHalf, projectXZ (clamped), sampleScene, lookDirXZ, unprojectXZ (round-trip), scaleLabelFor, projectSavedViews (empty/origin/multi/bounds/dirty), pickNearestMarker (hit/miss/nearest), tooltipPlacement (top/bottom flip + edge slide + tiny-canvas fallback)`)
+// --- R42.N: frame all saved views ---
+{
+  // framingForViews — centroid + XZ radius.
+  {
+    const views = [
+      { id: 1, pos: [10, 0, 0], target: [0, 0, 0] },
+      { id: 2, pos: [-10, 0, 0], target: [0, 0, 0] },
+      { id: 3, pos: [0, 6, 10], target: [0, 0, 0] },
+      { id: 4, pos: [0, 0, -10], target: [0, 0, 0] },
+    ]
+    const f = framingForViews(views)
+    eq(f.count, 4, 'framing counts all 4 views')
+    near(f.center[0], 0, 'centroid x ~ 0')
+    near(f.center[1], 1.5, 'centroid y = mean of ys (6/4)')
+    near(f.center[2], 0, 'centroid z ~ 0')
+    // radius is the max XZ distance from centroid (10 from the x/z extremes).
+    near(f.radius, 10, 'radius = max XZ spread')
+  }
+  // single view → radius 0, centroid IS the view pos.
+  {
+    const f = framingForViews([{ id: 1, pos: [5, 5, 5] }])
+    eq(f.count, 1, 'single view count 1')
+    near(f.radius, 0, 'single view radius 0')
+    eq(JSON.stringify(f.center), JSON.stringify([5, 5, 5]), 'single view centroid = pos')
+  }
+  // defensive: empty / non-array / all-corrupt → null.
+  eq(framingForViews([]), null, 'empty → null')
+  eq(framingForViews(null), null, 'non-array → null')
+  eq(framingForViews([{ id: 1 }, { id: 2, pos: [1, 2] }]), null, 'no usable pos → null')
+  // corrupt rows skipped, valid ones still framed.
+  {
+    const f = framingForViews([
+      null,
+      { id: 1, pos: [4, 0, 0] },
+      { id: 2, pos: [NaN, 0, 0] },
+      { id: 3, pos: [-4, 0, 0] },
+    ])
+    eq(f.count, 2, 'corrupt rows skipped — 2 valid')
+    near(f.center[0], 0, 'centroid of the 2 valid views')
+    near(f.radius, 4, 'radius from the 2 valid views')
+  }
+
+  // fitCameraDistance — physically grounded + clamped.
+  {
+    // larger radius → larger distance (monotone).
+    ok(fitCameraDistance(20) > fitCameraDistance(10), 'distance grows with radius')
+    // radius 0 → the minimum pull-back (a single view still frames sanely).
+    eq(fitCameraDistance(0), FIT_MIN_DIST, 'radius 0 → FIT_MIN_DIST')
+    // huge radius clamps to MAX.
+    eq(fitCameraDistance(100000), FIT_MAX_DIST, 'huge radius clamps to MAX')
+    // defensive: non-finite / negative → MIN.
+    eq(fitCameraDistance(NaN), FIT_MIN_DIST, 'NaN radius → MIN')
+    eq(fitCameraDistance(-5), FIT_MIN_DIST, 'negative radius → MIN')
+    // always within band.
+    for (const r of [0, 1, 8, 50, 999]) {
+      const d = fitCameraDistance(r)
+      ok(d >= FIT_MIN_DIST && d <= FIT_MAX_DIST, `fit dist for radius ${r} in band — got ${d}`)
+    }
+    // a custom opts band is honoured.
+    eq(fitCameraDistance(0, { minDist: 12 }), 12, 'custom minDist honoured')
+  }
+
+  // frameViewsCameraMove — full camera move.
+  {
+    const framing = { center: [0, 0, 0], radius: 10, count: 3 }
+    // current camera looking down +Z from (0,0,40), target origin.
+    const move = frameViewsCameraMove(framing, [0, 0, 40], [0, 0, 0])
+    ok(move != null, 'move computed')
+    // target lands on the centroid.
+    eq(JSON.stringify(move.target), JSON.stringify([0, 0, 0]), 'target = centroid')
+    // camera keeps its +Z direction (dolly, not teleport): pos is on +Z axis.
+    near(move.pos[0], 0, 'kept direction: pos x ~ 0')
+    near(move.pos[1], 0, 'kept direction: pos y ~ 0')
+    ok(move.pos[2] > 0, 'kept direction: pos still on +Z side')
+    near(move.pos[2], move.dist, 'pos z == fit distance along +Z')
+    // the eye sits exactly `dist` from the target.
+    {
+      const dx = move.pos[0] - move.target[0]
+      const dy = move.pos[1] - move.target[1]
+      const dz = move.pos[2] - move.target[2]
+      near(Math.sqrt(dx * dx + dy * dy + dz * dz), move.dist, 'eye is dist from target')
+    }
+  }
+  // offset centroid: target follows the cluster, not the origin.
+  {
+    const framing = { center: [100, 5, -20], radius: 4, count: 2 }
+    const move = frameViewsCameraMove(framing, [100, 5, 0], [100, 5, -20])
+    eq(JSON.stringify(move.target), JSON.stringify([100, 5, -20]), 'target follows offset centroid')
+  }
+  // degenerate current direction (camera on its own target) → default dir.
+  {
+    const framing = { center: [0, 0, 0], radius: 8, count: 2 }
+    const move = frameViewsCameraMove(framing, [3, 3, 3], [3, 3, 3])
+    ok(move != null, 'degenerate dir still yields a move')
+    // pos = center + FIT_DEFAULT_DIR * dist (direction came from the fallback).
+    near(move.pos[0], FIT_DEFAULT_DIR[0] * move.dist, 'fallback dir x')
+    near(move.pos[1], FIT_DEFAULT_DIR[1] * move.dist, 'fallback dir y')
+    near(move.pos[2], FIT_DEFAULT_DIR[2] * move.dist, 'fallback dir z')
+  }
+  // defensive: null framing / bad center → null.
+  eq(frameViewsCameraMove(null, [0, 0, 0], [0, 0, 0]), null, 'null framing → null')
+  eq(frameViewsCameraMove({ center: [0, 0] }, [0, 0, 0], [0, 0, 0]), null, 'short center → null')
+  eq(frameViewsCameraMove({ center: [0, NaN, 0] }, [0, 0, 0], [0, 0, 0]), null, 'non-finite center → null')
+}
+
+console.log(`PASS: minimap — pickSceneHalf, projectXZ (clamped), sampleScene, lookDirXZ, unprojectXZ (round-trip), scaleLabelFor, projectSavedViews (empty/origin/multi/bounds/dirty), pickNearestMarker (hit/miss/nearest), tooltipPlacement (top/bottom flip + edge slide + tiny-canvas fallback), framingForViews + fitCameraDistance + frameViewsCameraMove (R42.N frame-all)`)

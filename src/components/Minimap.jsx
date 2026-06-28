@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import {
   sampleScene, projectXZ, lookDirXZ, unprojectXZ, scaleLabelFor,
   projectSavedViews, pickNearestMarker, tooltipPlacement,
+  framingForViews, frameViewsCameraMove,
 } from '../lib/minimap'
 import { loadCameraViews, saveCameraViews, removeView } from '../lib/cameraViews'
 import { showToast } from './Toast'
@@ -36,6 +37,11 @@ export default function Minimap() {
   const [hoverId, setHoverId] = useState(null)
   const [hoverPlace, setHoverPlace] = useState(null)
   const [hoverName, setHoverName] = useState('')
+  // R42.N — saved-view count mirrored into state so the render path can
+  // gate the "Fit all" button without reading viewsRef (which the
+  // react-hooks/refs rule forbids during render). Updated whenever the
+  // tick loop refreshes the cached views list.
+  const [viewCount, setViewCount] = useState(0)
 
   useEffect(() => {
     if (!enabled) return
@@ -51,6 +57,7 @@ export default function Minimap() {
     // Seed views immediately on enable so the first frame already
     // paints any saved views.
     viewsRef.current = loadCameraViews()
+    setViewCount(viewsRef.current.length)
 
     const tick = () => {
       rafRef.current = requestAnimationFrame(tick)
@@ -62,6 +69,10 @@ export default function Minimap() {
       if (viewsTickRef.current >= 30) {
         viewsTickRef.current = 0
         viewsRef.current = loadCameraViews()
+        // R42.N — keep the render-side count in sync (functional set
+        // skips a re-render when the length is unchanged, so the 0.5s
+        // refresh doesn't churn React when nothing's been saved/deleted).
+        setViewCount(prev => (prev === viewsRef.current.length ? prev : viewsRef.current.length))
       }
       // Clear.
       ctx.clearRect(0, 0, SIZE, SIZE)
@@ -245,6 +256,28 @@ export default function Minimap() {
     }
   }
 
+  // R42.N — "Fit all": recenter + pull the camera back so every saved
+  // view is in frame. Reads the live saved-view list + the current
+  // camera (to keep its viewing direction so the move feels like a dolly,
+  // not a teleport), computes the fit move purely, and applies it through
+  // the camera API. A no-op (no usable views, no camera) just toasts.
+  const onFitAll = () => {
+    const api = typeof window !== 'undefined' ? window.__particleCamera : null
+    if (!api || typeof api.set !== 'function') return
+    const framing = framingForViews(viewsRef.current)
+    if (!framing) { showToast('No saved views to frame'); return }
+    let snap = null
+    try { snap = typeof api.get === 'function' ? api.get() : null } catch { snap = null }
+    const move = frameViewsCameraMove(
+      framing,
+      snap && Array.isArray(snap.pos) ? snap.pos : null,
+      snap && Array.isArray(snap.target) ? snap.target : null,
+    )
+    if (!move) { showToast('No saved views to frame'); return }
+    api.set({ pos: move.pos, target: move.target })
+    showToast(`Framed ${framing.count} view${framing.count === 1 ? '' : 's'}`)
+  }
+
   if (!enabled) return null
 
   // hoverName was captured at hover-time (see onMouseMove), so the
@@ -304,6 +337,40 @@ export default function Minimap() {
             <style>{`@keyframes minimap-tip-fade { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: translateY(0); } }`}</style>
             {hoverLabel}
           </div>
+        )}
+        {/* R42.N — "Fit all" button: one tap to recenter + pull the camera
+            back so every saved-view dot is in frame. Only shown with 2+
+            views (a single view is just a "jump to it" click). Sits in the
+            top-right corner of the minimap so it doesn't cover the scale
+            label (bottom-left) or the camera dot. */}
+        {viewCount >= 2 && (
+          <button
+            onClick={onFitAll}
+            title="Frame all saved views — recenter + zoom to fit every green dot"
+            style={{
+              position: 'absolute', top: 4, right: 4, zIndex: 2,
+              display: 'inline-flex', alignItems: 'center', gap: 3,
+              padding: '2px 6px', borderRadius: 5,
+              background: 'rgba(34,197,94,0.16)',
+              border: '1px solid rgba(34,197,94,0.4)',
+              color: '#bbf7d0', cursor: 'pointer',
+              fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',
+              fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+              backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)',
+              transition: 'all 0.15s ease-out',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = 'rgba(34,197,94,0.28)'
+              e.currentTarget.style.borderColor = 'rgba(34,197,94,0.6)'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'rgba(34,197,94,0.16)'
+              e.currentTarget.style.borderColor = 'rgba(34,197,94,0.4)'
+            }}
+          >
+            <span style={{ fontSize: 10, lineHeight: 1 }}>{'\u2922'}</span>
+            FIT
+          </button>
         )}
       </div>
     </div>

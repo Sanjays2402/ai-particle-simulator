@@ -198,3 +198,111 @@ export function tooltipPlacement(marker, canvasSize, tooltipW = 90, tooltipH = 2
   }
   return { left, top, side }
 }
+
+// --- Frame all saved views (R42.N) -----------------------------------
+//
+// A one-tap "fit the camera so every saved view is in frame" — the
+// classic "zoom to fit" / "view all" of a 3D editor, surfaced on the
+// minimap since that's where the saved-view dots already live. When the
+// camera is dollied in tight, saved-view dots scatter off the minimap's
+// edge; this recenters the orbit on the cluster of saved positions and
+// pulls the camera back just far enough to take them all in.
+//
+// The math is pure + DOM-free so it unit-tests without a camera: the
+// component reads the live camera snapshot and hands the numbers here.
+
+// A pleasant default 3/4 viewing angle (normalised) used when the current
+// camera direction is degenerate (camera sitting on its own target).
+export const FIT_DEFAULT_DIR = [0.55, 0.45, 0.7]
+// Camera-fit tuning. dist = (radius / sin(halfFov)) * padding, clamped.
+// sin(~25deg) ~ 0.42 → a roughly 50deg vertical FOV; padding leaves a bit
+// of breathing room around the outermost view.
+export const FIT_SIN_HALF_FOV = 0.42
+export const FIT_PADDING = 1.18
+export const FIT_MIN_DIST = 6
+export const FIT_MAX_DIST = 400
+
+// Compute the centroid + XZ-plane spread of a set of saved views. Returns
+//   { center: [x,y,z], radius, count }
+// or null when no view carries a usable position. `center` is the full-3D
+// centroid (so the orbit can pivot on the cluster); `radius` is the max
+// XZ-plane distance from the centroid to any view (the minimap is an XZ
+// widget, so framing is about the top-down spread). Defensive: non-array
+// → null; rows with a missing / non-finite pos are skipped.
+export function framingForViews(views) {
+  if (!Array.isArray(views) || views.length === 0) return null
+  let sx = 0, sy = 0, sz = 0, n = 0
+  const pts = []
+  for (const v of views) {
+    if (!v || !Array.isArray(v.pos) || v.pos.length < 3) continue
+    const x = Number(v.pos[0]), y = Number(v.pos[1]), z = Number(v.pos[2])
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue
+    pts.push([x, y, z])
+    sx += x; sy += y; sz += z; n++
+  }
+  if (n === 0) return null
+  const center = [sx / n, sy / n, sz / n]
+  let radius = 0
+  for (const p of pts) {
+    const dx = p[0] - center[0]
+    const dz = p[2] - center[2]
+    const d = Math.hypot(dx, dz)
+    if (d > radius) radius = d
+  }
+  return { center, radius, count: n }
+}
+
+// Suggest a camera distance that frames a cluster of the given radius.
+// Physically grounded: to fit a sphere of `radius` in a camera with
+// half-FOV θ, the distance is radius / sin(θ); we add padding + clamp to
+// a usable band so a single view (radius 0) still gives a sensible
+// minimum pull-back and a sprawling set can't fling the camera to
+// infinity. Defensive: non-finite / negative radius → FIT_MIN_DIST.
+export function fitCameraDistance(radius, opts = {}) {
+  const r = Number(radius)
+  if (!Number.isFinite(r) || r < 0) return FIT_MIN_DIST
+  const sinHalfFov = (Number.isFinite(opts.sinHalfFov) && opts.sinHalfFov > 0 && opts.sinHalfFov <= 1)
+    ? opts.sinHalfFov : FIT_SIN_HALF_FOV
+  const padding = (Number.isFinite(opts.padding) && opts.padding >= 1) ? opts.padding : FIT_PADDING
+  const minDist = (Number.isFinite(opts.minDist) && opts.minDist > 0) ? opts.minDist : FIT_MIN_DIST
+  const maxDist = (Number.isFinite(opts.maxDist) && opts.maxDist > minDist) ? opts.maxDist : FIT_MAX_DIST
+  let d = (r / sinHalfFov) * padding
+  if (!Number.isFinite(d) || d < minDist) d = minDist
+  if (d > maxDist) d = maxDist
+  return d
+}
+
+// The full "frame all views" camera move as a pure function: given the
+// framing (from framingForViews) plus the CURRENT camera pos + target,
+// return the new { pos, target, dist } that fits every view in frame.
+// The camera keeps its current viewing DIRECTION (so a fit feels like a
+// dolly, not a teleport) — we normalise (currentPos - currentTarget) and
+// re-place the camera at that direction × the fit distance from the new
+// centroid target. A degenerate direction (camera on its own target)
+// falls back to FIT_DEFAULT_DIR so the result is never a NaN-laden eye.
+// Returns null when there's nothing to frame.
+export function frameViewsCameraMove(framing, currentPos, currentTarget, opts = {}) {
+  if (!framing || !Array.isArray(framing.center)) return null
+  const center = framing.center
+  if (center.length < 3 || !center.every(Number.isFinite)) return null
+  const dist = fitCameraDistance(framing.radius, opts)
+  // Current viewing direction (camera back-vector), normalised.
+  let dir = FIT_DEFAULT_DIR
+  if (Array.isArray(currentPos) && Array.isArray(currentTarget)
+      && currentPos.length >= 3 && currentTarget.length >= 3) {
+    const dx = Number(currentPos[0]) - Number(currentTarget[0])
+    const dy = Number(currentPos[1]) - Number(currentTarget[1])
+    const dz = Number(currentPos[2]) - Number(currentTarget[2])
+    const len = Math.sqrt(dx * dx + dy * dy + dz * dz)
+    if (Number.isFinite(len) && len > 1e-4) dir = [dx / len, dy / len, dz / len]
+  }
+  return {
+    pos: [
+      center[0] + dir[0] * dist,
+      center[1] + dir[1] * dist,
+      center[2] + dir[2] * dist,
+    ],
+    target: [center[0], center[1], center[2]],
+    dist,
+  }
+}
