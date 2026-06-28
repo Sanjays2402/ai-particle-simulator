@@ -354,3 +354,32 @@ export function buildWatermarkPreview(boxW, boxH, anchor, lines, opts = {}) {
     lines: p.lines.map((ln, i) => ({ ...ln, text: rows[i].text })),
   }
 }
+
+// --- R45.G: pick a corner anchor from a click in the preview box ------
+//
+// R44.G shows a live caption preview inside the popover. R45.G makes that
+// preview directly manipulable: clicking a CORNER of the preview frame
+// sets the watermark anchor to that corner — so a user drags their eye to
+// where they want the caption and clicks there, instead of hunting for the
+// matching corner in a separate 4-button picker.
+//
+// This maps a click point (x, y) in a box of size (w, h) to the nearest of
+// the four corner anchor ids by simple quadrant split: left/right by the
+// horizontal midpoint, top/bottom by the vertical midpoint. A point exactly
+// on a midline biases toward the lower / right side (>= midpoint) so the
+// boundary is deterministic. Pure + DOM-free; the component converts a
+// pointer event into box-local coords and hands them here.
+//
+// Defensive: a degenerate box (non-finite / non-positive w or h) or a
+// non-finite point → null so the caller can ignore the click rather than
+// snap to a wrong corner.
+export function anchorFromPreviewPoint(x, y, w, h) {
+  const px = Number(x), py = Number(y)
+  const bw = Number(w), bh = Number(h)
+  if (!Number.isFinite(px) || !Number.isFinite(py)) return null
+  if (!Number.isFinite(bw) || !Number.isFinite(bh) || bw <= 0 || bh <= 0) return null
+  const right = px >= bw / 2
+  const bottom = py >= bh / 2
+  if (bottom) return right ? 'bottom-right' : 'bottom-left'
+  return right ? 'top-right' : 'top-left'
+}

@@ -15,6 +15,8 @@ import {
   buildWatermarkText, watermarkFontSize, WATERMARK_ANCHORS,
   buildWatermarkSubtext, watermarkSubFontSize, watermarkPlacementMulti,
   buildWatermarkPreview, PREVIEW_MAIN_FONT, PREVIEW_SUB_FONT,
+  // R45.G — clickable preview corners → set the anchor by direct manipulation.
+  anchorFromPreviewPoint,
 } from '../lib/screenshotWatermark'
 import { showToast } from './Toast'
 import {
@@ -855,27 +857,65 @@ function WatermarkBtn() {
             boxShadow: '0 16px 40px rgba(0,0,0,0.55)',
             backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
           }}>
-            {/* R44.G — live preview: a small frame showing where the
-                caption pill lands (corner + both lines + relative sizes)
-                so the branded layout is visible before exporting. The
-                pill + text are positioned by buildWatermarkPreview, which
-                reuses the export's tested multi-line geometry. */}
             <div style={{
               fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
               color: '#8a8aa0', marginBottom: 6, paddingLeft: 2,
             }}>Preview</div>
-            <div style={{
-              position: 'relative', width: PREVIEW_W, height: PREVIEW_H,
-              borderRadius: 7, marginBottom: 9, overflow: 'hidden',
-              // A faux "scene" so the caption pill reads the way it will
-              // over a real export.
-              background: 'linear-gradient(135deg, rgba(99,102,241,0.22) 0%, rgba(168,85,247,0.16) 45%, rgba(8,8,14,0.9) 100%)',
-              border: '1px solid rgba(255,255,255,0.07)',
-            }}>
+            {/* R44.G — live preview: a small frame showing where the
+                caption pill lands (corner + both lines + relative sizes)
+                so the branded layout is visible before exporting. The
+                pill + text are positioned by buildWatermarkPreview, which
+                reuses the export's tested multi-line geometry.
+                R45.G — the frame is now directly manipulable: clicking a
+                CORNER sets the caption anchor to that corner (mapped via
+                anchorFromPreviewPoint's quadrant split), so the user picks
+                placement by pointing at the preview instead of the button
+                grid below. Faint corner hotspots advertise the affordance;
+                the active corner glows. */}
+                <div
+                  onClick={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const next = anchorFromPreviewPoint(
+                      e.clientX - rect.left, e.clientY - rect.top, rect.width, rect.height,
+                    )
+                    if (next) { setAnchor(next); if (!active) setActive(true) }
+                  }}
+                  title="Click a corner to place the caption there"
+                  style={{
+                  position: 'relative', width: PREVIEW_W, height: PREVIEW_H,
+                  borderRadius: 7, marginBottom: 9, overflow: 'hidden', cursor: 'pointer',
+                  // A faux "scene" so the caption pill reads the way it will
+                  // over a real export.
+                  background: 'linear-gradient(135deg, rgba(99,102,241,0.22) 0%, rgba(168,85,247,0.16) 45%, rgba(8,8,14,0.9) 100%)',
+                  border: '1px solid rgba(255,255,255,0.07)',
+                }}>
               {/* a couple of faint dots to suggest particles under the pill */}
               <span style={{ position: 'absolute', left: '28%', top: '34%', width: 3, height: 3, borderRadius: '50%', background: 'rgba(255,255,255,0.4)' }} />
               <span style={{ position: 'absolute', left: '62%', top: '52%', width: 2, height: 2, borderRadius: '50%', background: 'rgba(255,255,255,0.3)' }} />
               <span style={{ position: 'absolute', left: '46%', top: '22%', width: 2, height: 2, borderRadius: '50%', background: 'rgba(255,255,255,0.25)' }} />
+              {/* R45.G — corner hotspots: small L-shaped brackets advertising
+                  that each corner is clickable. The active anchor's bracket
+                  glows violet; the rest are faint. pointerEvents:none so the
+                  click always lands on the parent frame (whose handler does
+                  the quadrant → anchor mapping). */}
+              {WATERMARK_ANCHORS.map(a => {
+                const on = anchor === a.id
+                const isTop = a.id.startsWith('top')
+                const isLeft = a.id.endsWith('left')
+                return (
+                  <span key={a.id} aria-hidden="true" style={{
+                    position: 'absolute', width: 9, height: 9, pointerEvents: 'none',
+                    [isTop ? 'top' : 'bottom']: 5,
+                    [isLeft ? 'left' : 'right']: 5,
+                    [isTop ? 'borderTop' : 'borderBottom']: `1.5px solid ${on ? 'rgba(216,180,254,0.95)' : 'rgba(255,255,255,0.22)'}`,
+                    [isLeft ? 'borderLeft' : 'borderRight']: `1.5px solid ${on ? 'rgba(216,180,254,0.95)' : 'rgba(255,255,255,0.22)'}`,
+                    [isTop ? 'borderTopLeftRadius' : 'borderBottomLeftRadius']: isLeft ? 2 : 0,
+                    [isTop ? 'borderTopRightRadius' : 'borderBottomRightRadius']: isLeft ? 0 : 2,
+                    boxShadow: on ? '0 0 6px rgba(168,85,247,0.6)' : 'none',
+                    transition: 'all 0.13s ease-out',
+                  }} />
+                )
+              })}
               {preview.pillW > 0 && (
                 <>
                   {/* the caption pill backdrop */}

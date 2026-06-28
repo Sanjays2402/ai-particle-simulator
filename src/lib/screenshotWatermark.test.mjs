@@ -13,6 +13,8 @@ import {
   // R44.G — live caption preview
   PREVIEW_CHAR_WIDTH_FACTOR, PREVIEW_MAIN_FONT, PREVIEW_SUB_FONT,
   estimateTextWidth, buildWatermarkPreview,
+  // R45.G — clickable preview corners
+  anchorFromPreviewPoint,
 } from './screenshotWatermark.js'
 
 let passed = 0
@@ -319,4 +321,32 @@ console.log(`PASS: screenshotWatermark R43.G — ${passed} total assertions (inc
   }
 }
 
-console.log(`PASS: screenshotWatermark R44.G — ${passed} total assertions (incl. live caption preview: width estimate + box layout)`)
+// --- R45.G: anchorFromPreviewPoint (clickable preview corners) ---
+{
+  const W = 158, H = 92
+  // each quadrant of the box maps to its corner anchor.
+  eq(anchorFromPreviewPoint(10, 10, W, H), 'top-left', 'corner: top-left quadrant')
+  eq(anchorFromPreviewPoint(150, 10, W, H), 'top-right', 'corner: top-right quadrant')
+  eq(anchorFromPreviewPoint(10, 85, W, H), 'bottom-left', 'corner: bottom-left quadrant')
+  eq(anchorFromPreviewPoint(150, 85, W, H), 'bottom-right', 'corner: bottom-right quadrant')
+  // every returned id is a valid anchor.
+  for (const [x, y] of [[1, 1], [W - 1, 1], [1, H - 1], [W - 1, H - 1], [W / 3, H / 3]]) {
+    ok(isValidWatermarkAnchor(anchorFromPreviewPoint(x, y, W, H)), `corner: (${x},${y}) → valid anchor`)
+  }
+  // exact midline biases to lower / right (>= midpoint).
+  eq(anchorFromPreviewPoint(W / 2, 10, W, H), 'top-right', 'corner: x exactly on midline → right')
+  eq(anchorFromPreviewPoint(10, H / 2, W, H), 'bottom-left', 'corner: y exactly on midline → bottom')
+  eq(anchorFromPreviewPoint(W / 2, H / 2, W, H), 'bottom-right', 'corner: dead-centre → bottom-right')
+  // corners (0,0) and (W,H) resolve sanely.
+  eq(anchorFromPreviewPoint(0, 0, W, H), 'top-left', 'corner: origin → top-left')
+  eq(anchorFromPreviewPoint(W, H, W, H), 'bottom-right', 'corner: far corner → bottom-right')
+  // defensive: degenerate box / non-finite point → null.
+  eq(anchorFromPreviewPoint(10, 10, 0, H), null, 'corner: zero width → null')
+  eq(anchorFromPreviewPoint(10, 10, W, 0), null, 'corner: zero height → null')
+  eq(anchorFromPreviewPoint(10, 10, -5, H), null, 'corner: negative width → null')
+  eq(anchorFromPreviewPoint(NaN, 10, W, H), null, 'corner: NaN x → null')
+  eq(anchorFromPreviewPoint(10, Infinity, W, H), null, 'corner: non-finite y → null')
+  eq(anchorFromPreviewPoint(10, 10, NaN, H), null, 'corner: non-finite box → null')
+}
+
+console.log(`PASS: screenshotWatermark R45.G — ${passed} total assertions (incl. clickable preview corner → anchor)`)
