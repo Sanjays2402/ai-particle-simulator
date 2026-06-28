@@ -6,6 +6,8 @@ import {
   NOW_PLAYING_MAX_LEN, formatNowPlaying,
   // R43.E — zen "Now Playing" theme line
   THEME_LABEL_MAX_LEN, formatThemeName,
+  // R44.E — zen "Now Playing" framing line
+  FRAMING_LABEL_MAX_LEN, formatFramingLabel,
 } from './zenMode.js'
 
 let passed = 0
@@ -254,4 +256,44 @@ eq(zenOrbitSpeed(true, false, 0, 999999), 0, 'preference off → 0 speed')
   eq(formatThemeName('abcdef', { maxLen: 1 }), '\u2026', 'maxLen 1 → lone ellipsis')
 }
 
-console.log(`PASS: zenMode — ${passed} assertions (cursor idle decision, key reducer, integration, R35.E auto-orbit ramp, R42.E now-playing label, R43.E theme label)`)
+// --- R44.E: framing label for the Now-Playing card ---
+{
+  // a normal frame label passes through trimmed.
+  eq(formatFramingLabel('2.39'), '2.39', 'plain frame label kept')
+  eq(formatFramingLabel('16:9'), '16:9', 'aspect label kept')
+  eq(formatFramingLabel('  1.78  '), '1.78', 'surrounding whitespace trimmed')
+  eq(formatFramingLabel('4  :  5'), '4 : 5', 'internal whitespace collapsed')
+  // "off" / "none" / empty → '' so the card omits the line.
+  eq(formatFramingLabel('Off'), '', 'Off → empty (no line)')
+  eq(formatFramingLabel('off'), '', 'off lowercase → empty')
+  eq(formatFramingLabel('NONE'), '', 'None (any case) → empty')
+  eq(formatFramingLabel(''), '', 'empty → empty')
+  eq(formatFramingLabel('   '), '', 'whitespace-only → empty')
+  // non-string → '' (caller omits).
+  eq(formatFramingLabel(null), '', 'null → empty')
+  eq(formatFramingLabel(42), '', 'number → empty')
+  eq(formatFramingLabel(undefined), '', 'undefined → empty')
+  // optional prefix prepended.
+  eq(formatFramingLabel('2.39', { prefix: 'Frame' }), 'Frame 2.39', 'prefix prepended')
+  eq(formatFramingLabel('Off', { prefix: 'Frame' }), '', 'prefix not applied to an off frame')
+  // truncation bounded to maxLen with ellipsis.
+  {
+    const out = formatFramingLabel('1'.repeat(40))
+    ok(out.length <= FRAMING_LABEL_MAX_LEN, `framing label within maxLen — got ${out.length}`)
+    ok(out.endsWith('\u2026'), 'over-long framing label ellipsized')
+  }
+  // custom maxLen honoured.
+  {
+    const out = formatFramingLabel('abcdefghij', { maxLen: 5 })
+    eq(out.length, 5, 'custom maxLen bounds the framing label')
+    ok(out.endsWith('\u2026'), 'custom maxLen ellipsizes')
+  }
+  eq(formatFramingLabel('abcdef', { maxLen: 1 }), '\u2026', 'maxLen 1 → lone ellipsis')
+  // exactly at maxLen → not truncated.
+  {
+    const exact = 'x'.repeat(FRAMING_LABEL_MAX_LEN)
+    eq(formatFramingLabel(exact), exact, 'exactly maxLen not truncated')
+  }
+}
+
+console.log(`PASS: zenMode — ${passed} assertions (cursor idle decision, key reducer, integration, R35.E auto-orbit ramp, R42.E now-playing label, R43.E theme label, R44.E framing label)`)

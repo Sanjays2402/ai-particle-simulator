@@ -203,3 +203,46 @@ export function formatThemeName(theme, opts = {}) {
   if (maxLen <= 1) return '\u2026'
   return titled.slice(0, maxLen - 1).trimEnd() + '\u2026'
 }
+
+// --- R44.E: zen "Now Playing" framing line ----------------------------
+//
+// R42.E/R43.E show the live preset (motion) + theme (look) on the zen
+// card. When the user has set a FRAMING guide (2.39, 16:9, a custom crop)
+// to compose a recording, the card should document the CROP too — so a
+// left-alone recording is fully self-describing: motion + look + frame.
+//
+// This formats a resolved framing label (the component resolves the id →
+// label via framingGuides) for the card. Like formatThemeName it's a pure
+// "format a raw string" helper: an "off" / empty frame yields '' so the
+// card simply omits the line. Kept DOM-free + framingGuides-free so it
+// unit-tests in isolation; the component owns the id → label resolution.
+
+// Max characters of the framing label on the card before ellipsis — frame
+// labels are short ("2.39", "16:9", "1.78"), so a tight bound is plenty.
+export const FRAMING_LABEL_MAX_LEN = 16
+
+// The label strings that mean "no frame is active" — when the framing
+// guide id is 'off' the resolver hands us its label ('Off'); we treat that
+// (case-insensitively) as nothing to show so the card omits the line.
+const FRAMING_OFF_LABELS = new Set(['off', 'none', ''])
+
+// Format a resolved framing label for the Now-Playing card. Pure.
+//   - non-string / empty / whitespace-only → '' (caller omits the line)
+//   - an "Off" / "None" label (case-insensitive) → '' (no active frame)
+//   - trims + collapses internal whitespace
+//   - optional prefix (e.g. 'Frame') prepended with a thin space so the
+//     line can read "Frame 2.39" instead of a bare number
+//   - ellipsis-truncates the WHOLE result to maxLen (ellipsis in budget)
+export function formatFramingLabel(label, opts = {}) {
+  const maxLenRaw = Number(opts.maxLen)
+  const maxLen = Number.isFinite(maxLenRaw) && maxLenRaw > 0 ? Math.floor(maxLenRaw) : FRAMING_LABEL_MAX_LEN
+  if (typeof label !== 'string') return ''
+  const cleaned = label.trim().replace(/\s+/g, ' ')
+  if (!cleaned) return ''
+  if (FRAMING_OFF_LABELS.has(cleaned.toLowerCase())) return ''
+  const prefix = typeof opts.prefix === 'string' ? opts.prefix.trim().replace(/\s+/g, ' ') : ''
+  let text = prefix ? `${prefix} ${cleaned}` : cleaned
+  if (text.length <= maxLen) return text
+  if (maxLen <= 1) return '\u2026'
+  return text.slice(0, maxLen - 1).trimEnd() + '\u2026'
+}

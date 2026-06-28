@@ -3,8 +3,9 @@ import { useStore, THEMES } from '../store'
 import {
   ZEN_BODY_CLASS, CURSOR_IDLE_MS,
   classifyZenKey, nextZenState, shouldHideCursor, zenOrbitSpeed,
-  formatNowPlaying, formatThemeName,
+  formatNowPlaying, formatThemeName, formatFramingLabel,
 } from '../lib/zenMode'
+import { labelForId as framingLabelForId, CUSTOM_FRAMING_ID, formatCustomRatioLabel } from '../lib/framingGuides'
 import { resolveReducedMotion } from '../lib/reducedMotion'
 import { resolveCalmFor } from '../lib/calmMode'
 
@@ -34,6 +35,17 @@ export default function ZenMode() {
   const zenNowPlaying = useStore(s => s.zenNowPlaying)
   const infoTitle = useStore(s => s.infoTitle)
   const theme = useStore(s => s.theme)
+  // R44.E — the active framing guide (crop), surfaced on the card so a
+  // composed recording documents the frame too. Resolve the id → a label:
+  // a preset id maps via framingLabelForId; the 'custom' pseudo-id reads
+  // the live numeric ratio. formatFramingLabel turns an "Off"/empty frame
+  // into '' so the card simply omits the line when no crop is set.
+  const framingGuideId = useStore(s => s.framingGuideId)
+  const framingCustomRatio = useStore(s => s.framingCustomRatio)
+  const framingRawLabel = framingGuideId === CUSTOM_FRAMING_ID
+    ? formatCustomRatioLabel(framingCustomRatio)
+    : framingLabelForId(framingGuideId)
+  const framingLine = formatFramingLabel(framingRawLabel)
   const lastMoveRef = useRef(0)
   const cursorHiddenRef = useRef(false)
 
@@ -255,6 +267,29 @@ export default function ZenMode() {
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               }}>{formatThemeName(theme)}</span>
             </span>
+            {/* R44.E — framing line: when a crop is set, a small monospace
+                badge documents the active aspect ratio so a composed
+                recording self-describes the frame too (preset + theme +
+                crop). Omitted entirely when no frame is active. */}
+            {framingLine && (
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                marginTop: 3, overflow: 'hidden',
+              }}>
+                <span aria-hidden="true" style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  width: 11, height: 8, flexShrink: 0, borderRadius: 1.5,
+                  border: '1px solid rgba(168,85,247,0.55)',
+                  boxShadow: '0 0 4px rgba(168,85,247,0.3)',
+                }} />
+                <span style={{
+                  fontSize: 9.5, fontWeight: 600, color: '#8a8aa0', lineHeight: 1.2,
+                  letterSpacing: '0.04em',
+                  fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>{framingLine}</span>
+              </span>
+            )}
           </span>
         </div>
       )}
