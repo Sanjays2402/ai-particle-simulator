@@ -733,3 +733,53 @@ export function invertSelection(orderedIds, selected) {
   return next
 }
 
+// --- R45.H: header "select range" two-click mode ---------------------
+//
+// R44.H added invert; shift-click range-select (selectIdRange) already
+// exists but needs a held modifier — awkward on touch and not obvious. A
+// header "Range" button arms an explicit two-click mode: the FIRST row
+// clicked sets the range anchor; the SECOND row clicked selects the whole
+// contiguous block between them (unioned into the live selection) and
+// disarms. This is the pure state machine that drives that mode so the
+// component stays a thin renderer and the (anchor-armed vs not, stale
+// anchor, same-row) cases are under test.
+//
+// `pendingAnchorId` is the currently-armed anchor (or null when nothing
+// is armed yet — the first click of the pair). `clickedId` is the row the
+// user just clicked. `orderedIds` is the selectable ids in display order.
+// `selected` is the live selection (Set | Array | iterable).
+//
+// Returns { selected, pendingAnchorId, completed }:
+//   - first click (no anchor armed): arms `clickedId` as the anchor,
+//     leaves `selected` unchanged (a fresh Set copy), completed=false
+//   - second click (anchor armed): unions the inclusive anchor..clicked
+//     range (via selectIdRange) into `selected`, clears the anchor,
+//     completed=true — even when the anchor row was clicked again (a
+//     single-row "range" selects just that row)
+//   - a stale armed anchor no longer in orderedIds falls back to arming
+//     the new click as a fresh anchor (so a deleted anchor can't strand
+//     the mode), completed=false
+// Pure; never mutates inputs (always returns a fresh Set).
+export function rangeClick(orderedIds, pendingAnchorId, clickedId, selected) {
+  const base = toIdSet(selected)
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
+    // Nothing selectable — disarm and pass the selection through.
+    return { selected: new Set(base), pendingAnchorId: null, completed: false }
+  }
+  // The clicked row must be a real selectable id; ignore stray clicks.
+  if (orderedIds.indexOf(clickedId) < 0) {
+    return { selected: new Set(base), pendingAnchorId: pendingAnchorId ?? null, completed: false }
+  }
+  const anchorArmed = pendingAnchorId !== null && pendingAnchorId !== undefined
+    && orderedIds.indexOf(pendingAnchorId) >= 0
+  if (!anchorArmed) {
+    // First click of the pair (or a stale anchor) → arm this row.
+    return { selected: new Set(base), pendingAnchorId: clickedId, completed: false }
+  }
+  // Second click → union the inclusive range into the selection, disarm.
+  const range = selectIdRange(orderedIds, pendingAnchorId, clickedId)
+  const next = new Set(base)
+  for (const id of range) next.add(id)
+  return { selected: next, pendingAnchorId: null, completed: true }
+}
+

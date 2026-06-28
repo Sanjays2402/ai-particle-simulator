@@ -12,6 +12,8 @@ import {
   allIdsSelected, someIdsSelected, toggleSelectAll,
   // R44.H — invert selection
   invertSelection,
+  // R45.H — header two-click range mode
+  rangeClick,
 } from '../lib/cameraViews'
 import { labelForId as framingLabelForId } from '../lib/framingGuides'
 import {
@@ -46,6 +48,14 @@ export function CommandPalette({ onSettings }) {
   const [selecting, setSelecting] = useState(false)
   const [selectedIds, setSelectedIds] = useState(() => new Set())
   const [anchorId, setAnchorId] = useState(null)
+  // R45.H — explicit two-click "Range" mode (an alternative to shift-click,
+  // reachable without a modifier — friendlier on touch). When armed, the
+  // first row click sets the range anchor, the second selects the whole
+  // block between them (via the pure rangeClick state machine) and disarms
+  // the mode. `rangeMode` is the armed toggle; `rangeAnchorId` is the
+  // pending first-click anchor inside that mode.
+  const [rangeMode, setRangeMode] = useState(false)
+  const [rangeAnchorId, setRangeAnchorId] = useState(null)
   // R44.N — handle for the "Fit selected" camera tween's rAF loop, so a
   // second fit (or the palette closing) cancels an in-flight tween instead
   // of stacking two animations fighting over the camera (mirrors Minimap).
@@ -71,6 +81,9 @@ export function CommandPalette({ onSettings }) {
           setSelecting(false)
           setSelectedIds(new Set())
           setAnchorId(null)
+          // R45.H — reset the two-click range mode too.
+          setRangeMode(false)
+          setRangeAnchorId(null)
           return !o
         })
       }
@@ -193,6 +206,21 @@ export function CommandPalette({ onSettings }) {
   // just that row + reseats the anchor.
   const toggleSelected = (viewId, shiftKey) => {
     const orderedIds = cameraViews.map(v => v.id)
+    // R45.H — when the explicit two-click Range mode is armed, route the
+    // click through the pure rangeClick state machine instead of the plain
+    // toggle: first click arms the anchor, second click selects the block
+    // between them and disarms the mode. A shift-click still uses the
+    // additive range path below so power users keep both.
+    if (rangeMode && !shiftKey) {
+      const r = rangeClick(orderedIds, rangeAnchorId, viewId, selectedIds)
+      setSelectedIds(r.selected)
+      setRangeAnchorId(r.pendingAnchorId)
+      if (r.completed) {
+        setRangeMode(false)
+        setAnchorId(viewId) // reseat the shift-click anchor at the range end
+      }
+      return
+    }
     setSelectedIds(prev => {
       const next = new Set(prev)
       if (shiftKey && anchorId != null) {
@@ -208,6 +236,17 @@ export function CommandPalette({ onSettings }) {
     // A plain click reseats the anchor; a shift-click keeps the original
     // anchor so successive shift-clicks grow from the same origin.
     if (!shiftKey) setAnchorId(viewId)
+  }
+
+  // R45.H — arm / disarm the explicit two-click Range mode from the header.
+  // Arming clears any pending range anchor so the next row click is a clean
+  // first-click; disarming drops the pending anchor too.
+  const toggleRangeMode = () => {
+    setRangeMode(prev => {
+      const next = !prev
+      setRangeAnchorId(null)
+      return next
+    })
   }
 
   // R43.H — header select-all / clear toggle: when every view is already
@@ -312,11 +351,15 @@ export function CommandPalette({ onSettings }) {
     setSelecting(true)
     setSelectedIds(new Set())
     setAnchorId(null)
+    setRangeMode(false)
+    setRangeAnchorId(null)
   }
   const cancelSelectMode = () => {
     setSelecting(false)
     setSelectedIds(new Set())
     setAnchorId(null)
+    setRangeMode(false)
+    setRangeAnchorId(null)
   }
 
   // R42.H — bulk-delete the selected subset (graduates the per-view
@@ -661,22 +704,75 @@ export function CommandPalette({ onSettings }) {
                     <span aria-hidden="true" style={{ fontSize: 12, lineHeight: 1 }}>{'\u21c4'}</span>
                     Invert
                   </button>
+                  {/* R45.H — Range: arm an explicit two-click range mode
+                      (no modifier needed — touch-friendly). When armed, the
+                      first row click sets the anchor, the second selects the
+                      whole block. The button stays lit while armed. */}
+                  <button
+                    onClick={toggleRangeMode}
+                    title={rangeMode
+                      ? 'Range mode armed — click two rows to select the block (click again to cancel)'
+                      : 'Select a range — click to arm, then click the first + last rows'}
+                    aria-pressed={rangeMode}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                      padding: '6px 12px', borderRadius: 8, cursor: 'pointer',
+                      background: rangeMode
+                        ? 'linear-gradient(135deg, rgba(99,102,241,0.3) 0%, rgba(168,85,247,0.24) 100%)'
+                        : 'rgba(255,255,255,0.02)',
+                      border: `1px solid ${rangeMode ? 'rgba(129,140,248,0.6)' : 'rgba(255,255,255,0.05)'}`,
+                      color: rangeMode ? '#c7d2fe' : '#a78bfa',
+                      fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600,
+                      letterSpacing: '0.02em', flexShrink: 0,
+                      boxShadow: rangeMode ? '0 0 12px rgba(99,102,241,0.3)' : 'none',
+                      transition: 'all 0.12s ease-out',
+                    }}
+                  >
+                    {/* Bracket glyph cue for "span a range". */}
+                    <span aria-hidden="true" style={{ fontSize: 12, lineHeight: 1 }}>{'\u2630'}</span>
+                    Range
+                  </button>
                 </div>
+                {/* R45.H — armed-mode hint: tells the user what the two
+                    clicks do, and which row is the pending anchor. */}
+                {rangeMode && (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 7,
+                    padding: '5px 9px', marginBottom: 7, borderRadius: 7,
+                    background: 'rgba(99,102,241,0.1)',
+                    border: '1px solid rgba(99,102,241,0.28)',
+                    fontSize: 10.5, color: '#c7d2fe', letterSpacing: '0.01em',
+                  }}>
+                    <span aria-hidden="true" style={{
+                      width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                      background: '#818cf8', boxShadow: '0 0 6px rgba(129,140,248,0.8)',
+                    }} />
+                    {rangeAnchorId == null
+                      ? 'Range mode: click the first row of the block'
+                      : 'Now click the last row to select the block'}
+                  </div>
+                )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 9 }}>
                   {duplicableViews.map(v => {
                     const on = selectedIds.has(v.id)
+                    const isRangeAnchor = rangeMode && rangeAnchorId === v.id
                     const name = (typeof v.name === 'string' && v.name.trim()) ? v.name.trim() : `View ${v.id}`
                     return (
                       <button
                         key={v.id}
                         onClick={(e) => toggleSelected(v.id, e.shiftKey)}
-                        title="Click to toggle · Shift+click to select a range"
+                        title={rangeMode
+                          ? (rangeAnchorId == null ? 'Click to set the range start' : 'Click to select up to here')
+                          : 'Click to toggle · Shift+click to select a range'}
                         style={{
                           display: 'flex', alignItems: 'center', gap: 10,
                           padding: '7px 9px', borderRadius: 8, cursor: 'pointer',
                           textAlign: 'left',
                           background: on ? 'rgba(168,85,247,0.16)' : 'rgba(255,255,255,0.03)',
-                          border: `1px solid ${on ? 'rgba(168,85,247,0.45)' : 'rgba(255,255,255,0.06)'}`,
+                          border: isRangeAnchor
+                            ? '1px solid rgba(129,140,248,0.85)'
+                            : `1px solid ${on ? 'rgba(168,85,247,0.45)' : 'rgba(255,255,255,0.06)'}`,
+                          boxShadow: isRangeAnchor ? '0 0 10px rgba(99,102,241,0.4)' : 'none',
                           color: on ? '#e9d5ff' : '#9a9ab0',
                           fontFamily: 'inherit', fontSize: 12.5, fontWeight: 500,
                           transition: 'all 0.12s ease-out',

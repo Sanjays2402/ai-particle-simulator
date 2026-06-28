@@ -25,6 +25,8 @@ import {
   countSelected, allIdsSelected, someIdsSelected, toggleSelectAll,
   // R44.H — invert selection
   invertSelection,
+  // R45.H — header two-click range mode
+  rangeClick,
 } from './cameraViews.js'
 
 function assertEq(actual, expected, msg) {
@@ -1119,3 +1121,72 @@ console.log('PASS: select-all / clear header state — countSelected/all/some/to
 }
 
 console.log('PASS: invert selection — complement / double-invert identity / stale-id reconcile (R44.H)')
+
+// --- R45.H: rangeClick — header two-click range mode -----------------
+{
+  const ids = [10, 20, 30, 40, 50]
+  // first click (no anchor) → arms the clicked row, selection unchanged.
+  {
+    const r = rangeClick(ids, null, 20, new Set())
+    assertEq(r.pendingAnchorId, 20, 'range: first click arms anchor')
+    assertTrue(r.completed === false, 'range: first click not completed')
+    assertEq([...r.selected], [], 'range: first click leaves selection empty')
+  }
+  // second click → unions the inclusive block, disarms.
+  {
+    const r = rangeClick(ids, 20, 40, new Set())
+    assertEq([...r.selected].sort((a, b) => a - b), [20, 30, 40], 'range: 20..40 selected')
+    assertTrue(r.completed === true, 'range: second click completed')
+    assertEq(r.pendingAnchorId, null, 'range: anchor disarmed after completion')
+  }
+  // order-agnostic: anchor below target gives the same block.
+  {
+    const r = rangeClick(ids, 40, 20, new Set())
+    assertEq([...r.selected].sort((a, b) => a - b), [20, 30, 40], 'range: 40..20 same block')
+  }
+  // unions into the EXISTING selection (doesn't replace it).
+  {
+    const r = rangeClick(ids, 30, 50, new Set([10]))
+    assertEq([...r.selected].sort((a, b) => a - b), [10, 30, 40, 50], 'range: unions into existing')
+  }
+  // anchor clicked again → single-row range (just that id).
+  {
+    const r = rangeClick(ids, 30, 30, new Set())
+    assertEq([...r.selected], [30], 'range: same row → single-id range')
+    assertTrue(r.completed === true, 'range: same-row still completes')
+  }
+  // stale armed anchor (deleted) → re-arms the new click as a fresh anchor.
+  {
+    const r = rangeClick(ids, 999, 20, new Set([10]))
+    assertEq(r.pendingAnchorId, 20, 'range: stale anchor → re-arm new click')
+    assertTrue(r.completed === false, 'range: stale anchor does not complete')
+    assertEq([...r.selected], [10], 'range: stale anchor preserves selection')
+  }
+  // clicking a non-selectable id is ignored (anchor + selection preserved).
+  {
+    const r = rangeClick(ids, 20, 777, new Set([10]))
+    assertEq(r.pendingAnchorId, 20, 'range: stray click keeps armed anchor')
+    assertTrue(r.completed === false, 'range: stray click not completed')
+    assertEq([...r.selected], [10], 'range: stray click preserves selection')
+  }
+  // accepts an array selection (toIdSet normalises).
+  {
+    const r = rangeClick(ids, 10, 30, [50])
+    assertEq([...r.selected].sort((a, b) => a - b), [10, 20, 30, 50], 'range: array selection unioned')
+  }
+  // empty / non-array ordered ids → disarm, pass selection through.
+  {
+    const r = rangeClick([], 10, 20, new Set([10]))
+    assertEq(r.pendingAnchorId, null, 'range: empty list disarms')
+    assertEq([...r.selected], [10], 'range: empty list preserves selection')
+  }
+  // returns a FRESH set (never an input ref).
+  {
+    const sel = new Set([10])
+    const r = rangeClick(ids, 20, 40, sel)
+    assertTrue(r.selected !== sel, 'range: returns a fresh set')
+    assertTrue(sel.size === 1, 'range: input selection not mutated')
+  }
+}
+
+console.log('PASS: rangeClick — header two-click range mode (arm / complete / stale anchor / union) (R45.H)')
