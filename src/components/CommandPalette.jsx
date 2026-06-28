@@ -98,6 +98,20 @@ export function CommandPalette({ onSettings }) {
     if (fitRafRef.current) { cancelAnimationFrame(fitRafRef.current); fitRafRef.current = 0 }
   }, [])
 
+  // R45.N — mirror the live multi-selection into the store so the minimap
+  // (which is always mounted while enabled) can offer a matching "Fit
+  // selected" button reading the SAME selection. We only publish the
+  // selection while actually in select mode; leaving the mode (or closing
+  // the palette) clears it so a stale selection can't linger on the minimap.
+  // setSelectedViewIds skips a no-op set, so re-publishing each render is
+  // cheap. Cleared on unmount too.
+  useEffect(() => {
+    const set = useStore.getState().setSelectedViewIds
+    if (selecting) set([...selectedIds])
+    else set([])
+  }, [selecting, selectedIds])
+  useEffect(() => () => { useStore.getState().setSelectedViewIds([]) }, [])
+
   const run = (fn) => () => { fn(); setOpen(false) }
 
   // R36.H — restore a saved camera view via the global camera API the

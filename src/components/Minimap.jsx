@@ -6,6 +6,8 @@ import {
   framingForViews, frameViewsCameraMove,
   // R43.N — animated fit-all tween
   FIT_TWEEN_MS, tweenProgress, tweenCameraStep,
+  // R45.N — frame only the selected subset (shared palette selection)
+  framingForSelectedViews,
 } from '../lib/minimap'
 import { loadCameraViews, saveCameraViews, removeView } from '../lib/cameraViews'
 import { resolveReducedMotion } from '../lib/reducedMotion'
@@ -24,6 +26,10 @@ const SIZE = 132   // px square
 
 export default function Minimap() {
   const enabled = useStore(s => s.minimapEnabled)
+  // R45.N — the live saved-view multi-selection mirrored from the command
+  // palette. When non-empty, the minimap offers a matching "Fit selected"
+  // button so framing a chosen subset is reachable without the palette open.
+  const selectedViewIds = useStore(s => s.selectedViewIds)
   const canvasRef = useRef(null)
   const rafRef = useRef(0)
   // R43.N — handle for the "Fit all" camera tween's rAF loop, so a second
@@ -279,10 +285,29 @@ export default function Minimap() {
   // animated camera move is exactly what that setting suppresses). A
   // second Fit click cancels the in-flight tween so they never stack.
   const onFitAll = () => {
-    const api = typeof window !== 'undefined' ? window.__particleCamera : null
-    if (!api || typeof api.set !== 'function') return
     const framing = framingForViews(viewsRef.current)
     if (!framing) { showToast('No saved views to frame'); return }
+    applyFitMove(framing)
+  }
+
+  // R45.N — "Fit selected": frame ONLY the subset the user multi-selected in
+  // the command palette (mirrored into the store), the minimap-side companion
+  // to the palette's own "Fit selected" so it's reachable without opening the
+  // palette. Reuses framingForSelectedViews (the same pure helper the palette
+  // uses) + the shared applyFitMove tween path below.
+  const onFitSelected = () => {
+    const framing = framingForSelectedViews(viewsRef.current, selectedViewIds)
+    if (!framing) { showToast('No selected views to frame'); return }
+    applyFitMove(framing)
+  }
+
+  // Shared fit-move applier (R42.N/R43.N/R45.N): given a framing, dolly the
+  // live camera to fit it. Keeps the camera's current viewing direction so
+  // the move reads as a graceful pull-back, not a teleport; reduced-motion
+  // users get the instant snap. A second fit cancels the in-flight tween.
+  const applyFitMove = (framing) => {
+    const api = typeof window !== 'undefined' ? window.__particleCamera : null
+    if (!api || typeof api.set !== 'function') return
     let snap = null
     try { snap = typeof api.get === 'function' ? api.get() : null } catch { snap = null }
     const startPos = snap && Array.isArray(snap.pos) ? snap.pos : null
@@ -296,10 +321,11 @@ export default function Minimap() {
     const st = useStore.getState()
     const reduced = resolveReducedMotion(st.reducedMotionMode, st.osPrefersReducedMotion)
     const end = { pos: move.pos, target: move.target }
+    const label = `Framed ${framing.count} view${framing.count === 1 ? '' : 's'}`
     // Reduced motion, or no usable start to tween from → instant snap.
     if (reduced || !startPos || !startTarget) {
       api.set(end)
-      showToast(`Framed ${framing.count} view${framing.count === 1 ? '' : 's'}`)
+      showToast(label)
       return
     }
 
@@ -317,7 +343,7 @@ export default function Minimap() {
       fitRafRef.current = requestAnimationFrame(step)
     }
     fitRafRef.current = requestAnimationFrame(step)
-    showToast(`Framed ${framing.count} view${framing.count === 1 ? '' : 's'}`)
+    showToast(label)
   }
 
   if (!enabled) return null
@@ -326,6 +352,9 @@ export default function Minimap() {
   // render path doesn't have to read viewsRef.current — keeps the
   // react-hooks/refs rule happy.
   const hoverLabel = hoverName || 'View'
+  // R45.N — how many views are in the live palette selection (mirrored from
+  // the store). Drives the "Fit selected" button's visibility + count badge.
+  const selectedCount = Array.isArray(selectedViewIds) ? selectedViewIds.length : 0
 
   return (
     <div className="zen-hideable" style={{
@@ -412,6 +441,41 @@ export default function Minimap() {
           >
             <span style={{ fontSize: 10, lineHeight: 1 }}>{'\u2922'}</span>
             FIT
+          </button>
+        )}
+        {/* R45.N — "Fit selected" button: appears when the user has a live
+            multi-selection going in the command palette (mirrored through
+            the store). One tap frames ONLY that subset on the camera, the
+            minimap-side companion to the palette's own "Fit selected" — so
+            it's reachable without the palette open. Indigo (vs the green
+            FIT-all) so the two are visually distinct; sits just below FIT. */}
+        {selectedCount > 0 && (
+          <button
+            onClick={onFitSelected}
+            title={`Frame the ${selectedCount} selected view${selectedCount === 1 ? '' : 's'} (from the command palette selection)`}
+            style={{
+              position: 'absolute', top: viewCount >= 2 ? 26 : 4, right: 4, zIndex: 2,
+              display: 'inline-flex', alignItems: 'center', gap: 3,
+              padding: '2px 6px', borderRadius: 5,
+              background: 'rgba(99,102,241,0.18)',
+              border: '1px solid rgba(99,102,241,0.45)',
+              color: '#c7d2fe', cursor: 'pointer',
+              fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',
+              fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+              backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)',
+              transition: 'all 0.15s ease-out',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = 'rgba(99,102,241,0.3)'
+              e.currentTarget.style.borderColor = 'rgba(129,140,248,0.7)'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'rgba(99,102,241,0.18)'
+              e.currentTarget.style.borderColor = 'rgba(99,102,241,0.45)'
+            }}
+          >
+            <span style={{ fontSize: 10, lineHeight: 1 }}>{'\u2922'}</span>
+            {selectedCount}
           </button>
         )}
       </div>

@@ -1031,6 +1031,22 @@ export const useStore = create((set, get) => {
   minimapEnabled: false,
   setMinimapEnabled: (v) => set({ minimapEnabled: !!v }),
 
+  // R45.N — the live saved-view multi-selection, mirrored from the command
+  // palette's local selection so OTHER surfaces (the minimap) can act on
+  // "the same selection" without the palette being open. Held as a plain
+  // array of view ids (transient — a selection is an in-session intent, not
+  // something to persist). The palette pushes its selection here on change;
+  // the minimap reads it to offer a matching "Fit selected" button.
+  selectedViewIds: [],
+  setSelectedViewIds: (ids) => {
+    const next = Array.isArray(ids) ? ids.filter(id => id !== null && id !== undefined) : []
+    const cur = get().selectedViewIds
+    // Skip a no-op set (same length + same members in order) so mirroring
+    // the palette's selection each render doesn't churn subscribers.
+    if (cur.length === next.length && cur.every((v, i) => v === next[i])) return
+    set({ selectedViewIds: next })
+  },
+
   // Waveform overlay — small oscilloscope strip pinned to the top-
   // right of the canvas whenever audio reactivity is on AND this
   // toggle is enabled. Renders the live time-domain signal so users
