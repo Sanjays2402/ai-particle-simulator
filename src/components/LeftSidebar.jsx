@@ -33,7 +33,7 @@ import {
   summarizeImportImpact as summarizeCrossfadeOverridesImpact,
 } from '../lib/crossfadeOverridesIO'
 import { ATTRACTOR_TYPES, MAX_ATTRACTORS, attractorTypeStyle, parsePositionInput, dropIndexForGap, stepKeyboardGapCursor, describeGapReorderAnnouncement } from '../lib/namedAttractors'
-import { FRAMING_RATIOS, FRAMING_GRIDS, SPIRAL_ORIENTATIONS, SPIRAL_SWEEP_SPEEDS, SPIRAL_SWEEP_EASINGS, CUSTOM_FRAMING_ID, formatCustomRatioLabel, buildRatioChips } from '../lib/framingGuides'
+import { FRAMING_RATIOS, FRAMING_GRIDS, SPIRAL_ORIENTATIONS, SPIRAL_SWEEP_SPEEDS, SPIRAL_SWEEP_EASINGS, CUSTOM_FRAMING_ID, formatCustomRatioLabel, buildRatioChips, projectedPinnedOrder } from '../lib/framingGuides'
 import { showToast } from './Toast'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
@@ -897,6 +897,14 @@ function CustomRatioChip({ active, ratio, onSubmit, onSelect, recents, onApplyRe
   // are drag-reorderable; reordering needs 2+ pins to be meaningful.
   const pinnedCount = chipRow.filter(c => c.pinned).length
   const canReorderPins = pinnedCount >= 2 && typeof onReorderPin === 'function'
+  // R46.M — while a pinned chip is being dragged, project the 1-based slot
+  // every pinned chip would land in if dropped now, so each chip can wear a
+  // tiny "N" order badge that previews the target order (a sortable-list
+  // affordance). No active drag → identity order, so the badges stay hidden
+  // (only rendered while dragIdx is set). Mirrors movePinnedRatio's splice
+  // so the badge never lies about where a chip will end up.
+  const dragActive = dragIdx !== null && dragOverIdx !== null
+  const projectedOrder = projectedPinnedOrder(pinnedCount, dragIdx, dragOverIdx)
 
   const commit = () => {
     const raw = draft.trim()
@@ -1023,7 +1031,8 @@ function CustomRatioChip({ active, ratio, onSubmit, onSelect, recents, onApplyRe
                   title={draggable ? `${label} — drag to reorder pinned crops` : undefined}
                   style={{
                     display: 'inline-flex', alignItems: 'stretch',
-                    borderRadius: 6, overflow: 'hidden',
+                    position: 'relative',
+                    borderRadius: 6, overflow: 'visible',
                     transition: 'all 0.13s ease-out',
                     cursor: draggable ? 'grab' : 'default',
                     opacity: isDragging ? 0.5 : 1,
@@ -1038,6 +1047,26 @@ function CustomRatioChip({ active, ratio, onSubmit, onSelect, recents, onApplyRe
                     boxShadow: isLive ? '0 0 10px rgba(168,85,247,0.22)' : 'none',
                   }}
                 >
+                  {/* R46.M — drag order badge: while a pinned chip is being
+                      dragged, each pinned chip shows the 1-based slot it would
+                      occupy if dropped now, so the user can read the target
+                      order at a glance instead of inferring it from the single
+                      drop-target highlight. Only rendered mid-drag; the dragged
+                      chip's own badge is emphasised (violet) vs the others. */}
+                  {dragActive && isPinned && pinIdx >= 0 && (
+                    <span aria-hidden="true" style={{
+                      position: 'absolute', top: -7, left: '50%', transform: 'translateX(-50%)',
+                      minWidth: 13, height: 13, padding: '0 3px', borderRadius: 7,
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 8, fontWeight: 800, lineHeight: 1, zIndex: 3,
+                      fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                      background: isDragging ? 'rgba(129,140,248,0.95)' : 'rgba(30,30,44,0.95)',
+                      color: isDragging ? '#fff' : '#c7d2fe',
+                      border: `1px solid ${isDragging ? 'rgba(199,210,254,0.9)' : 'rgba(99,102,241,0.5)'}`,
+                      boxShadow: isDragging ? '0 0 7px rgba(99,102,241,0.7)' : '0 1px 4px rgba(0,0,0,0.5)',
+                      pointerEvents: 'none',
+                    }}>{projectedOrder[pinIdx]}</span>
+                  )}
                   {/* Star toggle — pin (hollow → filled) / unpin. */}
                   <button
                     onClick={() => onTogglePin && onTogglePin(r)}

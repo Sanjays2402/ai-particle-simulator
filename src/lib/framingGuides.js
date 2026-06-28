@@ -837,3 +837,38 @@ export function movePinnedRatio(list, fromIdx, toIdx) {
   next.splice(toIdx, 0, picked)
   return next
 }
+
+// --- R46.M: projected slot order during a pinned-chip drag ------------
+//
+// R45.M makes the pinned ratio chips drag-reorderable. While the user is
+// MID-DRAG, the only live cue is the indigo drop-target highlight on one
+// chip — but with 4-5 pins it's hard to see at a glance where each chip
+// will END UP. This computes, for a pending move (drag chip `fromIdx`
+// hovering over `toIdx`), the projected 1-based slot number every chip
+// would occupy if the drop happened now — so the UI can paint a tiny
+// "1 / N" order badge on each pinned chip that updates as the cursor
+// moves, exactly like a sortable list preview.
+//
+// Returns an array of length `count` where entry[i] is the 1-based slot
+// the chip currently at index i would land in after the move. With no
+// active drag (fromIdx/toIdx null/out-of-range/equal, or count < 2) it
+// returns the identity order [1, 2, ..., count] so the caller can render
+// the same badge shape whether or not a drag is in flight. Pure; mirrors
+// movePinnedRatio's splice semantics so badge == post-drop reality.
+export function projectedPinnedOrder(count, fromIdx, toIdx) {
+  const n = Math.max(0, Math.floor(Number(count)) || 0)
+  // Identity order: chip at index i sits in slot i+1.
+  const identity = () => Array.from({ length: n }, (_, i) => i + 1)
+  if (n < 2) return identity()
+  const f = Number(fromIdx), t = Number(toIdx)
+  if (!Number.isFinite(f) || !Number.isFinite(t)) return identity()
+  if (f < 0 || f >= n || t < 0 || t >= n || f === t) return identity()
+  // Simulate the splice on an index array, then invert: for each ORIGINAL
+  // index, find where it lands in the reordered sequence (1-based).
+  const order = Array.from({ length: n }, (_, i) => i)
+  const [picked] = order.splice(f, 1)
+  order.splice(t, 0, picked)
+  const slotOf = new Array(n)
+  for (let slot = 0; slot < n; slot++) slotOf[order[slot]] = slot + 1
+  return slotOf
+}

@@ -21,6 +21,8 @@ import {
   PINNED_RATIOS_MAX, sanitizePinnedRatios, isRatioPinned, togglePinnedRatio, buildRatioChips,
   // R45.M — reorder the pinned ratio chips
   movePinnedRatio,
+  // R46.M — projected slot order during a pinned-chip drag
+  projectedPinnedOrder,
 } from './framingGuides.js'
 
 let passed = 0
@@ -959,4 +961,67 @@ console.log(`PASS: framingGuides R39.B — ${passed} total assertions (incl. on-
   }
 }
 
-console.log(`PASS: framingGuides R42.M/R43.M/R44.M/R45.M — ${passed} total assertions (incl. custom aspect-ratio input + recents MRU + pinned favourites + pinned reorder)`)
+// --- R46.M: projected slot order during a pinned-chip drag ---
+{
+  // No active drag → identity order [1..n].
+  {
+    const id = projectedPinnedOrder(4, null, null)
+    ok(id.length === 4 && id.every((v, i) => v === i + 1), 'order: no drag → identity 1..n')
+  }
+  // count < 2 → identity (0 → [], 1 → [1]).
+  eq(projectedPinnedOrder(0, 0, 1).length, 0, 'order: count 0 → []')
+  ok(projectedPinnedOrder(1, 0, 0).length === 1 && projectedPinnedOrder(1, 0, 0)[0] === 1, 'order: count 1 → [1]')
+  // Drag the FIRST chip to the LAST slot (0→3 in a 4-list): the dragged
+  // chip lands in slot 4; everyone else shifts up one.
+  {
+    const o = projectedPinnedOrder(4, 0, 3)
+    eq(o[0], 4, 'order: 0→3 — dragged chip projects to slot 4')
+    eq(o[1], 1, 'order: 0→3 — chip 1 shifts to slot 1')
+    eq(o[2], 2, 'order: 0→3 — chip 2 shifts to slot 2')
+    eq(o[3], 3, 'order: 0→3 — chip 3 shifts to slot 3')
+  }
+  // Drag the LAST chip to the FIRST slot (3→0): dragged chip → slot 1,
+  // the rest shift down one.
+  {
+    const o = projectedPinnedOrder(4, 3, 0)
+    eq(o[3], 1, 'order: 3→0 — dragged chip projects to slot 1')
+    eq(o[0], 2, 'order: 3→0 — chip 0 shifts to slot 2')
+    eq(o[1], 3, 'order: 3→0 — chip 1 shifts to slot 3')
+    eq(o[2], 4, 'order: 3→0 — chip 2 shifts to slot 4')
+  }
+  // A mid-list move (1→2 in a 3-list): chip 1 and chip 2 swap slots.
+  {
+    const o = projectedPinnedOrder(3, 1, 2)
+    eq(o[0], 1, 'order: 1→2 — chip 0 unchanged')
+    eq(o[1], 3, 'order: 1→2 — dragged chip 1 projects to slot 3')
+    eq(o[2], 2, 'order: 1→2 — chip 2 shifts up to slot 2')
+  }
+  // Every projected order is a permutation of 1..n (no slot duplicated/lost).
+  {
+    const o = projectedPinnedOrder(5, 1, 4)
+    const sorted = o.slice().sort((a, b) => a - b)
+    ok(sorted.every((v, i) => v === i + 1), 'order: result is a permutation of 1..n')
+  }
+  // No-op / out-of-range / non-finite → identity.
+  {
+    ok(projectedPinnedOrder(3, 1, 1).every((v, i) => v === i + 1), 'order: same index → identity')
+    ok(projectedPinnedOrder(3, 0, 9).every((v, i) => v === i + 1), 'order: toIdx OOB → identity')
+    ok(projectedPinnedOrder(3, -1, 1).every((v, i) => v === i + 1), 'order: fromIdx OOB → identity')
+    ok(projectedPinnedOrder(3, NaN, 1).every((v, i) => v === i + 1), 'order: non-finite idx → identity')
+  }
+  // Junk count → safe empty.
+  eq(projectedPinnedOrder('junk', 0, 1).length, 0, 'order: junk count → []')
+  eq(projectedPinnedOrder(NaN, 0, 1).length, 0, 'order: NaN count → []')
+  // Consistency invariant: the badge's slot for the dragged chip equals
+  // its new index after movePinnedRatio on a same-length canonical list.
+  {
+    const pins = [2, 1.6, 1.3, 1] // 4 distinct labels, already canonical
+    const moved = movePinnedRatio(pins, 0, 2)
+    const order = projectedPinnedOrder(pins.length, 0, 2)
+    // dragged chip (orig idx 0) should be at slot order[0]; in `moved`
+    // that value should sit at index order[0]-1.
+    near(moved[order[0] - 1], pins[0], 'order: badge slot matches movePinnedRatio landing')
+  }
+}
+
+console.log(`PASS: framingGuides R42.M/R43.M/R44.M/R45.M/R46.M — ${passed} total assertions (incl. custom aspect-ratio input + recents MRU + pinned favourites + pinned reorder + drag slot-order preview)`)
