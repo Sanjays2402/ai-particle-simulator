@@ -60,6 +60,8 @@ import {
   sanitizeBurstCount as sanitizeBurstCountHelper,
   DEFAULT_BURST_COUNT as DEFAULT_BURST_COUNT_VAL,
 } from './lib/selfTimer'
+// R42.G — screenshot watermark/caption anchor sanitiser.
+import { sanitizeWatermarkAnchor } from './lib/screenshotWatermark'
 // R29.43 — persisted hotkey-chain fade curve preference helpers.
 import {
   sanitizeHotkeyChainFadeCurve as sanitizeHotkeyChainFadeCurveHelper,
@@ -87,6 +89,9 @@ const FRAMING_CUSTOM_RATIO_KEY = 'particle-framing-custom-ratio-v1'
 const SCREENSHOT_TIMER_KEY = 'particle-screenshot-timer-v1'
 // R35.C — screenshot burst count (frames per capture), own key.
 const SCREENSHOT_BURST_KEY = 'particle-screenshot-burst-v1'
+// R42.G — screenshot watermark/caption toggle + anchor, own keys.
+const SCREENSHOT_WATERMARK_KEY = 'particle-screenshot-watermark-v1'
+const SCREENSHOT_WATERMARK_ANCHOR_KEY = 'particle-screenshot-watermark-anchor-v1'
 // R35.E — zen ambient auto-orbit preference, own key.
 const ZEN_AUTO_ORBIT_KEY = 'particle-zen-auto-orbit-v1'
 // R42.E — zen "Now Playing" overlay preference, own key.
@@ -711,6 +716,28 @@ export const useStore = create((set, get) => {
     const next = sanitizeBurstCountHelper(n)
     try { localStorage.setItem(SCREENSHOT_BURST_KEY, String(next)) } catch { /* quota / private mode */ }
     set({ screenshotBurstCount: next })
+  },
+
+  // R42.G — Screenshot watermark/caption: bake the live preset name into
+  // the exported PNG (in a chosen corner) so a shared still is
+  // self-documenting. Visual on the SAVED file only, never the live
+  // scene. Off by default (an opt-in for shareable stills); the anchor
+  // persists independently so flipping the toggle keeps the chosen corner.
+  screenshotWatermark: (() => {
+    try { return localStorage.getItem(SCREENSHOT_WATERMARK_KEY) === '1' } catch { return false }
+  })(),
+  setScreenshotWatermark: (v) => {
+    const next = !!v
+    try { localStorage.setItem(SCREENSHOT_WATERMARK_KEY, next ? '1' : '0') } catch { /* quota / private mode */ }
+    set({ screenshotWatermark: next })
+  },
+  screenshotWatermarkAnchor: (() => {
+    try { return sanitizeWatermarkAnchor(localStorage.getItem(SCREENSHOT_WATERMARK_ANCHOR_KEY)) } catch { return sanitizeWatermarkAnchor(null) }
+  })(),
+  setScreenshotWatermarkAnchor: (id) => {
+    const next = sanitizeWatermarkAnchor(id)
+    try { localStorage.setItem(SCREENSHOT_WATERMARK_ANCHOR_KEY, next) } catch { /* quota / private mode */ }
+    set({ screenshotWatermarkAnchor: next })
   },
 
 

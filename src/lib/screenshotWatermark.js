@@ -1,0 +1,146 @@
+// Screenshot watermark / caption (R42.G).
+//
+// Optionally bake a small caption (the preset name) into the exported
+// screenshot PNG so a shared still is self-documenting — "which preset
+// is this?" answered right on the image. The caption is composited onto
+// a 2D canvas copy of the live GL canvas at export time, so it only
+// appears in the saved file, never on the live scene.
+//
+// This module owns the pure bits — the corner anchor roster, the caption
+// text builder, and the placement geometry (where the text + its pill
+// background sit for a given canvas size + anchor) — so the React/canvas
+// side stays a thin renderer and the math unit-tests without a DOM.
+
+// The four corner anchors the caption can sit in. Ordered so a cycle
+// reads naturally (top row L→R, then bottom row L→R).
+export const WATERMARK_ANCHORS = [
+  { id: 'top-left',     label: 'Top left' },
+  { id: 'top-right',    label: 'Top right' },
+  { id: 'bottom-left',  label: 'Bottom left' },
+  { id: 'bottom-right', label: 'Bottom right' },
+]
+
+const ANCHOR_IDS = new Set(WATERMARK_ANCHORS.map(a => a.id))
+
+// The default anchor — bottom-right is the least intrusive spot for a
+// caption (mirrors where most apps watermark).
+export const WATERMARK_ANCHOR_DEFAULT = 'bottom-right'
+
+export function isValidWatermarkAnchor(id) {
+  return ANCHOR_IDS.has(id)
+}
+
+// Normalise a stored / incoming anchor id; junk → the default.
+export function sanitizeWatermarkAnchor(id) {
+  return ANCHOR_IDS.has(id) ? id : WATERMARK_ANCHOR_DEFAULT
+}
+
+// Cycle to the next anchor (wraps). Unknown id → first entry's id.
+export function nextWatermarkAnchor(id) {
+  const idx = WATERMARK_ANCHORS.findIndex(a => a.id === id)
+  if (idx < 0) return WATERMARK_ANCHORS[0].id
+  return WATERMARK_ANCHORS[(idx + 1) % WATERMARK_ANCHORS.length].id
+}
+
+// Max characters of caption text before we ellipsis, so a long preset
+// name can't run a caption off the edge of the image.
+export const WATERMARK_MAX_LEN = 48
+
+// Build the caption text from a preset label. Pure.
+//   - non-string / empty / whitespace-only → '' (caller skips drawing —
+//     a blank caption shouldn't paint an empty pill)
+//   - trims + collapses internal whitespace runs to single spaces
+//   - optional prefix (e.g. a wordmark) is prepended with a separator
+//   - ellipsis-truncates the WHOLE result to maxLen (ellipsis counted in
+//     the budget so the caption width is bounded)
+export function buildWatermarkText(label, opts = {}) {
+  const maxLenRaw = Number(opts.maxLen)
+  const maxLen = Number.isFinite(maxLenRaw) && maxLenRaw > 0 ? Math.floor(maxLenRaw) : WATERMARK_MAX_LEN
+  if (typeof label !== 'string') return ''
+  let text = label.trim().replace(/\s+/g, ' ')
+  if (!text) return ''
+  const prefix = typeof opts.prefix === 'string' ? opts.prefix.trim().replace(/\s+/g, ' ') : ''
+  if (prefix) text = `${prefix} \u00b7 ${text}`
+  if (text.length <= maxLen) return text
+  if (maxLen <= 1) return '\u2026'
+  return text.slice(0, maxLen - 1).trimEnd() + '\u2026'
+}
+
+// Resolve a font size that scales with the image so the caption is
+// legible on both a 600px-wide preview and a 4K export, clamped to a
+// readable band. Pure.
+//   size = clamp(round(min(w, h) * scale), min, max)
+export const WATERMARK_FONT_MIN = 11
+export const WATERMARK_FONT_MAX = 40
+export const WATERMARK_FONT_SCALE = 0.022
+
+export function watermarkFontSize(canvasW, canvasH, opts = {}) {
+  const w = Number(canvasW), h = Number(canvasH)
+  const min = (Number.isFinite(opts.min) && opts.min > 0) ? opts.min : WATERMARK_FONT_MIN
+  const max = (Number.isFinite(opts.max) && opts.max >= min) ? opts.max : WATERMARK_FONT_MAX
+  const scale = (Number.isFinite(opts.scale) && opts.scale > 0) ? opts.scale : WATERMARK_FONT_SCALE
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return min
+  const base = Math.min(w, h) * scale
+  const sized = Math.round(base)
+  if (sized < min) return min
+  if (sized > max) return max
+  return sized
+}
+
+// Compute the placement geometry for the caption: where the text anchors
+// and how its rounded-pill background is laid out for a given canvas
+// size, anchor, font size, and measured text width. Returns:
+//   {
+//     textX, textY, textAlign, textBaseline,
+//     pillX, pillY, pillW, pillH, pillRadius,
+//   }
+// in CANVAS pixel coordinates (origin top-left). The text is inset from
+// the chosen corner by `margin`; the pill wraps the text with `padX` /
+// `padY` breathing room.
+//
+// Defensive: a degenerate canvas (<=0 dims) collapses everything to 0 so
+// the renderer draws nothing rather than NaN-positioned text; a junk
+// anchor falls back to the default corner.
+export const WATERMARK_MARGIN = 16
+export const WATERMARK_PAD_X = 10
+export const WATERMARK_PAD_Y = 6
+
+export function watermarkPlacement(canvasW, canvasH, anchor, fontSize, textWidth, opts = {}) {
+  const w = Number(canvasW), h = Number(canvasH)
+  const empty = {
+    textX: 0, textY: 0, textAlign: 'left', textBaseline: 'alphabetic',
+    pillX: 0, pillY: 0, pillW: 0, pillH: 0, pillRadius: 0,
+  }
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return empty
+  const fs = (Number.isFinite(fontSize) && fontSize > 0) ? fontSize : WATERMARK_FONT_MIN
+  const tw = (Number.isFinite(textWidth) && textWidth >= 0) ? textWidth : 0
+  const a = sanitizeWatermarkAnchor(anchor)
+  // Scale the margin + padding gently with the font so a big export
+  // doesn't cram the caption into the corner.
+  const fontScale = fs / WATERMARK_FONT_MIN
+  const margin = ((Number.isFinite(opts.margin) && opts.margin >= 0) ? opts.margin : WATERMARK_MARGIN) * Math.min(2, fontScale)
+  const padX = ((Number.isFinite(opts.padX) && opts.padX >= 0) ? opts.padX : WATERMARK_PAD_X) * Math.min(2, fontScale)
+  const padY = ((Number.isFinite(opts.padY) && opts.padY >= 0) ? opts.padY : WATERMARK_PAD_Y) * Math.min(2, fontScale)
+
+  const pillW = tw + padX * 2
+  const pillH = fs + padY * 2
+  const pillRadius = Math.min(pillH / 2, 10 * Math.min(2, fontScale))
+
+  const isLeft = a === 'top-left' || a === 'bottom-left'
+  const isTop = a === 'top-left' || a === 'top-right'
+
+  // Pill corner position.
+  const pillX = isLeft ? margin : (w - margin - pillW)
+  const pillY = isTop ? margin : (h - margin - pillH)
+
+  // Text sits inset inside the pill by padX/padY. We draw text with
+  // 'left' align + 'middle' baseline so positioning is anchor-agnostic +
+  // vertically centred in the pill regardless of font metrics.
+  const textX = pillX + padX
+  const textY = pillY + pillH / 2
+
+  return {
+    textX, textY, textAlign: 'left', textBaseline: 'middle',
+    pillX, pillY, pillW, pillH, pillRadius,
+  }
+}

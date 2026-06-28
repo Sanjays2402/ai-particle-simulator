@@ -8,10 +8,13 @@ import { loadKeymap, resolveAction } from '../lib/keymap'
 import { TIMER_DELAYS, labelForDelay, BURST_COUNTS, labelForBurst } from '../lib/selfTimer'
 import { formatCalmToast, CALM_GATED_MOTIONS, countGatedMotions } from '../lib/calmMode'
 import { downloadCalmGatesFile, parseImport as parseCalmGatesImport, mergeImport as mergeCalmGatesImport, summarizeImportImpact as summarizeCalmGatesImpact, filterPreviewRows as filterCalmGatesPreviewRows } from '../lib/calmGatesIO'
+// R42.G — bake a preset-name caption into the exported screenshot.
+import { buildWatermarkText, watermarkFontSize, watermarkPlacement, WATERMARK_ANCHORS } from '../lib/screenshotWatermark'
 import { showToast } from './Toast'
 import {
   Play, Pause, RotateCcw, Maximize2, Shuffle, Magnet, Camera, Link2,
   Mic, Download, Settings, Repeat, Sparkles, Zap, Paintbrush, Send, Images, Music2, Timer, Layers, Wind,
+  Type,
 } from 'lucide-react'
 
 // R34.C — module-level screenshot helpers. Kept out of the component
@@ -19,18 +22,65 @@ import {
 // keymap dispatcher) can reference them without becoming effect deps
 // (they read live state via useStore.getState(), no closure needed).
 
+// R42.G — composite a preset-name caption onto a copy of the GL canvas
+// and return a PNG data URL. The caption is drawn on a 2D canvas so it's
+// baked into the SAVED file only — never the live scene. Returns null if
+// the caption is empty or the 2D context can't be had, so the caller
+// falls back to the plain canvas export.
+function composeWatermarkedDataUrl(canvas, label, anchor) {
+  const text = buildWatermarkText(label)
+  if (!text) return null
+  const w = canvas.width, h = canvas.height
+  if (!w || !h) return null
+  const out = document.createElement('canvas')
+  out.width = w
+  out.height = h
+  const ctx = out.getContext('2d')
+  if (!ctx) return null
+  // Draw the live frame first, then the caption on top.
+  ctx.drawImage(canvas, 0, 0)
+  const fontSize = watermarkFontSize(w, h)
+  ctx.font = `600 ${fontSize}px Geist, system-ui, -apple-system, sans-serif`
+  ctx.textBaseline = 'middle'
+  const textWidth = ctx.measureText(text).width
+  const p = watermarkPlacement(w, h, anchor, fontSize, textWidth)
+  if (p.pillW <= 0) return out.toDataURL('image/png')
+  // Rounded-pill backdrop so the caption reads over any scene.
+  ctx.fillStyle = 'rgba(10,10,16,0.55)'
+  if (typeof ctx.roundRect === 'function') {
+    ctx.beginPath()
+    ctx.roundRect(p.pillX, p.pillY, p.pillW, p.pillH, p.pillRadius)
+    ctx.fill()
+  } else {
+    ctx.fillRect(p.pillX, p.pillY, p.pillW, p.pillH)
+  }
+  // The caption text.
+  ctx.fillStyle = 'rgba(232,232,240,0.96)'
+  ctx.textAlign = p.textAlign
+  ctx.textBaseline = p.textBaseline
+  ctx.fillText(text, p.textX, p.textY)
+  return out.toDataURL('image/png')
+}
+
 // Do the real PNG capture from the live canvas + stash it in the
 // in-app gallery. Fired by the ScreenshotTimer overlay's
 // `particle:capture-now` after a countdown, or directly for 0 delay.
 function captureScreenshotNow() {
   const canvas = document.querySelector('#particle-canvas canvas')
   if (!canvas) return
-  const { infoTitle, currentPreset, bumpSessionStat } = useStore.getState()
+  const { infoTitle, currentPreset, bumpSessionStat, screenshotWatermark, screenshotWatermarkAnchor } = useStore.getState()
   const name = (infoTitle || currentPreset || 'particles').replace(/\s+/g, '-').toLowerCase()
   const ts = Date.now()
   const link = document.createElement('a')
   link.download = `particle-${name}-${ts}.png`
-  link.href = canvas.toDataURL('image/png')
+  // R42.G — when the watermark is on, export a captioned copy; otherwise
+  // the plain canvas. A failed compose (empty caption / no 2D ctx) falls
+  // back to the plain export so a screenshot is never lost.
+  let href = null
+  if (screenshotWatermark) {
+    try { href = composeWatermarkedDataUrl(canvas, infoTitle || currentPreset || 'particles', screenshotWatermarkAnchor) } catch { href = null }
+  }
+  link.href = href || canvas.toDataURL('image/png')
   link.click()
   bumpSessionStat('screenshotsTaken', 1)
   // Also stash the snapshot in the in-app gallery so users can revisit
@@ -424,6 +474,7 @@ export default function TopBar({ onSettings, onToggleGallery, galleryOpen, snaps
             }}
           />
         )}
+        <WatermarkBtn />
         <GalleryBtn onClick={onToggleGallery} active={galleryOpen} count={snapshotCount} />
         <Btn onClick={handleShare} title="Share URL"><Link2 size={14} strokeWidth={2.2} /></Btn>
         <Btn onClick={handleTweet} title="Tweet this scene"><Send size={14} strokeWidth={2.2} /></Btn>
@@ -649,6 +700,133 @@ function BurstBtn({ count, onCycle }) {
         }}>{labelForBurst(count)}</span>
       )}
     </button>
+  )
+}
+
+// R42.G — screenshot watermark toggle. A short click toggles baking the
+// preset-name caption into the exported PNG; a right-click (or long-
+// press) opens a tiny popover to choose which corner the caption sits in.
+// Reads the store directly so it stays a self-contained toolbar button,
+// mirroring CalmModeBtn's tap-vs-long-press pattern.
+const WATERMARK_ANCHOR_GLYPH = {
+  'top-left': '\u2196', 'top-right': '\u2197',
+  'bottom-left': '\u2199', 'bottom-right': '\u2198',
+}
+function WatermarkBtn() {
+  const active = useStore(s => s.screenshotWatermark)
+  const setActive = useStore(s => s.setScreenshotWatermark)
+  const anchor = useStore(s => s.screenshotWatermarkAnchor)
+  const setAnchor = useStore(s => s.setScreenshotWatermarkAnchor)
+  const [open, setOpen] = useState(false)
+  const pressTimer = useRef(0)
+  const longPressed = useRef(false)
+
+  const startPress = () => {
+    longPressed.current = false
+    pressTimer.current = window.setTimeout(() => {
+      longPressed.current = true
+      setOpen(o => !o)
+    }, 450)
+  }
+  const endPress = () => {
+    if (pressTimer.current) { clearTimeout(pressTimer.current); pressTimer.current = 0 }
+  }
+  const onClick = () => {
+    if (longPressed.current) { longPressed.current = false; return }
+    setActive(!active)
+  }
+
+  return (
+    <div style={{ position: 'relative', display: 'inline-flex' }}>
+      <button
+        onClick={onClick}
+        onContextMenu={(e) => { e.preventDefault(); setOpen(o => !o) }}
+        onMouseDown={startPress}
+        onMouseUp={endPress}
+        onMouseLeave={endPress}
+        title={active
+          ? `Caption baked into screenshots (${anchor.replace('-', ' ')}) — click to turn off, right-click for corner`
+          : 'Bake the preset name into screenshots — click to turn on, right-click for corner'}
+        style={{
+          position: 'relative',
+          width: 30, height: 30,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          borderRadius: 9, cursor: 'pointer',
+          transition: 'all 0.18s cubic-bezier(0.2, 0.8, 0.2, 1)',
+          background: active
+            ? 'linear-gradient(135deg, rgba(139,92,246,0.25) 0%, rgba(236,72,153,0.2) 100%)'
+            : 'rgba(255,255,255,0.035)',
+          color: active ? '#e9d5ff' : '#c8c8d0',
+          border: active ? '1px solid rgba(168,85,247,0.5)' : '1px solid rgba(255,255,255,0.05)',
+          boxShadow: active ? '0 0 16px rgba(168,85,247,0.35), inset 0 1px 0 rgba(255,255,255,0.08)' : 'none',
+        }}
+        onMouseEnter={e => {
+          if (!active) {
+            e.currentTarget.style.background = 'rgba(255,255,255,0.08)'
+            e.currentTarget.style.borderColor = 'rgba(168,85,247,0.3)'
+            e.currentTarget.style.color = '#fff'
+          }
+        }}
+      >
+        <Type size={14} strokeWidth={2.2} />
+        {active && (
+          <span style={{
+            position: 'absolute', top: -3, right: -4,
+            width: 14, height: 14,
+            background: 'linear-gradient(135deg, #a855f7, #ec4899)',
+            color: '#fff', fontSize: 9, fontWeight: 700,
+            borderRadius: 7, display: 'inline-flex',
+            alignItems: 'center', justifyContent: 'center',
+            border: '1.5px solid rgba(10,10,16,0.95)',
+            lineHeight: 1,
+          }}>{WATERMARK_ANCHOR_GLYPH[anchor] || '\u2218'}</span>
+        )}
+      </button>
+      {open && (
+        <>
+          {/* click-away catcher */}
+          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
+          <div style={{
+            position: 'absolute', top: 36, right: 0, zIndex: 61,
+            padding: 8, borderRadius: 10, minWidth: 150,
+            background: 'linear-gradient(180deg, rgba(20,20,30,0.97), rgba(14,14,22,0.98))',
+            border: '1px solid rgba(168,85,247,0.3)',
+            boxShadow: '0 16px 40px rgba(0,0,0,0.55)',
+            backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+          }}>
+            <div style={{
+              fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
+              color: '#8a8aa0', marginBottom: 7, paddingLeft: 2,
+            }}>Caption corner</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
+              {WATERMARK_ANCHORS.map(a => {
+                const on = anchor === a.id
+                return (
+                  <button key={a.id}
+                    onClick={() => { setAnchor(a.id); if (!active) setActive(true) }}
+                    title={a.label}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      padding: '6px 8px', borderRadius: 7, cursor: 'pointer',
+                      fontSize: 10.5, fontWeight: 600,
+                      fontFamily: 'Geist Mono, monospace',
+                      background: on
+                        ? 'linear-gradient(135deg, rgba(168,85,247,0.22) 0%, rgba(236,72,153,0.18) 100%)'
+                        : 'rgba(255,255,255,0.03)',
+                      color: on ? '#f3e8ff' : '#9a9ab0',
+                      border: on ? '1px solid rgba(168,85,247,0.45)' : '1px solid rgba(255,255,255,0.06)',
+                    }}
+                  >
+                    <span style={{ fontSize: 13, lineHeight: 1 }}>{WATERMARK_ANCHOR_GLYPH[a.id]}</span>
+                    {a.label.replace('Top ', 'T').replace('Bottom ', 'B').replace('left', 'L').replace('right', 'R')}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 
