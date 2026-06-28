@@ -7,6 +7,7 @@ import {
   renameView, buildCameraPaletteActions, buildCameraDeleteActions,
   buildCameraRenameActions, duplicateView, buildCameraDuplicateActions,
   duplicateAllViews, duplicateViews, selectIdRange,
+  removeViews,
 } from '../lib/cameraViews'
 import { labelForId as framingLabelForId } from '../lib/framingGuides'
 import { formatCalmToast } from '../lib/calmMode'
@@ -221,6 +222,34 @@ export function CommandPalette({ onSettings }) {
     setSelecting(false)
     setSelectedIds(new Set())
     setAnchorId(null)
+  }
+
+  // R42.H — bulk-delete the selected subset (graduates the per-view
+  // delete + the R41.H duplicate-subset into a shared multi-select bar).
+  // Pure removeViews (ref-equal-on-no-op) does the work; a window.confirm
+  // gates the destructive action. Persist + re-sync like every other
+  // lifecycle action, then leave selection mode.
+  const deleteSelected = () => {
+    const count = selectedIds.size
+    if (count === 0) return
+    if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+      const ok = window.confirm(`Delete ${count} selected camera view${count === 1 ? '' : 's'}? This can't be undone.`)
+      if (!ok) return
+    }
+    const current = loadCameraViews()
+    const next = removeViews(current, selectedIds)
+    setSelecting(false)
+    setSelectedIds(new Set())
+    setAnchorId(null)
+    if (next === current) return // nothing selected was present
+    saveCameraViews(next)
+    setCameraViews(next)
+    window.dispatchEvent(new CustomEvent('particle:camera-views-changed'))
+    const removed = current.length - next.length
+    showToast(
+      `Deleted ${removed} selected view${removed === 1 ? '' : 's'}`,
+      <Trash2 size={10} color="#fff" strokeWidth={2.4} />,
+    )
   }
 
   if (!open) return null
@@ -447,17 +476,18 @@ export function CommandPalette({ onSettings }) {
                 />
               )
             ))}
-            {/* R41.H — multi-select duplicate: a SUBSET fork, the middle
-                ground between R39.H (one) and R40.H (all). When 2+
-                duplicable views exist, an entry row arms a checkbox list
-                (escaping cmdk like the rename row) so the user picks which
-                views to clone. Shift-click range-selects. */}
+            {/* R41.H/R42.H — multi-select bar: pick a SUBSET of views and
+                either fork them (duplicate) OR prune them (delete) in one
+                pass. The middle ground between the per-view actions and the
+                all-views actions. When 2+ views exist, an entry row arms a
+                checkbox list (escaping cmdk like the rename row).
+                Shift-click range-selects. */}
             {!selecting && duplicableViews.length >= 2 && (
               <Item
                 icon={Copy}
-                label="Duplicate Selected Views…"
-                sub={`Pick a subset of the ${duplicableViews.length} views to clone`}
-                keywords="camera view duplicate selected subset multi clone copy fork some pick choose"
+                label="Select Views…"
+                sub={`Pick a subset of the ${duplicableViews.length} views to duplicate or delete`}
+                keywords="camera view duplicate delete selected subset multi clone copy fork remove prune some pick choose"
                 onSelect={() => enterSelectMode()}
               />
             )}
@@ -477,7 +507,7 @@ export function CommandPalette({ onSettings }) {
                   <span style={{
                     fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
                     textTransform: 'uppercase', color: '#a78bfa',
-                  }}>Select views to duplicate</span>
+                  }}>Select views</span>
                   <span style={{ fontSize: 10, color: '#8a8aa0', fontVariantNumeric: 'tabular-nums' }}>
                     {selectedCount}/{duplicableViews.length}
                   </span>
@@ -530,6 +560,29 @@ export function CommandPalette({ onSettings }) {
                       fontFamily: 'inherit', fontSize: 12, fontWeight: 600, letterSpacing: '0.02em',
                     }}
                   >{selectedCount === 0 ? 'Duplicate' : `Duplicate (${selectedCount})`}</button>
+                  {/* R42.H — bulk DELETE the same selected subset, so the
+                      multi-select bar covers both forking and pruning. Red-
+                      keyed + window.confirm-gated to distinguish it from the
+                      duplicate action. */}
+                  <button
+                    onClick={() => deleteSelected()}
+                    disabled={selectedCount === 0}
+                    title={selectedCount === 0 ? 'Select at least one view' : `Delete the ${selectedCount} selected view${selectedCount === 1 ? '' : 's'}`}
+                    style={{
+                      flex: 1, padding: '6px 0', borderRadius: 7,
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                      background: selectedCount === 0
+                        ? 'rgba(255,255,255,0.04)'
+                        : 'linear-gradient(135deg, rgba(239,68,68,0.3) 0%, rgba(220,38,38,0.24) 100%)',
+                      border: `1px solid ${selectedCount === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(248,113,113,0.5)'}`,
+                      color: selectedCount === 0 ? '#6a6a80' : '#fecaca',
+                      cursor: selectedCount === 0 ? 'not-allowed' : 'pointer',
+                      fontFamily: 'inherit', fontSize: 12, fontWeight: 600, letterSpacing: '0.02em',
+                    }}
+                  >
+                    <Trash2 size={11} strokeWidth={2.2} />
+                    {selectedCount === 0 ? 'Delete' : `Delete (${selectedCount})`}
+                  </button>
                   <button
                     onClick={() => cancelSelectMode()}
                     title="Cancel selection"

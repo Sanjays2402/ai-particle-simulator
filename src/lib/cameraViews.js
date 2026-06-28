@@ -614,3 +614,40 @@ export function selectIdRange(orderedIds, anchorId, targetId) {
   return orderedIds.slice(lo, hi + 1)
 }
 
+// --- R42.H: bulk-delete a SELECTED subset of views -------------------
+//
+// R41.H gave the command palette a checkbox multi-select that could
+// DUPLICATE a chosen subset; this completes that bar's lifecycle with a
+// matching bulk DELETE so a user can prune several saved views in one
+// pass instead of deleting them one at a time. The pure core mirrors
+// removeAttractors / removeSnapshots so the whole codebase shares one
+// "remove a set of rows by id" contract.
+//
+// `idSet` accepts a Set, an array, or any iterable of ids. Every view
+// whose id is in the set is dropped; everything else is kept in order.
+//
+// Contract:
+//   - non-array views → [] (callers persist [])
+//   - empty / non-iterable idSet → input ref unchanged AND no cleanup
+//     needed (ref-equal-on-no-op so persistence can skip a redundant
+//     save) — UNLESS a corrupt (null) row is present, which we always
+//     drop (parallels removeView's "ref-equal only when nothing to
+//     remove AND nothing to clean up" trade-off)
+//   - a selected id that isn't present is a silent no-op for that id
+//   - never mutates the input array
+export function removeViews(views, idSet) {
+  if (!Array.isArray(views)) return []
+  let ids
+  if (idSet instanceof Set) ids = idSet
+  else if (idSet && typeof idSet[Symbol.iterator] === 'function') ids = new Set(idSet)
+  else ids = new Set()
+  let changed = false
+  const next = []
+  for (const v of views) {
+    if (!v) { changed = true; continue }          // drop corrupt rows
+    if (ids.has(v.id)) { changed = true; continue } // selected → remove
+    next.push(v)
+  }
+  return changed ? next : views
+}
+

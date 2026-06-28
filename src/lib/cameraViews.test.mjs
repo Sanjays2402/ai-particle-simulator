@@ -19,6 +19,8 @@ import {
   duplicateAllViews,
   // R41.H — duplicate a SELECTED subset + shift-click range helper
   duplicateViews, selectIdRange,
+  // R42.H — bulk-delete a SELECTED subset
+  removeViews,
 } from './cameraViews.js'
 
 function assertEq(actual, expected, msg) {
@@ -954,3 +956,65 @@ console.log('PASS: duplicateViews — fork a selected subset (R41.H)')
 }
 
 console.log('PASS: selectIdRange — shift-click range-select core (R41.H)')
+
+// --- R42.H: removeViews — bulk-delete a selected subset ----------------
+{
+  const base = [
+    { id: 30, name: 'c', pos: [3, 0, 0], target: [0, 0, 0] },
+    { id: 20, name: 'b', pos: [2, 0, 0], target: [0, 0, 0] },
+    { id: 10, name: 'a', pos: [1, 0, 0], target: [0, 0, 0] },
+  ]
+  // remove a subset (Set) — keeps the rest in order.
+  {
+    const out = removeViews(base, new Set([30, 10]))
+    assertEq(out.map(v => v.id), [20], 'removeViews drops the selected ids')
+  }
+  // array input accepted (mirrors removeAttractors contract).
+  {
+    const out = removeViews(base, [20])
+    assertEq(out.map(v => v.id), [30, 10], 'removeViews accepts an array idSet')
+  }
+  // iterable / generator input accepted.
+  {
+    function* gen() { yield 10; yield 20 }
+    const out = removeViews(base, gen())
+    assertEq(out.map(v => v.id), [30], 'removeViews accepts a generator idSet')
+  }
+  // empty selection → input ref unchanged (ref-equal-on-no-op).
+  {
+    const out = removeViews(base, new Set())
+    assertTrue(out === base, 'empty idSet → same ref (no redundant save)')
+  }
+  // non-iterable idSet → ref unchanged.
+  {
+    const out = removeViews(base, null)
+    assertTrue(out === base, 'non-iterable idSet → same ref')
+  }
+  // selected id not present → no-op, ref unchanged.
+  {
+    const out = removeViews(base, new Set([999]))
+    assertTrue(out === base, 'absent id → same ref (silent no-op)')
+  }
+  // removing all → empty array.
+  {
+    const out = removeViews(base, new Set([10, 20, 30]))
+    assertEq(out, [], 'removing every id → []')
+  }
+  // corrupt (null) rows always dropped, even with an empty selection.
+  {
+    const dirty = [{ id: 1, pos: [0, 0, 0] }, null, { id: 2, pos: [1, 1, 1] }]
+    const out = removeViews(dirty, new Set())
+    assertEq(out.map(v => v.id), [1, 2], 'corrupt rows dropped even on empty idSet')
+    assertTrue(out !== dirty, 'cleanup means a fresh array (not the input ref)')
+  }
+  // non-array → [].
+  assertEq(removeViews(null, new Set([1])), [], 'non-array views → []')
+  // purity: input not mutated.
+  {
+    const snap = JSON.stringify(base)
+    removeViews(base, new Set([20]))
+    assertEq(JSON.stringify(base), snap, 'removeViews does not mutate input')
+  }
+}
+
+console.log('PASS: removeViews — bulk-delete a selected subset (R42.H)')
