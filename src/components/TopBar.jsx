@@ -760,6 +760,10 @@ function WatermarkBtn() {
   // popover can show the branded pill (corner + both lines) before export.
   const infoTitle = useStore(s => s.infoTitle)
   const currentPreset = useStore(s => s.currentPreset)
+  // Stable timestamp for the preview's illustrative date (the real export
+  // computes its own Date.now() at capture time). Lazy useState so it's
+  // evaluated once at mount, not impurely during every render.
+  const [previewNow] = useState(() => Date.now())
   const [open, setOpen] = useState(false)
   const pressTimer = useRef(0)
   const longPressed = useRef(false)
@@ -787,7 +791,7 @@ function WatermarkBtn() {
   const PREVIEW_W = 158
   const PREVIEW_H = 92
   const previewMain = buildWatermarkText(infoTitle || currentPreset || 'particles')
-  const previewSub = buildWatermarkSubtext({ wordmark, showDate, date: Date.now() })
+  const previewSub = buildWatermarkSubtext({ wordmark, showDate, date: previewNow })
   const preview = buildWatermarkPreview(PREVIEW_W, PREVIEW_H, anchor, [
     { text: previewMain, fontSize: PREVIEW_MAIN_FONT },
     { text: previewSub, fontSize: PREVIEW_SUB_FONT },

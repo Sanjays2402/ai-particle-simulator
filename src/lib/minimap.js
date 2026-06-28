@@ -252,6 +252,30 @@ export function framingForViews(views) {
   return { center, radius, count: n }
 }
 
+// --- R44.N: frame only a SELECTED subset of views --------------------
+//
+// R42.N/R43.N "Fit all" frames every saved view. When the user has a
+// multi-selection going (the R43.H command-palette panel), framing only
+// the CHOSEN subset is the natural companion — "zoom to fit these three"
+// rather than the whole set. This filters the views to the selected ids
+// then reuses framingForViews, so the centroid + spread math (and every
+// pinned test for it) is shared. `idSet` accepts a Set | Array | iterable
+// (mirrors removeViews / the selection helpers). Returns the same
+// { center, radius, count } shape as framingForViews, or null when the
+// subset carries no usable position (empty selection, all-stale ids, all
+// rows malformed). Pure.
+export function framingForSelectedViews(views, idSet) {
+  if (!Array.isArray(views) || views.length === 0) return null
+  let ids
+  if (idSet instanceof Set) ids = idSet
+  else if (idSet && typeof idSet[Symbol.iterator] === 'function') ids = new Set(idSet)
+  else return null
+  if (ids.size === 0) return null
+  const selected = views.filter(v => v && ids.has(v.id))
+  if (selected.length === 0) return null
+  return framingForViews(selected)
+}
+
 // Suggest a camera distance that frames a cluster of the given radius.
 // Physically grounded: to fit a sphere of `radius` in a camera with
 // half-FOV θ, the distance is radius / sin(θ); we add padding + clamp to

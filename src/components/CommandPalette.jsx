@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Command } from 'cmdk'
 import { useStore } from '../store'
 import { presets } from '../presets'
@@ -14,6 +14,12 @@ import {
   invertSelection,
 } from '../lib/cameraViews'
 import { labelForId as framingLabelForId } from '../lib/framingGuides'
+import {
+  // R44.N — frame a selected subset of saved views (eased camera tween)
+  framingForSelectedViews, frameViewsCameraMove,
+  FIT_TWEEN_MS, tweenProgress, tweenCameraStep,
+} from '../lib/minimap'
+import { resolveReducedMotion } from '../lib/reducedMotion'
 import { formatCalmToast } from '../lib/calmMode'
 import { showToast } from './Toast'
 import {
@@ -40,6 +46,10 @@ export function CommandPalette({ onSettings }) {
   const [selecting, setSelecting] = useState(false)
   const [selectedIds, setSelectedIds] = useState(() => new Set())
   const [anchorId, setAnchorId] = useState(null)
+  // R44.N — handle for the "Fit selected" camera tween's rAF loop, so a
+  // second fit (or the palette closing) cancels an in-flight tween instead
+  // of stacking two animations fighting over the camera (mirrors Minimap).
+  const fitRafRef = useRef(0)
   const framingGuideId = useStore(s => s.framingGuideId)
   const cycleFramingGuide = useStore(s => s.cycleFramingGuide)
   const {
@@ -67,6 +77,12 @@ export function CommandPalette({ onSettings }) {
     }
     document.addEventListener('keydown', h)
     return () => document.removeEventListener('keydown', h)
+  }, [])
+
+  // R44.N — stop any in-flight "Fit selected" camera tween on unmount so it
+  // doesn't keep driving the camera after the palette is gone.
+  useEffect(() => () => {
+    if (fitRafRef.current) { cancelAnimationFrame(fitRafRef.current); fitRafRef.current = 0 }
   }, [])
 
   const run = (fn) => () => { fn(); setOpen(false) }
@@ -221,6 +237,52 @@ export function CommandPalette({ onSettings }) {
       .map(v => v.id)
     setSelectedIds(prev => invertSelection(orderedIds, prev))
     setAnchorId(null)
+  }
+
+  // R44.N — "Fit selected": frame ONLY the chosen subset of saved views,
+  // the companion to the minimap's R42.N/R43.N "Fit all". Computes the
+  // subset's centroid + spread (framingForSelectedViews), keeps the
+  // camera's current viewing direction (so it dollies, not teleports), and
+  // tweens over ~0.6s eased — exactly mirroring the Minimap onFitAll path.
+  // Reduced motion (or no usable camera start) → instant snap. A second
+  // click cancels the in-flight tween. No-op (nothing selected with a
+  // usable position) just toasts.
+  const fitSelected = () => {
+    const api = typeof window !== 'undefined' ? window.__particleCamera : null
+    if (!api || typeof api.set !== 'function') { showToast('Camera not ready yet'); return }
+    const framing = framingForSelectedViews(loadCameraViews(), selectedIds)
+    if (!framing) { showToast('No selected views to frame'); return }
+    let snap = null
+    try { snap = typeof api.get === 'function' ? api.get() : null } catch { snap = null }
+    const startPos = snap && Array.isArray(snap.pos) ? snap.pos : null
+    const startTarget = snap && Array.isArray(snap.target) ? snap.target : null
+    const move = frameViewsCameraMove(framing, startPos, startTarget)
+    if (!move) { showToast('No selected views to frame'); return }
+
+    // Cancel any tween already running so two fits don't fight.
+    if (fitRafRef.current) { cancelAnimationFrame(fitRafRef.current); fitRafRef.current = 0 }
+
+    const st = useStore.getState()
+    const reduced = resolveReducedMotion(st.reducedMotionMode, st.osPrefersReducedMotion)
+    const end = { pos: move.pos, target: move.target }
+    const done = () => showToast(`Framed ${framing.count} selected view${framing.count === 1 ? '' : 's'}`)
+    if (reduced || !startPos || !startTarget) {
+      api.set(end)
+      done()
+      return
+    }
+    const start = { pos: startPos.slice(), target: startTarget.slice() }
+    const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now())
+    const step = () => {
+      const now = (typeof performance !== 'undefined' ? performance.now() : Date.now())
+      const p = tweenProgress(now - t0, FIT_TWEEN_MS)
+      const cam = tweenCameraStep(start, end, p)
+      if (cam) api.set(cam)
+      if (p >= 1) { fitRafRef.current = 0; return }
+      fitRafRef.current = requestAnimationFrame(step)
+    }
+    fitRafRef.current = requestAnimationFrame(step)
+    done()
   }
 
   // R41.H — fork just the selected subset. Pure duplicateViews
@@ -632,6 +694,30 @@ export function CommandPalette({ onSettings }) {
                     )
                   })}
                 </div>
+                {/* R44.N — "Fit selected": frame ONLY the chosen subset on
+                    the live camera (eased dolly), the companion to the
+                    minimap's "Fit all". Non-destructive, so it sits on its
+                    own row above the duplicate/delete lifecycle actions and
+                    keeps the panel open. */}
+                <button
+                  onClick={() => fitSelected()}
+                  disabled={selectedCount === 0}
+                  title={selectedCount === 0 ? 'Select at least one view' : `Frame the ${selectedCount} selected view${selectedCount === 1 ? '' : 's'} on the camera`}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    width: '100%', padding: '6px 0', borderRadius: 7, marginBottom: 7,
+                    background: selectedCount === 0
+                      ? 'rgba(255,255,255,0.04)'
+                      : 'linear-gradient(135deg, rgba(16,185,129,0.26) 0%, rgba(34,197,94,0.2) 100%)',
+                    border: `1px solid ${selectedCount === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(34,197,94,0.5)'}`,
+                    color: selectedCount === 0 ? '#6a6a80' : '#bbf7d0',
+                    cursor: selectedCount === 0 ? 'not-allowed' : 'pointer',
+                    fontFamily: 'inherit', fontSize: 12, fontWeight: 600, letterSpacing: '0.02em',
+                  }}
+                >
+                  <span aria-hidden="true" style={{ fontSize: 13, lineHeight: 1 }}>{'\u2922'}</span>
+                  {selectedCount === 0 ? 'Fit selected' : `Fit selected (${selectedCount})`}
+                </button>
                 <div style={{ display: 'flex', gap: 6 }}>
                   <button
                     onClick={() => duplicateSelected()}

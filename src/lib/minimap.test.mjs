@@ -10,6 +10,8 @@ import {
   FIT_MIN_DIST, FIT_MAX_DIST, FIT_DEFAULT_DIR,
   // R43.N — animated fit tween
   FIT_TWEEN_MS, easeInOutCubic, tweenProgress, tweenCameraStep,
+  // R44.N — frame a selected subset
+  framingForSelectedViews,
 } from './minimap.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -451,3 +453,71 @@ console.log(`PASS: minimap — pickSceneHalf, projectXZ (clamped), sampleScene, 
 }
 
 console.log('PASS: minimap R43.N — easeInOutCubic + tweenProgress + tweenCameraStep (animated fit-all tween)')
+
+// --- R44.N: framingForSelectedViews (frame a chosen subset) ---
+{
+  const views = [
+    { id: 1, pos: [10, 0, 0] },
+    { id: 2, pos: [-10, 0, 0] },
+    { id: 3, pos: [0, 0, 10] },
+    { id: 4, pos: [100, 0, 100] }, // far outlier
+  ]
+  // selecting the symmetric trio centres near origin.
+  {
+    const f = framingForSelectedViews(views, new Set([1, 2, 3]))
+    ok(f !== null, 'selected: trio framed')
+    eq(f.count, 3, 'selected: counts only the chosen')
+    near(f.center[0], 0, 'selected: centroid x ~0')
+    near(f.center[2], 10 / 3, 'selected: centroid z = mean of selected')
+  }
+  // selecting just the outlier frames it alone (radius 0, count 1).
+  {
+    const f = framingForSelectedViews(views, new Set([4]))
+    eq(f.count, 1, 'selected: single view → count 1')
+    near(f.radius, 0, 'selected: single view → radius 0')
+    near(f.center[0], 100, 'selected: single centroid is the view itself')
+  }
+  // the subset framing differs from the all-views framing (proves it's
+  // really scoping, not just deferring to framingForViews on everything).
+  {
+    const all = framingForViews(views)
+    const sub = framingForSelectedViews(views, new Set([1, 2, 3]))
+    ok(all.count === 4 && sub.count === 3, 'selected: subset count < all count')
+    ok(Math.abs(all.center[0] - sub.center[0]) > 1, 'selected: subset centroid differs from all')
+  }
+  // accepts an Array selection (not just a Set).
+  {
+    const f = framingForSelectedViews(views, [1, 2])
+    eq(f.count, 2, 'selected: array idSet accepted')
+    near(f.center[0], 0, 'selected: array idSet centroid correct')
+  }
+  // empty selection → null.
+  eq(framingForSelectedViews(views, new Set()), null, 'selected: empty set → null')
+  eq(framingForSelectedViews(views, []), null, 'selected: empty array → null')
+  // all-stale ids (none match) → null.
+  eq(framingForSelectedViews(views, new Set([99, 98])), null, 'selected: all-stale ids → null')
+  // non-iterable / missing idSet → null.
+  eq(framingForSelectedViews(views, null), null, 'selected: null idSet → null')
+  eq(framingForSelectedViews(views, 5), null, 'selected: non-iterable idSet → null')
+  // non-array / empty views → null.
+  eq(framingForSelectedViews(null, new Set([1])), null, 'selected: non-array views → null')
+  eq(framingForSelectedViews([], new Set([1])), null, 'selected: empty views → null')
+  // a selected-but-malformed row (no usable pos) is skipped → null when
+  // it's the only selection.
+  {
+    const bad = [{ id: 1, pos: [NaN, 0, 0] }, { id: 2, pos: [5, 0, 5] }]
+    const f = framingForSelectedViews(bad, new Set([1]))
+    eq(f, null, 'selected: only-malformed selection → null')
+    const f2 = framingForSelectedViews(bad, new Set([1, 2]))
+    eq(f2.count, 1, 'selected: malformed row skipped, valid one framed')
+  }
+  // the framing feeds frameViewsCameraMove to produce a finite move.
+  {
+    const f = framingForSelectedViews(views, new Set([1, 2, 3]))
+    const move = frameViewsCameraMove(f, [0, 0, 50], [0, 0, 0])
+    ok(move && move.pos.every(Number.isFinite) && move.target.every(Number.isFinite),
+      'selected: framing drives a finite camera move')
+  }
+}
+
+console.log('PASS: minimap R44.N — framingForSelectedViews (frame a chosen subset of saved views)')
