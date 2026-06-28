@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { useStore } from '../store'
+import { useStore, THEMES } from '../store'
 import {
   ZEN_BODY_CLASS, CURSOR_IDLE_MS,
   classifyZenKey, nextZenState, shouldHideCursor, zenOrbitSpeed,
+  formatNowPlaying,
 } from '../lib/zenMode'
 import { resolveReducedMotion } from '../lib/reducedMotion'
 import { resolveCalmFor } from '../lib/calmMode'
@@ -27,6 +28,12 @@ export default function ZenMode() {
   const reducedMotionMode = useStore(s => s.reducedMotionMode)
   const osReduced = useStore(s => s.osPrefersReducedMotion)
   const reduced = resolveReducedMotion(reducedMotionMode, osReduced)
+  // R42.E — zen "Now Playing" card: the live preset name + the theme
+  // accent for a small swatch. Re-keyed on the name so a preset change
+  // mid-zen replays the card's fade (like a music player's track change).
+  const zenNowPlaying = useStore(s => s.zenNowPlaying)
+  const infoTitle = useStore(s => s.infoTitle)
+  const theme = useStore(s => s.theme)
   const lastMoveRef = useRef(0)
   const cursorHiddenRef = useRef(false)
 
@@ -187,6 +194,52 @@ export default function ZenMode() {
           opacity: 0.5,
         }}
       />
+
+      {/* R42.E — "Now Playing" card: an auto-fading chip in the bottom-
+          left with the live preset name + a theme-accent swatch, so a
+          screen-recording is self-documenting without the full UI. Keyed
+          on the preset name so a preset change mid-zen remounts the card
+          and replays its fade (a music-player track-change feel). Under
+          reduced motion it stays statically visible (no flash). */}
+      {zenNowPlaying && (
+        <div
+          key={infoTitle}
+          style={{
+            position: 'fixed', bottom: 16, left: 16, zIndex: 951,
+            pointerEvents: 'none',
+            display: 'inline-flex', alignItems: 'center', gap: 9,
+            padding: '8px 13px', borderRadius: 10,
+            background: 'rgba(10,10,16,0.55)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
+            boxShadow: '0 10px 32px rgba(0,0,0,0.4)',
+            animation: reduced ? 'none' : 'zen-nowplaying-fade 5s ease-out forwards',
+            opacity: reduced ? 0.85 : undefined,
+            maxWidth: 'min(60vw, 360px)',
+          }}
+        >
+          <span style={{
+            width: 9, height: 9, borderRadius: '50%', flexShrink: 0,
+            background: (THEMES[theme] && THEMES[theme].neon) || '#a855f7',
+            boxShadow: `0 0 9px ${(THEMES[theme] && THEMES[theme].neon) || '#a855f7'}`,
+          }} />
+          <span style={{
+            display: 'inline-flex', flexDirection: 'column', gap: 1,
+            overflow: 'hidden',
+          }}>
+            <span style={{
+              fontSize: 8.5, fontWeight: 700, letterSpacing: '0.14em',
+              textTransform: 'uppercase', color: '#8a8aa0',
+              fontFamily: 'Geist Mono, JetBrains Mono, monospace', lineHeight: 1,
+            }}>Now Playing</span>
+            <span style={{
+              fontSize: 13, fontWeight: 600, color: '#e8e8f0', lineHeight: 1.25,
+              letterSpacing: '0.01em',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>{formatNowPlaying(infoTitle)}</span>
+          </span>
+        </div>
+      )}
     </>
   )
 }

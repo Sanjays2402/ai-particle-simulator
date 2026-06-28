@@ -407,6 +407,17 @@ body.zen-mode .orb {
 .zen-exit-dot { transition: opacity 0.2s ease, transform 0.2s ease; }
 .zen-exit-dot:hover { opacity: 1 !important; transform: scale(1.3); }
 
+/* R42.E: zen "Now Playing" card — slides up + fades in, holds, then
+   settles to a low-opacity resting state so it stays subtly legible for
+   a recording without dominating the frame. Keyed on the preset name in
+   the component, so a preset change replays this from the top. */
+@keyframes zen-nowplaying-fade {
+  0%   { opacity: 0; transform: translateY(8px); }
+  10%  { opacity: 1; transform: translateY(0); }
+  72%  { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0.32; transform: translateY(0); }
+}
+
 /* v2 iter 08: status strip at the bottom-left for live telemetry */
 .status-strip {
   position: fixed; bottom: 16px; left: 16px; z-index: 50;

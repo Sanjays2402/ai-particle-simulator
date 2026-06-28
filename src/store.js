@@ -89,6 +89,8 @@ const SCREENSHOT_TIMER_KEY = 'particle-screenshot-timer-v1'
 const SCREENSHOT_BURST_KEY = 'particle-screenshot-burst-v1'
 // R35.E — zen ambient auto-orbit preference, own key.
 const ZEN_AUTO_ORBIT_KEY = 'particle-zen-auto-orbit-v1'
+// R42.E — zen "Now Playing" overlay preference, own key.
+const ZEN_NOW_PLAYING_KEY = 'particle-zen-now-playing-v1'
 // R36.D — live perf-budget status pill toggle, own key.
 const PERF_PILL_KEY = 'particle-perf-pill-v1'
 // R36.K — global calm-mode master toggle, own key.
@@ -668,6 +670,20 @@ export const useStore = create((set, get) => {
     // churn the store every animation frame.
     if (get().zenAmbientOrbitSpeed === next) return
     set({ zenAmbientOrbitSpeed: next })
+  },
+
+  // R42.E — zen "Now Playing" overlay: while in zen mode, show an
+  // auto-fading card with the live preset name (+ a palette swatch) so a
+  // screen-recording is self-documenting without the full UI. Defaults
+  // ON (it's an unobtrusive, self-fading recording aid); persisted so a
+  // user who turns it off keeps it off.
+  zenNowPlaying: (() => {
+    try { return localStorage.getItem(ZEN_NOW_PLAYING_KEY) !== '0' } catch { return true }
+  })(),
+  setZenNowPlaying: (v) => {
+    const next = !!v
+    try { localStorage.setItem(ZEN_NOW_PLAYING_KEY, next ? '1' : '0') } catch { /* quota / private mode */ }
+    set({ zenNowPlaying: next })
   },
 
   // R34.C — Screenshot self-timer delay (seconds). When > 0, the

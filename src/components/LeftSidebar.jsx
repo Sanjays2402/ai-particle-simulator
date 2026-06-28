@@ -440,6 +440,20 @@ export default function LeftSidebar() {
             </p>
           </div>
 
+          {/* R42.E — zen "Now Playing" card: a self-fading chip with the
+              live preset name + theme swatch while in zen mode, so a
+              screen-recording is self-documenting without the full UI. */}
+          <div style={{ marginTop: 12 }}>
+            <ToggleRow
+              label="Zen Now Playing"
+              value={useStore(s => s.zenNowPlaying)}
+              onChange={useStore(s => s.setZenNowPlaying)}
+            />
+            <p style={{ fontSize: 10, color: '#5a5a70', marginTop: 4, lineHeight: 1.4 }}>
+              In zen mode (Z), show an auto-fading preset-name card for clean recordings.
+            </p>
+          </div>
+
           {/* R36.D — live perf-budget pill: an always-on green/amber/red
               fps dot pinned bottom-left, for users tuning a heavy scene
               who want to watch headroom continuously. Separate from the

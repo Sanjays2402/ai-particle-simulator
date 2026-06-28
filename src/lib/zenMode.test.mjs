@@ -2,6 +2,8 @@
 import {
   CURSOR_IDLE_MS, ZEN_BODY_CLASS,
   shouldHideCursor, cursorVisibleRemaining, classifyZenKey, nextZenState,
+  // R42.E — zen "Now Playing" overlay label formatting
+  NOW_PLAYING_MAX_LEN, formatNowPlaying,
 } from './zenMode.js'
 
 let passed = 0
@@ -156,4 +158,62 @@ eq(zenOrbitSpeed(true, false, 0, 999999), 0, 'preference off → 0 speed')
   eq(zenOrbitSpeed(true, true, 3000, 3100, opts), 0, 'interaction resets orbit to 0')
 }
 
-console.log(`PASS: zenMode — ${passed} assertions (cursor idle decision, key reducer, integration, R35.E auto-orbit ramp)`)
+// --- R42.E: formatNowPlaying — zen now-playing label ---
+{
+  // happy path: a normal name passes through.
+  eq(formatNowPlaying('Nebula Drift'), 'Nebula Drift', 'normal name passes through')
+  // trims surrounding whitespace.
+  eq(formatNowPlaying('  Aurora  '), 'Aurora', 'trims whitespace')
+  // collapses internal whitespace runs.
+  eq(formatNowPlaying('Solar\n  Flare'), 'Solar Flare', 'collapses internal whitespace')
+  eq(formatNowPlaying('a\t\tb'), 'a b', 'collapses tabs')
+  // empty / whitespace / non-string → fallback.
+  eq(formatNowPlaying(''), 'Untitled', 'empty → fallback')
+  eq(formatNowPlaying('   '), 'Untitled', 'whitespace-only → fallback')
+  eq(formatNowPlaying(null), 'Untitled', 'null → fallback')
+  eq(formatNowPlaying(undefined), 'Untitled', 'undefined → fallback')
+  eq(formatNowPlaying(42), 'Untitled', 'number → fallback')
+  eq(formatNowPlaying({}), 'Untitled', 'object → fallback')
+  // custom fallback honoured.
+  eq(formatNowPlaying('', { fallback: 'No preset' }), 'No preset', 'custom fallback')
+  // truncation: over-long names get an ellipsis, bounded to maxLen.
+  {
+    const long = 'X'.repeat(80)
+    const out = formatNowPlaying(long)
+    ok(out.length <= NOW_PLAYING_MAX_LEN, `truncated within maxLen — got ${out.length}`)
+    ok(out.endsWith('\u2026'), 'truncated name ends with ellipsis')
+  }
+  // a name exactly at maxLen is NOT truncated.
+  {
+    const exact = 'Y'.repeat(NOW_PLAYING_MAX_LEN)
+    eq(formatNowPlaying(exact), exact, 'name exactly maxLen not truncated')
+  }
+  // one over maxLen IS truncated + bounded.
+  {
+    const over = 'Z'.repeat(NOW_PLAYING_MAX_LEN + 1)
+    const out = formatNowPlaying(over)
+    eq(out.length, NOW_PLAYING_MAX_LEN, 'one-over truncates to exactly maxLen')
+    ok(out.endsWith('\u2026'), 'ends with ellipsis')
+  }
+  // custom maxLen honoured.
+  {
+    const out = formatNowPlaying('abcdefghij', { maxLen: 5 })
+    eq(out.length, 5, 'custom maxLen bounds length')
+    ok(out.endsWith('\u2026'), 'custom maxLen still ellipsizes')
+  }
+  // degenerate maxLen of 1 → just the ellipsis.
+  eq(formatNowPlaying('abcdef', { maxLen: 1 }), '\u2026', 'maxLen 1 → lone ellipsis')
+  // invalid maxLen falls back to the default.
+  {
+    const long = 'Q'.repeat(80)
+    const out = formatNowPlaying(long, { maxLen: -3 })
+    ok(out.length <= NOW_PLAYING_MAX_LEN, 'invalid maxLen → default budget')
+  }
+  // trailing space before ellipsis is trimmed (no "word …").
+  {
+    const out = formatNowPlaying('Hello ' + 'w'.repeat(60), { maxLen: 7 })
+    ok(!out.includes(' \u2026'), 'no dangling space before ellipsis')
+  }
+}
+
+console.log(`PASS: zenMode — ${passed} assertions (cursor idle decision, key reducer, integration, R35.E auto-orbit ramp, R42.E now-playing label)`)

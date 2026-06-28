@@ -130,3 +130,41 @@ export function zenOrbitSpeed(zenActive, orbitEnabled, lastInteractMs, nowMs, op
   if (rampMs <= 0) return maxSpeed
   return znClamp01(sinceOrbitStart / rampMs) * maxSpeed
 }
+
+// --- R42.E: zen "Now Playing" overlay --------------------------------
+//
+// While in zen mode the chrome is hidden for clean screen-recordings,
+// but a viewer of the recording then has no idea WHICH preset is on
+// screen. This optionally shows an auto-fading "Now Playing" card in a
+// corner with the live preset name (+ a palette swatch on the React
+// side) — like a music player's now-playing chip — so a recording is
+// self-documenting without bringing the full UI back.
+//
+// The pure bit is just the label formatting: trim, fall back to a
+// sensible default for an empty / non-string name, and ellipsis-truncate
+// an over-long name so the card never blows out its width.
+
+// Max characters of the preset name shown on the card before we ellipsis.
+export const NOW_PLAYING_MAX_LEN = 42
+
+// Format a preset name for the Now-Playing card. Pure.
+//   - non-string / empty / whitespace-only → the fallback ('Untitled')
+//   - trims surrounding whitespace
+//   - collapses internal runs of whitespace to single spaces (a name
+//     pulled from a multi-line source stays one tidy line)
+//   - truncates to maxLen with a trailing ellipsis (…) so the card width
+//     is bounded; the ellipsis counts toward the budget so the result is
+//     never longer than maxLen
+export function formatNowPlaying(name, opts = {}) {
+  const fallback = typeof opts.fallback === 'string' ? opts.fallback : 'Untitled'
+  const maxLenRaw = Number(opts.maxLen)
+  const maxLen = Number.isFinite(maxLenRaw) && maxLenRaw > 0 ? Math.floor(maxLenRaw) : NOW_PLAYING_MAX_LEN
+  if (typeof name !== 'string') return fallback
+  const cleaned = name.trim().replace(/\s+/g, ' ')
+  if (!cleaned) return fallback
+  if (cleaned.length <= maxLen) return cleaned
+  // Reserve one char for the ellipsis; maxLen of 1 just yields the
+  // ellipsis (degenerate but bounded).
+  if (maxLen <= 1) return '\u2026'
+  return cleaned.slice(0, maxLen - 1).trimEnd() + '\u2026'
+}
