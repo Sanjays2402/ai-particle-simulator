@@ -246,3 +246,43 @@ export function formatFramingLabel(label, opts = {}) {
   if (maxLen <= 1) return '\u2026'
   return text.slice(0, maxLen - 1).trimEnd() + '\u2026'
 }
+
+// --- R45.E: zen "Now Playing" composition-grid line ------------------
+//
+// R44.E surfaces the active framing CROP (2.39, 16:9, a custom ratio) on
+// the zen card so a left-alone recording documents the frame. But the
+// composition GRID (rule-of-thirds, centre cross, golden spiral) is the
+// other half of how a shot is composed — two recordings with the same
+// crop but different grids guided the framing differently. This formats a
+// resolved grid label for the card so the recording self-documents the
+// full composition: motion + look + crop + grid.
+//
+// Like formatFramingLabel it's a pure "format a raw string" helper: an
+// "off" / "none" grid yields '' so the card omits the line. Kept DOM-free
+// + framingGuides-free so it unit-tests in isolation; the component owns
+// the grid-id → label resolution (via framingGuides.gridLabelForId).
+
+// Max characters of the grid label on the card before ellipsis — grid
+// labels are short ("Thirds", "Cross", "Spiral"), so a tight bound fits.
+export const GRID_LABEL_MAX_LEN = 18
+
+// Format a resolved composition-grid label for the Now-Playing card. Pure.
+//   - non-string / empty / whitespace-only → '' (caller omits the line)
+//   - an "Off" / "None" label (case-insensitive) → '' (no active grid)
+//   - trims + collapses internal whitespace
+//   - optional prefix (e.g. 'Grid') prepended with a space so the line can
+//     read "Grid Thirds" instead of a bare word
+//   - ellipsis-truncates the WHOLE result to maxLen (ellipsis in budget)
+export function formatGridLabel(label, opts = {}) {
+  const maxLenRaw = Number(opts.maxLen)
+  const maxLen = Number.isFinite(maxLenRaw) && maxLenRaw > 0 ? Math.floor(maxLenRaw) : GRID_LABEL_MAX_LEN
+  if (typeof label !== 'string') return ''
+  const cleaned = label.trim().replace(/\s+/g, ' ')
+  if (!cleaned) return ''
+  if (FRAMING_OFF_LABELS.has(cleaned.toLowerCase())) return ''
+  const prefix = typeof opts.prefix === 'string' ? opts.prefix.trim().replace(/\s+/g, ' ') : ''
+  let text = prefix ? `${prefix} ${cleaned}` : cleaned
+  if (text.length <= maxLen) return text
+  if (maxLen <= 1) return '\u2026'
+  return text.slice(0, maxLen - 1).trimEnd() + '\u2026'
+}

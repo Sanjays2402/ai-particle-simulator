@@ -8,6 +8,8 @@ import {
   THEME_LABEL_MAX_LEN, formatThemeName,
   // R44.E — zen "Now Playing" framing line
   FRAMING_LABEL_MAX_LEN, formatFramingLabel,
+  // R45.E — composition-grid line
+  GRID_LABEL_MAX_LEN, formatGridLabel,
 } from './zenMode.js'
 
 let passed = 0
@@ -296,4 +298,44 @@ eq(zenOrbitSpeed(true, false, 0, 999999), 0, 'preference off → 0 speed')
   }
 }
 
-console.log(`PASS: zenMode — ${passed} assertions (cursor idle decision, key reducer, integration, R35.E auto-orbit ramp, R42.E now-playing label, R43.E theme label, R44.E framing label)`)
+// --- R45.E: composition-grid label for the Now-Playing card ---
+{
+  // a normal grid label passes through trimmed.
+  eq(formatGridLabel('Thirds'), 'Thirds', 'plain grid label kept')
+  eq(formatGridLabel('Cross'), 'Cross', 'cross label kept')
+  eq(formatGridLabel('  Spiral  '), 'Spiral', 'surrounding whitespace trimmed')
+  eq(formatGridLabel('Power  Points'), 'Power Points', 'internal whitespace collapsed')
+  // "off" / "none" / empty → '' so the card omits the line.
+  eq(formatGridLabel('Off'), '', 'Off → empty (no line)')
+  eq(formatGridLabel('off'), '', 'off lowercase → empty')
+  eq(formatGridLabel('NONE'), '', 'None (any case) → empty')
+  eq(formatGridLabel(''), '', 'empty → empty')
+  eq(formatGridLabel('   '), '', 'whitespace-only → empty')
+  // non-string → '' (caller omits).
+  eq(formatGridLabel(null), '', 'null → empty')
+  eq(formatGridLabel(42), '', 'number → empty')
+  eq(formatGridLabel(undefined), '', 'undefined → empty')
+  // optional prefix prepended.
+  eq(formatGridLabel('Thirds', { prefix: 'Grid' }), 'Grid Thirds', 'prefix prepended')
+  eq(formatGridLabel('Off', { prefix: 'Grid' }), '', 'prefix not applied to an off grid')
+  // truncation bounded to maxLen with ellipsis.
+  {
+    const out = formatGridLabel('g'.repeat(40))
+    ok(out.length <= GRID_LABEL_MAX_LEN, `grid label within maxLen — got ${out.length}`)
+    ok(out.endsWith('\u2026'), 'over-long grid label ellipsized')
+  }
+  // custom maxLen honoured.
+  {
+    const out = formatGridLabel('abcdefghij', { maxLen: 5 })
+    eq(out.length, 5, 'custom maxLen bounds the grid label')
+    ok(out.endsWith('\u2026'), 'custom maxLen ellipsizes')
+  }
+  eq(formatGridLabel('abcdef', { maxLen: 1 }), '\u2026', 'maxLen 1 → lone ellipsis')
+  // exactly at maxLen → not truncated.
+  {
+    const exact = 'g'.repeat(GRID_LABEL_MAX_LEN)
+    eq(formatGridLabel(exact), exact, 'exactly maxLen not truncated')
+  }
+}
+
+console.log(`PASS: zenMode — ${passed} assertions (cursor idle decision, key reducer, integration, R35.E auto-orbit ramp, R42.E now-playing label, R43.E theme label, R44.E framing label, R45.E grid label)`)

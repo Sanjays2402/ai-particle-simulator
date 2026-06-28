@@ -3,9 +3,9 @@ import { useStore, THEMES } from '../store'
 import {
   ZEN_BODY_CLASS, CURSOR_IDLE_MS,
   classifyZenKey, nextZenState, shouldHideCursor, zenOrbitSpeed,
-  formatNowPlaying, formatThemeName, formatFramingLabel,
+  formatNowPlaying, formatThemeName, formatFramingLabel, formatGridLabel,
 } from '../lib/zenMode'
-import { labelForId as framingLabelForId, CUSTOM_FRAMING_ID, formatCustomRatioLabel } from '../lib/framingGuides'
+import { labelForId as framingLabelForId, CUSTOM_FRAMING_ID, formatCustomRatioLabel, gridLabelForId } from '../lib/framingGuides'
 import { resolveReducedMotion } from '../lib/reducedMotion'
 import { resolveCalmFor } from '../lib/calmMode'
 
@@ -46,6 +46,13 @@ export default function ZenMode() {
     ? formatCustomRatioLabel(framingCustomRatio)
     : framingLabelForId(framingGuideId)
   const framingLine = formatFramingLabel(framingRawLabel)
+  // R45.E — the active composition grid (thirds / cross / golden spiral),
+  // surfaced beside the crop so a recording documents the full composition.
+  // The grid renders even with no crop (it composes into the full viewport),
+  // so it's an independent line; formatGridLabel turns an 'off' grid into ''
+  // so the card omits it when no grid is set.
+  const framingGridId = useStore(s => s.framingGridId)
+  const gridLine = formatGridLabel(gridLabelForId(framingGridId))
   const lastMoveRef = useRef(0)
   const cursorHiddenRef = useRef(false)
 
@@ -288,6 +295,36 @@ export default function ZenMode() {
                   fontFamily: 'Geist Mono, JetBrains Mono, monospace',
                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 }}>{framingLine}</span>
+              </span>
+            )}
+            {/* R45.E — composition-grid line: when a grid is set (thirds /
+                cross / golden spiral), a small monospace badge documents
+                it so the recording captures the full composition intent
+                (preset + theme + crop + grid). The little glyph is a 2x2
+                hatch echoing the rule-of-thirds overlay. Omitted entirely
+                when no grid is active. */}
+            {gridLine && (
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                marginTop: 3, overflow: 'hidden',
+              }}>
+                <span aria-hidden="true" style={{
+                  position: 'relative', width: 10, height: 10, flexShrink: 0,
+                  borderRadius: 1.5,
+                  border: '1px solid rgba(99,102,241,0.55)',
+                  boxShadow: '0 0 4px rgba(99,102,241,0.3)',
+                  backgroundImage:
+                    'linear-gradient(rgba(99,102,241,0.5) 1px, transparent 1px),' +
+                    'linear-gradient(90deg, rgba(99,102,241,0.5) 1px, transparent 1px)',
+                  backgroundSize: '3.3px 3.3px',
+                  backgroundPosition: '1px 1px',
+                }} />
+                <span style={{
+                  fontSize: 9.5, fontWeight: 600, color: '#8a8aa0', lineHeight: 1.2,
+                  letterSpacing: '0.04em',
+                  fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>{gridLine}</span>
               </span>
             )}
           </span>
