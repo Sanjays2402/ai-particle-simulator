@@ -286,3 +286,35 @@ export function formatGridLabel(label, opts = {}) {
   if (maxLen <= 1) return '\u2026'
   return text.slice(0, maxLen - 1).trimEnd() + '\u2026'
 }
+
+// --- R46.E: zen grid line — spiral orientation detail ----------------
+//
+// R45.E surfaces the active composition GRID name (Thirds / Cross /
+// Spiral) on the zen Now-Playing card. The golden SPIRAL has four
+// orientations (which corner its eye converges toward) — two recordings
+// guided by a spiral in opposite corners composed very differently, but
+// the card couldn't tell them apart. This appends the orientation as a
+// detail suffix ("Spiral · Top-left") so the card documents the full
+// spiral intent. Only the spiral grid has an orientation, so the caller
+// passes a detail only when the grid is the spiral; for every other grid
+// the detail is omitted and the line stays just the grid name.
+//
+// Pure "combine two resolved strings" helper, parallel to formatGridLabel:
+//   - a blank / non-string base label → '' (caller omits the line)
+//   - a blank / non-string detail → just the formatted base label
+//   - otherwise "<label> · <detail>", trimmed + whitespace-collapsed, the
+//     WHOLE result ellipsis-truncated to maxLen (the separator + detail
+//     count toward the budget so the line never blows out the card width)
+export function formatGridDetail(label, detail, opts = {}) {
+  const base = formatGridLabel(label, opts)
+  if (!base) return ''
+  if (typeof detail !== 'string') return base
+  const cleanedDetail = detail.trim().replace(/\s+/g, ' ')
+  if (!cleanedDetail) return base
+  const maxLenRaw = Number(opts.maxLen)
+  const maxLen = Number.isFinite(maxLenRaw) && maxLenRaw > 0 ? Math.floor(maxLenRaw) : GRID_LABEL_MAX_LEN
+  const text = `${base} \u00b7 ${cleanedDetail}`
+  if (text.length <= maxLen) return text
+  if (maxLen <= 1) return '\u2026'
+  return text.slice(0, maxLen - 1).trimEnd() + '\u2026'
+}

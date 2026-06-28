@@ -364,6 +364,19 @@ export function sanitizeSpiralOrientation(o) {
   return m < 0 ? m + SPIRAL_ORIENTATIONS.length : m
 }
 
+// R46.E — friendly corner names for the spiral's eye, keyed by orientation
+// index (0..3 = tl/tr/br/bl). Surfaced on the zen Now-Playing card so a
+// recording documents WHICH corner the golden spiral converges toward, not
+// just that a spiral grid is active.
+const SPIRAL_CORNER_LABELS = ['Top-left', 'Top-right', 'Bottom-right', 'Bottom-left']
+
+// Resolve a spiral orientation (id string OR numeric index, junk-tolerant
+// via sanitizeSpiralOrientation) to its friendly corner label. Always
+// returns a non-empty string from the fixed roster. Pure.
+export function spiralCornerLabel(orientation) {
+  return SPIRAL_CORNER_LABELS[sanitizeSpiralOrientation(orientation)]
+}
+
 // Build a golden spiral as a flat polyline of absolute-pixel points
 // ([{x, y}, ...]) inside the frame rect. We approximate each
 // quarter-turn arc with a short run of segments (smooth enough at screen

@@ -10,6 +10,8 @@ import {
   FRAMING_LABEL_MAX_LEN, formatFramingLabel,
   // R45.E — composition-grid line
   GRID_LABEL_MAX_LEN, formatGridLabel,
+  // R46.E — grid line spiral-orientation detail
+  formatGridDetail,
 } from './zenMode.js'
 
 let passed = 0
@@ -338,4 +340,34 @@ eq(zenOrbitSpeed(true, false, 0, 999999), 0, 'preference off → 0 speed')
   }
 }
 
-console.log(`PASS: zenMode — ${passed} assertions (cursor idle decision, key reducer, integration, R35.E auto-orbit ramp, R42.E now-playing label, R43.E theme label, R44.E framing label, R45.E grid label)`)
+// --- R46.E: grid line spiral-orientation detail ---
+{
+  // base + detail → "<label> · <detail>".
+  eq(formatGridDetail('Spiral', 'Top-left', { maxLen: 26 }), 'Spiral \u00b7 Top-left', 'spiral + corner combined')
+  eq(formatGridDetail('Spiral', 'Bottom-right', { maxLen: 26 }), 'Spiral \u00b7 Bottom-right', 'longest corner fits at maxLen 26')
+  // a blank / non-string detail → just the formatted base label.
+  eq(formatGridDetail('Thirds', ''), 'Thirds', 'empty detail → base label only')
+  eq(formatGridDetail('Thirds', '   '), 'Thirds', 'whitespace-only detail → base label only')
+  eq(formatGridDetail('Thirds', null), 'Thirds', 'null detail → base label only')
+  eq(formatGridDetail('Thirds', 42), 'Thirds', 'non-string detail → base label only')
+  // a blank / off base → '' (caller omits the line) regardless of detail.
+  eq(formatGridDetail('Off', 'Top-left'), '', 'off base → empty even with a detail')
+  eq(formatGridDetail('', 'Top-left'), '', 'empty base → empty')
+  eq(formatGridDetail(null, 'Top-left'), '', 'non-string base → empty')
+  // detail trimmed + internal whitespace collapsed.
+  eq(formatGridDetail('Spiral', '  Top   left  ', { maxLen: 26 }), 'Spiral \u00b7 Top left', 'detail trimmed + collapsed')
+  // the WHOLE combined string is bounded by maxLen with an ellipsis.
+  {
+    const out = formatGridDetail('Spiral', 'x'.repeat(40), { maxLen: 14 })
+    ok(out.length <= 14, `grid detail within maxLen — got ${out.length}`)
+    ok(out.endsWith('\u2026'), 'over-long grid detail ellipsized')
+  }
+  // default maxLen (GRID_LABEL_MAX_LEN) still applies when none passed.
+  {
+    const out = formatGridDetail('Spiral', 'y'.repeat(40))
+    ok(out.length <= GRID_LABEL_MAX_LEN, 'default maxLen bounds the combined detail')
+  }
+  eq(formatGridDetail('Spiral', 'Top', { maxLen: 1 }), '\u2026', 'maxLen 1 → lone ellipsis')
+}
+
+console.log(`PASS: zenMode — ${passed} assertions (cursor idle decision, key reducer, integration, R35.E auto-orbit ramp, R42.E now-playing label, R43.E theme label, R44.E framing label, R45.E grid label, R46.E grid spiral detail)`)

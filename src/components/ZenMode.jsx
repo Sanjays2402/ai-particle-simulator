@@ -3,9 +3,9 @@ import { useStore, THEMES } from '../store'
 import {
   ZEN_BODY_CLASS, CURSOR_IDLE_MS,
   classifyZenKey, nextZenState, shouldHideCursor, zenOrbitSpeed,
-  formatNowPlaying, formatThemeName, formatFramingLabel, formatGridLabel,
+  formatNowPlaying, formatThemeName, formatFramingLabel, formatGridLabel, formatGridDetail,
 } from '../lib/zenMode'
-import { labelForId as framingLabelForId, CUSTOM_FRAMING_ID, formatCustomRatioLabel, gridLabelForId } from '../lib/framingGuides'
+import { labelForId as framingLabelForId, CUSTOM_FRAMING_ID, formatCustomRatioLabel, gridLabelForId, spiralCornerLabel } from '../lib/framingGuides'
 import { resolveReducedMotion } from '../lib/reducedMotion'
 import { resolveCalmFor } from '../lib/calmMode'
 
@@ -52,7 +52,15 @@ export default function ZenMode() {
   // so it's an independent line; formatGridLabel turns an 'off' grid into ''
   // so the card omits it when no grid is set.
   const framingGridId = useStore(s => s.framingGridId)
-  const gridLine = formatGridLabel(gridLabelForId(framingGridId))
+  // R46.E — when the active grid is the golden SPIRAL, append which corner
+  // its eye converges toward (e.g. "Spiral · Top-left") so the card
+  // documents the full composition; other grids have no orientation so the
+  // line stays just the grid name. maxLen lifted to fit "Spiral · Bottom-
+  // right" without ellipsis.
+  const spiralOrientation = useStore(s => s.spiralOrientation)
+  const gridLine = framingGridId === 'spiral'
+    ? formatGridDetail(gridLabelForId(framingGridId), spiralCornerLabel(spiralOrientation), { maxLen: 26 })
+    : formatGridLabel(gridLabelForId(framingGridId))
   const lastMoveRef = useRef(0)
   const cursorHiddenRef = useRef(false)
 

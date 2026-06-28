@@ -163,6 +163,8 @@ const {
   SPIRAL_ORIENTATIONS, sanitizeSpiralOrientation, buildGoldenSpiral,
   // R38.B — spiral sweep length
   polylineLength,
+  // R46.E — friendly corner label for the spiral's eye
+  spiralCornerLabel,
 } = r35b
 
 // --- grid roster integrity ---
@@ -359,6 +361,25 @@ console.log(`PASS: framingGuides — ${passed} assertions (letterbox/pillarbox g
   eq(sanitizeSpiralOrientation(NaN), 0, 'NaN → 0')
   eq(sanitizeSpiralOrientation(undefined), 0, 'undefined → 0')
   eq(sanitizeSpiralOrientation(1.9), 1, 'fractional floors to 1')
+
+  // --- R46.E spiralCornerLabel — friendly corner names ---
+  eq(spiralCornerLabel(0), 'Top-left', 'orientation 0 → Top-left')
+  eq(spiralCornerLabel(1), 'Top-right', 'orientation 1 → Top-right')
+  eq(spiralCornerLabel(2), 'Bottom-right', 'orientation 2 → Bottom-right')
+  eq(spiralCornerLabel(3), 'Bottom-left', 'orientation 3 → Bottom-left')
+  eq(spiralCornerLabel('tl'), 'Top-left', 'string id tl → Top-left')
+  eq(spiralCornerLabel('bl'), 'Bottom-left', 'string id bl → Bottom-left')
+  eq(spiralCornerLabel(5), 'Top-right', 'out-of-range index wraps (5%4=1) → Top-right')
+  eq(spiralCornerLabel(-1), 'Bottom-left', 'negative wraps → Bottom-left')
+  eq(spiralCornerLabel('xx'), 'Top-left', 'unknown string → Top-left (index 0)')
+  eq(spiralCornerLabel(NaN), 'Top-left', 'NaN → Top-left')
+  eq(spiralCornerLabel(undefined), 'Top-left', 'undefined → Top-left')
+  // every orientation in the roster yields a non-empty unique label.
+  {
+    const labels = SPIRAL_ORIENTATIONS.map((_, i) => spiralCornerLabel(i))
+    ok(labels.every(l => typeof l === 'string' && l.length > 0), 'every corner label non-empty')
+    ok(new Set(labels).size === labels.length, 'corner labels are unique')
+  }
 
   // --- buildGoldenSpiral geometry ---
   const tl = buildGoldenSpiral(0, 0, 100, 100, 'tl', 8)
