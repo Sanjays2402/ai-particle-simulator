@@ -306,3 +306,75 @@ export function frameViewsCameraMove(framing, currentPos, currentTarget, opts = 
     dist,
   }
 }
+
+// --- R43.N: animated "fit all" tween ----------------------------------
+//
+// R42.N's "Fit all" snaps the camera to the fitted framing instantly. A
+// graceful pull-back reads better — so this provides the pure pieces to
+// TWEEN from the current camera to the fitted one over a short duration:
+// an ease curve + a per-frame interpolation of both the eye position and
+// the orbit target. The component runs an rAF loop calling tweenCameraStep
+// each frame and feeds the result to the (instant) camera API, turning the
+// snap into a ~0.6s dolly. All pure + DOM-free so the easing + lerp are
+// unit-tested without a clock.
+
+// Default tween duration (ms) for the fit pull-back — long enough to read
+// as a deliberate move, short enough not to feel sluggish.
+export const FIT_TWEEN_MS = 600
+
+// Cubic ease-in-out on [0,1]: slow start, quick middle, slow stop — the
+// natural feel for a camera move. Clamped so out-of-range t can't
+// overshoot. Pure.
+export function easeInOutCubic(t) {
+  const x = Number(t)
+  if (!Number.isFinite(x) || x <= 0) return 0
+  if (x >= 1) return 1
+  return x < 0.5
+    ? 4 * x * x * x
+    : 1 - Math.pow(-2 * x + 2, 3) / 2
+}
+
+// Linear progress (0..1) for an elapsed time within a duration. Pure;
+// non-finite / non-positive duration → 1 (treat as instantly complete so
+// a degenerate config can't trap the tween mid-flight). Clamped to [0,1].
+export function tweenProgress(elapsedMs, durationMs = FIT_TWEEN_MS) {
+  const e = Number(elapsedMs)
+  const d = Number(durationMs)
+  if (!Number.isFinite(d) || d <= 0) return 1
+  if (!Number.isFinite(e) || e <= 0) return 0
+  const p = e / d
+  return p >= 1 ? 1 : p
+}
+
+// Interpolate a single camera state (pos + target) from `start` to `end`
+// at eased progress `t` (0..1). Both states are { pos:[x,y,z],
+// target:[x,y,z] }. Returns a fresh { pos, target }. The easing is applied
+// here (t is the RAW 0..1 progress; we ease it internally) so the caller
+// just threads linear progress. Defensive: a missing / malformed start or
+// end coordinate falls back to the other end's value (so a half-built
+// state can't inject NaN); at t>=1 the result is exactly `end`. Pure.
+export function tweenCameraStep(start, end, t) {
+  if (!end || !Array.isArray(end.pos) || !Array.isArray(end.target)) return null
+  const e = easeInOutCubic(t)
+  const sPos = (start && Array.isArray(start.pos)) ? start.pos : end.pos
+  const sTgt = (start && Array.isArray(start.target)) ? start.target : end.target
+  const lerp = (a, b) => {
+    const av = Number(a), bv = Number(b)
+    const aa = Number.isFinite(av) ? av : bv
+    const bb = Number.isFinite(bv) ? bv : av
+    if (!Number.isFinite(aa) && !Number.isFinite(bb)) return 0
+    return aa + (bb - aa) * e
+  }
+  return {
+    pos: [
+      lerp(sPos[0], end.pos[0]),
+      lerp(sPos[1], end.pos[1]),
+      lerp(sPos[2], end.pos[2]),
+    ],
+    target: [
+      lerp(sTgt[0], end.target[0]),
+      lerp(sTgt[1], end.target[1]),
+      lerp(sTgt[2], end.target[2]),
+    ],
+  }
+}

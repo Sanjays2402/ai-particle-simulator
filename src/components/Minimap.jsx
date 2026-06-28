@@ -4,8 +4,11 @@ import {
   sampleScene, projectXZ, lookDirXZ, unprojectXZ, scaleLabelFor,
   projectSavedViews, pickNearestMarker, tooltipPlacement,
   framingForViews, frameViewsCameraMove,
+  // R43.N — animated fit-all tween
+  FIT_TWEEN_MS, tweenProgress, tweenCameraStep,
 } from '../lib/minimap'
 import { loadCameraViews, saveCameraViews, removeView } from '../lib/cameraViews'
+import { resolveReducedMotion } from '../lib/reducedMotion'
 import { showToast } from './Toast'
 
 // Minimap overlay — a small top-down (XZ-plane) widget pinned to the
@@ -23,6 +26,10 @@ export default function Minimap() {
   const enabled = useStore(s => s.minimapEnabled)
   const canvasRef = useRef(null)
   const rafRef = useRef(0)
+  // R43.N — handle for the "Fit all" camera tween's rAF loop, so a second
+  // Fit click (or unmount) cancels an in-flight tween instead of stacking
+  // two animations fighting over the camera.
+  const fitRafRef = useRef(0)
   // Cache the saved-views list + a markers projection. We refresh
   // both periodically (cheap — up to 6 views) so newly-saved views
   // appear without needing a store subscription wired in.
@@ -161,7 +168,12 @@ export default function Minimap() {
       }
     }
     rafRef.current = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(rafRef.current)
+    return () => {
+      cancelAnimationFrame(rafRef.current)
+      // R43.N — also stop any in-flight fit tween when the minimap is
+      // disabled / unmounts so it doesn't keep driving a hidden camera.
+      if (fitRafRef.current) { cancelAnimationFrame(fitRafRef.current); fitRafRef.current = 0 }
+    }
   }, [enabled, hoverId])
 
   // Click → if it lands on a saved-view dot, jump to that view
@@ -261,6 +273,11 @@ export default function Minimap() {
   // camera (to keep its viewing direction so the move feels like a dolly,
   // not a teleport), computes the fit move purely, and applies it through
   // the camera API. A no-op (no usable views, no camera) just toasts.
+  // R43.N — instead of an instant snap, TWEEN from the current camera to
+  // the fitted one over ~0.6s (eased) so the "fit" reads as a graceful
+  // pull-back. A reduced-motion user still gets the instant snap (an
+  // animated camera move is exactly what that setting suppresses). A
+  // second Fit click cancels the in-flight tween so they never stack.
   const onFitAll = () => {
     const api = typeof window !== 'undefined' ? window.__particleCamera : null
     if (!api || typeof api.set !== 'function') return
@@ -268,13 +285,38 @@ export default function Minimap() {
     if (!framing) { showToast('No saved views to frame'); return }
     let snap = null
     try { snap = typeof api.get === 'function' ? api.get() : null } catch { snap = null }
-    const move = frameViewsCameraMove(
-      framing,
-      snap && Array.isArray(snap.pos) ? snap.pos : null,
-      snap && Array.isArray(snap.target) ? snap.target : null,
-    )
+    const startPos = snap && Array.isArray(snap.pos) ? snap.pos : null
+    const startTarget = snap && Array.isArray(snap.target) ? snap.target : null
+    const move = frameViewsCameraMove(framing, startPos, startTarget)
     if (!move) { showToast('No saved views to frame'); return }
-    api.set({ pos: move.pos, target: move.target })
+
+    // Cancel any tween already running so two Fit clicks don't fight.
+    if (fitRafRef.current) { cancelAnimationFrame(fitRafRef.current); fitRafRef.current = 0 }
+
+    const st = useStore.getState()
+    const reduced = resolveReducedMotion(st.reducedMotionMode, st.osPrefersReducedMotion)
+    const end = { pos: move.pos, target: move.target }
+    // Reduced motion, or no usable start to tween from → instant snap.
+    if (reduced || !startPos || !startTarget) {
+      api.set(end)
+      showToast(`Framed ${framing.count} view${framing.count === 1 ? '' : 's'}`)
+      return
+    }
+
+    const start = { pos: startPos.slice(), target: startTarget.slice() }
+    const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now())
+    const step = () => {
+      const now = (typeof performance !== 'undefined' ? performance.now() : Date.now())
+      const p = tweenProgress(now - t0, FIT_TWEEN_MS)
+      const cam = tweenCameraStep(start, end, p)
+      if (cam) api.set(cam)
+      if (p >= 1) {
+        fitRafRef.current = 0
+        return
+      }
+      fitRafRef.current = requestAnimationFrame(step)
+    }
+    fitRafRef.current = requestAnimationFrame(step)
     showToast(`Framed ${framing.count} view${framing.count === 1 ? '' : 's'}`)
   }
 

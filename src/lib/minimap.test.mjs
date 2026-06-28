@@ -8,6 +8,8 @@ import {
   // R42.N — frame all saved views
   framingForViews, fitCameraDistance, frameViewsCameraMove,
   FIT_MIN_DIST, FIT_MAX_DIST, FIT_DEFAULT_DIR,
+  // R43.N — animated fit tween
+  FIT_TWEEN_MS, easeInOutCubic, tweenProgress, tweenCameraStep,
 } from './minimap.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -359,3 +361,93 @@ eq(scaleLabelFor(NaN), `${DEFAULT_SCENE_HALF}u`, 'NaN → default')
 }
 
 console.log(`PASS: minimap — pickSceneHalf, projectXZ (clamped), sampleScene, lookDirXZ, unprojectXZ (round-trip), scaleLabelFor, projectSavedViews (empty/origin/multi/bounds/dirty), pickNearestMarker (hit/miss/nearest), tooltipPlacement (top/bottom flip + edge slide + tiny-canvas fallback), framingForViews + fitCameraDistance + frameViewsCameraMove (R42.N frame-all)`)
+
+// --- R43.N: animated fit tween ---------------------------------------
+{
+  // easeInOutCubic — clamped 0..1, symmetric, monotone.
+  near(easeInOutCubic(0), 0, 'ease(0) = 0')
+  near(easeInOutCubic(1), 1, 'ease(1) = 1')
+  near(easeInOutCubic(0.5), 0.5, 'ease(0.5) = 0.5 (symmetric midpoint)')
+  eq(easeInOutCubic(-1), 0, 'ease clamps below 0')
+  eq(easeInOutCubic(2), 1, 'ease clamps above 1')
+  eq(easeInOutCubic(NaN), 0, 'ease NaN → 0')
+  // slow start: ease(0.25) < 0.25 (eased-in below linear in first half).
+  ok(easeInOutCubic(0.25) < 0.25, 'ease slow start (below linear)')
+  ok(easeInOutCubic(0.75) > 0.75, 'ease slow stop (above linear)')
+  // monotone increasing across the range.
+  {
+    let prev = -1
+    for (let i = 0; i <= 10; i++) {
+      const v = easeInOutCubic(i / 10)
+      ok(v >= prev, `ease monotone non-decreasing at ${i / 10}`)
+      prev = v
+    }
+  }
+
+  // tweenProgress — linear 0..1 with clamps.
+  near(tweenProgress(0, 600), 0, 'progress 0 at t=0')
+  near(tweenProgress(300, 600), 0.5, 'progress 0.5 at half')
+  near(tweenProgress(600, 600), 1, 'progress 1 at end')
+  eq(tweenProgress(900, 600), 1, 'progress clamps past end')
+  eq(tweenProgress(-5, 600), 0, 'progress clamps below 0')
+  eq(tweenProgress(100, 0), 1, 'zero duration → instantly complete')
+  eq(tweenProgress(100, NaN), 1, 'non-finite duration → complete')
+  ok(Number.isFinite(FIT_TWEEN_MS) && FIT_TWEEN_MS > 0, 'FIT_TWEEN_MS is a positive duration')
+
+  // tweenCameraStep — interpolates pos + target.
+  {
+    const start = { pos: [0, 0, 0], target: [0, 0, 0] }
+    const end = { pos: [10, 20, 30], target: [1, 2, 3] }
+    // t=0 → exactly start.
+    {
+      const s = tweenCameraStep(start, end, 0)
+      near(s.pos[0], 0, 'tween t=0 pos.x = start')
+      near(s.pos[1], 0, 'tween t=0 pos.y = start')
+      near(s.pos[2], 0, 'tween t=0 pos.z = start')
+      near(s.target[0], 0, 'tween t=0 target = start')
+    }
+    // t=1 → exactly end.
+    {
+      const s = tweenCameraStep(start, end, 1)
+      near(s.pos[0], 10, 'tween t=1 pos.x = end')
+      near(s.pos[2], 30, 'tween t=1 pos.z = end')
+      near(s.target[2], 3, 'tween t=1 target.z = end')
+    }
+    // t=0.5 → eased midpoint = exactly halfway (ease(0.5)=0.5).
+    {
+      const s = tweenCameraStep(start, end, 0.5)
+      near(s.pos[0], 5, 'tween t=0.5 pos.x = midpoint')
+      near(s.pos[1], 10, 'tween t=0.5 pos.y = midpoint')
+      near(s.target[0], 0.5, 'tween t=0.5 target.x = midpoint')
+    }
+    // early t stays close to start (slow-start easing).
+    {
+      const s = tweenCameraStep(start, end, 0.2)
+      ok(s.pos[0] < 2, 'tween early progress near start (eased)')
+    }
+    // returns a FRESH object (not start/end).
+    {
+      const s = tweenCameraStep(start, end, 0.5)
+      ok(s !== start && s !== end && s.pos !== end.pos, 'tween returns fresh state')
+    }
+  }
+  // malformed end → null (component skips the tween, would snap).
+  eq(tweenCameraStep({ pos: [0, 0, 0], target: [0, 0, 0] }, null, 0.5), null, 'null end → null')
+  eq(tweenCameraStep(null, { pos: [1, 2, 3] }, 0.5), null, 'end missing target → null')
+  // missing start falls back to end (so t<1 still yields end-ish, no NaN).
+  {
+    const end = { pos: [4, 5, 6], target: [0, 0, 0] }
+    const s = tweenCameraStep(null, end, 0.5)
+    ok(s && Number.isFinite(s.pos[0]), 'missing start → finite (falls back to end)')
+    near(s.pos[0], 4, 'missing start → pos tracks end')
+  }
+  // a non-finite coord in start falls back to the end value (no NaN leak).
+  {
+    const start = { pos: [NaN, 0, 0], target: [0, 0, 0] }
+    const end = { pos: [10, 10, 10], target: [0, 0, 0] }
+    const s = tweenCameraStep(start, end, 0.5)
+    ok(Number.isFinite(s.pos[0]), 'NaN start coord → finite result')
+  }
+}
+
+console.log('PASS: minimap R43.N — easeInOutCubic + tweenProgress + tweenCameraStep (animated fit-all tween)')
