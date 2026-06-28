@@ -306,6 +306,16 @@ export default function MidiPanel({ open, onClose }) {
   // phrases every transition; we just push its output here.
   const [gapReorderAnnounce, setGapReorderAnnounce] = useState('')
   const moveNamedAttractorByIndex = useStore(s => s.moveNamedAttractorByIndex)
+  // Subscribe to the live attractor list. Declared here (alongside the
+  // other useStore subscriptions) because render-time consumers above
+  // the old declaration site — notably the R29.20 lift-reset effect's
+  // dependency array `[namedAttractors, liftedGroupIdx]` — read it
+  // during render. A `const` declared lower in the body left those
+  // earlier reads in the temporal dead zone, crashing the panel on
+  // mount ("Cannot access 'namedAttractors' before initialization").
+  // attractorActions() is pure data (id + label + range), cheap to
+  // re-derive each render.
+  const namedAttractors = useStore(s => s.namedAttractors)
   // R26.20 — touch-drag support for the binding-group reorder
   // (graduates R25.20's desktop-only HTML5 native DnD; touch devices
   // don't fire dragstart so they were locked out). Parallels camera-
@@ -578,11 +588,9 @@ export default function MidiPanel({ open, onClose }) {
       onGroupTouchCancel(e)
     },
   })
-  // Subscribe to the live attractor list so per-attractor MIDI rows
-  // appear/disappear and re-label in real time as the user adds,
-  // renames, or deletes attractors. attractorActions() is pure data
-  // (id + label + range), so this is cheap to re-derive each render.
-  const namedAttractors = useStore(s => s.namedAttractors)
+  // attractorRows re-derives per render from the hoisted namedAttractors
+  // subscription above (declared near the other useStore calls to avoid a
+  // temporal-dead-zone crash from earlier render-time readers).
   const attractorRows = attractorActions({ namedAttractors })
   // R29.43 — live persisted fade-curve preference for the hotkey UNDO
   // chain badge. Read from the store so the chip's selection survives
