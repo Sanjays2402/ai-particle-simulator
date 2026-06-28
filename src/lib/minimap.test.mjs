@@ -12,6 +12,8 @@ import {
   FIT_TWEEN_MS, easeInOutCubic, tweenProgress, tweenCameraStep,
   // R44.N — frame a selected subset
   framingForSelectedViews,
+  // R46.N — dim non-selected markers while a selection is live
+  markerSelectionState, markerSelectionAlpha, MARKER_DIM_ALPHA,
 } from './minimap.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -521,3 +523,33 @@ console.log('PASS: minimap R43.N — easeInOutCubic + tweenProgress + tweenCamer
 }
 
 console.log('PASS: minimap R44.N — framingForSelectedViews (frame a chosen subset of saved views)')
+
+// --- R46.N: markerSelectionState + alpha — dim non-selected dots ---
+{
+  // no live selection (empty / non-iterable) → 'none' for any marker.
+  eq(markerSelectionState(1, new Set()), 'none', 'sel: empty set → none')
+  eq(markerSelectionState(1, null), 'none', 'sel: null idSet → none')
+  eq(markerSelectionState(1, undefined), 'none', 'sel: undefined idSet → none')
+  eq(markerSelectionState(1, 42), 'none', 'sel: non-iterable → none')
+  // a live selection classifies in vs out.
+  eq(markerSelectionState(2, new Set([2, 3])), 'selected', 'sel: id in set → selected')
+  eq(markerSelectionState(9, new Set([2, 3])), 'unselected', 'sel: id not in set → unselected')
+  // accepts an Array | iterable too (mirrors framingForSelectedViews).
+  eq(markerSelectionState(3, [2, 3]), 'selected', 'sel: array idSet → selected')
+  eq(markerSelectionState(5, [2, 3]), 'unselected', 'sel: array idSet → unselected')
+  {
+    function* gen() { yield 7; yield 8 }
+    eq(markerSelectionState(7, gen()), 'selected', 'sel: generator idSet → selected')
+  }
+  // string ids work (id type-agnostic).
+  eq(markerSelectionState('a', new Set(['a', 'b'])), 'selected', 'sel: string id in set → selected')
+  eq(markerSelectionState('z', new Set(['a', 'b'])), 'unselected', 'sel: string id not in set → unselected')
+  // alpha mapping: only 'unselected' dims; selected/none full strength.
+  eq(markerSelectionAlpha('unselected'), MARKER_DIM_ALPHA, 'alpha: unselected → dim')
+  eq(markerSelectionAlpha('selected'), 1, 'alpha: selected → full')
+  eq(markerSelectionAlpha('none'), 1, 'alpha: none → full')
+  eq(markerSelectionAlpha('junk'), 1, 'alpha: unknown state → full (safe)')
+  ok(MARKER_DIM_ALPHA > 0 && MARKER_DIM_ALPHA < 1, 'alpha: dim is a partial fade (0,1)')
+}
+
+console.log('PASS: minimap R46.N — markerSelectionState + alpha (dim non-selected dots while a selection is live)')

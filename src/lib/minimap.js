@@ -276,6 +276,39 @@ export function framingForSelectedViews(views, idSet) {
   return framingForViews(selected)
 }
 
+// --- R46.N: marker selection state for dimming non-selected dots ------
+//
+// When the user has a saved-view multi-selection going (mirrored from the
+// command palette), the minimap's R45.N "Fit selected" button frames just
+// that subset — but every green dot looks identical, so it's not obvious
+// WHICH dots that button will frame. R46.N dims the NON-selected dots
+// while a selection is live so the chosen subset stands out.
+//
+// This classifies a marker by its id against the selected-id set:
+//   - 'none'       → no live selection (size 0 / non-iterable) → draw all
+//                    dots at full strength (pre-R46.N behaviour)
+//   - 'selected'   → this marker is in the selection → full strength
+//   - 'unselected' → a selection exists but this marker isn't in it → dim
+// Pure; accepts a Set | Array | iterable of ids (mirrors
+// framingForSelectedViews). The renderer maps the result to an alpha
+// multiplier so the visual stays in the component.
+export function markerSelectionState(markerId, idSet) {
+  let ids
+  if (idSet instanceof Set) ids = idSet
+  else if (idSet && typeof idSet[Symbol.iterator] === 'function') ids = new Set(idSet)
+  else return 'none'
+  if (ids.size === 0) return 'none'
+  return ids.has(markerId) ? 'selected' : 'unselected'
+}
+
+// The alpha multiplier the renderer applies to a marker given its
+// selection state — selected/none draw at full strength, unselected dots
+// fade to MARKER_DIM_ALPHA so the live selection reads at a glance.
+export const MARKER_DIM_ALPHA = 0.28
+export function markerSelectionAlpha(state) {
+  return state === 'unselected' ? MARKER_DIM_ALPHA : 1
+}
+
 // Suggest a camera distance that frames a cluster of the given radius.
 // Physically grounded: to fit a sphere of `radius` in a camera with
 // half-FOV θ, the distance is radius / sin(θ); we add padding + clamp to

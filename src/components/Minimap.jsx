@@ -8,6 +8,8 @@ import {
   FIT_TWEEN_MS, tweenProgress, tweenCameraStep,
   // R45.N — frame only the selected subset (shared palette selection)
   framingForSelectedViews,
+  // R46.N — dim the non-selected markers while a selection is live
+  markerSelectionState, markerSelectionAlpha,
 } from '../lib/minimap'
 import { loadCameraViews, saveCameraViews, removeView } from '../lib/cameraViews'
 import { resolveReducedMotion } from '../lib/reducedMotion'
@@ -30,6 +32,12 @@ export default function Minimap() {
   // palette. When non-empty, the minimap offers a matching "Fit selected"
   // button so framing a chosen subset is reachable without the palette open.
   const selectedViewIds = useStore(s => s.selectedViewIds)
+  // R46.N — mirror the live selection into a ref the rAF draw loop can read
+  // without re-subscribing (the loop's effect only re-runs on [enabled,
+  // hoverId], so reading the state var directly would capture a stale value).
+  // Written in an effect (never during render) so it stays lint-clean.
+  const selectedIdsRef = useRef(selectedViewIds)
+  useEffect(() => { selectedIdsRef.current = selectedViewIds }, [selectedViewIds])
   const canvasRef = useRef(null)
   const rafRef = useRef(0)
   // R43.N — handle for the "Fit all" camera tween's rAF loop, so a second
@@ -118,8 +126,14 @@ export default function Minimap() {
       if (snap && viewsRef.current.length > 0) {
         const markers = projectSavedViews(viewsRef.current, snap.sceneHalf, SIZE)
         markersRef.current = markers
+        // R46.N — when a palette selection is live, dim the markers that
+        // aren't in it so the chosen subset (what "Fit selected" frames)
+        // reads at a glance. No selection → every marker draws full-strength.
+        const selIds = selectedIdsRef.current
         for (const m of markers) {
           const isHover = m.id === hoverId
+          const selState = markerSelectionState(m.id, selIds)
+          const dimAlpha = isHover ? 1 : markerSelectionAlpha(selState)
           // Stroke ring — dimmer when out of bounds (camera zoomed in
           // tight) so the user knows the view exists but is far away.
           const ringColor = isHover
@@ -128,6 +142,8 @@ export default function Minimap() {
           const fillColor = isHover
             ? 'rgba(167,243,208,0.45)'
             : m.inBounds ? 'rgba(34,197,94,0.18)' : 'rgba(34,197,94,0.06)'
+          ctx.save()
+          ctx.globalAlpha = dimAlpha
           ctx.fillStyle = fillColor
           ctx.strokeStyle = ringColor
           ctx.lineWidth = isHover ? 1.6 : 1
@@ -135,6 +151,17 @@ export default function Minimap() {
           ctx.arc(m.px, m.py, isHover ? 4 : 3, 0, Math.PI * 2)
           ctx.fill()
           ctx.stroke()
+          // R46.N — a thin bright ring on SELECTED markers so the subset is
+          // positively marked (not just "everyone else is dim"), which also
+          // makes a 1-of-1 selection legible.
+          if (selState === 'selected' && !isHover) {
+            ctx.strokeStyle = 'rgba(129,140,248,0.95)'
+            ctx.lineWidth = 1.4
+            ctx.beginPath()
+            ctx.arc(m.px, m.py, 5, 0, Math.PI * 2)
+            ctx.stroke()
+          }
+          ctx.restore()
         }
       } else {
         markersRef.current = []
