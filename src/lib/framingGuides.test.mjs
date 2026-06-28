@@ -17,6 +17,8 @@ import {
   parseAspectRatio, clampCustomRatio, formatCustomRatioLabel,
   // R43.M — recent custom ratios MRU
   RECENT_RATIOS_MAX, sanitizeRecentRatios, pushRecentRatio, sameRecentRatios,
+  // R44.M — pinned (favourite) custom ratios
+  PINNED_RATIOS_MAX, sanitizePinnedRatios, isRatioPinned, togglePinnedRatio, buildRatioChips,
 } from './framingGuides.js'
 
 let passed = 0
@@ -814,4 +816,97 @@ console.log(`PASS: framingGuides R39.B — ${passed} total assertions (incl. on-
   }
 }
 
-console.log(`PASS: framingGuides R42.M/R43.M — ${passed} total assertions (incl. custom aspect-ratio input + recents MRU)`)
+// --- R44.M: pinned (favourite) custom ratios ---
+{
+  // sanitizePinnedRatios mirrors the recents sanitiser.
+  eq(sanitizePinnedRatios(null).length, 0, 'pin sanitize: non-array → []')
+  eq(sanitizePinnedRatios('x').length, 0, 'pin sanitize: string → []')
+  {
+    const s = sanitizePinnedRatios([1.5, 1.5, 2])
+    eq(s.length, 2, 'pin sanitize: dedupes by label')
+    near(s[0], 1.5, 'pin sanitize: first occurrence kept')
+  }
+  {
+    // capped to MAX, junk dropped.
+    const s = sanitizePinnedRatios([1, 1.2, 1.4, 1.6, 1.8, 2.0, 'junk', NaN])
+    eq(s.length, PINNED_RATIOS_MAX, 'pin sanitize: capped at MAX')
+    ok(s.every(Number.isFinite), 'pin sanitize: only finite numbers')
+  }
+  // out-of-band ratios clamp into the usable band (parity with recents).
+  {
+    const s = sanitizePinnedRatios([100, 0.01])
+    ok(s.every(x => x >= CUSTOM_RATIO_MIN && x <= CUSTOM_RATIO_MAX), 'pin sanitize: clamps to band')
+  }
+
+  // isRatioPinned matches by display label.
+  ok(isRatioPinned([1.78], 1.78), 'isPinned: exact present')
+  ok(isRatioPinned([1.777], 1.778), 'isPinned: matched by 2dp label')
+  ok(!isRatioPinned([1.78], 2.39), 'isPinned: absent → false')
+  ok(!isRatioPinned([1.78], 'junk'), 'isPinned: unparseable → false')
+  ok(!isRatioPinned(null, 1.78), 'isPinned: non-array list → false')
+
+  // togglePinnedRatio: pin at front, unpin by label, no-op on junk.
+  {
+    const p1 = togglePinnedRatio([], 2.39)
+    eq(p1.length, 1, 'toggle: pin adds')
+    near(p1[0], 2.39, 'toggle: pinned value stored')
+    const p2 = togglePinnedRatio(p1, 1.85)
+    eq(p2.length, 2, 'toggle: second pin adds')
+    near(p2[0], 1.85, 'toggle: newest pin leads (front)')
+    // re-toggling 2.39 removes it.
+    const p3 = togglePinnedRatio(p2, 2.39)
+    eq(p3.length, 1, 'toggle: re-toggle unpins')
+    ok(!isRatioPinned(p3, 2.39), 'toggle: unpinned ratio gone')
+    near(p3[0], 1.85, 'toggle: surviving pin intact')
+  }
+  // toggle unpins by 2dp label even with a slightly different input value.
+  {
+    const p = togglePinnedRatio([1.777], 1.778)
+    eq(p.length, 0, 'toggle: unpins by display label match')
+  }
+  // unparseable ratio → cleaned list unchanged in value.
+  {
+    const base = [1.5, 2]
+    const out = togglePinnedRatio(base, 'junk')
+    ok(sameRecentRatios(out, sanitizePinnedRatios(base)), 'toggle: junk → cleaned list unchanged')
+  }
+  // pin cap: a 6th pin drops the oldest from the tail.
+  {
+    let p = []
+    for (const r of [1.1, 1.2, 1.3, 1.4, 1.5]) p = togglePinnedRatio(p, r)
+    eq(p.length, PINNED_RATIOS_MAX, 'toggle: at cap')
+    p = togglePinnedRatio(p, 1.6)
+    eq(p.length, PINNED_RATIOS_MAX, 'toggle: still capped after 6th pin')
+    near(p[0], 1.6, 'toggle: newest pin at front past cap')
+    ok(!isRatioPinned(p, 1.1), 'toggle: oldest pin dropped at cap')
+  }
+  // purity: toggle never mutates its input array.
+  {
+    const base = [1.5]
+    const snap = base.slice()
+    togglePinnedRatio(base, 2.0)
+    ok(base.length === snap.length && base[0] === snap[0], 'toggle: input not mutated')
+  }
+
+  // buildRatioChips: pinned lead, recents follow, no dupes.
+  {
+    const chips = buildRatioChips([2.39], [1.78, 2.39, 1.0])
+    // 2.39 pinned first; recents 1.78 and 1.0 follow; the 2.39 in recents
+    // is de-duped against the pin.
+    eq(chips.length, 3, 'chips: pinned ++ recents de-duped')
+    eq(chips[0].label, '2.39', 'chips: pinned leads')
+    ok(chips[0].pinned === true, 'chips: lead flagged pinned')
+    ok(chips.slice(1).every(c => c.pinned === false), 'chips: recents flagged not-pinned')
+    ok(!chips.slice(1).some(c => c.label === '2.39'), 'chips: pinned not repeated among recents')
+  }
+  // every chip carries a usable label + finite ratio.
+  {
+    const chips = buildRatioChips([1.5], [2.0])
+    ok(chips.every(c => c.label && Number.isFinite(c.ratio)), 'chips: each has label + finite ratio')
+  }
+  // both empty → empty row.
+  eq(buildRatioChips([], []).length, 0, 'chips: both empty → []')
+  eq(buildRatioChips(null, null).length, 0, 'chips: non-arrays → []')
+}
+
+console.log(`PASS: framingGuides R42.M/R43.M/R44.M — ${passed} total assertions (incl. custom aspect-ratio input + recents MRU + pinned favourites)`)

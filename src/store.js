@@ -54,6 +54,9 @@ import {
   sanitizeRecentRatios,
   pushRecentRatio,
   sameRecentRatios,
+  // R44.M — pinned (favourite) custom ratios.
+  sanitizePinnedRatios,
+  togglePinnedRatio as togglePinnedRatioHelper,
 } from './lib/framingGuides'
 // R38.K — per-motion calm gate sanitiser + toggle.
 import { sanitizeCalmGates, toggleCalmGate } from './lib/calmMode'
@@ -91,6 +94,8 @@ const SPIRAL_SWEEP_EASING_KEY = 'particle-spiral-sweep-easing-v1'
 const FRAMING_CUSTOM_RATIO_KEY = 'particle-framing-custom-ratio-v1'
 // R43.M — recent custom aspect ratios (MRU list of numbers), own key.
 const FRAMING_RECENT_RATIOS_KEY = 'particle-framing-recent-ratios-v1'
+// R44.M — pinned (favourite) custom aspect ratios, own key.
+const FRAMING_PINNED_RATIOS_KEY = 'particle-framing-pinned-ratios-v1'
 // R34.C — screenshot self-timer delay (seconds), own key.
 const SCREENSHOT_TIMER_KEY = 'particle-screenshot-timer-v1'
 // R35.C — screenshot burst count (frames per capture), own key.
@@ -606,6 +611,28 @@ export const useStore = create((set, get) => {
     if (get().recentCustomRatios.length === 0) return
     try { localStorage.removeItem(FRAMING_RECENT_RATIOS_KEY) } catch { /* quota / private mode */ }
     set({ recentCustomRatios: [] })
+  },
+
+  // R44.M — pinned (favourite) custom ratios. A user with one go-to crop
+  // can STAR a recent chip so it always leads the row and survives the MRU
+  // cap (recents fall off the tail; pins don't). Stored on its own key,
+  // sanitised on boot. The chip row is built from pinned ++ recents via
+  // buildRatioChips so a ratio is never shown twice.
+  pinnedCustomRatios: (() => {
+    try {
+      const raw = localStorage.getItem(FRAMING_PINNED_RATIOS_KEY)
+      return raw != null ? sanitizePinnedRatios(JSON.parse(raw)) : []
+    } catch { return [] }
+  })(),
+  // Toggle a ratio's pinned membership (star ↔ unstar). The pure helper
+  // pins-at-front / unpins-by-label and caps the list; we persist + set
+  // only when the result actually differs (ref/value change) so a no-op
+  // toggle on an unparseable ratio doesn't churn storage or React.
+  togglePinnedRatio: (ratio) => {
+    const next = togglePinnedRatioHelper(get().pinnedCustomRatios, ratio)
+    if (sameRecentRatios(next, get().pinnedCustomRatios)) return
+    try { localStorage.setItem(FRAMING_PINNED_RATIOS_KEY, JSON.stringify(next)) } catch { /* quota / private mode */ }
+    set({ pinnedCustomRatios: next })
   },
 
   // R35.B — Composition grid drawn INSIDE the active framing guide:

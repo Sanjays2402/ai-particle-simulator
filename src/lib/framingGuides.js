@@ -714,3 +714,97 @@ export function sameRecentRatios(a, b) {
   }
   return true
 }
+
+// --- R44.M: pinned (favourite) custom aspect ratios -------------------
+//
+// R43.M remembers the last few custom ratios as an MRU row, but a user
+// with ONE go-to crop (say a 21:9 wallpaper) loses it the moment they dial
+// in five other ratios — it falls off the MRU tail. Pinning is the fix: a
+// star on a recent chip promotes the ratio to a separate PINNED list that
+// (a) always renders at the HEAD of the row and (b) survives the MRU cap
+// regardless of recency. It's the "keep this one" affordance every recents
+// UI eventually wants.
+//
+// Pinned ratios live in their own small capped list (own store key) and
+// are deduped by the same 2-decimal display label the recents use, so the
+// two lists never disagree on what "the same crop" means. All pure +
+// DOM-free; the store + LeftSidebar stay thin.
+
+export const PINNED_RATIOS_MAX = 5
+
+// Normalise a stored / incoming pinned array into canonical form: valid
+// clamped numbers only, deduped by display label (first occurrence wins),
+// capped to MAX. Non-array → []. Mirrors sanitizeRecentRatios so the two
+// rows share one notion of validity. Pure; fresh array of plain numbers.
+export function sanitizePinnedRatios(list) {
+  if (!Array.isArray(list)) return []
+  const out = []
+  const seen = new Set()
+  for (const raw of list) {
+    const r = clampCustomRatio(raw)
+    if (r == null) continue
+    const key = formatCustomRatioLabel(r)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    out.push(r)
+    if (out.length >= PINNED_RATIOS_MAX) break
+  }
+  return out
+}
+
+// True when `ratio` (matched by its display label) is already pinned. An
+// unparseable ratio is never pinned. Pure.
+export function isRatioPinned(list, ratio) {
+  const r = clampCustomRatio(ratio)
+  if (r == null) return false
+  const key = formatCustomRatioLabel(r)
+  if (!key) return false
+  const base = sanitizePinnedRatios(list)
+  return base.some(x => formatCustomRatioLabel(x) === key)
+}
+
+// Toggle a ratio's pinned membership. If it's already pinned (by label),
+// UNPIN it (remove); otherwise PIN it at the FRONT (newest favourite leads,
+// and the oldest falls off the tail at the cap). An unparseable / out-of-
+// band ratio leaves the (cleaned) list unchanged. Pure; never mutates —
+// always returns a fresh canonical array the caller compares by value to
+// decide whether a persist is warranted.
+export function togglePinnedRatio(list, ratio) {
+  const base = sanitizePinnedRatios(list)
+  const r = clampCustomRatio(ratio)
+  if (r == null) return base
+  const key = formatCustomRatioLabel(r)
+  if (base.some(x => formatCustomRatioLabel(x) === key)) {
+    // Already pinned → unpin.
+    return base.filter(x => formatCustomRatioLabel(x) !== key)
+  }
+  // Not pinned → pin at the front, capped.
+  return [r, ...base].slice(0, PINNED_RATIOS_MAX)
+}
+
+// Build the ordered display row of ratio chips from the pinned + recents
+// lists: PINNED chips first (in pin order, each flagged pinned:true), then
+// the RECENT chips whose label isn't already pinned (flagged pinned:false).
+// This is the single render model the chip row maps over, so a ratio is
+// never shown twice and pinned favourites always lead. Both inputs are
+// sanitized here so a caller can pass raw persisted blobs. Returns an array
+// of { ratio, label, pinned }. Pure.
+export function buildRatioChips(pinned, recents) {
+  const pins = sanitizePinnedRatios(pinned)
+  const recs = sanitizeRecentRatios(recents)
+  const out = []
+  const seen = new Set()
+  for (const r of pins) {
+    const label = formatCustomRatioLabel(r)
+    if (!label || seen.has(label)) continue
+    seen.add(label)
+    out.push({ ratio: r, label, pinned: true })
+  }
+  for (const r of recs) {
+    const label = formatCustomRatioLabel(r)
+    if (!label || seen.has(label)) continue
+    seen.add(label)
+    out.push({ ratio: r, label, pinned: false })
+  }
+  return out
+}
