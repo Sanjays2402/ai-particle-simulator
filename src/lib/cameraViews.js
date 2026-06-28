@@ -783,3 +783,21 @@ export function rangeClick(orderedIds, pendingAnchorId, clickedId, selected) {
   return { selected: next, pendingAnchorId: null, completed: true }
 }
 
+// --- R46.H: arm the range anchor from a specific row -----------------
+//
+// R45.H's two-click Range mode is armed from a HEADER toggle, then the
+// first row click sets the anchor. R46.H lets a user arm the anchor
+// DIRECTLY on a row (via right-click / long-press) so they can say "range
+// FROM HERE" without first reaching for the header — then a normal click
+// on a later row completes the block (the existing rangeClick path picks
+// it up because the anchor is already armed).
+//
+// This validates that `rowId` is a real selectable id and returns it as
+// the new pending anchor, or null when the row isn't selectable (stray
+// id, empty roster) so the caller can ignore the gesture. Pure; the
+// caller flips its Range mode on + stashes this as the pending anchor.
+export function armRangeAnchor(orderedIds, rowId) {
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) return null
+  return orderedIds.indexOf(rowId) >= 0 ? rowId : null
+}
+

@@ -27,6 +27,8 @@ import {
   invertSelection,
   // R45.H — header two-click range mode
   rangeClick,
+  // R46.H — arm the range anchor from a row
+  armRangeAnchor,
 } from './cameraViews.js'
 
 function assertEq(actual, expected, msg) {
@@ -1190,3 +1192,33 @@ console.log('PASS: invert selection — complement / double-invert identity / st
 }
 
 console.log('PASS: rangeClick — header two-click range mode (arm / complete / stale anchor / union) (R45.H)')
+
+// --- R46.H: armRangeAnchor — arm the anchor from a specific row ---
+{
+  const ids = [10, 20, 30, 40, 50]
+  // a valid selectable id is returned as the new pending anchor.
+  assertEq(armRangeAnchor(ids, 30), 30, 'arm: valid row → that id is the anchor')
+  assertEq(armRangeAnchor(ids, 10), 10, 'arm: first row armable')
+  assertEq(armRangeAnchor(ids, 50), 50, 'arm: last row armable')
+  // a stray / non-selectable id → null (caller ignores the gesture).
+  assertEq(armRangeAnchor(ids, 999), null, 'arm: stray id → null')
+  assertEq(armRangeAnchor(ids, undefined), null, 'arm: undefined id → null')
+  assertEq(armRangeAnchor(ids, null), null, 'arm: null id → null')
+  // empty / non-array roster → null.
+  assertEq(armRangeAnchor([], 10), null, 'arm: empty roster → null')
+  assertEq(armRangeAnchor(null, 10), null, 'arm: non-array roster → null')
+  assertEq(armRangeAnchor(undefined, 10), null, 'arm: undefined roster → null')
+  // string ids work too (id type-agnostic, uses indexOf).
+  assertEq(armRangeAnchor(['a', 'b', 'c'], 'b'), 'b', 'arm: string id armable')
+  assertEq(armRangeAnchor(['a', 'b', 'c'], 'z'), null, 'arm: missing string id → null')
+  // the armed anchor feeds rangeClick: arming row 20 then clicking row 40
+  // selects the inclusive block 20..40 (proves R46.H composes with R45.H).
+  {
+    const armed = armRangeAnchor(ids, 20)
+    const r = rangeClick(ids, armed, 40, new Set())
+    assertTrue(r.completed, 'arm→range: second click completes the block')
+    assertEq([...r.selected].sort((a, b) => a - b).join(','), '20,30,40', 'arm→range: 20..40 selected')
+  }
+}
+
+console.log('PASS: armRangeAnchor — arm the range anchor directly from a row (R46.H)')

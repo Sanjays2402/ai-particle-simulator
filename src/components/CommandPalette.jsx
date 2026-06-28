@@ -14,6 +14,8 @@ import {
   invertSelection,
   // R45.H — header two-click range mode
   rangeClick,
+  // R46.H — arm the range anchor directly from a row
+  armRangeAnchor,
 } from '../lib/cameraViews'
 import { labelForId as framingLabelForId } from '../lib/framingGuides'
 import {
@@ -56,6 +58,11 @@ export function CommandPalette({ onSettings }) {
   // pending first-click anchor inside that mode.
   const [rangeMode, setRangeMode] = useState(false)
   const [rangeAnchorId, setRangeAnchorId] = useState(null)
+  // R46.H — per-row long-press timer + a "moved" guard so a touch-and-hold
+  // on a saved-view row arms the range anchor ("range from here"), while a
+  // tap-at-rest still toggles selection. Cleared on touchend / move.
+  const rowPressTimer = useRef(0)
+  const rowPressFired = useRef(false)
   // R44.N — handle for the "Fit selected" camera tween's rAF loop, so a
   // second fit (or the palette closing) cancels an in-flight tween instead
   // of stacking two animations fighting over the camera (mirrors Minimap).
@@ -261,6 +268,19 @@ export function CommandPalette({ onSettings }) {
       setRangeAnchorId(null)
       return next
     })
+  }
+
+  // R46.H — arm the range anchor DIRECTLY from a row (right-click / long-
+  // press) so a user can say "range from here" without first toggling the
+  // header. Flips Range mode on + stashes this row as the pending anchor;
+  // the next plain click on a later row completes the block via the
+  // existing rangeClick path. A non-selectable row (stray id) is ignored.
+  const armRangeFromRow = (viewId) => {
+    const orderedIds = cameraViews.map(v => v.id)
+    const armed = armRangeAnchor(orderedIds, viewId)
+    if (armed == null) return
+    setRangeMode(true)
+    setRangeAnchorId(armed)
   }
 
   // R43.H — header select-all / clear toggle: when every view is already
@@ -774,10 +794,39 @@ export function CommandPalette({ onSettings }) {
                     return (
                       <button
                         key={v.id}
-                        onClick={(e) => toggleSelected(v.id, e.shiftKey)}
+                        onClick={(e) => {
+                          // R46.H — swallow the click synthesised after a
+                          // long-press fired (which already armed the anchor)
+                          // so the hold doesn't also toggle the row.
+                          if (rowPressFired.current) { rowPressFired.current = false; return }
+                          toggleSelected(v.id, e.shiftKey)
+                        }}
+                        onContextMenu={(e) => {
+                          // R46.H — right-click arms the range anchor from this
+                          // row ("range from here") instead of the browser menu.
+                          e.preventDefault()
+                          armRangeFromRow(v.id)
+                        }}
+                        onTouchStart={() => {
+                          // R46.H — touch long-press (450ms) arms the anchor from
+                          // this row; a tap-at-rest still toggles via onClick.
+                          rowPressFired.current = false
+                          if (rowPressTimer.current) clearTimeout(rowPressTimer.current)
+                          rowPressTimer.current = window.setTimeout(() => {
+                            rowPressFired.current = true
+                            armRangeFromRow(v.id)
+                          }, 450)
+                        }}
+                        onTouchMove={() => {
+                          // A scroll/swipe cancels the pending long-press.
+                          if (rowPressTimer.current) { clearTimeout(rowPressTimer.current); rowPressTimer.current = 0 }
+                        }}
+                        onTouchEnd={() => {
+                          if (rowPressTimer.current) { clearTimeout(rowPressTimer.current); rowPressTimer.current = 0 }
+                        }}
                         title={rangeMode
                           ? (rangeAnchorId == null ? 'Click to set the range start' : 'Click to select up to here')
-                          : 'Click to toggle · Shift+click to select a range'}
+                          : 'Click to toggle · Shift+click or right-click/long-press to range from here'}
                         style={{
                           display: 'flex', alignItems: 'center', gap: 10,
                           padding: '7px 9px', borderRadius: 8, cursor: 'pointer',
