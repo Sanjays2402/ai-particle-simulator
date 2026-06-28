@@ -77,6 +77,7 @@ export default function LeftSidebar() {
     showFavoritesOnly, setShowFavoritesOnly,
     framingGuideId, setFramingGuideId,
     framingCustomRatio, setFramingCustomRatio,
+    recentCustomRatios, applyRecentRatio, clearRecentRatios,
     framingGridId, setFramingGridId,
     spiralOrientation, cycleSpiralOrientation, replaySpiralSweep,
     spiralSweepSpeed, setSpiralSweepSpeed,
@@ -275,12 +276,17 @@ export default function LeftSidebar() {
 
           {/* R42.M — custom aspect-ratio: type any crop (21:9, 2.39, 16x9)
               beyond the fixed preset chips. Selecting flips the active
-              frame to 'custom'; the parsed ratio persists. */}
+              frame to 'custom'; the parsed ratio persists.
+              R43.M — a row of recent custom ratios beneath it for one-tap
+              re-apply. */}
           <CustomRatioChip
             active={framingGuideId === CUSTOM_FRAMING_ID}
             ratio={framingCustomRatio}
             onSubmit={setFramingCustomRatio}
             onSelect={() => setFramingGuideId(CUSTOM_FRAMING_ID)}
+            recents={recentCustomRatios}
+            onApplyRecent={applyRecentRatio}
+            onClearRecents={clearRecentRatios}
           />
           {/* R35.B — composition grid drawn inside the active frame.
               Rule-of-thirds (with power-point dots) or a centre cross for
@@ -864,10 +870,14 @@ function ToggleRow({ label, value, onChange }) {
 // the input red without changing the frame. The chip stays visually in
 // sync with the live store value so a reload or a [ ]-cycle away + back
 // reflects correctly.
-function CustomRatioChip({ active, ratio, onSubmit, onSelect }) {
+function CustomRatioChip({ active, ratio, onSubmit, onSelect, recents, onApplyRecent, onClearRecents }) {
   const [draft, setDraft] = useState('')
   const [error, setError] = useState(false)
   const liveLabel = formatCustomRatioLabel(ratio)
+  // R43.M — recents row: the MRU custom ratios as one-tap chips. The
+  // active live ratio is highlighted so the user sees which chip is in
+  // play. Hidden when empty (nothing remembered yet).
+  const recentList = Array.isArray(recents) ? recents : []
 
   const commit = () => {
     const raw = draft.trim()
@@ -943,6 +953,59 @@ function CustomRatioChip({ active, ratio, onSubmit, onSelect }) {
       {error && (
         <div style={{ fontSize: 9.5, color: '#fca5a5', marginTop: 4, fontFamily: 'Geist Mono, monospace' }}>
           Couldn&apos;t read that — try 21:9, 2.39, or 16x9
+        </div>
+      )}
+      {/* R43.M — recent custom ratios: one-tap chips to re-apply a crop
+          the user dialled in before, newest-first. The chip matching the
+          live ratio is highlighted. A trailing × clears the whole row. */}
+      {recentList.length > 0 && (
+        <div style={{ marginTop: 7 }}>
+          <div style={{
+            fontSize: 8.5, fontWeight: 700, letterSpacing: '0.12em',
+            textTransform: 'uppercase', color: '#6a6a80', marginBottom: 4,
+            fontFamily: 'Geist Mono, monospace',
+          }}>Recent</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
+            {recentList.map(r => {
+              const label = formatCustomRatioLabel(r)
+              const isLive = active && liveLabel && label === liveLabel
+              return (
+                <button
+                  key={label}
+                  onClick={() => onApplyRecent && onApplyRecent(r)}
+                  title={`Re-apply ${label}`}
+                  style={{
+                    padding: '3px 8px', borderRadius: 6,
+                    fontSize: 10, fontWeight: 650,
+                    fontFamily: 'Geist Mono, monospace',
+                    cursor: 'pointer', transition: 'all 0.13s ease-out',
+                    background: isLive
+                      ? 'linear-gradient(135deg, rgba(168,85,247,0.28) 0%, rgba(236,72,153,0.2) 100%)'
+                      : 'rgba(255,255,255,0.04)',
+                    color: isLive ? '#f3e8ff' : '#9a9ab0',
+                    border: isLive ? '1px solid rgba(168,85,247,0.5)' : '1px solid rgba(255,255,255,0.07)',
+                    boxShadow: isLive ? '0 0 10px rgba(168,85,247,0.22)' : 'none',
+                  }}
+                  onMouseEnter={e => { if (!isLive) { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; e.currentTarget.style.color = '#d8d8e0' } }}
+                  onMouseLeave={e => { if (!isLive) { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = '#9a9ab0' } }}
+                >{label}</button>
+              )
+            })}
+            <button
+              onClick={() => onClearRecents && onClearRecents()}
+              title="Clear recent ratios"
+              aria-label="Clear recent ratios"
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 18, height: 18, borderRadius: 5, marginLeft: 1,
+                background: 'transparent', border: '1px solid rgba(255,255,255,0.06)',
+                color: '#7a7a90', cursor: 'pointer', fontSize: 11, lineHeight: 1,
+                transition: 'all 0.13s ease-out',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.color = '#fca5a5'; e.currentTarget.style.borderColor = 'rgba(248,113,113,0.4)' }}
+              onMouseLeave={e => { e.currentTarget.style.color = '#7a7a90'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)' }}
+            >{'\u00d7'}</button>
+          </div>
         </div>
       )}
     </div>

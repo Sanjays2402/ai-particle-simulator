@@ -15,6 +15,8 @@ import {
   // R42.M — custom aspect-ratio input
   CUSTOM_FRAMING_ID, CUSTOM_RATIO_MIN, CUSTOM_RATIO_MAX,
   parseAspectRatio, clampCustomRatio, formatCustomRatioLabel,
+  // R43.M — recent custom ratios MRU
+  RECENT_RATIOS_MAX, sanitizeRecentRatios, pushRecentRatio, sameRecentRatios,
 } from './framingGuides.js'
 
 let passed = 0
@@ -733,4 +735,83 @@ console.log(`PASS: framingGuides R39.B — ${passed} total assertions (incl. on-
   }
 }
 
-console.log(`PASS: framingGuides R42.M — ${passed} total assertions (incl. custom aspect-ratio input)`)
+// --- R43.M: recent custom ratios MRU ---------------------------------
+{
+  // sanitizeRecentRatios: keep valid clamped numbers, dedupe by label, cap.
+  eq(sanitizeRecentRatios(null).length, 0, 'recents: non-array → []')
+  eq(sanitizeRecentRatios([]).length, 0, 'recents: empty → []')
+  {
+    const s = sanitizeRecentRatios([2.39, 1.78, 1])
+    eq(s.length, 3, 'recents: 3 distinct kept')
+    near(s[0], 2.39, 'recents: order preserved [0]')
+    near(s[2], 1, 'recents: order preserved [2]')
+  }
+  // junk / out-of-band entries dropped (clamp returns null for <=0).
+  {
+    const s = sanitizeRecentRatios([2.39, 0, -1, NaN, 'x', null, 1.5])
+    eq(s.length, 2, 'recents: junk entries dropped')
+    near(s[0], 2.39, 'recents: first valid kept')
+    near(s[1], 1.5, 'recents: second valid kept')
+  }
+  // dedupe by 2dp display label (1.777 and 1.778 collapse to one).
+  {
+    const s = sanitizeRecentRatios([1.777, 1.778, 1.776])
+    eq(s.length, 1, 'recents: near-equal ratios dedupe by label')
+  }
+  // cap at MAX (oldest beyond the cap falls off).
+  {
+    const big = [3.1, 2.9, 2.7, 2.5, 2.3, 2.1, 1.9]
+    const s = sanitizeRecentRatios(big)
+    eq(s.length, RECENT_RATIOS_MAX, 'recents: capped at MAX')
+    near(s[0], 3.1, 'recents: newest kept at front under cap')
+  }
+  // out-of-band values are CLAMPED into the band (not dropped) — 100 → MAX.
+  {
+    const s = sanitizeRecentRatios([100])
+    eq(s.length, 1, 'recents: huge ratio clamped not dropped')
+    near(s[0], CUSTOM_RATIO_MAX, 'recents: clamped to band max')
+  }
+
+  // pushRecentRatio: prepend, move-to-front on repeat, clamp, cap.
+  {
+    let r = []
+    r = pushRecentRatio(r, 2.39)
+    r = pushRecentRatio(r, 1.78)
+    eq(r.length, 2, 'push: two distinct')
+    near(r[0], 1.78, 'push: newest at front')
+    near(r[1], 2.39, 'push: older behind')
+    // re-applying 2.39 floats it back to the front (no duplicate).
+    r = pushRecentRatio(r, 2.39)
+    eq(r.length, 2, 'push: repeat does not duplicate')
+    near(r[0], 2.39, 'push: repeat floats to front')
+  }
+  // push clamps the incoming value; an unparseable one leaves the list as-is.
+  {
+    const base = pushRecentRatio([], 2.0)
+    const same = pushRecentRatio(base, NaN)
+    ok(sameRecentRatios(base, same), 'push: junk ratio → unchanged list')
+    const clamped = pushRecentRatio([], 100)
+    near(clamped[0], CUSTOM_RATIO_MAX, 'push: huge ratio clamped to band max')
+  }
+  // push caps at MAX as new distinct ratios arrive.
+  {
+    let r = []
+    for (const v of [3.1, 2.9, 2.7, 2.5, 2.3, 2.1]) r = pushRecentRatio(r, v)
+    eq(r.length, RECENT_RATIOS_MAX, 'push: capped at MAX')
+    near(r[0], 2.1, 'push: newest survives the cap')
+    ok(!r.some(x => formatCustomRatioLabel(x) === '3.1'), 'push: oldest dropped past cap')
+  }
+  // sameRecentRatios value-equality.
+  ok(sameRecentRatios([1, 2, 3], [1, 2, 3]), 'same: equal arrays')
+  ok(!sameRecentRatios([1, 2], [1, 2, 3]), 'same: different length')
+  ok(!sameRecentRatios([1, 2, 3], [1, 9, 3]), 'same: different value')
+  ok(!sameRecentRatios(null, []), 'same: non-array → false')
+  // a pushed ratio is always re-applicable (in band, parseable label).
+  {
+    const r = pushRecentRatio([], parseAspectRatio('21:9'))
+    ok(r.length === 1 && r[0] >= CUSTOM_RATIO_MIN && r[0] <= CUSTOM_RATIO_MAX, 'push: parsed 21:9 stored in band')
+    ok(formatCustomRatioLabel(r[0]) !== '', 'push: stored ratio has a usable label')
+  }
+}
+
+console.log(`PASS: framingGuides R42.M/R43.M — ${passed} total assertions (incl. custom aspect-ratio input + recents MRU)`)

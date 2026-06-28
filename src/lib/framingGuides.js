@@ -647,3 +647,70 @@ export function spiralSweepEasingCss(id) {
   const e = SWEEP_EASING_BY_ID.get(sanitizeSpiralSweepEasing(id))
   return e.css
 }
+
+// --- R43.M: recent custom aspect ratios -------------------------------
+//
+// R42.M lets a user type any custom crop (21:9, 2.76, 5:7). A user who
+// flips between a few favourites (say 21:9 and 2.39) had to re-type each
+// one every time. This remembers the last few PARSED custom ratios as a
+// small MRU (most-recently-used) list so they can be re-applied with a
+// single click — like a browser's recent-searches row.
+//
+// The list holds CLAMPED numeric ratios (same usable band as the custom
+// input), newest-first, deduped by their 2-decimal DISPLAY label (so a
+// 1.777 and a 1.778 entry don't both linger), capped at RECENT_RATIOS_MAX
+// (the oldest falls off the tail). All pure + DOM-free so it unit-tests
+// cleanly and the store / LeftSidebar stay thin.
+
+export const RECENT_RATIOS_MAX = 5
+
+// Normalise a stored / incoming recents array into the canonical form:
+// keep only valid clamped numbers, dedupe by display label (newest wins,
+// i.e. first occurrence in input order is kept), cap to MAX. Non-array →
+// []. Pure; always returns a fresh array of plain numbers so downstream
+// comparisons (and React keys via formatCustomRatioLabel) are stable.
+export function sanitizeRecentRatios(list) {
+  if (!Array.isArray(list)) return []
+  const out = []
+  const seen = new Set()
+  for (const raw of list) {
+    const r = clampCustomRatio(raw)
+    if (r == null) continue
+    const key = formatCustomRatioLabel(r)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    out.push(r)
+    if (out.length >= RECENT_RATIOS_MAX) break
+  }
+  return out
+}
+
+// Push a freshly-applied ratio to the FRONT of the recents MRU. The ratio
+// is clamped into the usable band first; an unparseable / out-of-band one
+// leaves the (cleaned) list unchanged. A ratio already present (matched by
+// its display label) is MOVED to the front rather than duplicated, so
+// re-applying an old favourite floats it back to the top. The result is
+// capped at RECENT_RATIOS_MAX. Pure; never mutates the input — always
+// returns a fresh canonical array (the caller compares by value to decide
+// whether a persist is warranted).
+export function pushRecentRatio(list, ratio) {
+  const base = sanitizeRecentRatios(list)
+  const r = clampCustomRatio(ratio)
+  if (r == null) return base
+  const key = formatCustomRatioLabel(r)
+  const next = [r, ...base.filter(x => formatCustomRatioLabel(x) !== key)]
+  return next.slice(0, RECENT_RATIOS_MAX)
+}
+
+// Value-equality for two recents lists (both assumed canonical number
+// arrays). Lets a caller skip a redundant persist/re-render when a push
+// produced an identical list (e.g. re-applying the already-front ratio).
+// Pure.
+export function sameRecentRatios(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b)) return false
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}

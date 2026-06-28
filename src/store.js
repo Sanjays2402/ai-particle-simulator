@@ -50,6 +50,10 @@ import {
   // R42.M — custom aspect-ratio parser + clamp.
   parseAspectRatio,
   clampCustomRatio,
+  // R43.M — recent custom ratios MRU.
+  sanitizeRecentRatios,
+  pushRecentRatio,
+  sameRecentRatios,
 } from './lib/framingGuides'
 // R38.K — per-motion calm gate sanitiser + toggle.
 import { sanitizeCalmGates, toggleCalmGate } from './lib/calmMode'
@@ -85,6 +89,8 @@ const SPIRAL_SWEEP_SPEED_KEY = 'particle-spiral-sweep-speed-v1'
 const SPIRAL_SWEEP_EASING_KEY = 'particle-spiral-sweep-easing-v1'
 // R42.M — custom framing aspect ratio (numeric width/height), own key.
 const FRAMING_CUSTOM_RATIO_KEY = 'particle-framing-custom-ratio-v1'
+// R43.M — recent custom aspect ratios (MRU list of numbers), own key.
+const FRAMING_RECENT_RATIOS_KEY = 'particle-framing-recent-ratios-v1'
 // R34.C — screenshot self-timer delay (seconds), own key.
 const SCREENSHOT_TIMER_KEY = 'particle-screenshot-timer-v1'
 // R35.C — screenshot burst count (frames per capture), own key.
@@ -563,8 +569,39 @@ export const useStore = create((set, get) => {
     if (ratio == null) return null
     try { localStorage.setItem(FRAMING_CUSTOM_RATIO_KEY, String(ratio)) } catch { /* quota / private mode */ }
     try { localStorage.setItem(FRAMING_GUIDE_KEY, 'custom') } catch { /* */ }
-    set({ framingCustomRatio: ratio, framingGuideId: 'custom' })
+    // R43.M — remember this ratio in the recents MRU so the user can
+    // re-apply a favourite crop with a click instead of re-typing it.
+    const nextRecents = pushRecentRatio(get().recentCustomRatios, ratio)
+    if (!sameRecentRatios(nextRecents, get().recentCustomRatios)) {
+      try { localStorage.setItem(FRAMING_RECENT_RATIOS_KEY, JSON.stringify(nextRecents)) } catch { /* quota / private mode */ }
+      set({ framingCustomRatio: ratio, framingGuideId: 'custom', recentCustomRatios: nextRecents })
+    } else {
+      set({ framingCustomRatio: ratio, framingGuideId: 'custom' })
+    }
     return ratio
+  },
+
+  // R43.M — the most-recently-used custom aspect ratios (newest-first,
+  // deduped by display label, capped). Surfaced as a row of one-tap chips
+  // beneath the custom-ratio input so a user who flips between a few
+  // favourites (21:9, 2.39 ...) doesn't re-type each time. Loaded +
+  // sanitised on boot so a corrupt blob can't poison the chip row.
+  recentCustomRatios: (() => {
+    try {
+      const raw = localStorage.getItem(FRAMING_RECENT_RATIOS_KEY)
+      return raw != null ? sanitizeRecentRatios(JSON.parse(raw)) : []
+    } catch { return [] }
+  })(),
+  // Re-apply a remembered ratio: set it as the active custom frame (which
+  // also floats it back to the front of the MRU via setFramingCustomRatio).
+  // A number goes straight through clampCustomRatio inside the setter.
+  applyRecentRatio: (ratio) => get().setFramingCustomRatio(ratio),
+  // Forget the whole recents row (a small "clear" affordance). Skips the
+  // work when already empty.
+  clearRecentRatios: () => {
+    if (get().recentCustomRatios.length === 0) return
+    try { localStorage.removeItem(FRAMING_RECENT_RATIOS_KEY) } catch { /* quota / private mode */ }
+    set({ recentCustomRatios: [] })
   },
 
   // R35.B — Composition grid drawn INSIDE the active framing guide:
