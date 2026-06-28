@@ -15,6 +15,8 @@ import {
   estimateTextWidth, buildWatermarkPreview,
   // R45.G — clickable preview corners
   anchorFromPreviewPoint,
+  // R46.G — continuous drag-to-place the anchor
+  nextAnchorOnDrag,
 } from './screenshotWatermark.js'
 
 let passed = 0
@@ -350,3 +352,41 @@ console.log(`PASS: screenshotWatermark R43.G — ${passed} total assertions (inc
 }
 
 console.log(`PASS: screenshotWatermark R45.G — ${passed} total assertions (incl. clickable preview corner → anchor)`)
+
+// --- R46.G: continuous drag-to-place the anchor ---
+{
+  const W = 158, H = 92
+  // crossing into a new quadrant returns the new anchor.
+  eq(nextAnchorOnDrag('top-left', 150, 10, W, H), 'top-right', 'drag: TL → TR on crossing right')
+  eq(nextAnchorOnDrag('top-left', 10, 85, W, H), 'bottom-left', 'drag: TL → BL on crossing down')
+  eq(nextAnchorOnDrag('top-left', 150, 85, W, H), 'bottom-right', 'drag: TL → BR diagonal')
+  // staying in the SAME quadrant returns the SAME anchor ref (no churn).
+  {
+    const cur = 'top-left'
+    const r = nextAnchorOnDrag(cur, 12, 12, W, H)
+    ok(r === cur, 'drag: same quadrant → same ref (skip redundant setState)')
+    const r2 = nextAnchorOnDrag(cur, 40, 30, W, H) // still top-left quadrant
+    ok(r2 === cur, 'drag: still-in-quadrant move → same ref')
+  }
+  // a degenerate box / non-finite point → current unchanged (bad event
+  // never moves the anchor).
+  {
+    const cur = 'bottom-right'
+    ok(nextAnchorOnDrag(cur, 10, 10, 0, H) === cur, 'drag: zero width → current unchanged')
+    ok(nextAnchorOnDrag(cur, 10, 10, W, 0) === cur, 'drag: zero height → current unchanged')
+    ok(nextAnchorOnDrag(cur, NaN, 10, W, H) === cur, 'drag: NaN x → current unchanged')
+    ok(nextAnchorOnDrag(cur, 10, Infinity, W, H) === cur, 'drag: non-finite y → current unchanged')
+  }
+  // even with a junk `current`, a valid point still resolves to a real
+  // anchor (so a corrupt store value self-heals on the first drag).
+  eq(nextAnchorOnDrag('junk', 10, 10, W, H), 'top-left', 'drag: junk current + valid point → real anchor')
+  // every drag result (when changed) is a valid anchor.
+  for (const [x, y] of [[1, 1], [W - 1, 1], [1, H - 1], [W - 1, H - 1]]) {
+    const r = nextAnchorOnDrag('top-left', x, y, W, H)
+    ok(isValidWatermarkAnchor(r), `drag: (${x},${y}) → valid anchor`)
+  }
+  // midline bias matches anchorFromPreviewPoint (lower/right).
+  eq(nextAnchorOnDrag('top-left', W / 2, H / 2, W, H), 'bottom-right', 'drag: dead-centre → bottom-right (shared midline bias)')
+}
+
+console.log(`PASS: screenshotWatermark R46.G — ${passed} total assertions (incl. continuous drag-to-place the caption anchor)`)

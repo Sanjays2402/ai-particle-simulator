@@ -17,6 +17,8 @@ import {
   buildWatermarkPreview, PREVIEW_MAIN_FONT, PREVIEW_SUB_FONT,
   // R45.G — clickable preview corners → set the anchor by direct manipulation.
   anchorFromPreviewPoint,
+  // R46.G — drag the pointer across the preview to place the anchor continuously.
+  nextAnchorOnDrag,
 } from '../lib/screenshotWatermark'
 import { showToast } from './Toast'
 import {
@@ -769,6 +771,10 @@ function WatermarkBtn() {
   const [open, setOpen] = useState(false)
   const pressTimer = useRef(0)
   const longPressed = useRef(false)
+  // R46.G — true while the user is dragging on the preview frame to place
+  // the caption anchor; gates the pointermove handler so a hover never
+  // moves the anchor, only an active press-drag does.
+  const draggingAnchor = useRef(false)
 
   const startPress = () => {
     longPressed.current = false
@@ -873,17 +879,40 @@ function WatermarkBtn() {
                 grid below. Faint corner hotspots advertise the affordance;
                 the active corner glows. */}
                 <div
-                  onClick={(e) => {
+                  onPointerDown={(e) => {
+                    // R46.G — begin a drag: place the anchor at the press
+                    // point and capture the pointer so a slide outside the
+                    // frame keeps updating until release.
                     const rect = e.currentTarget.getBoundingClientRect()
                     const next = anchorFromPreviewPoint(
                       e.clientX - rect.left, e.clientY - rect.top, rect.width, rect.height,
                     )
                     if (next) { setAnchor(next); if (!active) setActive(true) }
+                    draggingAnchor.current = true
+                    try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* jsdom / unsupported */ }
                   }}
-                  title="Click a corner to place the caption there"
+                  onPointerMove={(e) => {
+                    // Only an active press-drag moves the anchor; a hover does
+                    // nothing. nextAnchorOnDrag returns the SAME anchor when the
+                    // pointer hasn't crossed a midline, so we skip a redundant
+                    // store write (no 60Hz churn).
+                    if (!draggingAnchor.current) return
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const next = nextAnchorOnDrag(
+                      anchor, e.clientX - rect.left, e.clientY - rect.top, rect.width, rect.height,
+                    )
+                    if (next !== anchor) setAnchor(next)
+                  }}
+                  onPointerUp={(e) => {
+                    draggingAnchor.current = false
+                    try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* noop */ }
+                  }}
+                  onPointerCancel={() => { draggingAnchor.current = false }}
+                  title="Click or drag across the preview to place the caption"
                   style={{
                   position: 'relative', width: PREVIEW_W, height: PREVIEW_H,
-                  borderRadius: 7, marginBottom: 9, overflow: 'hidden', cursor: 'pointer',
+                  borderRadius: 7, marginBottom: 9, overflow: 'hidden', cursor: 'grab',
+                  touchAction: 'none',
                   // A faux "scene" so the caption pill reads the way it will
                   // over a real export.
                   background: 'linear-gradient(135deg, rgba(99,102,241,0.22) 0%, rgba(168,85,247,0.16) 45%, rgba(8,8,14,0.9) 100%)',

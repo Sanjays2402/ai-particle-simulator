@@ -383,3 +383,26 @@ export function anchorFromPreviewPoint(x, y, w, h) {
   if (bottom) return right ? 'bottom-right' : 'bottom-left'
   return right ? 'top-right' : 'top-left'
 }
+
+// --- R46.G: continuous drag-to-place the caption anchor ---------------
+//
+// R45.G lets the user CLICK a corner of the preview to set the watermark
+// anchor. R46.G upgrades that to a DRAG: press on the preview and slide
+// the pointer around — the anchor follows the quadrant the pointer is in,
+// snapping corner-to-corner as you cross the midlines, so placing the
+// caption feels like dragging the pill itself rather than clicking a
+// target.
+//
+// To avoid hammering the store at 60Hz (a drag fires pointermove
+// constantly), this resolves the pointer to a quadrant anchor and returns
+// it ONLY when it differs from the current anchor; when the pointer hasn't
+// crossed into a new quadrant it returns `current` UNCHANGED (the same
+// string ref) so the caller can cheaply skip a redundant setState. A
+// degenerate box / non-finite point → `current` unchanged too (a bad
+// event never moves the anchor). Pure; built on anchorFromPreviewPoint so
+// the quadrant math is shared + tested in one place.
+export function nextAnchorOnDrag(current, x, y, w, h) {
+  const next = anchorFromPreviewPoint(x, y, w, h)
+  if (next === null) return current
+  return next === current ? current : next
+}
