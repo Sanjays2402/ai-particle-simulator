@@ -118,6 +118,11 @@ Existing capabilities (do not re-ship):
 - Bias import preview header pip cycles indigo → amber → red across THREE intensity tiers (R28.41, graduates R27.41). Pre-R28.41 the pip plateaued at amber the moment changed >= 10; for users importing a destructive 30+ field replace, that read no different from a careful 12-field merge. R28.41 splits into LOW (< 10, indigo), MEDIUM (10..19, amber), HIGH (>= 20, red). Thresholds exposed as `IMPORT_IMPACT_AMBER_AT=10` + `IMPORT_IMPACT_RED_AT=20`. Two new pure helpers in biasOverridesIO.js: `getImportImpactIntensity(changed)` returns 'low' | 'medium' | 'high' (defensive: non-finite / negative → 'low'); `getImportImpactStyle(intensity)` returns CSS-ready bundle { bg, border, color, accent, label } (parallels attractorTypeStyle (R14.05) + userPresetColorStyle (R16.19) shape). Three tiers visually distinct (no two share accent or text colour). Pip's bg/border/color all read from one impactStyle bundle so tier swap is atomic (no half-amber-half-red mid-render). Soft 160ms transition between tiers so flipping Merge → Replace across a threshold breathes into the new colour. Tooltip mentions both thresholds + the tier's friendly label.
 - Note filter bulk-unpin surfaces toast with Undo restore action (R28.42, graduates R27.42). Pattern parallels MidiPanel's R22.30 hotkey-transfer undo chip. Snapshot pre-wipe state (MINIMAL — just query+mode keys, not the whole list), run the wipe, fire toast with action chip whose onClick restores against whatever list is live at click-time. Concurrent edits between unpin + restore compose safely: user can add a new entry, delete one, or manually re-pin one between unpin + click. Two new pure helpers in presetThumbnails.js: `snapshotPinnedNoteFilterHistoryKeys(list)` returns array of { query, mode } pairs (order preserved, mode normalised via isValidNoteFilterMode, strict-true filter on pinned, corrupt rows skipped, non-array → []); `restorePinnedNoteFilterHistoryEntries(list, keys)` re-pins entries whose (query, mode) matches any key (ref-equal-on-no-op when keys empty / non-array / no matches / every target already pinned; never resurrects deleted entries; mode-specific matching so substring 'foo' and regex 'foo' are distinct keys; already-pinned entries left alone — idempotent). UI: showToast with monochrome star icon (lucide 1.8 lacks Pin) + "Unpinned N pattern(s)" text + Undo chip. Toast's onClick uses functional setState so restore runs against LIVE history at click-time.
 - Hotkey UNDO chain badge fades non-linearly (R28.43, graduates R27.43). Pre-R28.43 the fade was linear which read as "already expiring" by t=250ms — too rushed for the human's decision lag. R28.43 reshapes the t→t' progression via easeInCubic (t' = t^3): at t=0.5 the colour has only walked 12.5% toward grey, so the badge reads as ~bright through the first 500ms then accelerates to grey emphatically in the last 500ms. Roadmap requirement met: "fade slower in the first 500ms, faster in the last 500ms — non-linear curve". New constants in midiPresets.js: `HOTKEY_CHAIN_FADE_CURVES=['linear','easeOutCubic','easeInCubic']`, `HOTKEY_CHAIN_FADE_CURVE_DEFAULT='linear'` (preserves R27.43 backwards-compat — every existing call site / pinned test unchanged), `HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED='easeInCubic'` (named export so a future curve swap touches one file). New pure helper `applyHotkeyChainFadeCurve(t, curve)` — endpoint anchoring guaranteed across every curve (f(0)=0, f(1)=1); monotonicity preserved; non-finite t → 0; out-of-range clamps to endpoints; unknown curve falls through to linear. `fadeDirectionColor` extended with optional curve param threaded through Toast.jsx's existing fade-tick interval. MidiPanel.showHotkeyTransferToast passes the recommended curve into badge.fade.
+- Framing guide CUSTOM aspect ratio (R42.M). The fixed FRAMING_RATIOS chips (2.39 / 16:9 / 1:1 ...) gain a "Custom" chip + inline input that accepts any freeform ratio. Pure lib/framingGuides.js: `parseAspectRatio(raw)` handles A:B / AxB / A/B forms AND bare decimals ("21:9", "16x9", "16/9", "2.39"), whitespace-tolerant; junk / zero / divide-by-zero / non-finite → null; `clampCustomRatio` bounds to [CUSTOM_RATIO_MIN=0.2, CUSTOM_RATIO_MAX=5] so an absurd "100:1" still frames sanely; `formatCustomRatioLabel` (2dp); CUSTOM_FRAMING_ID='custom' is a pseudo-id kept OUT of FRAMING_RATIOS (so the preset chips + [ ] cycle stay roster-only) but VALID through sanitizeFramingId so it round-trips. Store: framingCustomRatio (persisted, own key) + setFramingCustomRatio (parses+clamps, flips active frame to 'custom'). UI: FramingGuides resolves the custom id to the store ratio + builds a "<ratio> WxH" badge; LeftSidebar CustomRatioChip (Enter/Set/blur commit, red-flag on bad entry, live ratio badge). +138 asserts.
+- Minimap "Fit all" frames every saved view (R42.N). One tap recenters the orbit on the cluster of saved-view positions + pulls the camera back to take them all in (the "zoom to fit" of a 3D editor). Pure lib/minimap.js: `framingForViews(views)` → centroid (3D) + XZ radius + count (null on empty/all-corrupt; skips non-finite pos); `fitCameraDistance(radius, opts)` = (radius / sin(halfFov)) * padding, clamped to [FIT_MIN_DIST=6, FIT_MAX_DIST=400], monotone; `frameViewsCameraMove(framing, curPos, curTarget)` keeps the camera's CURRENT viewing direction (dolly not teleport), re-places the eye at dir*dist from the new centroid target, falls back to FIT_DEFAULT_DIR on a degenerate direction. UI: green "FIT" button top-right of the minimap, shown only with 2+ views; reads the live camera snapshot, applies via window.__particleCamera.set, toasts "Framed N views". viewCount mirrored into state (functional-set skip). +60 asserts.
+- Saved-views multi-select bulk-DELETE (R42.H, graduates R41.H subset duplicate). The command palette's R41.H checkbox panel ("Select Views…") now does BOTH: fork the subset (Duplicate) OR prune it (Delete). Pure lib/cameraViews.js: `removeViews(views, idSet)` drops every selected id, keeps the rest in order; idSet accepts Set | Array | iterable (mirrors removeAttractors / removeSnapshots); ref-equal-on-no-op when nothing selected is present, EXCEPT corrupt null rows always dropped; non-array → []; never mutates. UI: red, window.confirm-gated "Delete (N)" button beside "Duplicate (N)"; both read the same selection set (click toggles, shift-click range-selects via selectIdRange); persists + fires particle:camera-views-changed; toasts "Deleted N selected views". +30 asserts.
+- Zen "Now Playing" overlay (R42.E). While in zen mode (Z, chrome hidden for recordings), an optional auto-fading card in the bottom-left shows the live preset name + a theme-accent swatch — like a music player's now-playing chip — so a screen-recording is self-documenting without the full UI. Pure lib/zenMode.js: `formatNowPlaying(name, opts)` trims, collapses internal whitespace to single spaces, ellipsis-truncates to maxLen (default NOW_PLAYING_MAX_LEN=42, ellipsis in budget, trailing-space-before-ellipsis trimmed); non-string/empty → fallback ('Untitled'); degenerate maxLen<=1 → lone ellipsis. Store: zenNowPlaying (persisted, own key, defaults ON — unobtrusive self-fading aid). UI: ZenMode renders the card keyed on the preset name so a preset change replays the fade; swatch reads THEMES[theme].neon; new zen-nowplaying-fade keyframe (slide-up + fade-in, hold, settle to low-opacity rest); reduced-motion shows it statically. LeftSidebar "Zen Now Playing" toggle. +21 asserts.
+- Screenshot watermark / preset-name caption (R42.G). Opt-in: bake the live preset name into the exported PNG (in a chosen corner) so a shared still is self-documenting; composited onto a 2D copy of the GL canvas at export time so it's on the SAVED file ONLY, never the live scene. New lib/screenshotWatermark.js: WATERMARK_ANCHORS (4 corners) + sanitize/cycle (default bottom-right); `buildWatermarkText(label, opts)` (trim + collapse + optional prefix + ellipsis-truncate to maxLen=48; empty/non-string → '' so the caller skips drawing); `watermarkFontSize(w, h, opts)` scales with min(w,h), clamped [11, 40] so legible on a 600px preview AND a 4K export; `watermarkPlacement(...)` returns the pill + text geometry per corner (margin-inset, padded rounded pill, font-metric-agnostic middle baseline), junk anchor → default corner, degenerate canvas → all-zero. Store: screenshotWatermark (off by default) + screenshotWatermarkAnchor (persisted independently). UI: TopBar.composeWatermarkedDataUrl draws the frame + a translucent rounded-pill + caption (roundRect w/ fillRect fallback) and exports that; failed compose falls back to the plain export. New WatermarkBtn toolbar toggle (Type icon, anchor-glyph badge); click toggles, right-click / long-press opens a 4-corner picker popover. New test file, 64 asserts.
 - Clamp popover preview chips become per-cell wipe buttons (R28.45, graduates R27.45). Pre-R28.45 the chips just LISTED affected attractors; R28.45 makes each chip an actionable button — tap any chip to clear JUST that one attractor's per-cell override on the current field, without leaving the popover or dropping every other attractor's override along with it. Pure wire layer — no new lib helpers; delegates to the existing `setClampWarnAttractorFieldOverride(overrides, id, field, null)` with its ref-equal-on-no-op + sanitize-and-prune contract pinned across R24.40/R25.45/R26.45/R27.45. UI: chips swap `<span>` → `<button type="button">` with onClick wired to onClearAttractorCell(id); disabled when no handler attached (read-only callers see no affordance); cursor: pointer + soft indigo hover lift; small × glyph appended to clickable chips for discoverability; tooltips differentiate read-only vs clickable-live vs clickable-stale; e.stopPropagation() prevents bubble to popover surface; native button styling reset so visually identical to pre-R28.45 span baseline.
 - MidiPanel binding-group gap-drop zones reachable via touch long-press drag (R28.20, graduates R26.20 + R27.20 combined). Pre-R28.20 desktop users had gap-drop zones (R27.20) and touch users had row-drop drag (R26.20), but the gap-drop zones were touch-unreachable — 4-18px wide pixel strips are too narrow for a thumb. R28.20 introduces a gap-AWARE touch hit-test that returns a discriminated union { kind: 'row' | 'gap', idx | gapIdx } with 12px tolerance bands around each row boundary. New pure helper `resolveTouchTargetWithGaps(y, ranges, opts)` in cameraViews.js (parallel to R22.12's resolveTouchTargetIdx): gap takes precedence at boundaries (two-pass scan — gap bands first, then row hits — so a touch sitting at a row's edge always resolves to insert-here intent); above-row-0 + within-tolerance-of-midpoint + trailing-zone-below-last-row all return gap targets; everything else falls through to row hit-test. Custom tolerance via opts.tolerancePx (default `TOUCH_GAP_TOLERANCE_PX=12`); handles partial-corrupt ranges via valid-index pair walk so gap math survives ghost entries. MidiPanel.onGroupTouchMove routes the discriminator to setGapOverGroupIdx vs setDragOverGroupIdx; touchend reads both — gap wins via dropIndexForGap, else falls through to R26.20 row-mode drop path.
 - Debug HUD ETA-to-budget-edge readout (R38.A, graduates R37.A). The ms-view trend pill says headroom is "loading" (falling) but not how urgent; R38.A extrapolates the headroom slope to a concrete "~Ns until you cross the 16.7ms budget" warning, shown ONLY while genuinely falling AND still above the edge (a recovering / flat / already-over scene yields no ETA). Slope is a least-squares fit over the live 2s window so one noisy frame doesn't whipsaw the estimate; sampleMs (250 = HUD cadence) converts the per-sample slope to real seconds; minSlope dead-band guards against noise; "To edge" row turns red at <=3s. Pure lib/fpsGraph.js: headroomEtaToEdge -> { approaching, etaSec, slopePerSec, currentHeadroom } + ETA_MAX_SEC cap + linregSlope. +39 asserts (linear-fall ETA, cadence scaling, rising/flat/over-budget all yield none, dead-band, junk filtering, cap + non-negative invariant, purity).
@@ -834,6 +839,11 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R41.O Debug HUD compact/expanded toggle (carried R38.O→R40.O)
 
 ### Batch 42 — fresh frontend queue (graduations of Batch 41 + carried)
+- [x] **R42.M** Framing guide custom aspect-ratio chip — c6d3ba6
+- [x] **R42.N** Minimap "frame all saved views" — 30dbe8d
+- [x] **R42.H** Saved views multi-select bulk-DELETE (graduates R41.H subset) — 1f20325
+- [x] **R42.E** Zen "Now Playing" overlay (auto-fading preset card) — 370896d
+- [x] **R42.G** Screenshot watermark / preset-name caption — 13797d6
 - [ ] R42.A Debug HUD ETA pin (R41.A): a "copy pinned ETA" button on the
   pinned readout (parallels R41.D's perf-pill copy) so a tuner can paste
   the exact "~Ns to edge · Ms ago" moment into a perf note in one tap
@@ -845,20 +855,38 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
   the health summary (avg / 1% low / worst / drops / samples as one line)
   so a bug report can carry the whole ~12s window, not just one pinned
   sample
-- [ ] R42.H Saved views multi-select (R41.H): extend the same checkbox
-  panel with a "Delete selected" action (graduates the per-view delete +
-  the duplicate-subset into a shared multi-select bar)
 - [ ] R42.K Calm-gate import preview (R41.K): a per-row "apply just this
   motion" mini-button in the preview so a user can cherry-pick a single
   motion's change without adopting the whole map (graduates merge/replace
   into per-row granularity)
 - [ ] R42.C Self-timer burst review strip (carried R36.C→R41.C)
-- [ ] R42.E Zen "Now Playing" overlay (carried R36.E→R41.E)
-- [ ] R42.G Screenshot watermark / caption (carried R36.G→R41.G)
-- [ ] R42.L Shortcut cheat-sheet overlay (carried R36.L→R41.L)
-- [ ] R42.M Framing guide custom aspect-ratio chip (carried R38.M→R41.M)
-- [ ] R42.N Minimap "frame all saved views" (carried R38.N→R41.N)
+- [ ] R42.L Shortcut cheat-sheet overlay — RETIRED: HelpOverlay already IS
+  a live, remapped (via labelForBinding) cheat-sheet on '?'. Shipping a
+  second one would be filler. Dropped 2026-06-27 (tick 42).
 - [ ] R42.O Debug HUD compact/expanded toggle (carried R38.O→R41.O)
+
+### Batch 43 — fresh frontend queue (graduations of Batch 42 + carried)
+- [ ] R43.M Framing custom ratio (R42.M): a row of "recent custom ratios"
+  chips so a user who flips between 21:9 and 2.76 doesn't re-type each
+  time — remember the last ~5 parsed ratios, click to re-apply.
+- [ ] R43.N Minimap frame-all (R42.N): an animated tween to the fitted
+  camera (ease over ~0.6s via the existing camera-path tween) instead of
+  the instant snap, so the "fit" reads as a graceful pull-back.
+- [ ] R43.H Saved-views multi-select (R42.H): a "select all / clear"
+  header row in the checkbox panel so a user pruning many views doesn't
+  click each one.
+- [ ] R43.E Zen "Now Playing" (R42.E): also show the active THEME name +
+  a second swatch on the card (preset + look), so a recording documents
+  both the motion and the palette.
+- [ ] R43.G Screenshot caption (R42.G): an optional second line with the
+  date or a custom user wordmark beneath the preset name, for a branded
+  share still.
+- [ ] R43.C Self-timer burst review strip (carried R36.C→R42.C)
+- [ ] R43.O Debug HUD compact/expanded toggle (carried R38.O→R42.O)
+- [ ] R43.B Spiral sweep easing preview glyph (carried R42.B)
+- [ ] R43.A Debug HUD copy-pinned-ETA button (carried R42.A)
+- [ ] R43.D Perf-pill copy-all-window-stats button (carried R42.D)
+- [ ] R43.K Calm-gate import per-row apply (carried R42.K)
 
 ### Future queue carried from Batch 24 (still genuine, unshipped)
 - [ ] R25.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view
@@ -868,6 +896,57 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R25.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode)
 
 ## TICK LOG
+- 2026-06-27 16:57 PT — Batch 42 (5/5). Tick 42. Frontend-focus override
+  active. Shipped FIVE genuinely-new user-facing features, deliberately
+  prioritising the LONG-DEFERRED carried items (Zen Now-Playing, framing
+  custom ratio, minimap frame-all, screenshot watermark — each carried +
+  deferred since Batch 36-38) over yet another safe R42 micro-graduation,
+  per the prompt's "great features only, never pad". Each adds a fresh
+  pure tested helper + real UI wiring; spread across 5 different
+  components (FramingGuides, Minimap, CommandPalette, ZenMode, TopBar) so
+  no two overlap.
+  NOTE: the trigger message's "first tick / 31 unpushed commits / branch
+  feature/autoship off LOCAL HEAD / npm install" was STALE boilerplate
+  AGAIN (6th tick running — same false signal Batch 37-41 logged).
+  Reality: repo in sync with origin at cd73c0d (0 ahead / 0 behind),
+  node_modules present, STATE.md bootstrapped through tick 41, ZERO
+  unpushed commits to preserve. Followed the authoritative prompt: worked
+  DIRECTLY ON main (the prompt BANS feature branches — they don't show on
+  the contribution graph), no feature/autoship branch created.
+  Also RETIRED R42.L (shortcut cheat-sheet overlay) as filler: HelpOverlay
+  already IS a live, remapped-key cheat-sheet on '?' — a second one would
+  be padding. Shipped 5 real features instead of 6-with-filler.
+  Commits: c6d3ba6 (R42.M framing custom aspect-ratio — parseAspectRatio
+  A:B/AxB/decimal + clampCustomRatio[0.2,5] + CUSTOM_FRAMING_ID pseudo-id;
+  store framingCustomRatio; LeftSidebar CustomRatioChip), 30dbe8d (R42.N
+  minimap Fit-all — framingForViews centroid+XZradius / fitCameraDistance
+  radius/sin(fov) clamped / frameViewsCameraMove keeps view direction;
+  green FIT button, 2+ views), 1f20325 (R42.H saved-views bulk-DELETE —
+  removeViews Set|Array|iterable ref-equal-on-no-op; red confirm-gated
+  Delete(N) beside Duplicate(N) in the R41.H panel), 370896d (R42.E zen
+  Now-Playing card — formatNowPlaying trim/collapse/ellipsis; zenNowPlaying
+  pref defaults ON; keyed-on-name fade replay + theme swatch; sidebar
+  toggle), 13797d6 (R42.G screenshot watermark — new screenshotWatermark.js
+  buildWatermarkText/watermarkFontSize/watermarkPlacement; TopBar
+  composeWatermarkedDataUrl bakes caption onto a 2D canvas copy; WatermarkBtn
+  toggle + right-click corner picker).
+  Pushed cd73c0d..13797d6 -> origin/main (verified fast-forward, 0 ahead /
+  0 behind after push).
+  Gates: lint EXACTLY at baseline (26 problems / 23 errors / 3 warnings —
+  all pre-existing: DebugHUD performance.now-in-render, ParticleCanvas,
+  Toast, TopBar glow-unused + generateExportHTML escapes, store no-empty +
+  unused-e, LeftSidebar set-state-in-effect, SnapshotGallery, Timeline,
+  vite.config process; the only "errors" on touched files are baseline
+  ones line-shifted by my additions — proved per-file ZERO new). Build:
+  green (~0.8-1.0s). Unit tests: 48 test files ALL pass (was 47, +1 new
+  screenshotWatermark.test.mjs); +313 fresh asserts this batch
+  (framingGuides +138 R42.M, minimap +60 R42.N, cameraViews +30 R42.H,
+  zenMode +21 R42.E, screenshotWatermark +64 new R42.G).
+  Disk: Projects volume healthy (7.3Gi free, 51%) — no repeat of the
+  tick-41 full-temp incident; wrote commit messages to .git/CAKE_MSG.txt.
+  Frontend-focus override honoured — all 5 slices are FRONTEND/UX (framing
+  composition tool, camera framing aid, view-management lifecycle,
+  recording overlay, shareable-still export).
 - 2026-06-27 11:36 PT — Batch 41 (5/5). Tick 41. Frontend-focus override
   active. Shipped the five pre-planned Batch-41 graduations — all
   genuinely-new user-facing capability (NOT cosmetic filler); each adds a
