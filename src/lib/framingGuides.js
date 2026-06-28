@@ -26,13 +26,32 @@ export const FRAMING_RATIOS = [
 
 const RATIO_BY_ID = new Map(FRAMING_RATIOS.map(r => [r.id, r]))
 
+// R42.M — the pseudo-id for a user-entered custom aspect ratio. Selecting
+// it tells the overlay to read the ratio from the store's
+// `framingCustomRatio` value (set via parseAspectRatio) instead of the
+// FRAMING_RATIOS table. Kept out of FRAMING_RATIOS so the preset chips +
+// the [ ] cycle keep working on the fixed set; the custom chip is its own
+// thing in the sidebar.
+export const CUSTOM_FRAMING_ID = 'custom'
+
+// Sane bounds for a custom ratio so a fat-fingered "100:1" can't paint a
+// 1px slit (or an off-screen frame). 0.2 ~ a tall 1:5 column; 5 ~ a wide
+// 5:1 panorama — wider than cinemascope's 2.39 but still a usable frame.
+export const CUSTOM_RATIO_MIN = 0.2
+export const CUSTOM_RATIO_MAX = 5
+
 export function isValidFramingId(id) {
   return RATIO_BY_ID.has(id)
 }
 
-// Normalize a stored / incoming id to a known one; junk → 'off'.
+// Normalize a stored / incoming id to a known one; junk → 'off'. The
+// pseudo-id 'custom' (R42.M) isn't in FRAMING_RATIOS — its ratio lives
+// in a separate store value — but it's a VALID selection, so it passes
+// through here (and round-trips on reload) rather than resetting to off.
 export function sanitizeFramingId(id) {
-  return RATIO_BY_ID.has(id) ? id : 'off'
+  if (RATIO_BY_ID.has(id)) return id
+  if (id === CUSTOM_FRAMING_ID) return CUSTOM_FRAMING_ID
+  return 'off'
 }
 
 export function ratioForId(id) {
@@ -52,6 +71,60 @@ export function nextFramingId(id) {
   const idx = FRAMING_RATIOS.findIndex(r => r.id === id)
   if (idx < 0) return FRAMING_RATIOS[0].id
   return FRAMING_RATIOS[(idx + 1) % FRAMING_RATIOS.length].id
+}
+
+// --- R42.M: custom aspect-ratio input -------------------------------
+//
+// The fixed FRAMING_RATIOS chips cover the common crops, but a user
+// shooting for a specific target (a 21:9 ultrawide wallpaper, a 5:7
+// print, a bespoke 2.76:1 Ultra Panavision still) had no way to get an
+// exact frame. This parses a freeform aspect-ratio string into a numeric
+// width/height ratio the overlay can mask to.
+//
+// Accepted forms (whitespace-tolerant):
+//   "21:9"  "16x9"  "16/9"   → ratio = 21/9 etc. (separator : x / all ok)
+//   "2.39"  "1.85"           → a bare decimal IS the ratio directly
+//   "4 : 5"                  → spaces around the separator fine
+// Junk / zero / negative / non-finite → null (caller keeps the prior
+// frame / shows an error hint). The parsed ratio is CLAMPED to
+// [CUSTOM_RATIO_MIN, CUSTOM_RATIO_MAX] so an absurd entry still yields a
+// usable on-screen frame rather than a sliver or an off-canvas crop.
+export function parseAspectRatio(raw) {
+  if (typeof raw !== 'string' && typeof raw !== 'number') return null
+  const s = String(raw).trim()
+  if (!s) return null
+  // A:B / AxB / A/B form — split on the first separator.
+  const m = s.match(/^(-?\d*\.?\d+)\s*[:x/]\s*(-?\d*\.?\d+)$/i)
+  if (m) {
+    const w = Number(m[1])
+    const h = Number(m[2])
+    if (!Number.isFinite(w) || !Number.isFinite(h) || h === 0) return null
+    const r = w / h
+    if (!Number.isFinite(r) || r <= 0) return null
+    return clampCustomRatio(r)
+  }
+  // Bare decimal — the ratio itself (e.g. "2.39").
+  const bare = Number(s)
+  if (Number.isFinite(bare) && bare > 0) return clampCustomRatio(bare)
+  return null
+}
+
+// Clamp a numeric ratio into the usable on-screen band. Non-finite /
+// non-positive → null (nothing to clamp). Pure.
+export function clampCustomRatio(ratio) {
+  const r = Number(ratio)
+  if (!Number.isFinite(r) || r <= 0) return null
+  if (r < CUSTOM_RATIO_MIN) return CUSTOM_RATIO_MIN
+  if (r > CUSTOM_RATIO_MAX) return CUSTOM_RATIO_MAX
+  return r
+}
+
+// A short label for a custom ratio, e.g. 1.778 → "1.78". null / invalid
+// → '' so the chip can fall back to its placeholder. Pure.
+export function formatCustomRatioLabel(ratio) {
+  const r = Number(ratio)
+  if (!Number.isFinite(r) || r <= 0) return ''
+  return String(Math.round(r * 100) / 100)
 }
 
 // Given the viewport size + a target ratio, compute the bar geometry.

@@ -12,6 +12,9 @@ import {
   SPIRAL_SWEEP_EASINGS, SPIRAL_SWEEP_EASING_DEFAULT,
   isValidSpiralSweepEasing, sanitizeSpiralSweepEasing,
   nextSpiralSweepEasing, spiralSweepEasingCss,
+  // R42.M — custom aspect-ratio input
+  CUSTOM_FRAMING_ID, CUSTOM_RATIO_MIN, CUSTOM_RATIO_MAX,
+  parseAspectRatio, clampCustomRatio, formatCustomRatioLabel,
 } from './framingGuides.js'
 
 let passed = 0
@@ -643,4 +646,91 @@ console.log(`PASS: framingGuides R39.B — ${passed} total assertions (incl. on-
   }
 }
 
-console.log(`PASS: framingGuides R41.B — ${passed} total assertions (incl. spiral sweep easing control)`)
+// --- R42.M: custom aspect-ratio input --------------------------------
+{
+  // custom pseudo-id round-trips through sanitize (it's a valid selection
+  // even though it's not in FRAMING_RATIOS).
+  eq(sanitizeFramingId(CUSTOM_FRAMING_ID), 'custom', 'custom id sanitizes to itself')
+  eq(CUSTOM_FRAMING_ID, 'custom', 'custom id is "custom"')
+  // ...but custom is NOT in the fixed roster, so the [ ] cycle skips it
+  // and isValidFramingId (roster membership) reports false.
+  eq(isValidFramingId('custom'), false, 'custom not a roster member')
+  ok(!FRAMING_RATIOS.some(r => r.id === 'custom'), 'custom kept out of FRAMING_RATIOS')
+  // nextFramingId never lands on custom (cycle is roster-only).
+  {
+    let id = FRAMING_RATIOS[0].id
+    let sawCustom = false
+    for (let i = 0; i < FRAMING_RATIOS.length + 2; i++) {
+      id = nextFramingId(id)
+      if (id === 'custom') sawCustom = true
+    }
+    ok(!sawCustom, 'cycle never yields custom')
+  }
+
+  // --- parseAspectRatio: A:B / AxB / A/B forms ---
+  near(parseAspectRatio('16:9'), 16 / 9, 'parse 16:9')
+  near(parseAspectRatio('21:9'), 21 / 9, 'parse 21:9')
+  near(parseAspectRatio('4:5'), 4 / 5, 'parse 4:5')
+  near(parseAspectRatio('16x9'), 16 / 9, 'parse 16x9 (x separator)')
+  near(parseAspectRatio('16X9'), 16 / 9, 'parse 16X9 (uppercase X)')
+  near(parseAspectRatio('16/9'), 16 / 9, 'parse 16/9 (slash separator)')
+  near(parseAspectRatio('4 : 5'), 4 / 5, 'parse with spaces around separator')
+  near(parseAspectRatio('  3:2  '), 3 / 2, 'parse trims outer whitespace')
+  near(parseAspectRatio('1.85:1'), 1.85, 'parse decimal-in-ratio 1.85:1')
+  // --- bare decimal form ---
+  near(parseAspectRatio('2.39'), 2.39, 'parse bare decimal 2.39')
+  near(parseAspectRatio('1'), 1, 'parse bare 1 (square)')
+  near(parseAspectRatio(1.5), 1.5, 'parse bare number input')
+  // --- junk / degenerate → null ---
+  eq(parseAspectRatio(''), null, 'empty → null')
+  eq(parseAspectRatio('   '), null, 'whitespace-only → null')
+  eq(parseAspectRatio('abc'), null, 'letters → null')
+  eq(parseAspectRatio('16:'), null, 'missing denominator → null')
+  eq(parseAspectRatio(':9'), null, 'missing numerator → null')
+  eq(parseAspectRatio('16:0'), null, 'divide-by-zero → null')
+  eq(parseAspectRatio('0'), null, 'bare zero → null')
+  eq(parseAspectRatio('-2'), null, 'bare negative → null')
+  eq(parseAspectRatio('0:9'), null, 'zero numerator → null')
+  eq(parseAspectRatio(null), null, 'null input → null')
+  eq(parseAspectRatio(undefined), null, 'undefined input → null')
+  eq(parseAspectRatio({}), null, 'object input → null')
+  eq(parseAspectRatio('16:9:4'), null, 'triple-part → null')
+  eq(parseAspectRatio(NaN), null, 'NaN → null')
+  eq(parseAspectRatio(Infinity), null, 'Infinity → null')
+
+  // --- clamping to the usable band ---
+  ok(CUSTOM_RATIO_MIN > 0 && CUSTOM_RATIO_MAX > CUSTOM_RATIO_MIN, 'custom band sane')
+  eq(parseAspectRatio('100:1'), CUSTOM_RATIO_MAX, 'absurdly wide clamps to MAX')
+  eq(parseAspectRatio('1:100'), CUSTOM_RATIO_MIN, 'absurdly tall clamps to MIN')
+  eq(clampCustomRatio(9), CUSTOM_RATIO_MAX, 'clampCustomRatio over → MAX')
+  eq(clampCustomRatio(0.01), CUSTOM_RATIO_MIN, 'clampCustomRatio under → MIN')
+  near(clampCustomRatio(2.39), 2.39, 'clampCustomRatio in-band passthrough')
+  eq(clampCustomRatio(0), null, 'clampCustomRatio 0 → null')
+  eq(clampCustomRatio(-1), null, 'clampCustomRatio negative → null')
+  eq(clampCustomRatio(NaN), null, 'clampCustomRatio NaN → null')
+  eq(clampCustomRatio('x'), null, 'clampCustomRatio junk → null')
+  // a parsed ratio always lands inside the band.
+  for (const inp of ['16:9', '2.39', '4:5', '32:9', '1:4', '0.5']) {
+    const r = parseAspectRatio(inp)
+    ok(r >= CUSTOM_RATIO_MIN && r <= CUSTOM_RATIO_MAX, `parsed ${inp} in band`)
+  }
+
+  // --- formatCustomRatioLabel ---
+  eq(formatCustomRatioLabel(1.7777), '1.78', 'format rounds to 2dp')
+  eq(formatCustomRatioLabel(2.39), '2.39', 'format keeps 2.39')
+  eq(formatCustomRatioLabel(1), '1', 'format whole number')
+  eq(formatCustomRatioLabel(null), '', 'format null → empty')
+  eq(formatCustomRatioLabel(0), '', 'format 0 → empty')
+  eq(formatCustomRatioLabel(-2), '', 'format negative → empty')
+  eq(formatCustomRatioLabel(NaN), '', 'format NaN → empty')
+
+  // --- the parsed custom ratio feeds computeFramingBars cleanly ---
+  {
+    const r = parseAspectRatio('1:1')
+    const bars = computeFramingBars(200, 100, r) // wide viewport, square frame
+    eq(bars.mode, 'pillarbox', 'custom 1:1 on wide viewport → pillarbox')
+    near(bars.frameW, 100, 'custom 1:1 frame width matches height')
+  }
+}
+
+console.log(`PASS: framingGuides R42.M — ${passed} total assertions (incl. custom aspect-ratio input)`)

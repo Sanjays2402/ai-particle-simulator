@@ -33,7 +33,7 @@ import {
   summarizeImportImpact as summarizeCrossfadeOverridesImpact,
 } from '../lib/crossfadeOverridesIO'
 import { ATTRACTOR_TYPES, MAX_ATTRACTORS, attractorTypeStyle, parsePositionInput, dropIndexForGap, stepKeyboardGapCursor, describeGapReorderAnnouncement } from '../lib/namedAttractors'
-import { FRAMING_RATIOS, FRAMING_GRIDS, SPIRAL_ORIENTATIONS, SPIRAL_SWEEP_SPEEDS, SPIRAL_SWEEP_EASINGS } from '../lib/framingGuides'
+import { FRAMING_RATIOS, FRAMING_GRIDS, SPIRAL_ORIENTATIONS, SPIRAL_SWEEP_SPEEDS, SPIRAL_SWEEP_EASINGS, CUSTOM_FRAMING_ID, formatCustomRatioLabel } from '../lib/framingGuides'
 import { showToast } from './Toast'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
@@ -76,6 +76,7 @@ export default function LeftSidebar() {
     presetSearch, setPresetSearch,
     showFavoritesOnly, setShowFavoritesOnly,
     framingGuideId, setFramingGuideId,
+    framingCustomRatio, setFramingCustomRatio,
     framingGridId, setFramingGridId,
     spiralOrientation, cycleSpiralOrientation, replaySpiralSweep,
     spiralSweepSpeed, setSpiralSweepSpeed,
@@ -272,6 +273,15 @@ export default function LeftSidebar() {
             })}
           </div>
 
+          {/* R42.M — custom aspect-ratio: type any crop (21:9, 2.39, 16x9)
+              beyond the fixed preset chips. Selecting flips the active
+              frame to 'custom'; the parsed ratio persists. */}
+          <CustomRatioChip
+            active={framingGuideId === CUSTOM_FRAMING_ID}
+            ratio={framingCustomRatio}
+            onSubmit={setFramingCustomRatio}
+            onSelect={() => setFramingGuideId(CUSTOM_FRAMING_ID)}
+          />
           {/* R35.B — composition grid drawn inside the active frame.
               Rule-of-thirds (with power-point dots) or a centre cross for
               symmetric framing; works even with no ratio (full viewport).
@@ -828,6 +838,99 @@ function ToggleRow({ label, value, onChange }) {
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
       <span style={{ fontSize: 12, color: '#7a7a90' }}>{label}</span>
       <Toggle value={value} onChange={onChange} />
+    </div>
+  )
+}
+
+// R42.M — custom aspect-ratio chip + inline input. Lives below the fixed
+// FRAMING_RATIOS chips. A chip shows the active custom ratio (or "Custom")
+// and, when active, an input row appears so the user can type any crop
+// ("21:9", "2.39", "16x9"). Submitting parses + clamps via the store
+// (which flips the active frame to 'custom'); an unparseable entry flags
+// the input red without changing the frame. The chip stays visually in
+// sync with the live store value so a reload or a [ ]-cycle away + back
+// reflects correctly.
+function CustomRatioChip({ active, ratio, onSubmit, onSelect }) {
+  const [draft, setDraft] = useState('')
+  const [error, setError] = useState(false)
+  const liveLabel = formatCustomRatioLabel(ratio)
+
+  const commit = () => {
+    const raw = draft.trim()
+    if (!raw) { setError(false); return }
+    const result = onSubmit(raw)
+    if (result == null) {
+      setError(true)
+    } else {
+      setError(false)
+      setDraft('')
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 6 }}>
+      <button
+        onClick={onSelect}
+        title="Custom aspect ratio — type any crop like 21:9, 2.39, or 16x9"
+        style={{
+          width: '100%', padding: '6px 0', borderRadius: 7, fontSize: 11, fontWeight: 550,
+          cursor: 'pointer', transition: 'all 0.15s ease-out',
+          fontFamily: 'Geist Mono, monospace',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          background: active
+            ? 'linear-gradient(135deg, rgba(168,85,247,0.22) 0%, rgba(236,72,153,0.18) 100%)'
+            : 'rgba(255,255,255,0.03)',
+          color: active ? '#f3e8ff' : '#8a8aa0',
+          border: active ? '1px solid rgba(168,85,247,0.45)' : '1px solid rgba(255,255,255,0.05)',
+          boxShadow: active ? '0 0 12px rgba(168,85,247,0.22)' : 'none',
+        }}
+      >
+        <span>Custom</span>
+        {liveLabel && (
+          <span style={{
+            fontSize: 9.5, fontWeight: 700,
+            padding: '1px 5px', borderRadius: 4,
+            background: 'rgba(0,0,0,0.28)', color: active ? '#f9a8d4' : '#9a9ab0',
+          }}>{liveLabel}</span>
+        )}
+      </button>
+      {active && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+          <input
+            value={draft}
+            onChange={e => { setDraft(e.target.value); if (error) setError(false) }}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commit() } }}
+            onBlur={commit}
+            placeholder={liveLabel ? `${liveLabel} (e.g. 21:9)` : 'e.g. 21:9 or 2.39'}
+            inputMode="decimal"
+            style={{
+              flex: 1, minWidth: 0,
+              padding: '6px 9px', borderRadius: 7,
+              fontSize: 11, fontFamily: 'Geist Mono, monospace',
+              background: 'rgba(0,0,0,0.32)',
+              color: '#e8e8f0',
+              border: error ? '1px solid rgba(248,113,113,0.6)' : '1px solid rgba(255,255,255,0.08)',
+              outline: 'none', transition: 'border-color 0.15s ease-out',
+            }}
+          />
+          <button
+            onClick={commit}
+            title="Apply this aspect ratio"
+            style={{
+              padding: '0 12px', borderRadius: 7, fontSize: 11, fontWeight: 600,
+              cursor: 'pointer', flexShrink: 0,
+              fontFamily: 'Geist Mono, monospace',
+              background: 'rgba(168,85,247,0.16)', color: '#e9d5ff',
+              border: '1px solid rgba(168,85,247,0.34)',
+            }}
+          >Set</button>
+        </div>
+      )}
+      {error && (
+        <div style={{ fontSize: 9.5, color: '#fca5a5', marginTop: 4, fontFamily: 'Geist Mono, monospace' }}>
+          Couldn&apos;t read that — try 21:9, 2.39, or 16x9
+        </div>
+      )}
     </div>
   )
 }

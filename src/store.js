@@ -47,6 +47,9 @@ import {
   nextSpiralSweepSpeed,
   sanitizeSpiralSweepEasing,
   nextSpiralSweepEasing,
+  // R42.M — custom aspect-ratio parser + clamp.
+  parseAspectRatio,
+  clampCustomRatio,
 } from './lib/framingGuides'
 // R38.K — per-motion calm gate sanitiser + toggle.
 import { sanitizeCalmGates, toggleCalmGate } from './lib/calmMode'
@@ -78,6 +81,8 @@ const FRAMING_GRID_KEY = 'particle-framing-grid-v1'
 const SPIRAL_ORIENT_KEY = 'particle-spiral-orientation-v1'
 const SPIRAL_SWEEP_SPEED_KEY = 'particle-spiral-sweep-speed-v1'
 const SPIRAL_SWEEP_EASING_KEY = 'particle-spiral-sweep-easing-v1'
+// R42.M — custom framing aspect ratio (numeric width/height), own key.
+const FRAMING_CUSTOM_RATIO_KEY = 'particle-framing-custom-ratio-v1'
 // R34.C — screenshot self-timer delay (seconds), own key.
 const SCREENSHOT_TIMER_KEY = 'particle-screenshot-timer-v1'
 // R35.C — screenshot burst count (frames per capture), own key.
@@ -528,6 +533,31 @@ export const useStore = create((set, get) => {
     const next = nextFramingGuideId(get().framingGuideId)
     try { localStorage.setItem(FRAMING_GUIDE_KEY, next) } catch { /* */ }
     set({ framingGuideId: next })
+  },
+
+  // R42.M — the numeric aspect ratio (width/height) used when the framing
+  // guide id is 'custom'. Lets a user dial in any exact crop (21:9, 5:7,
+  // 2.76 ...) beyond the fixed preset chips. Stored as a clamped number;
+  // null = none entered yet (the custom chip then shows nothing to frame).
+  // Persisted on its own key so a dialled-in crop survives reload.
+  framingCustomRatio: (() => {
+    try {
+      const raw = localStorage.getItem(FRAMING_CUSTOM_RATIO_KEY)
+      return raw != null ? clampCustomRatio(Number(raw)) : null
+    } catch { return null }
+  })(),
+  // Accepts a freeform string ("21:9", "2.39", "16x9") OR a number; parses
+  // + clamps to the usable band. Returns the resolved numeric ratio (or
+  // null when unparseable) so the caller can flag a bad entry. Also flips
+  // the active framing id to 'custom' on a successful parse so the frame
+  // applies immediately.
+  setFramingCustomRatio: (raw) => {
+    const ratio = typeof raw === 'number' ? clampCustomRatio(raw) : parseAspectRatio(raw)
+    if (ratio == null) return null
+    try { localStorage.setItem(FRAMING_CUSTOM_RATIO_KEY, String(ratio)) } catch { /* quota / private mode */ }
+    try { localStorage.setItem(FRAMING_GUIDE_KEY, 'custom') } catch { /* */ }
+    set({ framingCustomRatio: ratio, framingGuideId: 'custom' })
+    return ratio
   },
 
   // R35.B — Composition grid drawn INSIDE the active framing guide:

@@ -3,7 +3,7 @@ import { useStore } from '../store'
 import {
   ratioForId, computeFramingBars, describeFraming, labelForId,
   computeCompositionGrid, polylineLength, spiralSweepKey, spiralSweepTimings,
-  spiralSweepEasingCss,
+  spiralSweepEasingCss, CUSTOM_FRAMING_ID, formatCustomRatioLabel,
 } from '../lib/framingGuides'
 import { useReducedMotion } from '../lib/useReducedMotion'
 
@@ -18,6 +18,7 @@ import { useReducedMotion } from '../lib/useReducedMotion'
 // tab through frames without reaching for a menu.
 export default function FramingGuides() {
   const framingGuideId = useStore(s => s.framingGuideId)
+  const framingCustomRatio = useStore(s => s.framingCustomRatio)
   const cycleFramingGuide = useStore(s => s.cycleFramingGuide)
   const setFramingGuideId = useStore(s => s.setFramingGuideId)
   const framingGridId = useStore(s => s.framingGridId)
@@ -75,7 +76,12 @@ export default function FramingGuides() {
   // setState-in-effect cascade). Reduced-motion users get the full curve
   // at once — see spiralLen below, which is 0 under RM so no anim runs.
 
-  const ratio = ratioForId(framingGuideId)
+  // R42.M — a 'custom' id reads its ratio from the store value (a parsed
+  // user entry), not the fixed roster. null when nothing's been entered
+  // yet so the custom chip simply draws no bars until the user types one.
+  const ratio = framingGuideId === CUSTOM_FRAMING_ID
+    ? (framingCustomRatio || null)
+    : ratioForId(framingGuideId)
   // The grid can draw even with no ratio active (full-viewport frame) so
   // a user gets rule-of-thirds without committing to a crop.
   const gridActive = framingGridId && framingGridId !== 'off'
@@ -120,7 +126,14 @@ export default function FramingGuides() {
   // existing user sees no change until they pick another easing.
   const sweepEasingCss = spiralSweepEasingCss(spiralSweepEasing)
 
-  const label = describeFraming(framingGuideId, vp.w, vp.h)
+  // R42.M — the badge label. For a custom ratio describeFraming (roster-
+  // based) returns '', so we build a "<ratio> · WxH" label from the live
+  // bars instead so the custom frame still self-documents its dims.
+  const label = framingGuideId === CUSTOM_FRAMING_ID
+    ? (showBars
+        ? `${formatCustomRatioLabel(ratio)} \u00b7 ${Math.round(bars.frameW)}x${Math.round(bars.frameH)}`
+        : formatCustomRatioLabel(ratio))
+    : describeFraming(framingGuideId, vp.w, vp.h)
   const barStyle = {
     position: 'fixed',
     background: 'rgba(0,0,0,0.82)',
