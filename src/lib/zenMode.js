@@ -168,3 +168,38 @@ export function formatNowPlaying(name, opts = {}) {
   if (maxLen <= 1) return '\u2026'
   return cleaned.slice(0, maxLen - 1).trimEnd() + '\u2026'
 }
+
+// --- R43.E: zen "Now Playing" theme line -----------------------------
+//
+// R42.E's card shows the live PRESET name + an accent swatch. A recording
+// then documents the motion but not the LOOK — two recordings of the same
+// preset under different themes are indistinguishable. This adds the
+// active THEME name as a second line on the card (paired with a second
+// swatch on the React side), so a recording self-documents both the
+// motion and the palette.
+//
+// Theme ids are lowercase tokens ('vaporwave', 'neon'); this presents
+// them as a clean Title-Case label for the card. Pure + DOM-free.
+
+// Max characters of the theme label shown on the card before ellipsis —
+// theme ids are short, so a tight bound keeps the second line compact.
+export const THEME_LABEL_MAX_LEN = 18
+
+// Format a theme id into a display label for the card. Pure.
+//   - non-string / empty / whitespace-only → the fallback ('Default')
+//   - trims + collapses internal whitespace
+//   - Title-Cases each word ('vaporwave' → 'Vaporwave', 'deep sea' →
+//     'Deep Sea') so the label reads as a name, not a code token
+//   - ellipsis-truncates to THEME_LABEL_MAX_LEN (ellipsis in the budget)
+export function formatThemeName(theme, opts = {}) {
+  const fallback = typeof opts.fallback === 'string' ? opts.fallback : 'Default'
+  const maxLenRaw = Number(opts.maxLen)
+  const maxLen = Number.isFinite(maxLenRaw) && maxLenRaw > 0 ? Math.floor(maxLenRaw) : THEME_LABEL_MAX_LEN
+  if (typeof theme !== 'string') return fallback
+  const cleaned = theme.trim().replace(/\s+/g, ' ')
+  if (!cleaned) return fallback
+  const titled = cleaned.replace(/\b\w/g, c => c.toUpperCase())
+  if (titled.length <= maxLen) return titled
+  if (maxLen <= 1) return '\u2026'
+  return titled.slice(0, maxLen - 1).trimEnd() + '\u2026'
+}

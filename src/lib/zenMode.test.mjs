@@ -4,6 +4,8 @@ import {
   shouldHideCursor, cursorVisibleRemaining, classifyZenKey, nextZenState,
   // R42.E — zen "Now Playing" overlay label formatting
   NOW_PLAYING_MAX_LEN, formatNowPlaying,
+  // R43.E — zen "Now Playing" theme line
+  THEME_LABEL_MAX_LEN, formatThemeName,
 } from './zenMode.js'
 
 let passed = 0
@@ -216,4 +218,40 @@ eq(zenOrbitSpeed(true, false, 0, 999999), 0, 'preference off → 0 speed')
   }
 }
 
-console.log(`PASS: zenMode — ${passed} assertions (cursor idle decision, key reducer, integration, R35.E auto-orbit ramp, R42.E now-playing label)`)
+// --- R43.E: formatThemeName -------------------------------------------
+{
+  // Title-cases a lowercase theme id.
+  eq(formatThemeName('vaporwave'), 'Vaporwave', 'single-word theme title-cased')
+  eq(formatThemeName('neon'), 'Neon', 'neon → Neon')
+  eq(formatThemeName('deep sea'), 'Deep Sea', 'multi-word theme title-cased')
+  // trims + collapses whitespace.
+  eq(formatThemeName('  arctic  '), 'Arctic', 'trims surrounding whitespace')
+  eq(formatThemeName('deep   sea'), 'Deep Sea', 'collapses internal whitespace')
+  // non-string / empty → fallback.
+  eq(formatThemeName(''), 'Default', 'empty → Default')
+  eq(formatThemeName('   '), 'Default', 'whitespace-only → Default')
+  eq(formatThemeName(null), 'Default', 'null → Default')
+  eq(formatThemeName(42), 'Default', 'number → Default')
+  // custom fallback honoured.
+  eq(formatThemeName('', { fallback: 'Theme' }), 'Theme', 'custom fallback used')
+  // truncation bounded to maxLen with ellipsis.
+  {
+    const out = formatThemeName('x'.repeat(40))
+    ok(out.length <= THEME_LABEL_MAX_LEN, `theme label within maxLen — got ${out.length}`)
+    ok(out.endsWith('\u2026'), 'over-long theme label ellipsized')
+  }
+  // exactly at maxLen → not truncated.
+  {
+    const exact = 'y'.repeat(THEME_LABEL_MAX_LEN)
+    eq(formatThemeName(exact), 'Y' + 'y'.repeat(THEME_LABEL_MAX_LEN - 1), 'exactly maxLen not truncated')
+  }
+  // custom maxLen honoured.
+  {
+    const out = formatThemeName('abcdefghij', { maxLen: 5 })
+    eq(out.length, 5, 'custom maxLen bounds the theme label')
+    ok(out.endsWith('\u2026'), 'custom maxLen ellipsizes')
+  }
+  eq(formatThemeName('abcdef', { maxLen: 1 }), '\u2026', 'maxLen 1 → lone ellipsis')
+}
+
+console.log(`PASS: zenMode — ${passed} assertions (cursor idle decision, key reducer, integration, R35.E auto-orbit ramp, R42.E now-playing label, R43.E theme label)`)

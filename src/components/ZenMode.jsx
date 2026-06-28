@@ -3,7 +3,7 @@ import { useStore, THEMES } from '../store'
 import {
   ZEN_BODY_CLASS, CURSOR_IDLE_MS,
   classifyZenKey, nextZenState, shouldHideCursor, zenOrbitSpeed,
-  formatNowPlaying,
+  formatNowPlaying, formatThemeName,
 } from '../lib/zenMode'
 import { resolveReducedMotion } from '../lib/reducedMotion'
 import { resolveCalmFor } from '../lib/calmMode'
@@ -224,7 +224,7 @@ export default function ZenMode() {
             boxShadow: `0 0 9px ${(THEMES[theme] && THEMES[theme].neon) || '#a855f7'}`,
           }} />
           <span style={{
-            display: 'inline-flex', flexDirection: 'column', gap: 1,
+            display: 'inline-flex', flexDirection: 'column', gap: 2,
             overflow: 'hidden',
           }}>
             <span style={{
@@ -237,6 +237,24 @@ export default function ZenMode() {
               letterSpacing: '0.01em',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             }}>{formatNowPlaying(infoTitle)}</span>
+            {/* R43.E — theme (look) line: a tiny second swatch + the active
+                theme name beneath the preset (motion), so a recording
+                documents both what's moving and how it's coloured. */}
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              marginTop: 1, overflow: 'hidden',
+            }}>
+              <span style={{
+                width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                background: (THEMES[theme] && THEMES[theme].neon) || '#a855f7',
+                boxShadow: `0 0 5px ${(THEMES[theme] && THEMES[theme].neon) || '#a855f7'}`,
+              }} />
+              <span style={{
+                fontSize: 10.5, fontWeight: 500, color: '#9a9ab0', lineHeight: 1.2,
+                letterSpacing: '0.01em',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>{formatThemeName(theme)}</span>
+            </span>
           </span>
         </div>
       )}
