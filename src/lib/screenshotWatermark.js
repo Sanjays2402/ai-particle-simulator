@@ -279,3 +279,78 @@ export function watermarkPlacementMulti(canvasW, canvasH, anchor, lines, opts = 
   }
   return { pillX, pillY, pillW, pillH, pillRadius, lines: outLines }
 }
+
+// --- R44.G: live caption preview --------------------------------------
+//
+// R42.G/R43.G bake the caption (corner + optional second line) into the
+// export, but the user only SEES the result after exporting. R44.G adds a
+// live preview inside the watermark popover so they see the branded pill —
+// corner placement + both lines + relative line sizes — before exporting.
+//
+// The preview renders into a small box (e.g. 150x90), not the real canvas,
+// so we need a width estimate WITHOUT a 2D context. estimateTextWidth uses
+// an average-glyph-width heuristic (good enough for an indicative preview;
+// the real export still measures precisely with ctx.measureText). The
+// preview geometry then reuses the tested watermarkPlacementMulti so the
+// pill sits in the same corner with the same stacking the export uses.
+
+// Average glyph width as a fraction of the font size for the preview
+// estimate. ~0.55 is a reasonable mean for a humanist sans at small sizes.
+export const PREVIEW_CHAR_WIDTH_FACTOR = 0.55
+// Preview line font sizes (px) inside the small popover box — fixed +
+// small so a long caption still fits; the sub-line is the smaller of the
+// pair to mirror the export's main/sub hierarchy.
+export const PREVIEW_MAIN_FONT = 9
+export const PREVIEW_SUB_FONT = 7
+
+// Estimate a text run's pixel width at a given font size, without a canvas.
+// Pure. Non-string / empty → 0; non-finite / non-positive font → 0.
+export function estimateTextWidth(text, fontSize, charWidthFactor = PREVIEW_CHAR_WIDTH_FACTOR) {
+  if (typeof text !== 'string' || text.length === 0) return 0
+  const fs = Number(fontSize)
+  if (!Number.isFinite(fs) || fs <= 0) return 0
+  const f = (Number.isFinite(charWidthFactor) && charWidthFactor > 0) ? charWidthFactor : PREVIEW_CHAR_WIDTH_FACTOR
+  return text.length * fs * f
+}
+
+// Build the live caption preview geometry for a small box. `lines` is an
+// array of the already-built caption strings paired with a preview font
+// size: [{ text, fontSize }] (1 or 2 entries; main first, sub second).
+// Empty-text rows are dropped so a preview with no second line collapses to
+// one. Returns:
+//   { pillX, pillY, pillW, pillH, pillRadius, lines: [{ textX, textY,
+//     fontSize, text, textAlign, textBaseline }] }
+// in PREVIEW-box pixel coordinates (origin top-left), reusing the tested
+// watermarkPlacementMulti so the corner placement + stacking match the
+// export. Defensive: degenerate box / no usable lines → an all-zero result
+// (lines: []) so the renderer draws nothing rather than NaN-positioned
+// chips.
+export function buildWatermarkPreview(boxW, boxH, anchor, lines, opts = {}) {
+  const rows = Array.isArray(lines)
+    ? lines.filter(l => l && typeof l.text === 'string' && l.text.length > 0
+        && Number.isFinite(Number(l.fontSize)) && Number(l.fontSize) > 0)
+    : []
+  const empty = { pillX: 0, pillY: 0, pillW: 0, pillH: 0, pillRadius: 0, lines: [] }
+  if (rows.length === 0) return empty
+  const charWidthFactor = (Number.isFinite(opts.charWidthFactor) && opts.charWidthFactor > 0)
+    ? opts.charWidthFactor : PREVIEW_CHAR_WIDTH_FACTOR
+  // Smaller margins/pad than the export default so the pill fits a tiny box.
+  const placeOpts = {
+    margin: Number.isFinite(opts.margin) ? opts.margin : 8,
+    padX: Number.isFinite(opts.padX) ? opts.padX : 5,
+    padY: Number.isFinite(opts.padY) ? opts.padY : 3,
+    lineGap: Number.isFinite(opts.lineGap) ? opts.lineGap : 2,
+  }
+  const measured = rows.map(r => ({
+    width: estimateTextWidth(r.text, r.fontSize, charWidthFactor),
+    fontSize: Number(r.fontSize),
+  }))
+  const p = watermarkPlacementMulti(boxW, boxH, anchor, measured, placeOpts)
+  if (p.pillW <= 0 || p.lines.length === 0) return empty
+  // Re-attach each row's text to its placed line so the renderer can draw
+  // the actual caption strings in their estimated positions.
+  return {
+    pillX: p.pillX, pillY: p.pillY, pillW: p.pillW, pillH: p.pillH, pillRadius: p.pillRadius,
+    lines: p.lines.map((ln, i) => ({ ...ln, text: rows[i].text })),
+  }
+}

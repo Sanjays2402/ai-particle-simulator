@@ -10,6 +10,9 @@ import {
   WATERMARK_SUBTEXT_MAX_LEN, WATERMARK_SUB_SCALE,
   formatWatermarkDate, buildWatermarkSubtext, watermarkSubFontSize,
   watermarkPlacementMulti,
+  // R44.G — live caption preview
+  PREVIEW_CHAR_WIDTH_FACTOR, PREVIEW_MAIN_FONT, PREVIEW_SUB_FONT,
+  estimateTextWidth, buildWatermarkPreview,
 } from './screenshotWatermark.js'
 
 let passed = 0
@@ -251,3 +254,69 @@ console.log(`PASS: screenshotWatermark — ${passed} assertions (anchor roster +
 }
 
 console.log(`PASS: screenshotWatermark R43.G — ${passed} total assertions (incl. second caption line: date, subtext, sub-font, multi-line geometry)`)
+
+// --- R44.G: live caption preview ---
+{
+  // estimateTextWidth: proportional to length * font * factor.
+  near(estimateTextWidth('abcd', 10, 0.5), 20, 'estimate: 4 chars * 10 * 0.5 = 20')
+  near(estimateTextWidth('ab', 20, 0.5), 20, 'estimate: 2 chars * 20 * 0.5 = 20')
+  eq(estimateTextWidth('', 10), 0, 'estimate: empty text → 0')
+  eq(estimateTextWidth(null, 10), 0, 'estimate: non-string → 0')
+  eq(estimateTextWidth('abc', 0), 0, 'estimate: zero font → 0')
+  eq(estimateTextWidth('abc', -5), 0, 'estimate: negative font → 0')
+  eq(estimateTextWidth('abc', NaN), 0, 'estimate: NaN font → 0')
+  // a longer string estimates wider than a shorter one (monotone in length).
+  ok(estimateTextWidth('abcdef', 10) > estimateTextWidth('abc', 10), 'estimate: longer → wider')
+  // default factor used when an invalid one is passed.
+  near(estimateTextWidth('ab', 10, -1), 2 * 10 * PREVIEW_CHAR_WIDTH_FACTOR, 'estimate: bad factor → default')
+
+  // buildWatermarkPreview: a single line lays out within the box.
+  {
+    const p = buildWatermarkPreview(158, 92, 'bottom-right', [
+      { text: 'Aurora', fontSize: PREVIEW_MAIN_FONT },
+      { text: '', fontSize: PREVIEW_SUB_FONT },
+    ])
+    eq(p.lines.length, 1, 'preview: empty sub-line dropped → one line')
+    eq(p.lines[0].text, 'Aurora', 'preview: main text attached to its line')
+    ok(p.pillW > 0 && p.pillH > 0, 'preview: pill has positive size')
+    // pill sits inside the box.
+    ok(p.pillX >= 0 && p.pillX + p.pillW <= 158, 'preview: pill within box width')
+    ok(p.pillY >= 0 && p.pillY + p.pillH <= 92, 'preview: pill within box height')
+  }
+  // two lines → both placed, sub stacked below main, sub smaller.
+  {
+    const p = buildWatermarkPreview(158, 92, 'bottom-right', [
+      { text: 'Aurora', fontSize: PREVIEW_MAIN_FONT },
+      { text: 'by cake', fontSize: PREVIEW_SUB_FONT },
+    ])
+    eq(p.lines.length, 2, 'preview: two lines placed')
+    eq(p.lines[1].text, 'by cake', 'preview: sub text attached')
+    ok(p.lines[1].textY > p.lines[0].textY, 'preview: sub stacked below main')
+    ok(p.lines[1].fontSize < p.lines[0].fontSize, 'preview: sub font smaller')
+  }
+  // corner placement: a top-left frame puts the pill near the top-left.
+  {
+    const tl = buildWatermarkPreview(158, 92, 'top-left', [{ text: 'X', fontSize: PREVIEW_MAIN_FONT }])
+    const br = buildWatermarkPreview(158, 92, 'bottom-right', [{ text: 'X', fontSize: PREVIEW_MAIN_FONT }])
+    ok(tl.pillX < br.pillX, 'preview: top-left pill is further left than bottom-right')
+    ok(tl.pillY < br.pillY, 'preview: top-left pill is higher than bottom-right')
+  }
+  // defensive: no usable lines / degenerate box → all-zero result.
+  {
+    eq(buildWatermarkPreview(158, 92, 'top-left', []).pillW, 0, 'preview: no lines → zero pill')
+    eq(buildWatermarkPreview(158, 92, 'top-left', [{ text: '', fontSize: 9 }]).lines.length, 0, 'preview: all-empty lines → []')
+    eq(buildWatermarkPreview(0, 0, 'top-left', [{ text: 'X', fontSize: 9 }]).pillW, 0, 'preview: degenerate box → zero pill')
+    eq(buildWatermarkPreview(158, 92, 'top-left', null).lines.length, 0, 'preview: non-array lines → []')
+  }
+  // every placed line carries finite coords + its text.
+  {
+    const p = buildWatermarkPreview(158, 92, 'bottom-left', [
+      { text: 'Hello', fontSize: PREVIEW_MAIN_FONT },
+      { text: 'World', fontSize: PREVIEW_SUB_FONT },
+    ])
+    ok(p.lines.every(l => Number.isFinite(l.textX) && Number.isFinite(l.textY) && typeof l.text === 'string'),
+      'preview: every line has finite coords + text')
+  }
+}
+
+console.log(`PASS: screenshotWatermark R44.G — ${passed} total assertions (incl. live caption preview: width estimate + box layout)`)

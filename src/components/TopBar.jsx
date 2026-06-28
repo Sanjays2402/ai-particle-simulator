@@ -10,9 +10,11 @@ import { formatCalmToast, CALM_GATED_MOTIONS, countGatedMotions } from '../lib/c
 import { downloadCalmGatesFile, parseImport as parseCalmGatesImport, mergeImport as mergeCalmGatesImport, summarizeImportImpact as summarizeCalmGatesImpact, filterPreviewRows as filterCalmGatesPreviewRows } from '../lib/calmGatesIO'
 // R42.G — bake a preset-name caption into the exported screenshot.
 // R43.G — optional second caption line (wordmark + date).
+// R44.G — live caption preview in the watermark popover.
 import {
   buildWatermarkText, watermarkFontSize, WATERMARK_ANCHORS,
   buildWatermarkSubtext, watermarkSubFontSize, watermarkPlacementMulti,
+  buildWatermarkPreview, PREVIEW_MAIN_FONT, PREVIEW_SUB_FONT,
 } from '../lib/screenshotWatermark'
 import { showToast } from './Toast'
 import {
@@ -754,6 +756,10 @@ function WatermarkBtn() {
   const setWordmark = useStore(s => s.setScreenshotWatermarkWordmark)
   const showDate = useStore(s => s.screenshotWatermarkDate)
   const setShowDate = useStore(s => s.setScreenshotWatermarkDate)
+  // R44.G — live preview: the caption strings the export would bake, so the
+  // popover can show the branded pill (corner + both lines) before export.
+  const infoTitle = useStore(s => s.infoTitle)
+  const currentPreset = useStore(s => s.currentPreset)
   const [open, setOpen] = useState(false)
   const pressTimer = useRef(0)
   const longPressed = useRef(false)
@@ -772,6 +778,20 @@ function WatermarkBtn() {
     if (longPressed.current) { longPressed.current = false; return }
     setActive(!active)
   }
+
+  // R44.G — build the live caption preview the same way the export does:
+  // the main line is the preset caption, the optional second line is the
+  // wordmark + date. buildWatermarkPreview lays them out in a small box at
+  // the chosen corner (reusing the export's tested multi-line geometry) so
+  // the popover shows the branded pill before the user exports.
+  const PREVIEW_W = 158
+  const PREVIEW_H = 92
+  const previewMain = buildWatermarkText(infoTitle || currentPreset || 'particles')
+  const previewSub = buildWatermarkSubtext({ wordmark, showDate, date: Date.now() })
+  const preview = buildWatermarkPreview(PREVIEW_W, PREVIEW_H, anchor, [
+    { text: previewMain, fontSize: PREVIEW_MAIN_FONT },
+    { text: previewSub, fontSize: PREVIEW_SUB_FONT },
+  ])
 
   return (
     <div style={{ position: 'relative', display: 'inline-flex' }}>
@@ -831,6 +851,53 @@ function WatermarkBtn() {
             boxShadow: '0 16px 40px rgba(0,0,0,0.55)',
             backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
           }}>
+            {/* R44.G — live preview: a small frame showing where the
+                caption pill lands (corner + both lines + relative sizes)
+                so the branded layout is visible before exporting. The
+                pill + text are positioned by buildWatermarkPreview, which
+                reuses the export's tested multi-line geometry. */}
+            <div style={{
+              fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
+              color: '#8a8aa0', marginBottom: 6, paddingLeft: 2,
+            }}>Preview</div>
+            <div style={{
+              position: 'relative', width: PREVIEW_W, height: PREVIEW_H,
+              borderRadius: 7, marginBottom: 9, overflow: 'hidden',
+              // A faux "scene" so the caption pill reads the way it will
+              // over a real export.
+              background: 'linear-gradient(135deg, rgba(99,102,241,0.22) 0%, rgba(168,85,247,0.16) 45%, rgba(8,8,14,0.9) 100%)',
+              border: '1px solid rgba(255,255,255,0.07)',
+            }}>
+              {/* a couple of faint dots to suggest particles under the pill */}
+              <span style={{ position: 'absolute', left: '28%', top: '34%', width: 3, height: 3, borderRadius: '50%', background: 'rgba(255,255,255,0.4)' }} />
+              <span style={{ position: 'absolute', left: '62%', top: '52%', width: 2, height: 2, borderRadius: '50%', background: 'rgba(255,255,255,0.3)' }} />
+              <span style={{ position: 'absolute', left: '46%', top: '22%', width: 2, height: 2, borderRadius: '50%', background: 'rgba(255,255,255,0.25)' }} />
+              {preview.pillW > 0 && (
+                <>
+                  {/* the caption pill backdrop */}
+                  <div style={{
+                    position: 'absolute',
+                    left: preview.pillX, top: preview.pillY,
+                    width: preview.pillW, height: preview.pillH,
+                    borderRadius: preview.pillRadius,
+                    background: 'rgba(10,10,16,0.62)',
+                  }} />
+                  {/* each caption line, positioned + sized like the export */}
+                  {preview.lines.map((ln, i) => (
+                    <span key={i} style={{
+                      position: 'absolute',
+                      left: ln.textX, top: ln.textY,
+                      transform: 'translateY(-50%)',
+                      fontSize: ln.fontSize, lineHeight: 1,
+                      fontWeight: i === 0 ? 600 : 500,
+                      color: i === 0 ? 'rgba(232,232,240,0.97)' : 'rgba(200,200,212,0.84)',
+                      fontFamily: 'Geist, system-ui, sans-serif',
+                      whiteSpace: 'nowrap',
+                    }}>{ln.text}</span>
+                  ))}
+                </>
+              )}
+            </div>
             <div style={{
               fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
               color: '#8a8aa0', marginBottom: 7, paddingLeft: 2,
