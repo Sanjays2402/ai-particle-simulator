@@ -98,6 +98,10 @@ const SCREENSHOT_BURST_KEY = 'particle-screenshot-burst-v1'
 // R42.G — screenshot watermark/caption toggle + anchor, own keys.
 const SCREENSHOT_WATERMARK_KEY = 'particle-screenshot-watermark-v1'
 const SCREENSHOT_WATERMARK_ANCHOR_KEY = 'particle-screenshot-watermark-anchor-v1'
+// R43.G — optional second caption line: a user wordmark + a show-date
+// toggle, own keys so they round-trip independently of the main toggle.
+const SCREENSHOT_WATERMARK_WORDMARK_KEY = 'particle-screenshot-watermark-wordmark-v1'
+const SCREENSHOT_WATERMARK_DATE_KEY = 'particle-screenshot-watermark-date-v1'
 // R35.E — zen ambient auto-orbit preference, own key.
 const ZEN_AUTO_ORBIT_KEY = 'particle-zen-auto-orbit-v1'
 // R42.E — zen "Now Playing" overlay preference, own key.
@@ -775,6 +779,28 @@ export const useStore = create((set, get) => {
     const next = sanitizeWatermarkAnchor(id)
     try { localStorage.setItem(SCREENSHOT_WATERMARK_ANCHOR_KEY, next) } catch { /* quota / private mode */ }
     set({ screenshotWatermarkAnchor: next })
+  },
+
+  // R43.G — optional SECOND caption line for a branded share still: a
+  // user wordmark / handle and/or the capture date, drawn beneath the
+  // preset name. Both default empty/off so an existing watermark export is
+  // unchanged until a user opts in. The wordmark is capped on write so a
+  // pasted essay can't bloat the stored value.
+  screenshotWatermarkWordmark: (() => {
+    try { return localStorage.getItem(SCREENSHOT_WATERMARK_WORDMARK_KEY) || '' } catch { return '' }
+  })(),
+  setScreenshotWatermarkWordmark: (text) => {
+    const next = (typeof text === 'string' ? text : '').slice(0, 60)
+    try { localStorage.setItem(SCREENSHOT_WATERMARK_WORDMARK_KEY, next) } catch { /* quota / private mode */ }
+    set({ screenshotWatermarkWordmark: next })
+  },
+  screenshotWatermarkDate: (() => {
+    try { return localStorage.getItem(SCREENSHOT_WATERMARK_DATE_KEY) === '1' } catch { return false }
+  })(),
+  setScreenshotWatermarkDate: (v) => {
+    const next = !!v
+    try { localStorage.setItem(SCREENSHOT_WATERMARK_DATE_KEY, next ? '1' : '0') } catch { /* quota / private mode */ }
+    set({ screenshotWatermarkDate: next })
   },
 
 

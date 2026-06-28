@@ -144,3 +144,138 @@ export function watermarkPlacement(canvasW, canvasH, anchor, fontSize, textWidth
     pillX, pillY, pillW, pillH, pillRadius,
   }
 }
+
+// --- R43.G: optional second caption line ------------------------------
+//
+// R42.G bakes the preset name into the export as a single-line caption.
+// For a BRANDED share still a user wants a second line beneath it — a
+// personal wordmark / handle, and/or the capture date. This adds the pure
+// bits: a deterministic date formatter, a subtext builder that composes
+// the wordmark + date, and a multi-line placement geometry that sizes the
+// pill to fit both lines. The single-line path (watermarkPlacement) is
+// untouched, so an export with no second line behaves exactly as before.
+
+// Max characters of the second line before we ellipsis it.
+export const WATERMARK_SUBTEXT_MAX_LEN = 52
+// The sub-line font is a fraction of the main caption font so it reads as
+// secondary; clamped to a legible minimum.
+export const WATERMARK_SUB_SCALE = 0.78
+export const WATERMARK_LINE_GAP = 3
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+// Format a date as a short, locale-independent caption string, e.g.
+// "Jun 27, 2026". Accepts a Date or a millisecond timestamp. Pure +
+// deterministic (we read UTC-agnostic local getters but build the string
+// ourselves so there's no locale/Intl flakiness in tests). Invalid /
+// non-date input → '' (caller skips the date).
+export function formatWatermarkDate(date) {
+  let d
+  if (date instanceof Date) d = date
+  else if (typeof date === 'number' && Number.isFinite(date)) d = new Date(date)
+  else return ''
+  const ms = d.getTime()
+  if (!Number.isFinite(ms)) return ''
+  const mon = MONTHS[d.getMonth()]
+  if (!mon) return ''
+  return `${mon} ${d.getDate()}, ${d.getFullYear()}`
+}
+
+// Build the optional second caption line from a wordmark and/or a date.
+// Pure.
+//   opts: { wordmark, showDate, date, maxLen }
+//   - wordmark: a user string (trimmed + whitespace-collapsed); blank → omitted
+//   - showDate: when true, append the formatted `date` (default now is the
+//     caller's job — pass an explicit date for determinism)
+//   - when BOTH are present they're joined with " · " (wordmark first)
+//   - empty result (neither present / both blank) → '' so the caller
+//     skips drawing a second line
+//   - ellipsis-truncates the WHOLE line to maxLen (ellipsis in budget)
+export function buildWatermarkSubtext(opts = {}) {
+  const maxLenRaw = Number(opts.maxLen)
+  const maxLen = Number.isFinite(maxLenRaw) && maxLenRaw > 0 ? Math.floor(maxLenRaw) : WATERMARK_SUBTEXT_MAX_LEN
+  const parts = []
+  const wordmark = typeof opts.wordmark === 'string' ? opts.wordmark.trim().replace(/\s+/g, ' ') : ''
+  if (wordmark) parts.push(wordmark)
+  if (opts.showDate) {
+    const dateStr = formatWatermarkDate(opts.date)
+    if (dateStr) parts.push(dateStr)
+  }
+  let text = parts.join(' \u00b7 ')
+  if (!text) return ''
+  if (text.length <= maxLen) return text
+  if (maxLen <= 1) return '\u2026'
+  return text.slice(0, maxLen - 1).trimEnd() + '\u2026'
+}
+
+// Sub-line font size derived from the main caption font, clamped so it
+// never shrinks below the readable floor. Pure.
+export function watermarkSubFontSize(mainFontSize, opts = {}) {
+  const fs = Number(mainFontSize)
+  if (!Number.isFinite(fs) || fs <= 0) return WATERMARK_FONT_MIN
+  const scale = (Number.isFinite(opts.scale) && opts.scale > 0) ? opts.scale : WATERMARK_SUB_SCALE
+  const min = (Number.isFinite(opts.min) && opts.min > 0) ? opts.min : WATERMARK_FONT_MIN
+  const sized = Math.round(fs * scale)
+  return sized < min ? min : sized
+}
+
+// Multi-line placement geometry: like watermarkPlacement but for a caption
+// with one OR two lines. `lines` is an array of measured line descriptors
+// [{ width, fontSize }] (1 or 2 entries; the first is the main caption,
+// the second the sub-line). Returns the pill rect + a per-line list of
+// { textX, textY, textAlign, textBaseline } in canvas pixels. The pill is
+// sized to the widest line and the summed line heights; lines are left-
+// aligned and stacked, vertically centred-per-line so font metrics don't
+// matter. Defensive: degenerate canvas / no valid lines → an all-zero
+// result so the renderer draws nothing rather than NaN-positioned text.
+export function watermarkPlacementMulti(canvasW, canvasH, anchor, lines, opts = {}) {
+  const w = Number(canvasW), h = Number(canvasH)
+  const empty = { pillX: 0, pillY: 0, pillW: 0, pillH: 0, pillRadius: 0, lines: [] }
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return empty
+  const rows = Array.isArray(lines)
+    ? lines.filter(l => l && Number.isFinite(Number(l.fontSize)) && Number(l.fontSize) > 0)
+    : []
+  if (rows.length === 0) return empty
+  const a = sanitizeWatermarkAnchor(anchor)
+  // Scale margin/pad gently with the MAIN font (first row), matching the
+  // single-line path so a one-line export lands in the same spot.
+  const mainFs = Number(rows[0].fontSize)
+  const fontScale = mainFs / WATERMARK_FONT_MIN
+  const margin = ((Number.isFinite(opts.margin) && opts.margin >= 0) ? opts.margin : WATERMARK_MARGIN) * Math.min(2, fontScale)
+  const padX = ((Number.isFinite(opts.padX) && opts.padX >= 0) ? opts.padX : WATERMARK_PAD_X) * Math.min(2, fontScale)
+  const padY = ((Number.isFinite(opts.padY) && opts.padY >= 0) ? opts.padY : WATERMARK_PAD_Y) * Math.min(2, fontScale)
+  const lineGap = ((Number.isFinite(opts.lineGap) && opts.lineGap >= 0) ? opts.lineGap : WATERMARK_LINE_GAP) * Math.min(2, fontScale)
+
+  let maxW = 0
+  let sumH = 0
+  for (let i = 0; i < rows.length; i++) {
+    const lw = Number(rows[i].width)
+    if (Number.isFinite(lw) && lw > maxW) maxW = lw
+    sumH += Number(rows[i].fontSize)
+    if (i > 0) sumH += lineGap
+  }
+  const pillW = maxW + padX * 2
+  const pillH = sumH + padY * 2
+  const pillRadius = Math.min(pillH / 2, 10 * Math.min(2, fontScale))
+
+  const isLeft = a === 'top-left' || a === 'bottom-left'
+  const isTop = a === 'top-left' || a === 'top-right'
+  const pillX = isLeft ? margin : (w - margin - pillW)
+  const pillY = isTop ? margin : (h - margin - pillH)
+
+  const textX = pillX + padX
+  const outLines = []
+  let cursorY = pillY + padY
+  for (const r of rows) {
+    const fs = Number(r.fontSize)
+    outLines.push({
+      textX,
+      textY: cursorY + fs / 2,
+      textAlign: 'left',
+      textBaseline: 'middle',
+      fontSize: fs,
+    })
+    cursorY += fs + lineGap
+  }
+  return { pillX, pillY, pillW, pillH, pillRadius, lines: outLines }
+}

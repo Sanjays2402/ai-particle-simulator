@@ -9,7 +9,11 @@ import { TIMER_DELAYS, labelForDelay, BURST_COUNTS, labelForBurst } from '../lib
 import { formatCalmToast, CALM_GATED_MOTIONS, countGatedMotions } from '../lib/calmMode'
 import { downloadCalmGatesFile, parseImport as parseCalmGatesImport, mergeImport as mergeCalmGatesImport, summarizeImportImpact as summarizeCalmGatesImpact, filterPreviewRows as filterCalmGatesPreviewRows } from '../lib/calmGatesIO'
 // R42.G — bake a preset-name caption into the exported screenshot.
-import { buildWatermarkText, watermarkFontSize, watermarkPlacement, WATERMARK_ANCHORS } from '../lib/screenshotWatermark'
+// R43.G — optional second caption line (wordmark + date).
+import {
+  buildWatermarkText, watermarkFontSize, WATERMARK_ANCHORS,
+  buildWatermarkSubtext, watermarkSubFontSize, watermarkPlacementMulti,
+} from '../lib/screenshotWatermark'
 import { showToast } from './Toast'
 import {
   Play, Pause, RotateCcw, Maximize2, Shuffle, Magnet, Camera, Link2,
@@ -27,7 +31,7 @@ import {
 // baked into the SAVED file only — never the live scene. Returns null if
 // the caption is empty or the 2D context can't be had, so the caller
 // falls back to the plain canvas export.
-function composeWatermarkedDataUrl(canvas, label, anchor) {
+function composeWatermarkedDataUrl(canvas, label, anchor, subtext) {
   const text = buildWatermarkText(label)
   if (!text) return null
   const w = canvas.width, h = canvas.height
@@ -40,11 +44,25 @@ function composeWatermarkedDataUrl(canvas, label, anchor) {
   // Draw the live frame first, then the caption on top.
   ctx.drawImage(canvas, 0, 0)
   const fontSize = watermarkFontSize(w, h)
-  ctx.font = `600 ${fontSize}px Geist, system-ui, -apple-system, sans-serif`
+  const mainFontCss = `600 ${fontSize}px Geist, system-ui, -apple-system, sans-serif`
+  // R43.G — measure both lines (main + optional sub) then lay them out
+  // with the multi-line geometry so the pill grows to fit a branded
+  // second line. With no sub-line this collapses to the original single-
+  // line look (same anchor / pill).
+  const sub = (typeof subtext === 'string' && subtext) ? subtext : ''
+  const subFontSize = watermarkSubFontSize(fontSize)
+  const subFontCss = `500 ${subFontSize}px Geist, system-ui, -apple-system, sans-serif`
+  ctx.font = mainFontCss
   ctx.textBaseline = 'middle'
-  const textWidth = ctx.measureText(text).width
-  const p = watermarkPlacement(w, h, anchor, fontSize, textWidth)
-  if (p.pillW <= 0) return out.toDataURL('image/png')
+  const mainWidth = ctx.measureText(text).width
+  const lines = [{ width: mainWidth, fontSize }]
+  if (sub) {
+    ctx.font = subFontCss
+    const subWidth = ctx.measureText(sub).width
+    lines.push({ width: subWidth, fontSize: subFontSize })
+  }
+  const p = watermarkPlacementMulti(w, h, anchor, lines)
+  if (p.pillW <= 0 || p.lines.length === 0) return out.toDataURL('image/png')
   // Rounded-pill backdrop so the caption reads over any scene.
   ctx.fillStyle = 'rgba(10,10,16,0.55)'
   if (typeof ctx.roundRect === 'function') {
@@ -54,11 +72,18 @@ function composeWatermarkedDataUrl(canvas, label, anchor) {
   } else {
     ctx.fillRect(p.pillX, p.pillY, p.pillW, p.pillH)
   }
-  // The caption text.
+  // Main caption line.
+  ctx.textAlign = p.lines[0].textAlign
+  ctx.textBaseline = p.lines[0].textBaseline
+  ctx.font = mainFontCss
   ctx.fillStyle = 'rgba(232,232,240,0.96)'
-  ctx.textAlign = p.textAlign
-  ctx.textBaseline = p.textBaseline
-  ctx.fillText(text, p.textX, p.textY)
+  ctx.fillText(text, p.lines[0].textX, p.lines[0].textY)
+  // R43.G — optional second line (wordmark / date), dimmer + smaller.
+  if (sub && p.lines[1]) {
+    ctx.font = subFontCss
+    ctx.fillStyle = 'rgba(200,200,212,0.82)'
+    ctx.fillText(sub, p.lines[1].textX, p.lines[1].textY)
+  }
   return out.toDataURL('image/png')
 }
 
@@ -68,7 +93,7 @@ function composeWatermarkedDataUrl(canvas, label, anchor) {
 function captureScreenshotNow() {
   const canvas = document.querySelector('#particle-canvas canvas')
   if (!canvas) return
-  const { infoTitle, currentPreset, bumpSessionStat, screenshotWatermark, screenshotWatermarkAnchor } = useStore.getState()
+  const { infoTitle, currentPreset, bumpSessionStat, screenshotWatermark, screenshotWatermarkAnchor, screenshotWatermarkWordmark, screenshotWatermarkDate } = useStore.getState()
   const name = (infoTitle || currentPreset || 'particles').replace(/\s+/g, '-').toLowerCase()
   const ts = Date.now()
   const link = document.createElement('a')
@@ -76,9 +101,16 @@ function captureScreenshotNow() {
   // R42.G — when the watermark is on, export a captioned copy; otherwise
   // the plain canvas. A failed compose (empty caption / no 2D ctx) falls
   // back to the plain export so a screenshot is never lost.
+  // R43.G — compose the optional second line (wordmark + date) so a
+  // branded share still carries both beneath the preset name.
   let href = null
   if (screenshotWatermark) {
-    try { href = composeWatermarkedDataUrl(canvas, infoTitle || currentPreset || 'particles', screenshotWatermarkAnchor) } catch { href = null }
+    const subtext = buildWatermarkSubtext({
+      wordmark: screenshotWatermarkWordmark,
+      showDate: screenshotWatermarkDate,
+      date: ts,
+    })
+    try { href = composeWatermarkedDataUrl(canvas, infoTitle || currentPreset || 'particles', screenshotWatermarkAnchor, subtext) } catch { href = null }
   }
   link.href = href || canvas.toDataURL('image/png')
   link.click()
@@ -717,6 +749,11 @@ function WatermarkBtn() {
   const setActive = useStore(s => s.setScreenshotWatermark)
   const anchor = useStore(s => s.screenshotWatermarkAnchor)
   const setAnchor = useStore(s => s.setScreenshotWatermarkAnchor)
+  // R43.G — optional second caption line (wordmark + date).
+  const wordmark = useStore(s => s.screenshotWatermarkWordmark)
+  const setWordmark = useStore(s => s.setScreenshotWatermarkWordmark)
+  const showDate = useStore(s => s.screenshotWatermarkDate)
+  const setShowDate = useStore(s => s.setScreenshotWatermarkDate)
   const [open, setOpen] = useState(false)
   const pressTimer = useRef(0)
   const longPressed = useRef(false)
@@ -823,6 +860,48 @@ function WatermarkBtn() {
                 )
               })}
             </div>
+            {/* R43.G — optional second caption line: a personal wordmark
+                and/or the capture date, for a branded share still. */}
+            <div style={{
+              fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
+              color: '#8a8aa0', margin: '11px 0 6px', paddingLeft: 2,
+            }}>Second line</div>
+            <input
+              value={wordmark}
+              onChange={e => { setWordmark(e.target.value); if (!active && (e.target.value.trim() || showDate)) setActive(true) }}
+              placeholder="Wordmark / handle"
+              maxLength={60}
+              style={{
+                width: '100%', boxSizing: 'border-box',
+                padding: '6px 9px', borderRadius: 7, marginBottom: 7,
+                fontSize: 11, fontFamily: 'Geist Mono, monospace',
+                background: 'rgba(0,0,0,0.32)', color: '#e8e8f0',
+                border: '1px solid rgba(255,255,255,0.08)', outline: 'none',
+              }}
+            />
+            <button
+              onClick={() => { const next = !showDate; setShowDate(next); if (next && !active) setActive(true) }}
+              title="Append the capture date to the second line"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                padding: '6px 8px', borderRadius: 7, cursor: 'pointer', textAlign: 'left',
+                background: showDate
+                  ? 'linear-gradient(135deg, rgba(168,85,247,0.2) 0%, rgba(236,72,153,0.15) 100%)'
+                  : 'rgba(255,255,255,0.03)',
+                color: showDate ? '#f3e8ff' : '#9a9ab0',
+                border: showDate ? '1px solid rgba(168,85,247,0.45)' : '1px solid rgba(255,255,255,0.06)',
+                fontSize: 11, fontWeight: 600, fontFamily: 'Geist Mono, monospace',
+              }}
+            >
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 15, height: 15, borderRadius: 4, flexShrink: 0,
+                background: showDate ? 'rgba(168,85,247,0.6)' : 'rgba(255,255,255,0.06)',
+                border: `1px solid ${showDate ? 'rgba(168,85,247,0.7)' : 'rgba(255,255,255,0.14)'}`,
+                color: '#fff', fontSize: 10, lineHeight: 1,
+              }}>{showDate ? '\u2713' : ''}</span>
+              Add date
+            </button>
           </div>
         </>
       )}
