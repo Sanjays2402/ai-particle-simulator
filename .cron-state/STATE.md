@@ -878,28 +878,36 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R43.D Perf-pill copy-all-window-stats button (carried R42.D)
 - [ ] R43.K Calm-gate import per-row apply (carried R42.K)
 
-### Batch 44 — fresh frontend queue (graduations of Batch 43 + carried)
-- [ ] R44.M Recent-ratios (R43.M): pin a favourite custom ratio so it
-  survives the MRU cap — a "star" on a recent chip keeps it at the head
-  of the row regardless of recency, for a user with one go-to crop.
-- [ ] R44.H Select-all header (R43.H): an "invert selection" action beside
-  select-all, so a user wanting "all but these three" can tick the three
-  then invert instead of ticking the rest.
-- [ ] R44.E Zen Now-Playing (R43.E): also surface the active framing-guide
-  ratio on the card when a frame is set, so a composed recording documents
-  the crop too (preset + theme + frame).
-- [ ] R44.G Screenshot caption (R43.G): a small live PREVIEW of the caption
-  pill (corner + both lines) in the watermark popover, so a user sees the
-  branded layout before exporting rather than after.
-- [ ] R44.N Minimap fit tween (R43.N): a "Fit selected" companion that
-  tweens to frame only a chosen subset of saved views (pairs with the
-  R43.H multi-select), not the whole set.
+### Batch 44 — fresh frontend queue (graduations of Batch 43 + carried)  (SHIPPED)
+- [x] **R44.M** Pin a favourite custom ratio (star, survives MRU cap) — 1f44683
+- [x] **R44.H** Invert selection beside select-all — e405465
+- [x] **R44.E** Zen Now-Playing surfaces the active framing-guide crop — 11e37f3
+- [x] **R44.G** Live caption preview in the watermark popover — 4f00f70
+- [x] **R44.N** "Fit selected" — frame only the multi-selected subset — c437e0b
 - [ ] R44.C Self-timer burst review strip (carried R36.C→R43.C)
 - [ ] R44.O Debug HUD compact/expanded toggle (carried R38.O→R43.O)
 - [ ] R44.B Spiral sweep easing preview glyph (carried R42.B→R43.B)
 - [ ] R44.A Debug HUD copy-pinned-ETA button (carried R42.A→R43.A)
 - [ ] R44.D Perf-pill copy-all-window-stats button (carried R42.D→R43.D)
 - [ ] R44.K Calm-gate import per-row apply (carried R42.K→R43.K)
+
+### Batch 45 — fresh frontend queue (graduations of Batch 44 + carried)
+- [ ] R45.M Pinned ratios (R44.M): drag-reorder the pinned chips so a user
+  with several favourites can order them by preference, not just pin-recency.
+- [ ] R45.H Invert selection (R44.H): a "select range" affordance in the
+  panel header (first + last click) so a contiguous block is one gesture.
+- [ ] R45.E Zen Now-Playing (R44.E): also surface the active composition
+  GRID (thirds / cross) alongside the crop when one is set.
+- [ ] R45.G Caption preview (R44.G): make the preview's corner clickable —
+  click a corner of the preview frame to set the anchor (direct manipulation).
+- [ ] R45.N Fit selected (R44.N): a matching "Fit selected" button on the
+  MINIMAP itself (reads the same selection) so it's reachable without the palette.
+- [ ] R45.C Self-timer burst review strip (carried R36.C→R44.C)
+- [ ] R45.O Debug HUD compact/expanded toggle (carried R38.O→R44.O)
+- [ ] R45.B Spiral sweep easing preview glyph (carried R42.B→R44.B)
+- [ ] R45.A Debug HUD copy-pinned-ETA button (carried R42.A→R44.A)
+- [ ] R45.D Perf-pill copy-all-window-stats button (carried R42.D→R44.D)
+- [ ] R45.K Calm-gate import per-row apply (carried R42.K→R44.K)
 
 ### Future queue carried from Batch 24 (still genuine, unshipped)
 - [ ] R25.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view
@@ -909,6 +917,50 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R25.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode)
 
 ## TICK LOG
+- 2026-06-28 04:08 PT — Batch 44 (5/5). Tick 44. Frontend-focus override
+  active. Shipped FIVE genuinely-new user-facing features, each a clean
+  graduation of a tick-43 feature, spread across 5 distinct libs +
+  components (framingGuides/LeftSidebar+store, cameraViews/CommandPalette,
+  zenMode/ZenMode, screenshotWatermark/TopBar, minimap/CommandPalette) so
+  no two overlap. Each adds a fresh pure tested helper set + real UI wiring.
+  NOTE: the trigger message's "31 unpushed commits / first tick / branch
+  feature/autoship off LOCAL HEAD / npm install" was STALE boilerplate
+  AGAIN (8th tick running — same false signal Batch 37-43 logged). Reality:
+  repo in sync with origin at 03de485 (0 ahead / 0 behind), node_modules
+  present, STATE.md bootstrapped through tick 43, ZERO unpushed commits to
+  preserve. Followed the AUTHORITATIVE prompt: worked DIRECTLY ON main (the
+  prompt BANS feature branches — they don't show on the contribution graph),
+  pushed straight to origin/main. Non-destructive since main==origin/main,
+  so the operator's "preserve commits" intent is met.
+  Commits: 1f44683 (R44.M pin a favourite custom ratio — framingGuides
+  PINNED_RATIOS_MAX/sanitizePinnedRatios/isRatioPinned/togglePinnedRatio
+  [pin-at-front,unpin-by-label,capped]/buildRatioChips[pinned++recents,
+  de-duped]; store pinnedCustomRatios own key + togglePinnedRatio action;
+  LeftSidebar chip row = star-toggle + re-apply body, amber pinned tint),
+  e405465 (R44.H invert selection — cameraViews invertSelection[complement,
+  double-invert identity, stale-id reconcile, fresh-Set]; CommandPalette
+  select-all header → flex row + Invert button), 11e37f3 (R44.E zen framing
+  line — zenMode formatFramingLabel[off/none/empty→'', prefix, truncate];
+  ZenMode resolves id→label (custom reads live ratio), 3rd card line w/ aspect
+  badge), 4f00f70 (R44.G live caption preview — screenshotWatermark
+  estimateTextWidth[no-ctx width] + buildWatermarkPreview[reuses
+  watermarkPlacementMulti, re-attaches text]; TopBar popover Preview frame
+  w/ faux scene + positioned pill + both lines; lazy-useState previewNow to
+  keep render pure), c437e0b (R44.N Fit selected — minimap
+  framingForSelectedViews[filter-to-subset, reuse framingForViews,
+  Set|Array|iterable]; CommandPalette green "Fit selected (N)" button on its
+  own row, reuses Minimap onFitAll eased-tween path + unmount cancel).
+  Pushed 03de485..c437e0b -> origin/main (verified fast-forward, 0 ahead /
+  0 behind after push).
+  Gates: lint EXACTLY at baseline (26 problems / 23 errors / 3 warnings —
+  all pre-existing; proved repo-wide count unchanged before+after; one
+  transient new "Date.now impure during render" in R44.G's preview was
+  fixed in-place with a lazy useState before the final gate). Build: green
+  (~0.67-0.80s). Unit tests: 48 test files ALL pass (count unchanged —
+  extended 5 existing test files in place rather than adding new ones);
+  +201 fresh asserts this batch (framingGuides +59 R44.M, cameraViews +12
+  R44.H, zenMode +27 R44.E, screenshotWatermark +25 R44.G, minimap +21
+  R44.N — also bumped the rolling PASS-line totals each file prints).
 - 2026-06-27 22:07 PT — Batch 43 (5/5). Tick 43. Frontend-focus override
   active. Shipped FIVE genuinely-new user-facing features, each a clean
   graduation of a tick-42 feature, spread across 5 different libs +
