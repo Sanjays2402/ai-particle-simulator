@@ -21,6 +21,8 @@ import {
   duplicateViews, selectIdRange,
   // R42.H — bulk-delete a SELECTED subset
   removeViews,
+  // R43.H — select-all / clear header state
+  countSelected, allIdsSelected, someIdsSelected, toggleSelectAll,
 } from './cameraViews.js'
 
 function assertEq(actual, expected, msg) {
@@ -1018,3 +1020,46 @@ console.log('PASS: selectIdRange — shift-click range-select core (R41.H)')
 }
 
 console.log('PASS: removeViews — bulk-delete a selected subset (R42.H)')
+
+// --- R43.H: select-all / clear header state --------------------------
+{
+  const ids = [10, 20, 30]
+  // countSelected reconciles against the ordered ids.
+  assertEq(countSelected(ids, new Set([10, 30])), 2, 'countSelected counts present ids')
+  assertEq(countSelected(ids, new Set([10, 30, 99])), 2, 'countSelected ignores stale ids')
+  assertEq(countSelected(ids, []), 0, 'countSelected empty selection → 0')
+  assertEq(countSelected([], new Set([10])), 0, 'countSelected empty list → 0')
+  assertEq(countSelected(ids, [20]), 1, 'countSelected accepts an array selection')
+  // allIdsSelected.
+  assertTrue(allIdsSelected(ids, new Set([10, 20, 30])), 'all selected → true')
+  assertTrue(!allIdsSelected(ids, new Set([10, 20])), 'partial → not all')
+  assertTrue(!allIdsSelected(ids, new Set()), 'none → not all')
+  assertTrue(!allIdsSelected([], new Set()), 'empty list → not all (toggle reads off)')
+  // a superset selection still counts as "all" (extra stale ids ignored).
+  assertTrue(allIdsSelected(ids, new Set([10, 20, 30, 40])), 'superset still all')
+  // someIdsSelected = strictly partial.
+  assertTrue(someIdsSelected(ids, new Set([10])), 'one of three → indeterminate')
+  assertTrue(someIdsSelected(ids, new Set([10, 20])), 'two of three → indeterminate')
+  assertTrue(!someIdsSelected(ids, new Set([10, 20, 30])), 'all → not indeterminate')
+  assertTrue(!someIdsSelected(ids, new Set()), 'none → not indeterminate')
+  assertTrue(!someIdsSelected([], new Set()), 'empty list → not indeterminate')
+  // toggleSelectAll: partial/none → select all; all → clear.
+  {
+    const fromNone = toggleSelectAll(ids, new Set())
+    assertEq([...fromNone].sort((a, b) => a - b), [10, 20, 30], 'none → select all')
+    const fromPartial = toggleSelectAll(ids, new Set([20]))
+    assertEq([...fromPartial].sort((a, b) => a - b), [10, 20, 30], 'partial → select all (mail-client rule)')
+    const fromAll = toggleSelectAll(ids, new Set([10, 20, 30]))
+    assertEq([...fromAll], [], 'all → clear')
+    const fromEmpty = toggleSelectAll([], new Set())
+    assertEq([...fromEmpty], [], 'empty list → empty set')
+  }
+  // toggleSelectAll returns a FRESH set (never the input ref).
+  {
+    const sel = new Set([10, 20, 30])
+    const out = toggleSelectAll(ids, sel)
+    assertTrue(out !== sel, 'toggleSelectAll returns a fresh set')
+  }
+}
+
+console.log('PASS: select-all / clear header state — countSelected/all/some/toggleSelectAll (R43.H)')

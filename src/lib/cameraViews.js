@@ -651,3 +651,64 @@ export function removeViews(views, idSet) {
   return changed ? next : views
 }
 
+// --- R43.H: select-all / clear header state --------------------------
+//
+// The R41.H/R42.H multi-select panel lets a user pick a subset of saved
+// views to duplicate or delete. With several views, ticking each one by
+// hand to act on "all but one" is tedious; this adds a header row with a
+// single select-all toggle. These pure helpers own the toggle's tri-state
+// (off / indeterminate / on) so the component stays a thin renderer and
+// the boundary cases (empty list, stale ids in the set) are under test.
+//
+// `orderedIds` is the list of selectable view ids in display order;
+// `selected` is a Set | Array | iterable of the currently-checked ids.
+// We reconcile against orderedIds so a selection holding ids that have
+// since vanished never over-counts.
+
+// Normalise a selection collection (Set | Array | iterable) to a Set.
+// Non-iterable → empty Set. Internal helper shared by the state queries.
+function toIdSet(selected) {
+  if (selected instanceof Set) return selected
+  if (selected && typeof selected[Symbol.iterator] === 'function') return new Set(selected)
+  return new Set()
+}
+
+// Count how many of `orderedIds` are present in the selection. Pure.
+// Non-array orderedIds → 0.
+export function countSelected(orderedIds, selected) {
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) return 0
+  const ids = toIdSet(selected)
+  if (ids.size === 0) return 0
+  let n = 0
+  for (const id of orderedIds) if (ids.has(id)) n++
+  return n
+}
+
+// True when EVERY selectable id is selected (and there's at least one to
+// select — an empty list is "not all selected" so the toggle reads off).
+// Pure.
+export function allIdsSelected(orderedIds, selected) {
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) return false
+  return countSelected(orderedIds, selected) === orderedIds.length
+}
+
+// True when SOME but not all selectable ids are selected — the
+// indeterminate ("-") state for the header toggle. Pure.
+export function someIdsSelected(orderedIds, selected) {
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) return false
+  const n = countSelected(orderedIds, selected)
+  return n > 0 && n < orderedIds.length
+}
+
+// The set the selection becomes when the header toggle is clicked: if
+// every selectable id is already selected, CLEAR (return an empty Set);
+// otherwise SELECT ALL (return a Set of every selectable id). The
+// "partial → select all" rule matches the familiar mail-client header
+// checkbox, where a half-filled box fills the rest rather than clearing.
+// Returns a fresh Set; never mutates inputs. Pure.
+export function toggleSelectAll(orderedIds, selected) {
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) return new Set()
+  if (allIdsSelected(orderedIds, selected)) return new Set()
+  return new Set(orderedIds)
+}
+

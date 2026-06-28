@@ -8,6 +8,8 @@ import {
   buildCameraRenameActions, duplicateView, buildCameraDuplicateActions,
   duplicateAllViews, duplicateViews, selectIdRange,
   removeViews,
+  // R43.H — select-all / clear header state
+  allIdsSelected, someIdsSelected, toggleSelectAll,
 } from '../lib/cameraViews'
 import { labelForId as framingLabelForId } from '../lib/framingGuides'
 import { formatCalmToast } from '../lib/calmMode'
@@ -190,6 +192,20 @@ export function CommandPalette({ onSettings }) {
     if (!shiftKey) setAnchorId(viewId)
   }
 
+  // R43.H — header select-all / clear toggle: when every view is already
+  // selected, clear; otherwise select them all (the mail-client header-
+  // checkbox rule). Pure toggleSelectAll computes the next set from the
+  // live duplicable-view ids so stale ids never leak in. Resets the
+  // shift-click anchor since a bulk toggle has no single origin row.
+  const toggleAllSelected = () => {
+    const orderedIds = cameraViews
+      .filter(v => v && v.id != null && Array.isArray(v.pos) && v.pos.length >= 3 &&
+        v.pos.every(n => Number.isFinite(Number(n))))
+      .map(v => v.id)
+    setSelectedIds(prev => toggleSelectAll(orderedIds, prev))
+    setAnchorId(null)
+  }
+
   // R41.H — fork just the selected subset. Pure duplicateViews
   // (ref-equal-on-no-op when nothing selected is cloneable) does the
   // work; persist + re-sync exactly like the other lifecycle actions,
@@ -267,6 +283,11 @@ export function CommandPalette({ onSettings }) {
     v.pos.every(n => Number.isFinite(Number(n))),
   )
   const selectedCount = duplicableViews.reduce((n, v) => n + (selectedIds.has(v.id) ? 1 : 0), 0)
+  // R43.H — header select-all toggle tri-state, derived from the live
+  // duplicable-view ids so a stale id in selectedIds can't skew it.
+  const duplicableIds = duplicableViews.map(v => v.id)
+  const allSelected = allIdsSelected(duplicableIds, selectedIds)
+  const someSelected = someIdsSelected(duplicableIds, selectedIds)
 
   return (
     <div
@@ -512,6 +533,34 @@ export function CommandPalette({ onSettings }) {
                     {selectedCount}/{duplicableViews.length}
                   </span>
                 </div>
+                {/* R43.H — select-all / clear header: one click checks
+                    every view (or clears when all are checked). The box
+                    shows a check when all are selected, a dash when some
+                    are. Saves ticking each row to act on "all but one". */}
+                <button
+                  onClick={toggleAllSelected}
+                  title={allSelected ? 'Clear selection' : 'Select all views'}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 9, width: '100%',
+                    padding: '6px 9px', borderRadius: 8, marginBottom: 7, cursor: 'pointer',
+                    textAlign: 'left',
+                    background: 'rgba(255,255,255,0.02)',
+                    border: '1px solid rgba(255,255,255,0.05)',
+                    color: '#c4b5fd', fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600,
+                    transition: 'all 0.12s ease-out',
+                  }}
+                >
+                  <span style={{
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    width: 16, height: 16, borderRadius: 5, flexShrink: 0,
+                    background: (allSelected || someSelected) ? 'rgba(168,85,247,0.6)' : 'rgba(255,255,255,0.06)',
+                    border: `1px solid ${(allSelected || someSelected) ? 'rgba(168,85,247,0.7)' : 'rgba(255,255,255,0.14)'}`,
+                    color: '#fff', fontSize: 11, lineHeight: 1,
+                  }}>{allSelected ? '\u2713' : someSelected ? '\u2212' : ''}</span>
+                  <span style={{ flex: 1, color: '#a78bfa', letterSpacing: '0.02em' }}>
+                    {allSelected ? 'Clear all' : 'Select all'}
+                  </span>
+                </button>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 9 }}>
                   {duplicableViews.map(v => {
                     const on = selectedIds.has(v.id)
