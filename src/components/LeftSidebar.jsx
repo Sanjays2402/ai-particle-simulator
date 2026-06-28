@@ -78,7 +78,7 @@ export default function LeftSidebar() {
     framingGuideId, setFramingGuideId,
     framingCustomRatio, setFramingCustomRatio,
     recentCustomRatios, applyRecentRatio, clearRecentRatios,
-    pinnedCustomRatios, togglePinnedRatio,
+    pinnedCustomRatios, togglePinnedRatio, reorderPinnedRatio,
     framingGridId, setFramingGridId,
     spiralOrientation, cycleSpiralOrientation, replaySpiralSweep,
     spiralSweepSpeed, setSpiralSweepSpeed,
@@ -290,6 +290,7 @@ export default function LeftSidebar() {
             onClearRecents={clearRecentRatios}
             pinned={pinnedCustomRatios}
             onTogglePin={togglePinnedRatio}
+            onReorderPin={reorderPinnedRatio}
           />
           {/* R35.B — composition grid drawn inside the active frame.
               Rule-of-thirds (with power-point dots) or a centre cross for
@@ -873,15 +874,29 @@ function ToggleRow({ label, value, onChange }) {
 // the input red without changing the frame. The chip stays visually in
 // sync with the live store value so a reload or a [ ]-cycle away + back
 // reflects correctly.
-function CustomRatioChip({ active, ratio, onSubmit, onSelect, recents, onApplyRecent, onClearRecents, pinned, onTogglePin }) {
+function CustomRatioChip({ active, ratio, onSubmit, onSelect, recents, onApplyRecent, onClearRecents, pinned, onTogglePin, onReorderPin }) {
   const [draft, setDraft] = useState('')
   const [error, setError] = useState(false)
+  // R45.M — drag-reorder state for the pinned chips. `dragIdx` is the
+  // pinned-chip index being dragged; `dragOverIdx` is the pinned chip the
+  // cursor is hovering as a drop target (drives the indigo drop highlight).
+  // Both are pinned-row indices (0-based among PINNED chips only) so the
+  // store's reorderPinnedRatio (which operates on the sanitized pinned
+  // list) maps straight through.
+  const [dragIdx, setDragIdx] = useState(null)
+  const [dragOverIdx, setDragOverIdx] = useState(null)
   const liveLabel = formatCustomRatioLabel(ratio)
   // R43.M / R44.M — the chip row: PINNED favourites first (starred, kept at
   // the head past the MRU cap), then the recent MRU ratios. buildRatioChips
   // merges + de-dupes the two lists so a ratio is never shown twice. Hidden
   // when both are empty (nothing remembered yet).
   const chipRow = buildRatioChips(pinned, recents)
+  // R45.M — how many of the leading chips are pinned. buildRatioChips emits
+  // every pinned chip first (in pin order) then the recents, so the pinned
+  // count is the length of the leading run flagged pinned. Only these chips
+  // are drag-reorderable; reordering needs 2+ pins to be meaningful.
+  const pinnedCount = chipRow.filter(c => c.pinned).length
+  const canReorderPins = pinnedCount >= 2 && typeof onReorderPin === 'function'
 
   const commit = () => {
     const raw = draft.trim()
@@ -973,20 +988,52 @@ function CustomRatioChip({ active, ratio, onSubmit, onSelect, recents, onApplyRe
             fontFamily: 'Geist Mono, monospace',
           }}>Recent</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
-            {chipRow.map(({ ratio: r, label, pinned: isPinned }) => {
+            {chipRow.map(({ ratio: r, label, pinned: isPinned }, chipIdx) => {
               const isLive = active && liveLabel && label === liveLabel
+              // R45.M — pinned chips are the leading run, so a pinned chip's
+              // index in the PINNED list equals its index in chipRow.
+              const pinIdx = isPinned ? chipIdx : -1
+              const draggable = isPinned && canReorderPins
+              const isDragging = draggable && dragIdx === pinIdx
+              const isDropTarget = draggable && dragOverIdx === pinIdx && dragIdx !== pinIdx
               return (
                 <span
                   key={label}
+                  draggable={draggable}
+                  onDragStart={draggable ? (e) => {
+                    setDragIdx(pinIdx)
+                    try { e.dataTransfer.effectAllowed = 'move' } catch { /* jsdom */ }
+                  } : undefined}
+                  onDragOver={draggable ? (e) => {
+                    e.preventDefault()
+                    try { e.dataTransfer.dropEffect = 'move' } catch { /* jsdom */ }
+                    if (dragOverIdx !== pinIdx) setDragOverIdx(pinIdx)
+                  } : undefined}
+                  onDragLeave={draggable ? () => {
+                    // Clear only when leaving the row currently highlighted so a
+                    // sibling enter-before-leave doesn't flicker the indicator.
+                    setDragOverIdx(prev => (prev === pinIdx ? null : prev))
+                  } : undefined}
+                  onDrop={draggable ? (e) => {
+                    e.preventDefault()
+                    if (dragIdx !== null && dragIdx !== pinIdx) onReorderPin(dragIdx, pinIdx)
+                    setDragIdx(null); setDragOverIdx(null)
+                  } : undefined}
+                  onDragEnd={draggable ? () => { setDragIdx(null); setDragOverIdx(null) } : undefined}
+                  title={draggable ? `${label} — drag to reorder pinned crops` : undefined}
                   style={{
                     display: 'inline-flex', alignItems: 'stretch',
                     borderRadius: 6, overflow: 'hidden',
                     transition: 'all 0.13s ease-out',
+                    cursor: draggable ? 'grab' : 'default',
+                    opacity: isDragging ? 0.5 : 1,
                     background: isLive
                       ? 'linear-gradient(135deg, rgba(168,85,247,0.28) 0%, rgba(236,72,153,0.2) 100%)'
+                      : isDropTarget ? 'rgba(99,102,241,0.18)'
                       : isPinned ? 'rgba(250,204,21,0.07)' : 'rgba(255,255,255,0.04)',
                     border: isLive
                       ? '1px solid rgba(168,85,247,0.5)'
+                      : isDropTarget ? '1px solid rgba(99,102,241,0.6)'
                       : isPinned ? '1px solid rgba(250,204,21,0.32)' : '1px solid rgba(255,255,255,0.07)',
                     boxShadow: isLive ? '0 0 10px rgba(168,85,247,0.22)' : 'none',
                   }}

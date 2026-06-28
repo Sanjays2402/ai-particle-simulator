@@ -808,3 +808,32 @@ export function buildRatioChips(pinned, recents) {
   }
   return out
 }
+
+// --- R45.M: reorder the pinned ratio chips ----------------------------
+//
+// R44.M pins a favourite custom ratio to the HEAD of the chip row in
+// pin-recency order. A user with several pinned crops (a 21:9 wallpaper,
+// a 4:5 portrait, a 1:1) may want them in a deliberate PREFERENCE order,
+// not just "most-recently-pinned first" — so this lets the pinned chips
+// be drag-reordered. The pure core mirrors moveView / moveAttractorByIndex
+// (the codebase's shared "splice from→to" reorder contract) so the React
+// drag wiring stays thin and the fence-post cases are under test.
+//
+// The list is sanitized to canonical form FIRST so a caller can pass a
+// raw persisted blob; the move then operates on indices into that
+// canonical row. Returns the SANITIZED list unchanged (by value) on a
+// no-op move (same index / out-of-range / non-finite index) so the
+// caller can compare-by-value to skip a redundant persist. Pure; never
+// mutates the input.
+export function movePinnedRatio(list, fromIdx, toIdx) {
+  const base = sanitizePinnedRatios(list)
+  const n = base.length
+  if (!Number.isFinite(fromIdx) || !Number.isFinite(toIdx)) return base
+  if (fromIdx < 0 || fromIdx >= n) return base
+  if (toIdx < 0 || toIdx >= n) return base
+  if (fromIdx === toIdx) return base
+  const next = base.slice()
+  const [picked] = next.splice(fromIdx, 1)
+  next.splice(toIdx, 0, picked)
+  return next
+}

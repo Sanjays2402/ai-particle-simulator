@@ -57,6 +57,7 @@ import {
   // R44.M — pinned (favourite) custom ratios.
   sanitizePinnedRatios,
   togglePinnedRatio as togglePinnedRatioHelper,
+  movePinnedRatio as movePinnedRatioHelper,
 } from './lib/framingGuides'
 // R38.K — per-motion calm gate sanitiser + toggle.
 import { sanitizeCalmGates, toggleCalmGate } from './lib/calmMode'
@@ -630,6 +631,15 @@ export const useStore = create((set, get) => {
   // toggle on an unparseable ratio doesn't churn storage or React.
   togglePinnedRatio: (ratio) => {
     const next = togglePinnedRatioHelper(get().pinnedCustomRatios, ratio)
+    if (sameRecentRatios(next, get().pinnedCustomRatios)) return
+    try { localStorage.setItem(FRAMING_PINNED_RATIOS_KEY, JSON.stringify(next)) } catch { /* quota / private mode */ }
+    set({ pinnedCustomRatios: next })
+  },
+  // R45.M — reorder a pinned ratio (drag-and-drop the pinned chips). The
+  // pure helper sanitises + splices from→to, returning the list unchanged
+  // (by value) on a no-op move, so we persist + set only on a real change.
+  reorderPinnedRatio: (fromIdx, toIdx) => {
+    const next = movePinnedRatioHelper(get().pinnedCustomRatios, fromIdx, toIdx)
     if (sameRecentRatios(next, get().pinnedCustomRatios)) return
     try { localStorage.setItem(FRAMING_PINNED_RATIOS_KEY, JSON.stringify(next)) } catch { /* quota / private mode */ }
     set({ pinnedCustomRatios: next })

@@ -19,6 +19,8 @@ import {
   RECENT_RATIOS_MAX, sanitizeRecentRatios, pushRecentRatio, sameRecentRatios,
   // R44.M — pinned (favourite) custom ratios
   PINNED_RATIOS_MAX, sanitizePinnedRatios, isRatioPinned, togglePinnedRatio, buildRatioChips,
+  // R45.M — reorder the pinned ratio chips
+  movePinnedRatio,
 } from './framingGuides.js'
 
 let passed = 0
@@ -909,4 +911,52 @@ console.log(`PASS: framingGuides R39.B — ${passed} total assertions (incl. on-
   eq(buildRatioChips(null, null).length, 0, 'chips: non-arrays → []')
 }
 
-console.log(`PASS: framingGuides R42.M/R43.M/R44.M — ${passed} total assertions (incl. custom aspect-ratio input + recents MRU + pinned favourites)`)
+// --- R45.M: movePinnedRatio (reorder the pinned chips) ---
+{
+  // basic move: index 0 → 2 reorders the canonical list.
+  {
+    const out = movePinnedRatio([1.1, 1.2, 1.3], 0, 2)
+    eq(out.length, 3, 'move: length preserved')
+    near(out[0], 1.2, 'move: 0→2 second leads now')
+    near(out[1], 1.3, 'move: third shifts up')
+    near(out[2], 1.1, 'move: moved item lands at tail')
+  }
+  // move toward the front.
+  {
+    const out = movePinnedRatio([1.1, 1.2, 1.3], 2, 0)
+    near(out[0], 1.3, 'move: 2→0 puts last at front')
+    near(out[1], 1.1, 'move: rest shift down')
+    near(out[2], 1.2, 'move: rest shift down 2')
+  }
+  // sanitizes the input FIRST so a raw blob reorders correctly.
+  {
+    // 'junk' + a dupe-by-label are stripped, leaving [2, 1.5]; move 0→1.
+    const out = movePinnedRatio([2, 'junk', 1.5, 2.001], 0, 1)
+    eq(out.length, 2, 'move: input sanitized before reorder (junk + dupe dropped)')
+    near(out[0], 1.5, 'move: sanitized reorder front')
+    near(out[1], 2, 'move: sanitized reorder tail')
+  }
+  // no-op moves return the SANITIZED list (by value) unchanged.
+  {
+    const same = movePinnedRatio([1.1, 1.2], 0, 0)
+    ok(sameRecentRatios(same, [1.1, 1.2]), 'move: same index → sanitized unchanged')
+    const oob = movePinnedRatio([1.1, 1.2], 0, 9)
+    ok(sameRecentRatios(oob, [1.1, 1.2]), 'move: toIdx out of range → unchanged')
+    const oobF = movePinnedRatio([1.1, 1.2], -1, 1)
+    ok(sameRecentRatios(oobF, [1.1, 1.2]), 'move: fromIdx out of range → unchanged')
+    const nan = movePinnedRatio([1.1, 1.2], NaN, 1)
+    ok(sameRecentRatios(nan, [1.1, 1.2]), 'move: non-finite index → unchanged')
+  }
+  // non-array / empty input → [].
+  eq(movePinnedRatio(null, 0, 1).length, 0, 'move: non-array → []')
+  eq(movePinnedRatio([], 0, 1).length, 0, 'move: empty → []')
+  // purity: never mutates the input array.
+  {
+    const base = [1.1, 1.2, 1.3]
+    const snap = base.slice()
+    movePinnedRatio(base, 0, 2)
+    ok(base.length === snap.length && base.every((v, i) => v === snap[i]), 'move: input not mutated')
+  }
+}
+
+console.log(`PASS: framingGuides R42.M/R43.M/R44.M/R45.M — ${passed} total assertions (incl. custom aspect-ratio input + recents MRU + pinned favourites + pinned reorder)`)
