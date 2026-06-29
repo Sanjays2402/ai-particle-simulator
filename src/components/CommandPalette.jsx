@@ -21,7 +21,8 @@ import {
   // R48.H — count the pending range block so a size chip can ride the hovered row
   rangePreviewCount,
   // R49.H — grade the block so a 10+ row range reads amber before the prune
-  rangePreviewTier, RANGE_PREVIEW_LARGE_AT,
+  // R50.H — 20+ rows escalate to red via a 3-tier style bundle
+  rangePreviewTier, RANGE_PREVIEW_LARGE_AT, RANGE_PREVIEW_HUGE_AT, rangeTierStyle,
 } from '../lib/cameraViews'
 import { labelForId as framingLabelForId } from '../lib/framingGuides'
 import {
@@ -886,15 +887,19 @@ export function CommandPalette({ onSettings }) {
                             amber once the block hits 10 rows so a big destructive
                             range reads loud before commit. */}
                         {rangeMode && v.id === rangeHoverId && pendingRangeCount >= 2 && (() => {
-                          const large = rangePreviewTier(pendingRangeCount) === 'large'
+                          const tier = rangePreviewTier(pendingRangeCount)
+                          const ts = rangeTierStyle(tier)
+                          const tip = tier === 'huge' ? `Huge range — ${pendingRangeCount} rows (>= ${RANGE_PREVIEW_HUGE_AT})`
+                            : tier === 'large' ? `Large range — ${pendingRangeCount} rows (>= ${RANGE_PREVIEW_LARGE_AT})`
+                            : `${pendingRangeCount} rows`
                           return (
-                          <span aria-hidden="true" title={large ? `Large range — ${pendingRangeCount} rows (>= ${RANGE_PREVIEW_LARGE_AT})` : `${pendingRangeCount} rows`} style={{
+                          <span aria-hidden="true" title={tip} style={{
                             flexShrink: 0, padding: '1px 6px', borderRadius: 999,
                             fontSize: 10, fontWeight: 700, lineHeight: 1.4,
                             fontFamily: 'Geist Mono, monospace',
-                            background: large ? 'rgba(245,158,11,0.22)' : 'rgba(99,102,241,0.22)',
-                            color: large ? '#fcd34d' : '#c7d2fe',
-                            border: `1px solid ${large ? 'rgba(245,158,11,0.55)' : 'rgba(129,140,248,0.5)'}`,
+                            background: ts.bg,
+                            color: ts.fg,
+                            border: `1px solid ${ts.border}`,
                           }}>{pendingRangeCount} rows</span>
                           )
                         })()}

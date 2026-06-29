@@ -30,7 +30,7 @@ import {
   // R46.H — arm the range anchor from a row
   armRangeAnchor,
   // R47.H — preview the pending range block
-  rangePreviewSet, rangePreviewCount, rangePreviewTier, RANGE_PREVIEW_LARGE_AT,
+  rangePreviewSet, rangePreviewCount, rangePreviewTier, RANGE_PREVIEW_LARGE_AT, RANGE_PREVIEW_HUGE_AT, rangeTierStyle,
 } from './cameraViews.js'
 
 function assertEq(actual, expected, msg) {
@@ -1264,16 +1264,25 @@ console.log('PASS: rangePreviewSet — preview the pending range block before co
 }
 console.log('PASS: rangePreviewCount — block size for the hovered-row chip (R48.H)')
 
-// --- R49.H: rangePreviewTier — flag a large (10+) destructive range --------
+// --- R49.H/R50.H: rangePreviewTier — flag large (10+) / huge (20+) ranges ---
 {
-  assertEq(RANGE_PREVIEW_LARGE_AT, 10, 'tier: threshold exposed as 10')
+  assertEq(RANGE_PREVIEW_LARGE_AT, 10, 'tier: large threshold exposed as 10')
+  assertEq(RANGE_PREVIEW_HUGE_AT, 20, 'tier: huge threshold exposed as 20')
   assertEq(rangePreviewTier(2), 'normal', 'tier: 2 rows normal')
-  assertEq(rangePreviewTier(9), 'normal', 'tier: 9 just below threshold')
+  assertEq(rangePreviewTier(9), 'normal', 'tier: 9 just below large')
   assertEq(rangePreviewTier(10), 'large', 'tier: 10 hits large')
-  assertEq(rangePreviewTier(40), 'large', 'tier: 40 large')
+  assertEq(rangePreviewTier(19), 'large', 'tier: 19 just below huge')
+  assertEq(rangePreviewTier(20), 'huge', 'tier: 20 hits huge')
+  assertEq(rangePreviewTier(40), 'huge', 'tier: 40 huge')
   assertEq(rangePreviewTier(0), 'normal', 'tier: 0 normal')
   assertEq(rangePreviewTier(-5), 'normal', 'tier: negative normal')
   assertEq(rangePreviewTier(NaN), 'normal', 'tier: NaN normal')
   assertEq(rangePreviewTier('x'), 'normal', 'tier: non-numeric normal')
+  // R50.H — style bundles distinct per tier, unknown → normal
+  const sn = rangeTierStyle('normal'), sl = rangeTierStyle('large'), sh = rangeTierStyle('huge')
+  assertTrue(sn.fg !== sl.fg && sl.fg !== sh.fg && sn.fg !== sh.fg, 'tier: each tier a distinct fg')
+  assertTrue(sh.border.includes('239,68,68'), 'tier: huge wears red border')
+  assertEq(rangeTierStyle('bogus').fg, sn.fg, 'tier: unknown → normal style')
+  assertEq(rangeTierStyle(undefined).fg, sn.fg, 'tier: undefined → normal style')
 }
-console.log('PASS: rangePreviewTier — large-block warning tier (R49.H)')
+console.log('PASS: rangePreviewTier — large/huge 3-tier warning (R49.H/R50.H)')

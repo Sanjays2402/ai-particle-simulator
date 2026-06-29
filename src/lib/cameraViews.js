@@ -832,18 +832,33 @@ export function rangePreviewCount(orderedIds, anchorId, hoverId) {
   return rangePreviewSet(orderedIds, anchorId, hoverId).size
 }
 
-// --- R49.H: range-block size tier so a big destructive range reads loud ----
+// --- R49.H/R50.H: range-block size tier so a big destructive range reads loud --
 //
-// R48.H surfaces the count; R49.H grades it. A 3-row range is routine and the
-// chip stays indigo, but a 10+ row range is a meaningful prune (the panel
-// fronts a multi-select DELETE, not just Duplicate) so the chip flips amber to
-// warn before the commit click — parallels biasOverridesIO's import-impact
-// tiers. Threshold exposed so the chip + tooltip can quote it. Defensive:
+// R48.H surfaces the count; R49.H graded it two-way (normal/large). R50.H
+// splits the loud end into TWO tiers so a 30-row prune reads louder than a
+// 12-row one — a 3-tier mirror of biasOverridesIO's import-impact tiers:
+// 'normal' (<10, indigo), 'large' (10..19, amber), 'huge' (20+, red). The
+// panel fronts a multi-select DELETE so the escalation warns before commit.
+// Thresholds exposed so the chip + tooltip can quote them. Defensive:
 // non-finite / negative → 'normal'. Pure.
 export const RANGE_PREVIEW_LARGE_AT = 10
+export const RANGE_PREVIEW_HUGE_AT = 20
 export function rangePreviewTier(count) {
   const n = Number(count)
   if (!Number.isFinite(n) || n < RANGE_PREVIEW_LARGE_AT) return 'normal'
-  return 'large'
+  if (n < RANGE_PREVIEW_HUGE_AT) return 'large'
+  return 'huge'
+}
+
+// R50.H — CSS-ready style bundle for a range tier (parallels attractorTypeStyle
+// / import-impact style). Each tier is visually distinct (indigo → amber →
+// red); unknown tier → normal. Pure.
+export const RANGE_TIER_STYLES = {
+  normal: { bg: 'rgba(99,102,241,0.22)', fg: '#c7d2fe', border: 'rgba(129,140,248,0.5)' },
+  large:  { bg: 'rgba(245,158,11,0.22)', fg: '#fcd34d', border: 'rgba(245,158,11,0.55)' },
+  huge:   { bg: 'rgba(239,68,68,0.24)',  fg: '#fca5a5', border: 'rgba(239,68,68,0.6)' },
+}
+export function rangeTierStyle(tier) {
+  return RANGE_TIER_STYLES[tier] || RANGE_TIER_STYLES.normal
 }
 
