@@ -4,6 +4,8 @@ import {
   resolveHudSections, hudModeLabel,
   // R50.O — per-view (fps vs ms) density
   HUD_VIEWS, sanitizeHudViewModes, hudModeForView, toggleHudViewMode, resolveHudSectionsForView,
+  // R51.O — sync both views to one mode
+  syncHudViewModes,
 } from './debugHud.js'
 
 let passed = 0
@@ -79,4 +81,19 @@ console.log(`PASS: debugHud R45.O — ${passed} assertions (compact/expanded HUD
   ok(resolveHudSectionsForView({ fps: 'compact', ms: 'expanded' }, 'fps').sparkline === false, 'fps compact: no sparkline')
   ok(resolveHudSectionsForView({ fps: 'compact', ms: 'expanded' }, 'ms').sparkline === true, 'ms expanded: sparkline on')
 }
-console.log(`PASS: debugHud R50.O — per-view fps/ms density`)
+
+// R51.O — syncHudViewModes: both views snap to one mode, alternating off fps.
+{
+  // either expanded → both collapse
+  let s = syncHudViewModes({ fps: 'expanded', ms: 'expanded' })
+  eq(s.fps, 'compact', 'sync: both expanded → fps compact'); eq(s.ms, 'compact', 'sync: both expanded → ms compact')
+  s = syncHudViewModes({ fps: 'expanded', ms: 'compact' })
+  eq(s.fps, 'compact', 'sync: fps expanded → both compact'); eq(s.ms, 'compact', 'sync: mixed → both compact')
+  // both compact → both expand
+  s = syncHudViewModes({ fps: 'compact', ms: 'compact' })
+  eq(s.fps, 'expanded', 'sync: both compact → fps expanded'); eq(s.ms, 'expanded', 'sync: both compact → ms expanded')
+  // junk → both default (expanded), so first sync collapses both
+  s = syncHudViewModes(null)
+  eq(s.fps, 'compact', 'sync: junk → fps compact'); eq(s.ms, 'compact', 'sync: junk → ms compact')
+}
+console.log(`PASS: debugHud R50.O/R51.O — per-view fps/ms density + sync`)

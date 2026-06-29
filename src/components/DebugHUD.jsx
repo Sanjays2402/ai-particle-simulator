@@ -37,6 +37,7 @@ export default function DebugHUD() {
   // collapse independently; the pill + sections follow the active view.
   const hudViewModes = useStore(s => s.debugHudViewModes)
   const toggleHudViewMode = useStore(s => s.toggleDebugHudViewMode)
+  const syncHudViewModes = useStore(s => s.syncDebugHudViewModes)
   const activeView = msView ? 'ms' : 'fps'
   const hudMode = hudModeForView(hudViewModes, activeView)
   const sections = resolveHudSections(hudMode)
@@ -90,10 +91,12 @@ export default function DebugHUD() {
         setVisible(v => !v)
       } else if ((e.key === 'm' || e.key === 'M') && !e.metaKey && !e.ctrlKey && !e.altKey) {
         // Flip fps <-> ms, but only while the HUD is open so M stays
-        // free for any future global shortcut when it's closed.
+        // free for any future global shortcut when it's closed. R51.O —
+        // Shift+M instead SYNCS both views to one density in a single shot.
         if (visibleRef.current) {
           e.preventDefault()
-          setMsView(v => !v)
+          if (e.shiftKey) syncHudViewModes()
+          else setMsView(v => !v)
         }
       }
     }
@@ -106,7 +109,7 @@ export default function DebugHUD() {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('particle:toggle-debug-hud', onToggle)
     }
-  }, [])
+  }, [syncHudViewModes])
 
   useEffect(() => {
     if (!visible) return
@@ -344,8 +347,8 @@ export default function DebugHUD() {
             panel; MIN keeps the at-a-glance rows only. pointerEvents:auto so
             it's clickable inside the otherwise pass-through HUD. */}
         <button
-          onClick={() => toggleHudViewMode(activeView)}
-          title={hudMode === 'compact' ? `Expand ${activeView.toUpperCase()} HUD (full panel) - density remembered per view` : `Compact ${activeView.toUpperCase()} HUD (essentials only) - density remembered per view`}
+          onClick={(e) => e.shiftKey ? syncHudViewModes() : toggleHudViewMode(activeView)}
+          title={hudMode === 'compact' ? `Expand ${activeView.toUpperCase()} HUD (full panel) - density remembered per view; Shift to sync both views (Shift+M)` : `Compact ${activeView.toUpperCase()} HUD (essentials only) - density remembered per view; Shift to sync both views (Shift+M)`}
           style={{
             marginLeft: 6, padding: '1px 6px', borderRadius: 4, lineHeight: 1.5,
             background: 'rgba(168,85,247,0.18)', border: '1px solid rgba(168,85,247,0.3)',

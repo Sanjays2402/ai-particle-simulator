@@ -17,7 +17,7 @@ import {
 } from './lib/waveform'
 import { recordThumbMetadata as recordPresetThumbMeta } from './lib/presetThumbnails'
 // R45.O — Debug HUD compact/expanded layout mode.
-import { sanitizeHudMode, nextHudMode, sanitizeHudViewModes, toggleHudViewMode } from './lib/debugHud'
+import { sanitizeHudMode, nextHudMode, sanitizeHudViewModes, toggleHudViewMode, syncHudViewModes } from './lib/debugHud'
 import {
   loadAttractors as loadNamedAttractors,
   saveAttractors as saveNamedAttractors,
@@ -1167,6 +1167,14 @@ export const useStore = create((set, get) => {
   })(),
   toggleDebugHudViewMode: (view) => {
     const next = toggleHudViewMode(get().debugHudViewModes, view)
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem('debug-hud-view-modes-v1', JSON.stringify(next)) } catch { /* */ }
+    set({ debugHudViewModes: next })
+  },
+  // R51.O — snap BOTH views to one density in a single shot (symmetric
+  // collapse) for users who don't want the two readouts diverging. Alternates
+  // off the fps view so one keystroke flips them together.
+  syncDebugHudViewModes: () => {
+    const next = syncHudViewModes(get().debugHudViewModes)
     try { if (typeof localStorage !== 'undefined') localStorage.setItem('debug-hud-view-modes-v1', JSON.stringify(next)) } catch { /* */ }
     set({ debugHudViewModes: next })
   },

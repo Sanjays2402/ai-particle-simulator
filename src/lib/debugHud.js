@@ -90,3 +90,15 @@ export function toggleHudViewMode(modes, view) {
 export function resolveHudSectionsForView(modes, view) {
   return resolveHudSections(hudModeForView(modes, view))
 }
+
+// R51.O — set BOTH views to the SAME mode in one shot. R50.O lets the two
+// readouts collapse independently; R51.O is the symmetric companion for
+// users who want them locked together. The target is the OPPOSITE of the
+// fps view's current mode so a single keystroke alternates both: if either
+// view is expanded, collapse both; otherwise expand both. Returns a fresh
+// {fps, ms} map at that mode. Junk → both default. Pure.
+export function syncHudViewModes(modes) {
+  const m = sanitizeHudViewModes(modes)
+  const target = m.fps === 'expanded' ? 'compact' : 'expanded'
+  return { fps: target, ms: target }
+}
