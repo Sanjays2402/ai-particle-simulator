@@ -62,6 +62,8 @@ import {
   sanitizePinnedRatios,
   togglePinnedRatio as togglePinnedRatioHelper,
   movePinnedRatio as movePinnedRatioHelper,
+  // R53.B — tunable easing-preview dot pace (persisted speed multiplier).
+  sanitizeEasingPreviewSpeed,
 } from './lib/framingGuides'
 // R38.K — per-motion calm gate sanitiser + toggle.
 import { sanitizeCalmGates, toggleCalmGate } from './lib/calmMode'
@@ -118,6 +120,8 @@ const SCREENSHOT_WATERMARK_DATE_KEY = 'particle-screenshot-watermark-date-v1'
 // R52.G — caption size preset (S/M/L), own key so it round-trips
 // independently of the toggle / anchor / second line.
 const SCREENSHOT_WATERMARK_SIZE_KEY = 'particle-screenshot-watermark-size-v1'
+// R53.B — persisted easing-preview dot pace (speed multiplier), own key.
+const EASING_PREVIEW_SPEED_KEY = 'particle-easing-preview-speed-v1'
 // R35.E — zen ambient auto-orbit preference, own key.
 const ZEN_AUTO_ORBIT_KEY = 'particle-zen-auto-orbit-v1'
 // R42.E — zen "Now Playing" overlay preference, own key.
@@ -874,6 +878,23 @@ export const useStore = create((set, get) => {
     const next = sanitizeWatermarkSize(id)
     try { localStorage.setItem(SCREENSHOT_WATERMARK_SIZE_KEY, next) } catch { /* quota / private mode */ }
     set({ screenshotWatermarkSize: next })
+  },
+
+  // R53.B — the easing-preview dot's pace multiplier (0.8x..2x), persisted
+  // on its own key so a tuned pace survives reload. Sanitised on read so a
+  // corrupt stored value resolves to the 1x default.
+  easingPreviewSpeed: (() => {
+    try {
+      const raw = localStorage.getItem(EASING_PREVIEW_SPEED_KEY)
+      // Missing key → pass null so a fresh install gets the 1x default
+      // (Number(null) would be 0, which the sanitiser would clamp to MIN).
+      return sanitizeEasingPreviewSpeed(raw == null ? null : Number(raw))
+    } catch { return sanitizeEasingPreviewSpeed(null) }
+  })(),
+  setEasingPreviewSpeed: (speed) => {
+    const next = sanitizeEasingPreviewSpeed(speed)
+    try { localStorage.setItem(EASING_PREVIEW_SPEED_KEY, String(next)) } catch { /* quota / private mode */ }
+    set({ easingPreviewSpeed: next })
   },
 
 

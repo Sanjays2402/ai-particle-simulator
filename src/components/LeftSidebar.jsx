@@ -33,7 +33,7 @@ import {
   summarizeImportImpact as summarizeCrossfadeOverridesImpact,
 } from '../lib/crossfadeOverridesIO'
 import { ATTRACTOR_TYPES, MAX_ATTRACTORS, attractorTypeStyle, parsePositionInput, dropIndexForGap, stepKeyboardGapCursor, describeGapReorderAnnouncement } from '../lib/namedAttractors'
-import { FRAMING_RATIOS, FRAMING_GRIDS, SPIRAL_ORIENTATIONS, SPIRAL_SWEEP_SPEEDS, SPIRAL_SWEEP_EASINGS, CUSTOM_FRAMING_ID, formatCustomRatioLabel, buildRatioChips, projectedPinnedOrder, pinnedDropCaretGap, buildEasingPreviewPoints, buildEasingPreviewPath, pinnedReorderTarget, EASING_PREVIEW_LOOP_SEC, easingPreviewPaceLabel } from '../lib/framingGuides'
+import { FRAMING_RATIOS, FRAMING_GRIDS, SPIRAL_ORIENTATIONS, SPIRAL_SWEEP_SPEEDS, SPIRAL_SWEEP_EASINGS, CUSTOM_FRAMING_ID, formatCustomRatioLabel, buildRatioChips, projectedPinnedOrder, pinnedDropCaretGap, buildEasingPreviewPoints, buildEasingPreviewPath, pinnedReorderTarget, easingPreviewPaceLabel, stepEasingPreviewSpeed, easingPreviewSpeedAtMin, easingPreviewSpeedAtMax, effectiveEasingLoopSec, easingPreviewSpeedLabel } from '../lib/framingGuides'
 import { showToast } from './Toast'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
@@ -88,6 +88,8 @@ export default function LeftSidebar() {
     spiralOrientation, cycleSpiralOrientation, replaySpiralSweep,
     spiralSweepSpeed, setSpiralSweepSpeed,
     spiralSweepEasing, setSpiralSweepEasing,
+    // R53.B — tunable easing-preview dot pace (persisted speed multiplier).
+    easingPreviewSpeed, setEasingPreviewSpeed,
   } = useStore()
 
   const exportGif = async () => {
@@ -416,20 +418,53 @@ export default function LeftSidebar() {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, marginBottom: 5 }}>
                 <span style={{ fontSize: 10, color: '#7a7a90', fontWeight: 500 }}>Sweep easing</span>
                 {/* R52.B — pace label documents the preview dot's loop speed
-                    (duration + Hz) so a still capture of the chip explains
-                    itself instead of relying on the live motion. Brightens
-                    while the row is hovered (dot is playing), dims when the
-                    dot is paused. */}
-                <span style={{
-                  fontSize: 8.5, fontWeight: 600, letterSpacing: '0.03em',
-                  fontFamily: 'Geist Mono, monospace',
-                  color: easingRowHovered ? '#c4b5fd' : '#5a5a70',
-                  transition: 'color 0.2s ease-out',
-                }} title={easingRowHovered
-                  ? 'Preview dot loop pace (playing) - hover out to pause'
-                  : 'Preview dot loop pace (paused) - hover the chips to play'}>
-                  {easingPreviewPaceLabel(EASING_PREVIEW_LOOP_SEC)}
-                </span>
+                    (duration + Hz). R53.B — a +/- stepper scales that loop
+                    speed (0.8x..2x, persisted) so the user can slow the dot
+                    to study the acceleration shape or speed it up to match a
+                    faster real sweep. The label reads the EFFECTIVE duration
+                    (base / speed) so it always matches the moving dot. */}
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <button
+                    onClick={() => setEasingPreviewSpeed(stepEasingPreviewSpeed(easingPreviewSpeed, -1))}
+                    disabled={easingPreviewSpeedAtMin(easingPreviewSpeed)}
+                    title="Slow the preview dot down"
+                    aria-label="Slow the preview dot loop down"
+                    style={{
+                      width: 15, height: 15, lineHeight: 1, padding: 0, borderRadius: 4,
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 12, fontWeight: 700, fontFamily: 'Geist Mono, monospace',
+                      background: 'rgba(255,255,255,0.04)',
+                      border: '1px solid rgba(255,255,255,0.08)',
+                      color: easingPreviewSpeedAtMin(easingPreviewSpeed) ? '#3a3a48' : '#a78bfa',
+                      cursor: easingPreviewSpeedAtMin(easingPreviewSpeed) ? 'default' : 'pointer',
+                      transition: 'color 0.15s ease-out',
+                    }}
+                  >{'\u2212'}</button>
+                  <span style={{
+                    fontSize: 8.5, fontWeight: 600, letterSpacing: '0.03em',
+                    fontFamily: 'Geist Mono, monospace',
+                    color: easingRowHovered ? '#c4b5fd' : '#5a5a70',
+                    transition: 'color 0.2s ease-out', minWidth: 70, textAlign: 'center',
+                  }} title={`${easingPreviewSpeedLabel(easingPreviewSpeed)} - ${easingRowHovered ? 'dot playing, hover out to pause' : 'hover the chips to play the dot'}`}>
+                    {easingPreviewPaceLabel(effectiveEasingLoopSec(easingPreviewSpeed))}
+                  </span>
+                  <button
+                    onClick={() => setEasingPreviewSpeed(stepEasingPreviewSpeed(easingPreviewSpeed, +1))}
+                    disabled={easingPreviewSpeedAtMax(easingPreviewSpeed)}
+                    title="Speed the preview dot up"
+                    aria-label="Speed the preview dot loop up"
+                    style={{
+                      width: 15, height: 15, lineHeight: 1, padding: 0, borderRadius: 4,
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 11, fontWeight: 700, fontFamily: 'Geist Mono, monospace',
+                      background: 'rgba(255,255,255,0.04)',
+                      border: '1px solid rgba(255,255,255,0.08)',
+                      color: easingPreviewSpeedAtMax(easingPreviewSpeed) ? '#3a3a48' : '#a78bfa',
+                      cursor: easingPreviewSpeedAtMax(easingPreviewSpeed) ? 'default' : 'pointer',
+                      transition: 'color 0.15s ease-out',
+                    }}
+                  >{'+'}</button>
+                </div>
               </div>
               <div
                 onMouseEnter={() => setEasingRowHovered(true)}
@@ -473,7 +508,7 @@ export default function LeftSidebar() {
                         {active && (
                           easingRowHovered ? (
                             <circle r="1.4" fill="#fde9ff">
-                              <animateMotion dur={`${EASING_PREVIEW_LOOP_SEC}s`} repeatCount="indefinite"
+                              <animateMotion dur={`${effectiveEasingLoopSec(easingPreviewSpeed)}s`} repeatCount="indefinite"
                                 path={buildEasingPreviewPath(e.css, 16, 10)} />
                             </circle>
                           ) : (

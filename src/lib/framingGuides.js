@@ -810,6 +810,84 @@ export function easingPreviewPaceLabel(loopSec = EASING_PREVIEW_LOOP_SEC) {
   return `${trim(s)}s \u00b7 ${trim(hz)}Hz`
 }
 
+// --- R53.B: tunable preview-dot pace (a +/- stepper) ------------------
+//
+// R52.B documents the dot's loop pace; R53.B lets the user CHANGE it so
+// they can slow the dot down (to study the acceleration shape) or speed it
+// up (to match a faster real sweep). The control is a small +/- stepper on
+// the pace label that scales the loop SPEED between 0.8x and 2x of the base
+// EASING_PREVIEW_LOOP_SEC. The chosen speed persists so a tuned pace
+// survives a reload.
+//
+// Speed is a multiplier on the dot's traversal RATE: 1x = the base 1.6s
+// loop, 2x = twice as fast (0.8s), 0.8x = a fifth slower (2s). The
+// effective duration the <animateMotion> + the pace label both read is
+// base / speed, so glyph motion + the printed "Ns / Hz" can't disagree.
+export const EASING_PREVIEW_SPEED_MIN = 0.8
+export const EASING_PREVIEW_SPEED_MAX = 2
+export const EASING_PREVIEW_SPEED_STEP = 0.2
+export const EASING_PREVIEW_SPEED_DEFAULT = 1
+
+// Round to one decimal so repeated +/- stepping can't accrue float drift
+// (0.8 + 0.2 + 0.2 → 1.2000000000000002). Pure.
+function round1(n) {
+  return Math.round(n * 10) / 10
+}
+
+// Clamp a stored / incoming speed multiplier into the usable band; junk →
+// the 1x default. Rounded to one decimal so it lands on a clean step. Pure.
+export function sanitizeEasingPreviewSpeed(raw) {
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return EASING_PREVIEW_SPEED_DEFAULT
+  const r = round1(n)
+  if (r < EASING_PREVIEW_SPEED_MIN) return EASING_PREVIEW_SPEED_MIN
+  if (r > EASING_PREVIEW_SPEED_MAX) return EASING_PREVIEW_SPEED_MAX
+  return r
+}
+
+// Step the speed up (dir > 0) or down (dir < 0) by EASING_PREVIEW_SPEED_STEP,
+// clamped to the band. The current value is sanitised first so a corrupt
+// stored value still steps from a sane base. Returns the SAME value
+// (ref-equal for the === number) when already at the boundary in the step
+// direction, so the caller can cheaply skip a redundant setState. dir === 0
+// or non-finite → the sanitised current unchanged. Pure.
+export function stepEasingPreviewSpeed(current, dir) {
+  const cur = sanitizeEasingPreviewSpeed(current)
+  const d = Number(dir)
+  if (!Number.isFinite(d) || d === 0) return cur
+  const next = sanitizeEasingPreviewSpeed(cur + (d > 0 ? EASING_PREVIEW_SPEED_STEP : -EASING_PREVIEW_SPEED_STEP))
+  return next === cur ? cur : next
+}
+
+// Is the speed at the low / high end of the band? Drives disabling the
+// matching stepper button so the user gets a dead-end cue. Pure.
+export function easingPreviewSpeedAtMin(speed) {
+  return sanitizeEasingPreviewSpeed(speed) <= EASING_PREVIEW_SPEED_MIN
+}
+export function easingPreviewSpeedAtMax(speed) {
+  return sanitizeEasingPreviewSpeed(speed) >= EASING_PREVIEW_SPEED_MAX
+}
+
+// The EFFECTIVE loop duration (seconds) at a given speed: base / speed, so
+// 2x halves the 1.6s base to 0.8s and 0.8x stretches it to 2s. Feeds both
+// the <animateMotion> dur and easingPreviewPaceLabel so the moving dot and
+// the printed pace always match. Defensive: a non-positive base or a junk
+// speed resolves through the sanitiser / falls back so the result is never
+// 0 / NaN / Infinity. Pure.
+export function effectiveEasingLoopSec(speed, base = EASING_PREVIEW_LOOP_SEC) {
+  const b = Number(base)
+  const safeBase = (Number.isFinite(b) && b > 0) ? b : EASING_PREVIEW_LOOP_SEC
+  const s = sanitizeEasingPreviewSpeed(speed)
+  return round1(safeBase / s)
+}
+
+// A short "1.0x" style label for the stepper's current multiplier, so the
+// user sees the factor they're at. Always one decimal + an "x" suffix.
+// Pure.
+export function easingPreviewSpeedLabel(speed) {
+  return `${sanitizeEasingPreviewSpeed(speed).toFixed(1)}x`
+}
+
 // --- R43.M: recent custom aspect ratios -------------------------------
 //
 // R42.M lets a user type any custom crop (21:9, 2.76, 5:7). A user who

@@ -18,6 +18,10 @@ import {
   buildEasingPreviewPath, pinnedReorderTarget,
   // R52.B — easing preview pace label (loop duration + Hz)
   EASING_PREVIEW_LOOP_SEC, easingPreviewPaceLabel,
+  // R53.B — tunable preview-dot pace (+/- stepper, persisted)
+  EASING_PREVIEW_SPEED_MIN, EASING_PREVIEW_SPEED_MAX, EASING_PREVIEW_SPEED_STEP,
+  EASING_PREVIEW_SPEED_DEFAULT, sanitizeEasingPreviewSpeed, stepEasingPreviewSpeed,
+  easingPreviewSpeedAtMin, easingPreviewSpeedAtMax, effectiveEasingLoopSec, easingPreviewSpeedLabel,
   // R42.M — custom aspect-ratio input
   CUSTOM_FRAMING_ID, CUSTOM_RATIO_MIN, CUSTOM_RATIO_MAX,
   parseAspectRatio, clampCustomRatio, formatCustomRatioLabel, isCustomRatioClamped,
@@ -1191,6 +1195,56 @@ console.log(`PASS: framingGuides R39.B — ${passed} total assertions (incl. on-
   // the exported loop constant is a sane positive number
   ok(Number.isFinite(EASING_PREVIEW_LOOP_SEC) && EASING_PREVIEW_LOOP_SEC > 0, 'pace: loop const positive finite')
 }
+
+// R53.B — tunable preview-dot pace: sanitize, step, band edges, effective
+// duration, and the "Nx" label. The +/- stepper scales loop SPEED in
+// [0.8, 2] by 0.2, persisted; effective duration = base / speed.
+{
+  // band constants are sane + ordered
+  ok(EASING_PREVIEW_SPEED_MIN < EASING_PREVIEW_SPEED_DEFAULT && EASING_PREVIEW_SPEED_DEFAULT < EASING_PREVIEW_SPEED_MAX, 'speed: min < default < max')
+  eq(EASING_PREVIEW_SPEED_DEFAULT, 1, 'speed: default is 1x')
+  ok(EASING_PREVIEW_SPEED_STEP > 0, 'speed: step positive')
+  // sanitize: clamp + round + junk → default
+  eq(sanitizeEasingPreviewSpeed(1), 1, 'sanitize: 1 passes')
+  eq(sanitizeEasingPreviewSpeed(0.5), EASING_PREVIEW_SPEED_MIN, 'sanitize: below band → min')
+  eq(sanitizeEasingPreviewSpeed(9), EASING_PREVIEW_SPEED_MAX, 'sanitize: above band → max')
+  eq(sanitizeEasingPreviewSpeed(NaN), EASING_PREVIEW_SPEED_DEFAULT, 'sanitize: NaN → default')
+  eq(sanitizeEasingPreviewSpeed('junk'), EASING_PREVIEW_SPEED_DEFAULT, 'sanitize: non-number → default')
+  eq(sanitizeEasingPreviewSpeed(1.23), 1.2, 'sanitize: rounds to one decimal')
+  // step up / down by STEP, clamped
+  eq(stepEasingPreviewSpeed(1, +1), 1.2, 'step: 1 up → 1.2')
+  eq(stepEasingPreviewSpeed(1, -1), 0.8, 'step: 1 down → 0.8')
+  eq(stepEasingPreviewSpeed(EASING_PREVIEW_SPEED_MAX, +1), EASING_PREVIEW_SPEED_MAX, 'step: up at max → clamp (ref-equal)')
+  eq(stepEasingPreviewSpeed(EASING_PREVIEW_SPEED_MIN, -1), EASING_PREVIEW_SPEED_MIN, 'step: down at min → clamp')
+  eq(stepEasingPreviewSpeed(1, 0), 1, 'step: zero dir → unchanged')
+  eq(stepEasingPreviewSpeed(1, NaN), 1, 'step: NaN dir → unchanged')
+  eq(stepEasingPreviewSpeed('junk', +1), sanitizeEasingPreviewSpeed('junk') + 0.2, 'step: corrupt current steps from sane base')
+  // repeated stepping has no float drift (0.8 → 1.0 → 1.2 clean)
+  let v = 0.8
+  v = stepEasingPreviewSpeed(v, +1); v = stepEasingPreviewSpeed(v, +1)
+  eq(v, 1.2, 'step: repeated +0.2 stays on clean decimals (no drift)')
+  // band-edge predicates
+  ok(easingPreviewSpeedAtMin(EASING_PREVIEW_SPEED_MIN) === true, 'atMin: true at floor')
+  ok(easingPreviewSpeedAtMin(1) === false, 'atMin: false mid-band')
+  ok(easingPreviewSpeedAtMax(EASING_PREVIEW_SPEED_MAX) === true, 'atMax: true at ceiling')
+  ok(easingPreviewSpeedAtMax(1) === false, 'atMax: false mid-band')
+  // effective duration = base / speed
+  eq(effectiveEasingLoopSec(1), EASING_PREVIEW_LOOP_SEC, 'effective: 1x → base loop')
+  eq(effectiveEasingLoopSec(2), 0.8, 'effective: 2x → half the 1.6s base')
+  eq(effectiveEasingLoopSec(0.8), 2, 'effective: 0.8x → 2s (slower)')
+  ok(effectiveEasingLoopSec(2) < effectiveEasingLoopSec(1), 'effective: faster speed → shorter duration')
+  // defensive: junk base / speed never yields 0 / NaN / Infinity
+  ok(Number.isFinite(effectiveEasingLoopSec(1, 0)) && effectiveEasingLoopSec(1, 0) > 0, 'effective: junk base falls back finite')
+  ok(Number.isFinite(effectiveEasingLoopSec('junk')), 'effective: junk speed finite')
+  // pace label reads the effective duration so dot + text agree
+  eq(easingPreviewPaceLabel(effectiveEasingLoopSec(2)), easingPreviewPaceLabel(0.8), 'effective feeds the pace label coherently')
+  // "Nx" speed label
+  eq(easingPreviewSpeedLabel(1), '1.0x', 'speed label: 1 → 1.0x')
+  eq(easingPreviewSpeedLabel(2), '2.0x', 'speed label: 2 → 2.0x')
+  eq(easingPreviewSpeedLabel(0.8), '0.8x', 'speed label: 0.8 → 0.8x')
+  eq(easingPreviewSpeedLabel(NaN), '1.0x', 'speed label: junk → default 1.0x')
+}
+console.log(`PASS: framingGuides R53.B — tunable preview-dot pace stepper`)
 
 // R51.M — pinnedReorderTarget: arrow-step within the pinned run, ends clamp.
 {
