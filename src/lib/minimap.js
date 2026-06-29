@@ -104,11 +104,15 @@ export function scaleLabelFor(sceneHalf) {
 // shape { id, name, pos: [x,y,z], target: [x,y,z], createdAt } —
 // matching the cameraViews lib.
 //
-// Returns an array of { id, name, px, py, inBounds } where inBounds
-// is true when the view's XZ position lands inside [0, size]^2
+// Returns an array of { id, name, px, py, inBounds, order } where
+// inBounds is true when the view's XZ position lands inside [0, size]^2
 // without clamping. The renderer uses inBounds to dim out-of-view
 // markers (they still draw at the canvas edge so the user knows the
-// view exists, just visually distinguished).
+// view exists, just visually distinguished). `order` (R52.N) is the
+// 1-based position of the marker among the VALID (drawable) views, in
+// list order — so a numbered badge on each dot cross-references the
+// saved-views list (RightSidebar) at a glance. Skipped (malformed)
+// rows don't consume a number, so the badges stay 1..N contiguous.
 export function projectSavedViews(views, sceneHalf, size) {
   if (!Array.isArray(views) || views.length === 0) return []
   const sh = (sceneHalf > 0 && Number.isFinite(sceneHalf)) ? sceneHalf : DEFAULT_SCENE_HALF
@@ -128,9 +132,23 @@ export function projectSavedViews(views, sceneHalf, size) {
       px,
       py,
       inBounds,
+      order: out.length + 1,
     })
   }
   return out
+}
+
+// R52.N — format a saved-view marker's badge text from its 1-based order.
+// The minimap is a tiny widget, so a runaway count is capped to keep the
+// glyph legible (anything past `cap` reads as "cap+"). Defensive: a
+// non-finite / sub-1 order → '' so the renderer simply omits the badge
+// rather than painting "NaN" or "0". Pure.
+export const MARKER_BADGE_CAP = 99
+export function savedViewMarkerLabel(order, cap = MARKER_BADGE_CAP) {
+  const n = Math.floor(Number(order))
+  if (!Number.isFinite(n) || n < 1) return ''
+  const c = (Number.isFinite(cap) && cap >= 1) ? Math.floor(cap) : MARKER_BADGE_CAP
+  return n > c ? `${c}+` : String(n)
 }
 
 // Pick the saved-view marker nearest a click point, within a small

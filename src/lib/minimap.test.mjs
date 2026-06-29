@@ -5,6 +5,8 @@ import {
   DEFAULT_SCENE_HALF, MIN_SCENE_HALF, MAX_SCENE_HALF,
   pickSceneHalf, projectXZ, sampleScene, lookDirXZ, unprojectXZ, scaleLabelFor,
   projectSavedViews, pickNearestMarker, tooltipPlacement,
+  // R52.N — numbered saved-view badge label
+  savedViewMarkerLabel,
   // R42.N — frame all saved views
   framingForViews, fitCameraDistance, frameViewsCameraMove,
   FIT_MIN_DIST, FIT_MAX_DIST, FIT_DEFAULT_DIR,
@@ -188,6 +190,38 @@ eq(scaleLabelFor(NaN), `${DEFAULT_SCENE_HALF}u`, 'NaN → default')
   const outNoId = projectSavedViews(noId, 30, 100)
   ok(outNoId[0].id, 'fallback id is truthy when missing')
   eq(typeof outNoId[0].id, 'string', 'fallback id is a string')
+
+  // R52.N — markers carry a 1-based `order` matching list position among
+  // the VALID rows (skipped malformed rows don't consume a number).
+  const ordered = [
+    { id: 'a', pos: [0, 0, 0], target: [0, 0, 0] },
+    { id: 'bad', pos: [1, 0] },                       // malformed → skipped
+    { id: 'b', pos: [5, 0, 5], target: [0, 0, 0] },
+    null,                                              // skipped
+    { id: 'c', pos: [-5, 0, -5], target: [0, 0, 0] },
+  ]
+  const om = projectSavedViews(ordered, 30, 100)
+  eq(om.length, 3, 'R52.N: only valid rows projected')
+  eq(om[0].order, 1, 'R52.N: first valid → order 1')
+  eq(om[1].order, 2, 'R52.N: second valid → order 2 (gap-free)')
+  eq(om[2].order, 3, 'R52.N: third valid → order 3')
+  eq(om[1].id, 'b', 'R52.N: order tracks the surviving rows in list order')
+}
+
+// --- R52.N savedViewMarkerLabel ---
+{
+  eq(savedViewMarkerLabel(1), '1', 'badge: 1 → "1"')
+  eq(savedViewMarkerLabel(12), '12', 'badge: 12 → "12"')
+  eq(savedViewMarkerLabel(99), '99', 'badge: 99 → "99" (at cap)')
+  eq(savedViewMarkerLabel(100), '99+', 'badge: 100 → "99+" (over cap)')
+  eq(savedViewMarkerLabel(5, 4), '4+', 'badge: custom cap honoured')
+  eq(savedViewMarkerLabel(4, 4), '4', 'badge: exactly at custom cap')
+  eq(savedViewMarkerLabel(0), '', 'badge: 0 → "" (omitted)')
+  eq(savedViewMarkerLabel(-3), '', 'badge: negative → ""')
+  eq(savedViewMarkerLabel(NaN), '', 'badge: NaN → ""')
+  eq(savedViewMarkerLabel('7'), '7', 'badge: numeric string coerces')
+  eq(savedViewMarkerLabel(3.9), '3', 'badge: floored')
+  eq(savedViewMarkerLabel(150, NaN), '99+', 'badge: junk cap → default cap')
 }
 
 // --- pickNearestMarker ---

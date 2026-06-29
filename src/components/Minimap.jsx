@@ -3,6 +3,8 @@ import { useStore } from '../store'
 import {
   sampleScene, projectXZ, lookDirXZ, unprojectXZ, scaleLabelFor,
   projectSavedViews, pickNearestMarker, tooltipPlacement,
+  // R52.N — numbered badge text per saved-view dot (matches list order)
+  savedViewMarkerLabel,
   framingForViews, frameViewsCameraMove,
   // R43.N — animated fit-all tween
   FIT_TWEEN_MS, tweenProgress, tweenCameraStep,
@@ -162,6 +164,27 @@ export default function Minimap() {
             ctx.beginPath()
             ctx.arc(m.px, m.py, 5, 0, Math.PI * 2)
             ctx.stroke()
+          }
+          // R52.N — a tiny numbered badge beside each dot, matching the
+          // marker's 1-based order in the saved-views list so the dot
+          // cross-references the RightSidebar list at a glance. Drawn up-
+          // and-right of the dot (clamped inside the canvas) so it never
+          // sits under the dot itself; inherits the dot's dim alpha so a
+          // dimmed/out-of-bounds dot's number reads as secondary too.
+          const badge = savedViewMarkerLabel(m.order)
+          if (badge) {
+            const bx = Math.min(SIZE - 2, m.px + (isHover ? 6 : 5))
+            const by = Math.max(7, m.py - (isHover ? 5 : 4))
+            ctx.font = '700 8px Geist Mono, JetBrains Mono, monospace'
+            ctx.textAlign = 'left'
+            ctx.textBaseline = 'alphabetic'
+            // A faint dark backing stroke so the digit stays legible over
+            // the bright camera dot / grid lines.
+            ctx.lineWidth = 2
+            ctx.strokeStyle = 'rgba(2,2,6,0.85)'
+            ctx.strokeText(badge, bx, by)
+            ctx.fillStyle = isHover ? 'rgba(209,250,229,0.95)' : 'rgba(134,239,172,0.92)'
+            ctx.fillText(badge, bx, by)
           }
           ctx.restore()
         }
