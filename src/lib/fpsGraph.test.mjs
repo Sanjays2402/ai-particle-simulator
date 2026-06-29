@@ -17,7 +17,7 @@ import {
   // R41.D — one-line summary of a pinned perf sample (copy-to-clipboard)
   formatPinnedSampleLine,
   // R45.D / R45.A — paste-ready perf-window + pinned-ETA summary lines
-  formatFpsWindowStats, formatPinnedEtaLine,
+  formatFpsWindowStats, formatPinnedEtaLine, formatParticleCount,
 } from './fpsGraph.js'
 
 let passed = 0
@@ -1101,5 +1101,28 @@ console.log(`PASS: fpsGraph R45.D — ${passed} total assertions (incl. copy-rea
   eq(formatPinnedEtaLine(null), '', 'eta: null → empty')
   eq(formatPinnedEtaLine(42), '', 'eta: non-object → empty')
   ok(formatPinnedEtaLine({ approaching: true, etaSec: 1, secondsAgo: 2 }, { sep: ' | ' }).includes(' | '), 'eta: custom sep')
+}
+
+// R49.D — formatFpsWindowStats heap + particle context + formatParticleCount
+{
+  const W = { avg: 58, low: 41, min: 30, max: 60, drops: 7, count: 120 }
+  // No opts → exactly the pre-R49.D 6-part line (backwards-compatible).
+  eq(formatFpsWindowStats(W), 'avg 58 \u00b7 1% low 41 \u00b7 min 30 \u00b7 max 60 \u00b7 7 drops \u00b7 120 samples', 'win: no opts unchanged')
+  ok(formatFpsWindowStats(W, { heapMB: 312 }).includes('312 MB heap'), 'win: heap appended')
+  ok(formatFpsWindowStats(W, { particles: 32000 }).includes('32K particles'), 'win: particles appended')
+  ok(formatFpsWindowStats(W, { heapMB: 312, particles: 32000 }).endsWith('312 MB heap \u00b7 32K particles'), 'win: both append in order')
+  eq(formatFpsWindowStats(W, { heapMB: 0 }), formatFpsWindowStats(W), 'win: zero heap omitted')
+  eq(formatFpsWindowStats(W, { particles: -5 }), formatFpsWindowStats(W), 'win: negative particles omitted')
+  eq(formatFpsWindowStats(W, { heapMB: NaN, particles: 'x' }), formatFpsWindowStats(W), 'win: junk opts omitted')
+  ok(formatFpsWindowStats(W, { heapMB: 311.6 }).includes('312 MB heap'), 'win: heap rounds to MB')
+  // formatParticleCount — compact K suffix mirroring the HUD badge.
+  eq(formatParticleCount(800), '800', 'pc: sub-1K stays raw')
+  eq(formatParticleCount(8500), '8.5K', 'pc: 8500 → 8.5K')
+  eq(formatParticleCount(32000), '32K', 'pc: 32000 → 32K')
+  eq(formatParticleCount(10000), '10K', 'pc: 10K boundary no decimal')
+  eq(formatParticleCount(0), '0', 'pc: zero → 0')
+  eq(formatParticleCount(-1), '0', 'pc: negative → 0')
+  eq(formatParticleCount(NaN), '0', 'pc: NaN → 0')
+  eq(formatParticleCount('nope'), '0', 'pc: non-numeric → 0')
 }
 console.log(`PASS: fpsGraph R45.A — ${passed} total assertions (incl. copy-ready pinned ETA line)`)

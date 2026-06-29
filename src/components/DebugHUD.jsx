@@ -608,8 +608,8 @@ export default function DebugHUD() {
               one paste-ready line so a perf-bug report carries exact numbers. */}
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 2 }}>
             <button
-              onClick={() => copyStat('win', formatFpsWindowStats(fpsSummary))}
-              title="Copy the 2s perf window as one line"
+              onClick={() => copyStat('win', formatFpsWindowStats(fpsSummary, { heapMB: stats.mem, particles: particleCount }))}
+              title="Copy the 2s perf window + heap + particle count as one line"
               style={{
                 padding: '1px 7px', borderRadius: 4, lineHeight: 1.5,
                 background: copiedKey === 'win' ? 'rgba(134,239,172,0.18)' : 'rgba(255,255,255,0.05)',

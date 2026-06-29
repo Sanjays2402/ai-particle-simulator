@@ -893,7 +893,27 @@ export function formatFpsWindowStats(summary, opts = {}) {
     `${n(summary.drops)} drops`,
     `${n(count)} samples`,
   ]
+  // R49.D — append the GPU-load context so a pasted perf-bug report carries
+  // WHY the fps fell, not just that it did. Both are opt-in (omitted when not
+  // passed / non-finite) so the line stays a pure fps summary by default and
+  // existing callers/tests see no change. Heap rounds to MB; particle count
+  // gets a compact "K" suffix mirroring the HUD's own Particles row.
+  const heap = Number(opts.heapMB)
+  if (Number.isFinite(heap) && heap > 0) parts.push(`${Math.round(heap)} MB heap`)
+  const particles = Number(opts.particles)
+  if (Number.isFinite(particles) && particles > 0) parts.push(`${formatParticleCount(particles)} particles`)
   return parts.join(sep)
+}
+
+// R49.D — compact particle count, e.g. 32000 → "32K", 8500 → "8.5K", 800 →
+// "800". Mirrors the DebugHUD Particles row so a copied window line reads the
+// same as the on-screen badge. Non-finite / non-positive → '0'. Pure.
+export function formatParticleCount(count) {
+  const c = Number(count)
+  if (!Number.isFinite(c) || c <= 0) return '0'
+  if (c < 1000) return String(Math.round(c))
+  const k = c / 1000
+  return `${k >= 10 ? Math.round(k) : Math.round(k * 10) / 10}K`
 }
 
 // --- R45.A: copy the pinned ETA-to-edge sample as a paste-ready line ---
