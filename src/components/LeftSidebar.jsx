@@ -33,7 +33,7 @@ import {
   summarizeImportImpact as summarizeCrossfadeOverridesImpact,
 } from '../lib/crossfadeOverridesIO'
 import { ATTRACTOR_TYPES, MAX_ATTRACTORS, attractorTypeStyle, parsePositionInput, dropIndexForGap, stepKeyboardGapCursor, describeGapReorderAnnouncement } from '../lib/namedAttractors'
-import { FRAMING_RATIOS, FRAMING_GRIDS, SPIRAL_ORIENTATIONS, SPIRAL_SWEEP_SPEEDS, SPIRAL_SWEEP_EASINGS, CUSTOM_FRAMING_ID, formatCustomRatioLabel, buildRatioChips, projectedPinnedOrder, pinnedDropCaretGap, buildEasingPreviewPoints } from '../lib/framingGuides'
+import { FRAMING_RATIOS, FRAMING_GRIDS, SPIRAL_ORIENTATIONS, SPIRAL_SWEEP_SPEEDS, SPIRAL_SWEEP_EASINGS, CUSTOM_FRAMING_ID, formatCustomRatioLabel, buildRatioChips, projectedPinnedOrder, pinnedDropCaretGap, buildEasingPreviewPoints, buildEasingPreviewPath, pinnedReorderTarget } from '../lib/framingGuides'
 import { showToast } from './Toast'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
@@ -439,6 +439,16 @@ export default function LeftSidebar() {
                         <polyline points={buildEasingPreviewPoints(e.css, 16, 10)} fill="none"
                           stroke={active ? '#f0abfc' : '#6a6a80'} strokeWidth="1.2"
                           strokeLinecap="round" strokeLinejoin="round" />
+                        {/* R51.B — when this easing is active, a dot rides the
+                            curve so the acceleration is FELT over time: slow
+                            start sprints, ease-out coasts to a stop. Loops on
+                            the same css token the polyline + real sweep use. */}
+                        {active && (
+                          <circle r="1.4" fill="#fde9ff">
+                            <animateMotion dur="1.6s" repeatCount="indefinite"
+                              path={buildEasingPreviewPath(e.css, 16, 10)} />
+                          </circle>
+                        )}
                       </svg>
                       <span>{e.label}</span>
                     </button>
@@ -1067,7 +1077,23 @@ function CustomRatioChip({ active, ratio, onSubmit, onSelect, recents, onApplyRe
                     setDragIdx(null); setDragOverIdx(null)
                   } : undefined}
                   onDragEnd={draggable ? () => { setDragIdx(null); setDragOverIdx(null) } : undefined}
-                  title={draggable ? `${label} — drag to reorder pinned crops` : undefined}
+                  tabIndex={draggable ? 0 : undefined}
+                  onKeyDown={draggable ? (e) => {
+                    // R51.M — keyboard reorder parity with the drag: arrow keys
+                    // shift the focused pin one slot; ends are no-ops. Refocus
+                    // the chip's new position so a screen reader follows it.
+                    const dir = e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1
+                      : e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : 0
+                    if (dir === 0) return
+                    const to = pinnedReorderTarget(pinIdx, pinnedCount, dir)
+                    if (to === pinIdx) return
+                    e.preventDefault()
+                    onReorderPin(pinIdx, to)
+                    const el = e.currentTarget
+                    const sib = dir < 0 ? el.previousElementSibling : el.nextElementSibling
+                    if (sib && typeof sib.focus === 'function') requestAnimationFrame(() => sib.focus())
+                  } : undefined}
+                  title={draggable ? `${label} — drag or arrow-keys to reorder pinned crops` : undefined}
                   style={{
                     display: 'inline-flex', alignItems: 'stretch',
                     position: 'relative',

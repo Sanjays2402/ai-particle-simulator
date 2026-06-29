@@ -771,6 +771,19 @@ export function buildEasingPreviewPoints(css, w = 16, h = 10, samples = EASING_P
   return pts.join(' ')
 }
 
+// R51.B — same sample geometry, but emitted as an SVG path `d` string so a
+// dot can ride it via <animateMotion> (mpath needs a <path>, not a
+// <polyline>). The dot animating along the curve makes the easing's
+// acceleration FELT over time, not just shown as a static line: a slow
+// start sprints, an ease-out coasts to a stop. Identical bezier sampling
+// to buildEasingPreviewPoints so glyph + dot trace exactly the same shape.
+// Junk easing → linear diagonal. Pure.
+export function buildEasingPreviewPath(css, w = 16, h = 10, samples = EASING_PREVIEW_SAMPLES) {
+  const pts = buildEasingPreviewPoints(css, w, h, samples).split(' ')
+  if (pts.length < 2) return ''
+  return 'M' + pts.join(' L')
+}
+
 // --- R43.M: recent custom aspect ratios -------------------------------
 //
 // R42.M lets a user type any custom crop (21:9, 2.76, 5:7). A user who
@@ -994,6 +1007,27 @@ export function projectedPinnedOrder(count, fromIdx, toIdx) {
   const slotOf = new Array(n)
   for (let slot = 0; slot < n; slot++) slotOf[order[slot]] = slot + 1
   return slotOf
+}
+
+// --- R51.M: keyboard reorder for pinned ratio chips -------------------
+//
+// R45.M makes the pinned chips drag-reorderable, but drag is mouse-only —
+// no keyboard or screen-reader path. R51.M is the accessibility parity:
+// focus a pinned chip and press Left/Right (or Up/Down) to shift it one
+// slot. This computes the TARGET index for one arrow step from a focused
+// chip, clamped to the pinned run so the ends are no-ops. Returns the new
+// index, or the SAME index when the move would fall off either end / count
+// < 2 / junk, so a caller can compare-and-skip. The caller pairs the result
+// with movePinnedRatio + refocus. Pure.
+export function pinnedReorderTarget(fromIdx, count, dir) {
+  const n = Math.max(0, Math.floor(Number(count)) || 0)
+  const f = Math.floor(Number(fromIdx))
+  if (n < 2 || !Number.isFinite(f) || f < 0 || f >= n) return f
+  const step = dir < 0 ? -1 : dir > 0 ? 1 : 0
+  if (step === 0) return f
+  const t = f + step
+  if (t < 0 || t >= n) return f
+  return t
 }
 
 // --- R47.M: insert-caret gap during a pinned-chip drag ----------------

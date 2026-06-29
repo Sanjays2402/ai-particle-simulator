@@ -14,6 +14,8 @@ import {
   nextSpiralSweepEasing, spiralSweepEasingCss,
   // R45.B — easing preview curve glyph
   parseEasingControlPoints, buildEasingPreviewPoints, EASING_PREVIEW_SAMPLES,
+  // R51.B — easing preview path (animated dot) · R51.M — pinned keyboard reorder
+  buildEasingPreviewPath, pinnedReorderTarget,
   // R42.M — custom aspect-ratio input
   CUSTOM_FRAMING_ID, CUSTOM_RATIO_MIN, CUSTOM_RATIO_MAX,
   parseAspectRatio, clampCustomRatio, formatCustomRatioLabel, isCustomRatioClamped,
@@ -1148,4 +1150,32 @@ console.log(`PASS: framingGuides R39.B — ${passed} total assertions (incl. on-
   ok(buildEasingPreviewPoints('linear', 16, 10, 1).split(' ').length >= 2, 'samples<2 clamps to 2')
 }
 
-console.log(`PASS: framingGuides R42.M/R43.M/R44.M/R45.M/R45.B/R46.M/R47.M — ${passed} total assertions (incl. custom aspect-ratio input + recents MRU + pinned favourites + pinned reorder + drag slot-order preview + drop caret + easing preview glyph)`)
+// R51.B — buildEasingPreviewPath: same samples as the polyline, M…L… path.
+{
+  const d = buildEasingPreviewPath('linear', 16, 10)
+  ok(d.startsWith('M0,10'), 'path: starts at bottom-left M0,10')
+  ok(d.includes('L'), 'path: has line segments')
+  ok(d.endsWith('16,0'), 'path: ends top-right 16,0')
+  // sample count == polyline count (M + N-1 L commands == N points)
+  const pts = d.replace('M', '').split('L')
+  eq(pts.length, EASING_PREVIEW_SAMPLES, 'path: one point per sample')
+  // every easing yields a usable, finite path
+  for (const e of SPIRAL_SWEEP_EASINGS) {
+    const p = buildEasingPreviewPath(e.css, 16, 10)
+    ok(p.startsWith('M') && p.length > 4, `${e.id}: path builds`)
+  }
+  ok(buildEasingPreviewPath('garbage', 16, 10).startsWith('M'), 'junk → linear path fallback')
+}
+
+// R51.M — pinnedReorderTarget: arrow-step within the pinned run, ends clamp.
+{
+  eq(pinnedReorderTarget(0, 4, +1), 1, 'reorder: 0 right → 1')
+  eq(pinnedReorderTarget(2, 4, -1), 1, 'reorder: 2 left → 1')
+  eq(pinnedReorderTarget(0, 4, -1), 0, 'reorder: left at head → no-op')
+  eq(pinnedReorderTarget(3, 4, +1), 3, 'reorder: right at tail → no-op')
+  eq(pinnedReorderTarget(0, 1, +1), 0, 'reorder: count<2 → no-op')
+  eq(pinnedReorderTarget(1, 4, 0), 1, 'reorder: zero dir → no-op')
+  ok(Number.isNaN(pinnedReorderTarget(NaN, 4, +1)), 'reorder: junk idx → NaN returned as-is')
+}
+
+console.log(`PASS: framingGuides R42.M/R43.M/R44.M/R45.M/R45.B/R46.M/R47.M/R51.B/R51.M — ${passed} total assertions (incl. custom aspect-ratio input + recents MRU + pinned favourites + pinned reorder + drag slot-order preview + drop caret + easing preview glyph + animated path + keyboard reorder)`)
