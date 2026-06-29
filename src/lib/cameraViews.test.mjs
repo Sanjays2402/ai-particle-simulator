@@ -30,7 +30,7 @@ import {
   // R46.H — arm the range anchor from a row
   armRangeAnchor,
   // R47.H — preview the pending range block
-  rangePreviewSet,
+  rangePreviewSet, rangePreviewCount,
 } from './cameraViews.js'
 
 function assertEq(actual, expected, msg) {
@@ -1246,3 +1246,20 @@ console.log('PASS: armRangeAnchor — arm the range anchor directly from a row (
   }
 }
 console.log('PASS: rangePreviewSet — preview the pending range block before commit (R47.H)')
+
+// --- R48.H: rangePreviewCount — block size for the hovered-row chip ----
+{
+  const ids = [10, 20, 30, 40, 50]
+  assertEq(rangePreviewCount(ids, 20, 40), 3, 'count: 20..40 → 3')
+  assertEq(rangePreviewCount(ids, 40, 20), 3, 'count: order-agnostic')
+  assertEq(rangePreviewCount(ids, 10, 50), 5, 'count: full span')
+  assertEq(rangePreviewCount(ids, 30, 30), 1, 'count: same row → 1')
+  assertEq(rangePreviewCount(ids, null, 40), 0, 'count: no anchor → 0')
+  assertEq(rangePreviewCount(ids, 20, null), 0, 'count: no hover → 0')
+  assertEq(rangePreviewCount(ids, 999, 40), 0, 'count: stale anchor → 0')
+  assertEq(rangePreviewCount([], 1, 2), 0, 'count: empty roster → 0')
+  assertEq(rangePreviewCount(null, 1, 2), 0, 'count: non-array → 0')
+  // count never disagrees with the previewed set's size.
+  assertEq(rangePreviewCount(ids, 20, 40), rangePreviewSet(ids, 20, 40).size, 'count: equals set size')
+}
+console.log('PASS: rangePreviewCount — block size for the hovered-row chip (R48.H)')

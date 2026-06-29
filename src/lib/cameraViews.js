@@ -820,3 +820,15 @@ export function rangePreviewSet(orderedIds, anchorId, hoverId) {
   return new Set(selectIdRange(orderedIds, anchorId, hoverId))
 }
 
+// --- R48.H: how many rows the pending range covers --------------------
+//
+// R47.H lights up the anchor..hover block, but the user still has to
+// count rows to know how big the selection will be — fine for 3, awkward
+// for 20. R48.H surfaces the block SIZE so a "N rows" chip can ride the
+// hovered row: glance, read, commit. Built straight on rangePreviewSet so
+// the count can never disagree with the highlighted block (a sub-1 count
+// means no real preview → 0). Pure.
+export function rangePreviewCount(orderedIds, anchorId, hoverId) {
+  return rangePreviewSet(orderedIds, anchorId, hoverId).size
+}
+

@@ -18,6 +18,8 @@ import {
   armRangeAnchor,
   // R47.H — preview the pending range block before commit
   rangePreviewSet,
+  // R48.H — count the pending range block so a size chip can ride the hovered row
+  rangePreviewCount,
 } from '../lib/cameraViews'
 import { labelForId as framingLabelForId } from '../lib/framingGuides'
 import {
@@ -796,8 +798,10 @@ export function CommandPalette({ onSettings }) {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 9 }}>
                   {/* R47.H — preview the pending range block: while an anchor
                       is armed, the rows from anchor down to the hovered row
-                      light up so the user sees the block before committing. */}
-                  {duplicableViews.map(v => {
+                      light up so the user sees the block before committing.
+                      R48.H — pendingRangeCount sizes the block so a "N rows"
+                      chip can ride the hovered (end) row before commit. */}
+                  {(() => { const pendingRangeCount = rangeMode ? rangePreviewCount(duplicableViews.map(d => d.id), rangeAnchorId, rangeHoverId) : 0; return duplicableViews.map(v => {
                     const on = selectedIds.has(v.id)
                     const isRangeAnchor = rangeMode && rangeAnchorId === v.id
                     const inPreview = rangeMode && rangePreviewSet(duplicableViews.map(d => d.id), rangeAnchorId, rangeHoverId).has(v.id)
@@ -874,9 +878,21 @@ export function CommandPalette({ onSettings }) {
                           color: '#fff', fontSize: 11, lineHeight: 1,
                         }}>{on ? '\u2713' : ''}</span>
                         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+                        {/* R48.H — block-size chip on the hovered (end) row so
+                            the count reads before the completing click; only
+                            shown for a real 2+ row block. */}
+                        {rangeMode && v.id === rangeHoverId && pendingRangeCount >= 2 && (
+                          <span aria-hidden="true" style={{
+                            flexShrink: 0, padding: '1px 6px', borderRadius: 999,
+                            fontSize: 10, fontWeight: 700, lineHeight: 1.4,
+                            fontFamily: 'Geist Mono, monospace',
+                            background: 'rgba(99,102,241,0.22)', color: '#c7d2fe',
+                            border: '1px solid rgba(129,140,248,0.5)',
+                          }}>{pendingRangeCount} rows</span>
+                        )}
                       </button>
                     )
-                  })}
+                  }) })()}
                 </div>
                 {/* R44.N — "Fit selected": frame ONLY the chosen subset on
                     the live camera (eased dolly), the companion to the
