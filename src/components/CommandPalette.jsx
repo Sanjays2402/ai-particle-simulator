@@ -16,6 +16,8 @@ import {
   rangeClick,
   // R46.H — arm the range anchor directly from a row
   armRangeAnchor,
+  // R47.H — preview the pending range block before commit
+  rangePreviewSet,
 } from '../lib/cameraViews'
 import { labelForId as framingLabelForId } from '../lib/framingGuides'
 import {
@@ -58,6 +60,9 @@ export function CommandPalette({ onSettings }) {
   // pending first-click anchor inside that mode.
   const [rangeMode, setRangeMode] = useState(false)
   const [rangeAnchorId, setRangeAnchorId] = useState(null)
+  // R47.H — the row currently hovered while a range anchor is armed, so
+  // the pending block (anchor..hover) can be previewed before the click.
+  const [rangeHoverId, setRangeHoverId] = useState(null)
   // R46.H — per-row long-press timer + a "moved" guard so a touch-and-hold
   // on a saved-view row arms the range anchor ("range from here"), while a
   // tap-at-rest still toggles selection. Cleared on touchend / move.
@@ -238,6 +243,7 @@ export function CommandPalette({ onSettings }) {
       setRangeAnchorId(r.pendingAnchorId)
       if (r.completed) {
         setRangeMode(false)
+        setRangeHoverId(null)
         setAnchorId(viewId) // reseat the shift-click anchor at the range end
       }
       return
@@ -266,6 +272,7 @@ export function CommandPalette({ onSettings }) {
     setRangeMode(prev => {
       const next = !prev
       setRangeAnchorId(null)
+      setRangeHoverId(null)
       return next
     })
   }
@@ -787,13 +794,19 @@ export function CommandPalette({ onSettings }) {
                   </div>
                 )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 9 }}>
+                  {/* R47.H — preview the pending range block: while an anchor
+                      is armed, the rows from anchor down to the hovered row
+                      light up so the user sees the block before committing. */}
                   {duplicableViews.map(v => {
                     const on = selectedIds.has(v.id)
                     const isRangeAnchor = rangeMode && rangeAnchorId === v.id
+                    const inPreview = rangeMode && rangePreviewSet(duplicableViews.map(d => d.id), rangeAnchorId, rangeHoverId).has(v.id)
                     const name = (typeof v.name === 'string' && v.name.trim()) ? v.name.trim() : `View ${v.id}`
                     return (
                       <button
                         key={v.id}
+                        onMouseEnter={() => { if (rangeMode && rangeAnchorId != null) setRangeHoverId(v.id) }}
+                        onMouseLeave={() => { setRangeHoverId(prev => (prev === v.id ? null : prev)) }}
                         onClick={(e) => {
                           // R46.H — swallow the click synthesised after a
                           // long-press fired (which already armed the anchor)
@@ -830,17 +843,29 @@ export function CommandPalette({ onSettings }) {
                         style={{
                           display: 'flex', alignItems: 'center', gap: 10,
                           padding: '7px 9px', borderRadius: 8, cursor: 'pointer',
-                          textAlign: 'left',
-                          background: on ? 'rgba(168,85,247,0.16)' : 'rgba(255,255,255,0.03)',
+                          textAlign: 'left', position: 'relative',
+                          background: on ? 'rgba(168,85,247,0.16)'
+                            : inPreview ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.03)',
                           border: isRangeAnchor
                             ? '1px solid rgba(129,140,248,0.85)'
+                            : inPreview ? '1px solid rgba(99,102,241,0.4)'
                             : `1px solid ${on ? 'rgba(168,85,247,0.45)' : 'rgba(255,255,255,0.06)'}`,
                           boxShadow: isRangeAnchor ? '0 0 10px rgba(99,102,241,0.4)' : 'none',
-                          color: on ? '#e9d5ff' : '#9a9ab0',
+                          color: on ? '#e9d5ff' : inPreview ? '#c7d2fe' : '#9a9ab0',
                           fontFamily: 'inherit', fontSize: 12.5, fontWeight: 500,
                           transition: 'all 0.12s ease-out',
                         }}
                       >
+                        {/* R47.H — connector stripe: a thin indigo bar down the
+                            left edge of every row in the pending block so the
+                            anchor→hover span reads as one connected selection. */}
+                        {inPreview && (
+                          <span aria-hidden="true" style={{
+                            position: 'absolute', left: 0, top: 0, bottom: 0, width: 2.5,
+                            borderRadius: '2px 0 0 2px',
+                            background: 'linear-gradient(180deg, rgba(129,140,248,0.95), rgba(168,85,247,0.85))',
+                          }} />
+                        )}
                         <span style={{
                           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                           width: 16, height: 16, borderRadius: 5, flexShrink: 0,

@@ -801,3 +801,22 @@ export function armRangeAnchor(orderedIds, rowId) {
   return orderedIds.indexOf(rowId) >= 0 ? rowId : null
 }
 
+// --- R47.H: preview the pending range block before the completing click -
+//
+// R46.H arms a range anchor; the next click completes the block via
+// rangeClick. Between arm + complete the user has no preview of WHICH
+// rows the block will cover — they have to trust the two endpoints. R47.H
+// previews the pending block: as the pointer hovers a row, the rows from
+// the armed anchor down to the hovered one light up (a faint connector)
+// so the selection is seen before it's committed. This returns a Set of
+// the inclusive anchor..hovered ids (for O(1) per-row membership in the
+// render), built on selectIdRange so the preview matches what rangeClick
+// will actually select. Empty Set when no anchor is armed, no row is
+// hovered, or either id isn't selectable. Pure; never mutates.
+export function rangePreviewSet(orderedIds, anchorId, hoverId) {
+  if (anchorId == null || hoverId == null) return new Set()
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) return new Set()
+  if (orderedIds.indexOf(anchorId) < 0 || orderedIds.indexOf(hoverId) < 0) return new Set()
+  return new Set(selectIdRange(orderedIds, anchorId, hoverId))
+}
+

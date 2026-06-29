@@ -29,6 +29,8 @@ import {
   rangeClick,
   // R46.H — arm the range anchor from a row
   armRangeAnchor,
+  // R47.H — preview the pending range block
+  rangePreviewSet,
 } from './cameraViews.js'
 
 function assertEq(actual, expected, msg) {
@@ -1222,3 +1224,25 @@ console.log('PASS: rangeClick — header two-click range mode (arm / complete / 
 }
 
 console.log('PASS: armRangeAnchor — arm the range anchor directly from a row (R46.H)')
+
+// --- R47.H: rangePreviewSet — preview the pending range block ---------
+{
+  const ids = [10, 20, 30, 40, 50]
+  const sortNums = (s) => [...s].sort((a, b) => a - b).join(',')
+  assertEq(sortNums(rangePreviewSet(ids, 20, 40)), '20,30,40', 'preview: 20..40 inclusive')
+  assertEq(sortNums(rangePreviewSet(ids, 40, 20)), '20,30,40', 'preview: order-agnostic')
+  assertEq(sortNums(rangePreviewSet(ids, 30, 30)), '30', 'preview: same row → single')
+  assertEq(rangePreviewSet(ids, null, 40).size, 0, 'preview: no anchor → empty')
+  assertEq(rangePreviewSet(ids, 20, null).size, 0, 'preview: no hover → empty')
+  assertEq(rangePreviewSet(ids, 999, 40).size, 0, 'preview: stale anchor → empty')
+  assertEq(rangePreviewSet(ids, 20, 999).size, 0, 'preview: stale hover → empty')
+  assertEq(rangePreviewSet([], 1, 2).size, 0, 'preview: empty roster → empty')
+  assertEq(rangePreviewSet(null, 1, 2).size, 0, 'preview: non-array roster → empty')
+  // matches what rangeClick would select (preview never lies).
+  {
+    const previewed = rangePreviewSet(ids, 20, 40)
+    const r = rangeClick(ids, 20, 40, new Set())
+    assertEq(sortNums(previewed), sortNums(new Set([...r.selected])), 'preview: matches rangeClick result')
+  }
+}
+console.log('PASS: rangePreviewSet — preview the pending range block before commit (R47.H)')
