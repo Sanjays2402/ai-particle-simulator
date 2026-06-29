@@ -5,7 +5,7 @@ import {
   classifyZenKey, nextZenState, shouldHideCursor, zenOrbitSpeed,
   formatNowPlaying, formatThemeName, formatFramingLabel, formatGridLabel, formatGridDetail, formatCustomFramingLine,
 } from '../lib/zenMode'
-import { labelForId as framingLabelForId, CUSTOM_FRAMING_ID, formatCustomRatioLabel, gridLabelForId, spiralCornerLabel, isCustomRatioClamped, formatClampedHint } from '../lib/framingGuides'
+import { labelForId as framingLabelForId, CUSTOM_FRAMING_ID, formatCustomRatioLabel, gridLabelForId, spiralCornerLabel, isCustomRatioClamped, formatClampedBandHint } from '../lib/framingGuides'
 import { resolveReducedMotion } from '../lib/reducedMotion'
 import { resolveCalmFor } from '../lib/calmMode'
 
@@ -58,7 +58,7 @@ export default function ZenMode() {
   // when nothing was clamped, so the suffix tooltip falls back to its plain
   // text. Cheap store read; recomputes only when the raw ratio changes.
   const framingCustomRatioRaw = useStore(s => s.framingCustomRatioRaw)
-  const framingClampedHint = framingClamped ? formatClampedHint(framingCustomRatioRaw) : ''
+  const framingClampedHint = framingClamped ? formatClampedBandHint(framingCustomRatioRaw) : ''
   // R45.E — the active composition grid (thirds / cross / golden spiral),
   // surfaced beside the crop so a recording documents the full composition.
   // The grid renders even with no crop (it composes into the full viewport),

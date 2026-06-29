@@ -17,7 +17,7 @@ import {
   // R42.M — custom aspect-ratio input
   CUSTOM_FRAMING_ID, CUSTOM_RATIO_MIN, CUSTOM_RATIO_MAX,
   parseAspectRatio, clampCustomRatio, formatCustomRatioLabel, isCustomRatioClamped,
-  parseRawAspectRatio, formatClampedHint,
+  parseRawAspectRatio, formatClampedHint, formatClampedBandHint,
   // R43.M — recent custom ratios MRU
   RECENT_RATIOS_MAX, sanitizeRecentRatios, pushRecentRatio, sameRecentRatios,
   // R44.M — pinned (favourite) custom ratios
@@ -1101,6 +1101,13 @@ console.log(`PASS: framingGuides R39.B — ${passed} total assertions (incl. on-
   eq(formatClampedHint(0), '', 'hint: 0 → empty')
   eq(formatClampedHint(NaN), '', 'hint: NaN → empty')
   eq(formatClampedHint('x'), '', 'hint: non-numeric → empty')
+  // R50.E — band-aware clamp hint appends the usable [MIN, MAX] band
+  eq(formatClampedBandHint(12), 'typed 12 \u2192 shown 5 (band 0.2-5)', 'band hint: 12 clamped + band')
+  eq(formatClampedBandHint(0.01), 'typed 0.01 \u2192 shown 0.2 (band 0.2-5)', 'band hint: tiny clamped + band')
+  eq(formatClampedBandHint(2.39), '', 'band hint: in-band → empty')
+  eq(formatClampedBandHint(0), '', 'band hint: 0 → empty')
+  eq(formatClampedBandHint(NaN), '', 'band hint: NaN → empty')
+  eq(formatClampedBandHint('x'), '', 'band hint: non-numeric → empty')
 }
 
 // --- R45.B: spiral sweep easing preview curve glyph -------------------

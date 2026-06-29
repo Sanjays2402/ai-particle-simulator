@@ -173,6 +173,18 @@ export function formatClampedHint(rawRatio) {
   return `typed ${formatCustomRatioLabel(r)} \u2192 shown ${formatCustomRatioLabel(clamped)}`
 }
 
+// R50.E — same clamp tooltip plus the usable BAND so a user learns WHY a
+// 12 became 5, not just that it did: "typed 12 -> shown 5 (band 0.2-5)".
+// The band is the [CUSTOM_RATIO_MIN, CUSTOM_RATIO_MAX] limits formatted
+// like every other ratio in the UI. Falls back to '' on the same
+// no-clamp / junk inputs as formatClampedHint so the suffix only explains
+// when there's genuinely something to explain. Pure.
+export function formatClampedBandHint(rawRatio) {
+  const base = formatClampedHint(rawRatio)
+  if (!base) return ''
+  return `${base} (band ${formatCustomRatioLabel(CUSTOM_RATIO_MIN)}-${formatCustomRatioLabel(CUSTOM_RATIO_MAX)})`
+}
+
 // Given the viewport size + a target ratio, compute the bar geometry.
 // Returns an object describing the masked frame:
 //   { mode, bar, frameW, frameH, frameX, frameY }
