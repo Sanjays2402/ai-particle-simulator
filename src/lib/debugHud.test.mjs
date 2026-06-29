@@ -8,6 +8,8 @@ import {
   syncHudViewModes,
   // R52.O — both-views-linked indicator
   hudViewsLinked,
+  // R53.O — the linked glyph is itself the sync control
+  HUD_LINK_GLYPH_LINKED, HUD_LINK_GLYPH_DIVERGED, hudLinkGlyph, hudLinkToggleLabel,
 } from './debugHud.js'
 
 let passed = 0
@@ -117,3 +119,31 @@ console.log(`PASS: debugHud R50.O/R51.O — per-view fps/ms density + sync`)
   ok(hudViewsLinked(toggleHudViewMode({ fps: 'expanded', ms: 'expanded' }, 'fps')) === false, 'linked: toggle one view diverges')
 }
 console.log(`PASS: debugHud R52.O — hudViewsLinked sync indicator`)
+
+// R53.O — the linked glyph + its action label are derived from the SAME
+// linked state, and clicking the glyph (syncHudViewModes) always lands
+// linked. We verify the glyph chars, the glyph selector, the action
+// tooltip, and the round-trip (click a diverged map → linked).
+{
+  // glyph chars are the two monochrome math symbols, distinct
+  eq(HUD_LINK_GLYPH_LINKED, '\u2261', 'linked glyph is ≡')
+  eq(HUD_LINK_GLYPH_DIVERGED, '\u2260', 'diverged glyph is ≠')
+  ok(HUD_LINK_GLYPH_LINKED !== HUD_LINK_GLYPH_DIVERGED, 'glyphs distinct')
+  // hudLinkGlyph tracks hudViewsLinked exactly
+  eq(hudLinkGlyph({ fps: 'expanded', ms: 'expanded' }), HUD_LINK_GLYPH_LINKED, 'both expanded → ≡')
+  eq(hudLinkGlyph({ fps: 'compact', ms: 'compact' }), HUD_LINK_GLYPH_LINKED, 'both compact → ≡')
+  eq(hudLinkGlyph({ fps: 'expanded', ms: 'compact' }), HUD_LINK_GLYPH_DIVERGED, 'diverged → ≠')
+  // junk / legacy resolve to linked (both-default)
+  eq(hudLinkGlyph(null), HUD_LINK_GLYPH_LINKED, 'null → both default → ≡')
+  eq(hudLinkGlyph('compact'), HUD_LINK_GLYPH_LINKED, 'legacy string → both same → ≡')
+  // action tooltip is non-empty and state-appropriate
+  ok(hudLinkToggleLabel({ fps: 'expanded', ms: 'compact' }).length > 0, 'diverged label non-empty')
+  ok(/re-link/i.test(hudLinkToggleLabel({ fps: 'expanded', ms: 'compact' })), 'diverged label mentions re-link')
+  ok(/flip both/i.test(hudLinkToggleLabel({ fps: 'compact', ms: 'compact' })), 'linked label mentions flip both')
+  // clicking the glyph = syncHudViewModes → ALWAYS lands on a linked map
+  ok(hudViewsLinked(syncHudViewModes({ fps: 'expanded', ms: 'compact' })) === true, 'click diverged → linked')
+  ok(hudViewsLinked(syncHudViewModes({ fps: 'compact', ms: 'compact' })) === true, 'click linked → still linked (both flip)')
+  // and the glyph the click produces is ≡ in both cases
+  eq(hudLinkGlyph(syncHudViewModes({ fps: 'expanded', ms: 'compact' })), HUD_LINK_GLYPH_LINKED, 'post-click glyph is ≡')
+}
+console.log(`PASS: debugHud R53.O — clickable linked glyph + action label`)

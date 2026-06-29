@@ -15,7 +15,7 @@ import {
   formatFpsWindowStats, formatPinnedEtaLine,
 } from '../lib/fpsGraph'
 // R45.O — compact/expanded section policy.
-import { resolveHudSections, hudModeLabel, hudModeForView, hudViewsLinked } from '../lib/debugHud'
+import { resolveHudSections, hudModeLabel, hudModeForView, hudViewsLinked, hudLinkGlyph, hudLinkToggleLabel } from '../lib/debugHud'
 
 // Performance debug HUD. Toggle with backtick (`) so it doesn't fight
 // the existing single-letter shortcuts. Tracks FPS as a rolling window
@@ -347,21 +347,31 @@ export default function DebugHUD() {
             color: msView ? '#e9d5ff' : '#6a6a80',
           }}>MS</span>
         </span>
-        {/* R52.O — "linked" glyph: an equals sign when both readouts (fps +
-            ms) sit at the same density (Shift+M syncs them), a not-equal
-            sign when they've diverged. So the user can see at a glance
-            whether the two views are locked in step or drifting apart.
-            Monochrome math glyphs only. */}
-        <span
-          title={viewsLinked
-            ? 'FPS + MS density are in sync (Shift+M keeps them linked)'
-            : 'FPS + MS density have diverged - Shift+M to re-link them'}
+        {/* R52.O — passive linked/diverged glyph: an equals sign when both
+            readouts (fps + ms) sit at the same density, a not-equal sign
+            when they've diverged. R53.O makes the glyph itself the SYNC
+            control — clicking it runs syncHudViewModes, so a mouse-only
+            user can re-link (or flip-both) by clicking the very indicator
+            that told them they'd drifted. Shift+M still works as the
+            keyboard path. Monochrome math glyphs only. */}
+        <button
+          onClick={(e) => { e.stopPropagation(); syncHudViewModes() }}
+          title={hudLinkToggleLabel(hudViewModes)}
+          aria-label={hudLinkToggleLabel(hudViewModes)}
           style={{
-            marginLeft: 5, fontSize: 11, lineHeight: 1, fontWeight: 700,
+            marginLeft: 5, padding: '0 3px', fontSize: 11, lineHeight: 1, fontWeight: 700,
             color: viewsLinked ? '#a78bfa' : '#6a6a80',
             opacity: viewsLinked ? 1 : 0.75,
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            fontFamily: 'inherit', pointerEvents: 'auto',
+            transition: 'color 0.15s ease-out, opacity 0.15s ease-out',
           }}
-        >{viewsLinked ? '\u2261' : '\u2260'}</span>
+          onMouseEnter={(e) => { e.currentTarget.style.color = '#c4b5fd'; e.currentTarget.style.opacity = '1' }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.color = viewsLinked ? '#a78bfa' : '#6a6a80'
+            e.currentTarget.style.opacity = viewsLinked ? '1' : '0.75'
+          }}
+        >{hudLinkGlyph(hudViewModes)}</button>
         {/* R45.O — compact/expanded density toggle. FULL is the instrument
             panel; MIN keeps the at-a-glance rows only. pointerEvents:auto so
             it's clickable inside the otherwise pass-through HUD. */}

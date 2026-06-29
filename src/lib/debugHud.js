@@ -115,3 +115,35 @@ export function hudViewsLinked(modes) {
   const m = sanitizeHudViewModes(modes)
   return m.fps === m.ms
 }
+
+// --- R53.O: the linked glyph is itself the sync control ----------------
+//
+// R52.O paints a passive linked/diverged glyph on the density pill, but
+// the only way to ACT on a divergence is the Shift+M keystroke (or
+// shift-clicking the FULL/MIN button). R53.O makes the glyph itself the
+// button: clicking it runs syncHudViewModes, so a mouse-only user can
+// re-link the two readouts by clicking the very indicator that told them
+// they'd drifted. These pure helpers keep the glyph chars + the action
+// tooltip in the lib (single source of truth shared with the component)
+// so the clickable glyph and the passive R52.O read can't disagree.
+
+// The two math glyphs the indicator shows. Monochrome, no emoji.
+export const HUD_LINK_GLYPH_LINKED = '\u2261'   // ≡  identical / linked
+export const HUD_LINK_GLYPH_DIVERGED = '\u2260' // ≠  not equal / diverged
+
+// The glyph char for the current density map — ≡ when linked, ≠ when the
+// two readouts have diverged. Pure.
+export function hudLinkGlyph(modes) {
+  return hudViewsLinked(modes) ? HUD_LINK_GLYPH_LINKED : HUD_LINK_GLYPH_DIVERGED
+}
+
+// The action-naming tooltip for the clickable glyph, so it announces what
+// a click DOES (not just the current state). Diverged → clicking links
+// them; linked → clicking toggles BOTH densities together (syncHudViewModes
+// always lands on a linked map, flipping to the opposite density when the
+// two already match). Pure; always a non-empty string.
+export function hudLinkToggleLabel(modes) {
+  return hudViewsLinked(modes)
+    ? 'FPS + MS density linked - click to flip both at once'
+    : 'FPS + MS density diverged - click to re-link them'
+}
