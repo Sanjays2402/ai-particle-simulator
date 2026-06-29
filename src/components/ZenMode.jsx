@@ -5,7 +5,7 @@ import {
   classifyZenKey, nextZenState, shouldHideCursor, zenOrbitSpeed,
   formatNowPlaying, formatThemeName, formatFramingLabel, formatGridLabel, formatGridDetail, formatCustomFramingLine,
 } from '../lib/zenMode'
-import { labelForId as framingLabelForId, CUSTOM_FRAMING_ID, formatCustomRatioLabel, gridLabelForId, spiralCornerLabel } from '../lib/framingGuides'
+import { labelForId as framingLabelForId, CUSTOM_FRAMING_ID, formatCustomRatioLabel, gridLabelForId, spiralCornerLabel, isCustomRatioClamped } from '../lib/framingGuides'
 import { resolveReducedMotion } from '../lib/reducedMotion'
 import { resolveCalmFor } from '../lib/calmMode'
 
@@ -48,6 +48,11 @@ export default function ZenMode() {
   const framingLine = framingGuideId === CUSTOM_FRAMING_ID
     ? formatCustomFramingLine(formatCustomRatioLabel(framingCustomRatio))
     : formatFramingLabel(framingLabelForId(framingGuideId))
+  // R48.E — when a custom crop got CLAMPED into the usable band (the user
+  // typed something extreme like 12:1), the displayed ratio isn't what was
+  // dialled in. Flag it so a recording self-documents that honestly rather
+  // than implying the shown aspect was the entry. Only on a live custom crop.
+  const framingClamped = framingGuideId === CUSTOM_FRAMING_ID && isCustomRatioClamped(framingCustomRatio)
   // R45.E — the active composition grid (thirds / cross / golden spiral),
   // surfaced beside the crop so a recording documents the full composition.
   // The grid renders even with no crop (it composes into the full viewport),
@@ -305,6 +310,16 @@ export default function ZenMode() {
                   fontFamily: 'Geist Mono, JetBrains Mono, monospace',
                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 }}>{framingLine}</span>
+                {/* R48.E — faint "(clamped)" suffix when the typed custom ratio
+                    was pulled into the usable band, so the recording is honest
+                    that the shown aspect isn't the raw entry. */}
+                {framingClamped && (
+                  <span style={{
+                    fontSize: 8.5, fontWeight: 600, color: '#b08a3a', lineHeight: 1.2,
+                    letterSpacing: '0.04em', flexShrink: 0,
+                    fontFamily: 'Geist Mono, JetBrains Mono, monospace',
+                  }}>(clamped)</span>
+                )}
               </span>
             )}
             {/* R45.E — composition-grid line: when a grid is set (thirds /

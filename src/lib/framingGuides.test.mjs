@@ -14,7 +14,7 @@ import {
   nextSpiralSweepEasing, spiralSweepEasingCss,
   // R42.M — custom aspect-ratio input
   CUSTOM_FRAMING_ID, CUSTOM_RATIO_MIN, CUSTOM_RATIO_MAX,
-  parseAspectRatio, clampCustomRatio, formatCustomRatioLabel,
+  parseAspectRatio, clampCustomRatio, formatCustomRatioLabel, isCustomRatioClamped,
   // R43.M — recent custom ratios MRU
   RECENT_RATIOS_MAX, sanitizeRecentRatios, pushRecentRatio, sameRecentRatios,
   // R44.M — pinned (favourite) custom ratios
@@ -745,6 +745,20 @@ console.log(`PASS: framingGuides R39.B — ${passed} total assertions (incl. on-
     const r = parseAspectRatio(inp)
     ok(r >= CUSTOM_RATIO_MIN && r <= CUSTOM_RATIO_MAX, `parsed ${inp} in band`)
   }
+
+  // --- R48.E isCustomRatioClamped — flag a ratio resting on a bound ---
+  ok(isCustomRatioClamped(CUSTOM_RATIO_MAX), 'clamped: at MAX → true')
+  ok(isCustomRatioClamped(CUSTOM_RATIO_MIN), 'clamped: at MIN → true')
+  ok(isCustomRatioClamped(parseAspectRatio('100:1')), 'clamped: absurdly wide entry → true')
+  ok(isCustomRatioClamped(parseAspectRatio('1:100')), 'clamped: absurdly tall entry → true')
+  ok(!isCustomRatioClamped(2.39), 'clamped: in-band 2.39 → false')
+  ok(!isCustomRatioClamped(parseAspectRatio('16:9')), 'clamped: in-band 16:9 → false')
+  ok(!isCustomRatioClamped(0), 'clamped: 0 → false')
+  ok(!isCustomRatioClamped(-3), 'clamped: negative → false')
+  ok(!isCustomRatioClamped(NaN), 'clamped: NaN → false')
+  ok(!isCustomRatioClamped('x'), 'clamped: junk → false')
+  ok(isCustomRatioClamped(CUSTOM_RATIO_MAX + 5), 'clamped: above MAX → true')
+  ok(isCustomRatioClamped(CUSTOM_RATIO_MIN / 4), 'clamped: below MIN → true')
 
   // --- formatCustomRatioLabel ---
   eq(formatCustomRatioLabel(1.7777), '1.78', 'format rounds to 2dp')

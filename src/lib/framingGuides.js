@@ -127,6 +127,19 @@ export function formatCustomRatioLabel(ratio) {
   return String(Math.round(r * 100) / 100)
 }
 
+// R48.E — is the stored custom ratio sitting EXACTLY on a clamp bound?
+// The store clamps every entry into [MIN, MAX] (parseAspectRatio →
+// clampCustomRatio), so a value resting precisely on a bound is the
+// fingerprint of an out-of-range input that got pulled back. The zen
+// card uses this to flag "(clamped)" so a recording is honest that the
+// displayed aspect isn't the raw number that was typed. Non-finite /
+// non-positive → false (no frame to flag). Pure.
+export function isCustomRatioClamped(ratio) {
+  const r = Number(ratio)
+  if (!Number.isFinite(r) || r <= 0) return false
+  return r <= CUSTOM_RATIO_MIN || r >= CUSTOM_RATIO_MAX
+}
+
 // Given the viewport size + a target ratio, compute the bar geometry.
 // Returns an object describing the masked frame:
 //   { mode, bar, frameW, frameH, frameX, frameY }
