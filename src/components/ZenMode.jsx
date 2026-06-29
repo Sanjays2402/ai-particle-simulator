@@ -3,7 +3,7 @@ import { useStore, THEMES } from '../store'
 import {
   ZEN_BODY_CLASS, CURSOR_IDLE_MS,
   classifyZenKey, nextZenState, shouldHideCursor, zenOrbitSpeed,
-  formatNowPlaying, formatThemeName, formatFramingLabel, formatGridLabel, formatGridDetail,
+  formatNowPlaying, formatThemeName, formatFramingLabel, formatGridLabel, formatGridDetail, formatCustomFramingLine,
 } from '../lib/zenMode'
 import { labelForId as framingLabelForId, CUSTOM_FRAMING_ID, formatCustomRatioLabel, gridLabelForId, spiralCornerLabel } from '../lib/framingGuides'
 import { resolveReducedMotion } from '../lib/reducedMotion'
@@ -42,10 +42,12 @@ export default function ZenMode() {
   // into '' so the card simply omits the line when no crop is set.
   const framingGuideId = useStore(s => s.framingGuideId)
   const framingCustomRatio = useStore(s => s.framingCustomRatio)
-  const framingRawLabel = framingGuideId === CUSTOM_FRAMING_ID
-    ? formatCustomRatioLabel(framingCustomRatio)
-    : framingLabelForId(framingGuideId)
-  const framingLine = formatFramingLabel(framingRawLabel)
+  // R47.E — for a CUSTOM crop, document the exact ratio AND that it's
+  // custom: "Custom · 2.35" rather than the bare "2.35" the preset chips
+  // also produce. A preset crop keeps its short label ("2.39", "16:9").
+  const framingLine = framingGuideId === CUSTOM_FRAMING_ID
+    ? formatCustomFramingLine(formatCustomRatioLabel(framingCustomRatio))
+    : formatFramingLabel(framingLabelForId(framingGuideId))
   // R45.E — the active composition grid (thirds / cross / golden spiral),
   // surfaced beside the crop so a recording documents the full composition.
   // The grid renders even with no crop (it composes into the full viewport),

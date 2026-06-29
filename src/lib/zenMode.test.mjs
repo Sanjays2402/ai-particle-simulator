@@ -12,6 +12,8 @@ import {
   GRID_LABEL_MAX_LEN, formatGridLabel,
   // R46.E — grid line spiral-orientation detail
   formatGridDetail,
+  // R47.E — custom framing line ("Custom · <ratio>")
+  CUSTOM_FRAMING_MAX_LEN, formatCustomFramingLine,
 } from './zenMode.js'
 
 let passed = 0
@@ -370,4 +372,18 @@ eq(zenOrbitSpeed(true, false, 0, 999999), 0, 'preference off → 0 speed')
   eq(formatGridDetail('Spiral', 'Top', { maxLen: 1 }), '\u2026', 'maxLen 1 → lone ellipsis')
 }
 
-console.log(`PASS: zenMode — ${passed} assertions (cursor idle decision, key reducer, integration, R35.E auto-orbit ramp, R42.E now-playing label, R43.E theme label, R44.E framing label, R45.E grid label, R46.E grid spiral detail)`)
+// R47.E — custom framing line: "Custom · <ratio>"
+{
+  eq(formatCustomFramingLine('2.35'), 'Custom \u00b7 2.35', 'custom: prefixes ratio')
+  eq(formatCustomFramingLine('21:9'), 'Custom \u00b7 21:9', 'custom: separator-form ratio')
+  eq(formatCustomFramingLine(''), '', 'custom: empty ratio → omitted')
+  eq(formatCustomFramingLine('   '), '', 'custom: whitespace ratio → omitted')
+  eq(formatCustomFramingLine(2.39), '', 'custom: non-string → omitted')
+  eq(formatCustomFramingLine(null), '', 'custom: null → omitted')
+  eq(formatCustomFramingLine('1.7  7'), 'Custom \u00b7 1.7 7', 'custom: collapses inner whitespace')
+  ok(formatCustomFramingLine('1234.5678').length <= CUSTOM_FRAMING_MAX_LEN, 'custom: default maxLen bounds it')
+  eq(formatCustomFramingLine('2.35', { maxLen: 1 }), '\u2026', 'custom: maxLen 1 → lone ellipsis')
+  { const out = formatCustomFramingLine('9'.repeat(40), { maxLen: 12 }); ok(out.endsWith('\u2026') && out.length <= 12, 'custom: truncates over-long ratio') }
+}
+
+console.log(`PASS: zenMode — ${passed} assertions (cursor idle decision, key reducer, integration, R35.E auto-orbit ramp, R42.E now-playing label, R43.E theme label, R44.E framing label, R45.E grid label, R46.E grid spiral detail, R47.E custom framing line)`)

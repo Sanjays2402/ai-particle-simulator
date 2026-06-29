@@ -318,3 +318,29 @@ export function formatGridDetail(label, detail, opts = {}) {
   if (maxLen <= 1) return '\u2026'
   return text.slice(0, maxLen - 1).trimEnd() + '\u2026'
 }
+
+// --- R47.E: zen framing line — custom crop reads "Custom · <ratio>" ---
+//
+// R44.E surfaces the active crop on the zen card. For a CUSTOM aspect the
+// card showed only the bare ratio number (e.g. "2.35") via
+// formatCustomRatioLabel — which reads identical to a preset crop's label
+// and never tells a viewer it was a hand-dialled custom frame. R47.E
+// labels the custom line "Custom · 2.35" so a recording documents the
+// exact custom aspect AND that it was custom (not just one of the preset
+// chips). Pure "combine a prefix + ratio" helper, parallel to the other
+// zen line formatters: a blank / non-string ratio → '' (card omits the
+// line, since there's nothing to document); otherwise "Custom · <ratio>",
+// ellipsis-truncated to maxLen (the prefix counts toward the budget so
+// the line never blows out the card width).
+export const CUSTOM_FRAMING_MAX_LEN = 22
+export function formatCustomFramingLine(ratioLabel, opts = {}) {
+  const maxLenRaw = Number(opts.maxLen)
+  const maxLen = Number.isFinite(maxLenRaw) && maxLenRaw > 0 ? Math.floor(maxLenRaw) : CUSTOM_FRAMING_MAX_LEN
+  if (typeof ratioLabel !== 'string') return ''
+  const cleaned = ratioLabel.trim().replace(/\s+/g, ' ')
+  if (!cleaned) return ''
+  const text = `Custom \u00b7 ${cleaned}`
+  if (text.length <= maxLen) return text
+  if (maxLen <= 1) return '\u2026'
+  return text.slice(0, maxLen - 1).trimEnd() + '\u2026'
+}
