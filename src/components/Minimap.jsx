@@ -10,6 +10,8 @@ import {
   framingForSelectedViews,
   // R46.N — dim the non-selected markers while a selection is live
   markerSelectionState, markerSelectionAlpha,
+  // R47.N — dot-count glyph cluster matching dimmed/lit dots
+  fitDotGlyphs,
 } from '../lib/minimap'
 import { loadCameraViews, saveCameraViews, removeView } from '../lib/cameraViews'
 import { resolveReducedMotion } from '../lib/reducedMotion'
@@ -382,6 +384,10 @@ export default function Minimap() {
   // R45.N — how many views are in the live palette selection (mirrored from
   // the store). Drives the "Fit selected" button's visibility + count badge.
   const selectedCount = Array.isArray(selectedViewIds) ? selectedViewIds.length : 0
+  // R47.N — a tiny dot cluster (lit selected + hollow rest) so the Fit N
+  // button reads the same selection the minimap dots show. total = all
+  // views, selected = how many are in the live palette selection.
+  const fitGlyphs = fitDotGlyphs(viewCount, selectedCount)
 
   return (
     <div className="zen-hideable" style={{
@@ -502,6 +508,18 @@ export default function Minimap() {
             }}
           >
             <span style={{ fontSize: 10, lineHeight: 1 }}>{'\u2922'}</span>
+            {/* R47.N — dot cluster: filled = selected (lit dots), hollow =
+                the rest (dimmed dots), so the button matches the map. The
+                count keeps the precise number; the dots make it a glance. */}
+            <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+              {Array.from({ length: fitGlyphs.lit }).map((_, i) => (
+                <span key={`l${i}`} style={{ width: 4, height: 4, borderRadius: '50%', background: '#c7d2fe', boxShadow: '0 0 3px rgba(129,140,248,0.8)' }} />
+              ))}
+              {Array.from({ length: fitGlyphs.dim }).map((_, i) => (
+                <span key={`d${i}`} style={{ width: 4, height: 4, borderRadius: '50%', border: '1px solid rgba(199,210,254,0.4)', boxSizing: 'border-box' }} />
+              ))}
+              {fitGlyphs.overflow && <span style={{ fontSize: 8, opacity: 0.7 }}>+</span>}
+            </span>
             {selectedCount}
           </button>
         )}

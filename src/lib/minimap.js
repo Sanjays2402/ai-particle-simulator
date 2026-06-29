@@ -309,6 +309,33 @@ export function markerSelectionAlpha(state) {
   return state === 'unselected' ? MARKER_DIM_ALPHA : 1
 }
 
+// --- R47.N: dot-count glyph cluster for the "Fit N" button ------------
+//
+// R46.N dims the non-selected dots so the chosen subset stands out on the
+// map. R47.N makes the "Fit N" BUTTON agree at a glance: instead of a bare
+// number it shows a tiny cluster of dots — `lit` filled (selected) + `dim`
+// hollow (the rest) — matching exactly the dimmed/lit dots on the minimap.
+// So the button and the map read the same selection without counting.
+//
+// Returns { lit, dim, total, overflow }: lit = selected dots (capped at
+// `maxDots`), dim = the rest (capped so lit+dim never exceeds maxDots),
+// overflow = true when the real total exceeds what we can draw (caller
+// appends a "+" so the cap is honest). Defensive: non-finite / negative
+// counts clamp to 0; selected can't exceed total. Pure.
+export const FIT_GLYPH_MAX_DOTS = 6
+export function fitDotGlyphs(total, selectedCount, maxDots = FIT_GLYPH_MAX_DOTS) {
+  const cap = (Number.isFinite(maxDots) && maxDots > 0) ? Math.floor(maxDots) : FIT_GLYPH_MAX_DOTS
+  let t = Math.floor(Number(total))
+  if (!Number.isFinite(t) || t < 0) t = 0
+  let s = Math.floor(Number(selectedCount))
+  if (!Number.isFinite(s) || s < 0) s = 0
+  if (s > t) s = t
+  const overflow = t > cap
+  const lit = Math.min(s, cap)
+  const dim = Math.min(t - s, cap - lit)
+  return { lit, dim, total: t, overflow }
+}
+
 // Suggest a camera distance that frames a cluster of the given radius.
 // Physically grounded: to fit a sphere of `radius` in a camera with
 // half-FOV θ, the distance is radius / sin(θ); we add padding + clamp to

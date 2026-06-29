@@ -14,6 +14,8 @@ import {
   framingForSelectedViews,
   // R46.N — dim non-selected markers while a selection is live
   markerSelectionState, markerSelectionAlpha, MARKER_DIM_ALPHA,
+  // R47.N — dot-count glyph cluster for the Fit N button
+  fitDotGlyphs, FIT_GLYPH_MAX_DOTS,
 } from './minimap.js'
 
 function fail(m) { console.error(`FAIL: ${m}`); process.exit(1) }
@@ -553,3 +555,24 @@ console.log('PASS: minimap R44.N — framingForSelectedViews (frame a chosen sub
 }
 
 console.log('PASS: minimap R46.N — markerSelectionState + alpha (dim non-selected dots while a selection is live)')
+
+// --- R47.N: fitDotGlyphs — dot-count cluster for the Fit N button ---
+{
+  // 3 of 5 selected → 3 lit, 2 dim, no overflow.
+  let g = fitDotGlyphs(5, 3)
+  eq(g.lit, 3, 'glyphs: 3 selected → 3 lit'); eq(g.dim, 2, 'glyphs: 2 unselected → 2 dim')
+  eq(g.total, 5, 'glyphs: total preserved'); ok(!g.overflow, 'glyphs: 5 ≤ cap → no overflow')
+  // All selected.
+  g = fitDotGlyphs(4, 4); eq(g.lit, 4, 'glyphs: all selected lit'); eq(g.dim, 0, 'glyphs: none dim')
+  // None selected (degenerate but bounded).
+  g = fitDotGlyphs(3, 0); eq(g.lit, 0, 'glyphs: none lit'); eq(g.dim, 3, 'glyphs: all dim')
+  // Overflow past the cap: lit+dim never exceeds cap, overflow flagged.
+  g = fitDotGlyphs(20, 12); ok(g.lit + g.dim <= FIT_GLYPH_MAX_DOTS, 'glyphs: capped to max dots'); ok(g.overflow, 'glyphs: overflow flagged'); eq(g.total, 20, 'glyphs: real total kept')
+  // selected > total clamps; negatives/junk clamp to 0.
+  g = fitDotGlyphs(3, 9); eq(g.lit, 3, 'glyphs: sel>total clamps to total'); eq(g.dim, 0, 'glyphs: no dim left')
+  g = fitDotGlyphs(-2, -1); eq(g.lit, 0, 'glyphs: negative → 0'); eq(g.dim, 0, 'glyphs: negative → 0')
+  g = fitDotGlyphs(NaN, NaN); eq(g.lit, 0, 'glyphs: NaN → 0'); eq(g.total, 0, 'glyphs: NaN total → 0')
+  // custom maxDots respected.
+  g = fitDotGlyphs(10, 4, 4); ok(g.lit + g.dim <= 4, 'glyphs: custom cap honoured')
+}
+console.log('PASS: minimap R47.N — fitDotGlyphs (dot-count cluster matches lit/dim dots)')
