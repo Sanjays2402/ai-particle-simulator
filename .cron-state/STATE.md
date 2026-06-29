@@ -980,20 +980,38 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [~] R50.G Ghost sub-line extra dim — SKIPPED (cosmetic-only, filler)
 
 ### Batch 51 — fresh frontend queue (graduations of Batch 50 + carried)
-- [ ] R51.B Easing preview glyph: a moving dot that animates along the curve on
+- [x] R51.B Easing preview glyph: a moving dot that animates along the curve on
   hover so the acceleration is felt over time, not just shown as a static line
   (graduates R45.B static polyline).
-- [ ] R51.H Range chip 3-tier: window.confirm before committing a HUGE (20+) row
+- [x] R51.H Range chip 3-tier: window.confirm before committing a HUGE (20+) row
   delete so the loudest tier also gates the destructive action (graduates R50.H).
-- [ ] R51.O Per-view HUD density: a one-key shortcut to flip BOTH views' density
+- [x] R51.O Per-view HUD density: a one-key shortcut to flip BOTH views' density
   at once (sync), for users who want symmetric collapse (graduates R50.O).
 - [ ] R51.E Zen band hint: clicking the (clamped) suffix re-opens the custom-ratio
   input pre-filled with the band so the fix is one tap (graduates R50.E).
-- [ ] R51.K Calm import: "apply all changed" alongside per-row so a user can take
+- [x] R51.K Calm import: "apply all changed" alongside per-row so a user can take
   the diff without the unchanged rows in one tap (graduates R45.K cherry-pick).
-- [ ] R51.M Pinned ratios: keyboard reorder (arrow keys) for accessibility parity
+- [x] R51.M Pinned ratios: keyboard reorder (arrow keys) for accessibility parity
   with the drag reorder.
 - [ ] R51.N Minimap: numbered badges on dots matching the saved-views list order.
+
+### Batch 52 — fresh frontend queue (graduations of Batch 51 + new)
+- [ ] R52.E Zen band hint: clicking (clamped) re-opens custom-ratio input pre-filled
+  with the band so the fix is one tap (carried R50.E/R51.E).
+- [ ] R52.N Minimap saved-view dots wear a numbered badge (1..N) matching the
+  saved-views list order so cross-referencing the list is instant (carried R51.N).
+- [ ] R52.B Easing preview: a Hz/sec label under the moving dot so the loop pace
+  is documented, and the dot pauses on chip-hover-out (graduates R51.B).
+- [ ] R52.M Pinned crops: Home/End jump a pin to first/last slot via keyboard
+  (graduates R51.M arrow-step). Aria-live announces the new slot.
+- [ ] R52.K Calm import: "apply all changed" also shows a one-line undo toast
+  ("adopted 3 — undo") restoring the pre-import map (graduates R51.K).
+- [ ] R52.O HUD sync: a tiny "linked" glyph on the pill while both views match,
+  so the user sees they're in sync vs diverged (graduates R51.O).
+- [ ] R52.H Bulk delete: huge-tier confirm pre-checks a "type DELETE" box for 30+
+  rows (graduates R51.H copy escalation to a real friction gate).
+- [ ] R52.A Debug HUD: a one-key (1/2/3) jump to compact/normal/full presets.
+- [ ] R52.G Screenshot: caption font-size chips (S/M/L) for the baked watermark.
 
 ### Future queue carried from Batch 24 (still genuine, unshipped)
 - [ ] R25.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view
@@ -1003,6 +1021,24 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R25.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode)
 
 ## TICK LOG
+- 2026-06-29 03:11 PT — Batch 51 (5/5). Tick 51. Frontend-focus override
+  active. Shipped FIVE genuinely-new user-facing features in 4 commits
+  (R51.B+R51.M share framingGuides+LeftSidebar, committed together &
+  documented honestly): R51.B (framingGuides+LeftSidebar: buildEasingPreviewPath
+  feeds an animateMotion circle riding the ACTIVE easing chip's curve so
+  acceleration is FELT, not just shown), R51.M (framingGuides+LeftSidebar:
+  pinnedReorderTarget + tabIndex/arrow-key reorder w/ refocus, a11y parity
+  for the drag), R51.K (calmGatesIO+TopBar: applyAllChanged bulk-adopts every
+  differing motion, "apply all changed (N)" button when 2+ rows diff),
+  R51.O (debugHud+store+DebugHUD: syncHudViewModes snaps fps+ms to one density
+  via Shift+M / shift-click pill), R51.H (cameraViews+CommandPalette:
+  rangeDeleteConfirmMessage escalates confirm copy plain/large/HUGE). Gate
+  ONCE: lint 23 err/3 warn == baseline (zero new), build green, all 49 test
+  files pass. Worked DIRECTLY on main, pushed origin ae0adc6..056dea1. +57
+  asserts (framingGuides +18, debugHud +8, calmGatesIO +14, cameraViews +8 +
+  R51.M reorder asserts incl). Trigger boilerplate ("31 unpushed / first tick
+  / npm install / branch off LOCAL HEAD") STALE — repo in sync, node_modules
+  present.
 - 2026-06-29 00:34 PT — Batch 50 (5/5). Tick 50. Frontend-focus override
   active. Shipped FIVE genuinely-new user-facing features across 5 distinct
   lib+component pairs: R45.B (framingGuides+LeftSidebar: easing chips draw an
