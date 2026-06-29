@@ -406,3 +406,30 @@ export function nextAnchorOnDrag(current, x, y, w, h) {
   if (next === null) return current
   return next === current ? current : next
 }
+
+// --- R47.G: live ghost pill position during a caption drag ------------
+//
+// R46.G snaps the caption anchor corner-to-corner as the pointer crosses
+// the preview midlines, but between snaps there's no continuous feedback —
+// the pill jumps. R47.G adds a small ghost pill that FOLLOWS the pointer
+// while dragging so the placement gesture is smooth: the ghost tracks the
+// cursor, then the real pill lands in the snapped corner on release. This
+// returns the ghost's clamped centre point (so it can't drift off the
+// frame edge) plus the quadrant it's currently over, or null for a
+// degenerate box / non-finite point so the caller hides the ghost. Pure;
+// reuses anchorFromPreviewPoint so the quadrant read matches the snap.
+export const GHOST_INSET = 6
+export function previewGhostPosition(x, y, w, h, opts = {}) {
+  const px = Number(x), py = Number(y)
+  const bw = Number(w), bh = Number(h)
+  if (!Number.isFinite(px) || !Number.isFinite(py)) return null
+  if (!Number.isFinite(bw) || !Number.isFinite(bh) || bw <= 0 || bh <= 0) return null
+  const inset = (Number.isFinite(opts.inset) && opts.inset >= 0) ? opts.inset : GHOST_INSET
+  // Keep the ghost centre a small inset from the frame edges so it reads
+  // as inside the box even when the pointer rides the border. Collapse to
+  // the centre when the box is too small for the inset.
+  const lo = (dim) => dim > inset * 2 ? inset : dim / 2
+  const cx = Math.max(lo(bw), Math.min(bw - lo(bw), px))
+  const cy = Math.max(lo(bh), Math.min(bh - lo(bh), py))
+  return { x: cx, y: cy, anchor: anchorFromPreviewPoint(px, py, bw, bh) }
+}

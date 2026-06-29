@@ -17,6 +17,8 @@ import {
   anchorFromPreviewPoint,
   // R46.G — continuous drag-to-place the anchor
   nextAnchorOnDrag,
+  // R47.G — live ghost pill position during a caption drag
+  GHOST_INSET, previewGhostPosition,
 } from './screenshotWatermark.js'
 
 let passed = 0
@@ -389,4 +391,28 @@ console.log(`PASS: screenshotWatermark R45.G — ${passed} total assertions (inc
   eq(nextAnchorOnDrag('top-left', W / 2, H / 2, W, H), 'bottom-right', 'drag: dead-centre → bottom-right (shared midline bias)')
 }
 
-console.log(`PASS: screenshotWatermark R46.G — ${passed} total assertions (incl. continuous drag-to-place the caption anchor)`)
+// R47.G — live ghost pill position during a caption drag
+{
+  const W = 158, H = 92
+  // Mid-frame pointer → ghost centred there, no clamping needed.
+  const mid = previewGhostPosition(80, 46, W, H)
+  ok(mid && near(mid.x, 80, 'ghost: mid x') === undefined, 'ghost: tracks pointer x')
+  near(mid.y, 46, 'ghost: tracks pointer y')
+  eq(mid.anchor, 'bottom-right', 'ghost: mid → quadrant via shared map')
+  // Pointer riding top-left edge → clamped to inset, not 0 (stays inside).
+  const tl = previewGhostPosition(0, 0, W, H)
+  ok(tl.x >= GHOST_INSET - 0.001 && tl.y >= GHOST_INSET - 0.001, 'ghost: top-left edge clamped to inset')
+  eq(tl.anchor, 'top-left', 'ghost: top-left quadrant')
+  // Pointer past bottom-right edge → clamped within frame.
+  const br = previewGhostPosition(999, 999, W, H)
+  ok(br.x <= W - GHOST_INSET + 0.001 && br.y <= H - GHOST_INSET + 0.001, 'ghost: bottom-right clamped')
+  eq(br.anchor, 'bottom-right', 'ghost: bottom-right quadrant')
+  // Degenerate box / non-finite point → null (caller hides the ghost).
+  eq(previewGhostPosition(10, 10, 0, 0), null, 'ghost: zero box → null')
+  eq(previewGhostPosition(NaN, 10, W, H), null, 'ghost: NaN point → null')
+  // Tiny box: inset collapses to half-dim so centre stays in bounds.
+  const tiny = previewGhostPosition(5, 5, 4, 4)
+  ok(tiny.x >= 0 && tiny.x <= 4 && tiny.y >= 0 && tiny.y <= 4, 'ghost: tiny box stays in bounds')
+}
+
+console.log(`PASS: screenshotWatermark R46.G/R47.G — ${passed} total assertions (incl. continuous drag-to-place + live ghost pill)`)

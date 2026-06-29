@@ -19,6 +19,8 @@ import {
   anchorFromPreviewPoint,
   // R46.G — drag the pointer across the preview to place the anchor continuously.
   nextAnchorOnDrag,
+  // R47.G — live ghost pill following the pointer between corner snaps.
+  previewGhostPosition,
 } from '../lib/screenshotWatermark'
 import { showToast } from './Toast'
 import {
@@ -775,6 +777,10 @@ function WatermarkBtn() {
   // the caption anchor; gates the pointermove handler so a hover never
   // moves the anchor, only an active press-drag does.
   const draggingAnchor = useRef(false)
+  // R47.G — ghost pill position {x, y, anchor} that follows the pointer
+  // while dragging, so the placement has continuous feedback between the
+  // corner-to-corner snaps. null when no drag is in flight (ghost hidden).
+  const [ghost, setGhost] = useState(null)
 
   const startPress = () => {
     longPressed.current = false
@@ -889,6 +895,7 @@ function WatermarkBtn() {
                     )
                     if (next) { setAnchor(next); if (!active) setActive(true) }
                     draggingAnchor.current = true
+                    setGhost(previewGhostPosition(e.clientX - rect.left, e.clientY - rect.top, rect.width, rect.height))
                     try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* jsdom / unsupported */ }
                   }}
                   onPointerMove={(e) => {
@@ -902,12 +909,17 @@ function WatermarkBtn() {
                       anchor, e.clientX - rect.left, e.clientY - rect.top, rect.width, rect.height,
                     )
                     if (next !== anchor) setAnchor(next)
+                    // R47.G — the ghost follows the pointer continuously
+                    // (clamped to the frame) so the drag reads smooth between
+                    // the corner snaps.
+                    setGhost(previewGhostPosition(e.clientX - rect.left, e.clientY - rect.top, rect.width, rect.height))
                   }}
                   onPointerUp={(e) => {
                     draggingAnchor.current = false
+                    setGhost(null)
                     try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* noop */ }
                   }}
-                  onPointerCancel={() => { draggingAnchor.current = false }}
+                  onPointerCancel={() => { draggingAnchor.current = false; setGhost(null) }}
                   title="Click or drag across the preview to place the caption"
                   style={{
                   position: 'relative', width: PREVIEW_W, height: PREVIEW_H,
@@ -969,6 +981,20 @@ function WatermarkBtn() {
                     }}>{ln.text}</span>
                   ))}
                 </>
+              )}
+              {/* R47.G — ghost pill follows the pointer mid-drag so the
+                  placement gesture has continuous feedback between the
+                  corner snaps; pointerEvents:none so it never eats the drag. */}
+              {ghost && (
+                <span aria-hidden="true" style={{
+                  position: 'absolute', left: ghost.x, top: ghost.y,
+                  transform: 'translate(-50%, -50%)',
+                  width: 26, height: 11, borderRadius: 6, pointerEvents: 'none',
+                  background: 'linear-gradient(135deg, rgba(168,85,247,0.65), rgba(236,72,153,0.55))',
+                  border: '1px solid rgba(216,180,254,0.8)',
+                  boxShadow: '0 0 8px rgba(168,85,247,0.6)',
+                  opacity: 0.85,
+                }} />
               )}
             </div>
             <div style={{
