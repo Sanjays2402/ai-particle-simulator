@@ -862,3 +862,22 @@ export function rangeTierStyle(tier) {
   return RANGE_TIER_STYLES[tier] || RANGE_TIER_STYLES.normal
 }
 
+// R51.H — the confirm prompt copy for a bulk DELETE, escalated by tier so the
+// loudest visual tier (20+, red) also carries the loudest words. R42.H gated
+// every multi-select delete with one flat confirm; this makes a 30-row prune
+// read more alarming than a 3-row one. `normal` (<10) → plain; `large`
+// (10..19) → quantified; `huge` (20+) → all-caps stop-and-think. Always
+// returns a non-empty string. Pure.
+export function rangeDeleteConfirmMessage(count) {
+  const n = Math.max(0, Math.floor(Number(count)) || 0)
+  const tier = rangePreviewTier(n)
+  const noun = `camera view${n === 1 ? '' : 's'}`
+  if (tier === 'huge') {
+    return `DELETE ${n} ${noun}? That's a HUGE range and can't be undone. Are you sure?`
+  }
+  if (tier === 'large') {
+    return `Delete ${n} selected ${noun}? That's a large range and can't be undone.`
+  }
+  return `Delete ${n} selected ${noun}? This can't be undone.`
+}
+

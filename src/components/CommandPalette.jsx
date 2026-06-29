@@ -22,7 +22,7 @@ import {
   rangePreviewCount,
   // R49.H — grade the block so a 10+ row range reads amber before the prune
   // R50.H — 20+ rows escalate to red via a 3-tier style bundle
-  rangePreviewTier, RANGE_PREVIEW_LARGE_AT, RANGE_PREVIEW_HUGE_AT, rangeTierStyle,
+  rangePreviewTier, RANGE_PREVIEW_LARGE_AT, RANGE_PREVIEW_HUGE_AT, rangeTierStyle, rangeDeleteConfirmMessage,
 } from '../lib/cameraViews'
 import { labelForId as framingLabelForId } from '../lib/framingGuides'
 import {
@@ -417,7 +417,10 @@ export function CommandPalette({ onSettings }) {
     const count = selectedIds.size
     if (count === 0) return
     if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
-      const ok = window.confirm(`Delete ${count} selected camera view${count === 1 ? '' : 's'}? This can't be undone.`)
+      // R51.H — confirm copy escalates by the same 3-tier scale as the chip:
+      // a 30-row prune SHOUTS, a 3-row one stays plain, so the loudest tier
+      // also gates the destructive action loudest.
+      const ok = window.confirm(rangeDeleteConfirmMessage(count))
       if (!ok) return
     }
     const current = loadCameraViews()

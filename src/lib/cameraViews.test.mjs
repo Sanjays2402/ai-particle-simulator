@@ -30,7 +30,7 @@ import {
   // R46.H — arm the range anchor from a row
   armRangeAnchor,
   // R47.H — preview the pending range block
-  rangePreviewSet, rangePreviewCount, rangePreviewTier, RANGE_PREVIEW_LARGE_AT, RANGE_PREVIEW_HUGE_AT, rangeTierStyle,
+  rangePreviewSet, rangePreviewCount, rangePreviewTier, RANGE_PREVIEW_LARGE_AT, RANGE_PREVIEW_HUGE_AT, rangeTierStyle, rangeDeleteConfirmMessage,
 } from './cameraViews.js'
 
 function assertEq(actual, expected, msg) {
@@ -1286,3 +1286,19 @@ console.log('PASS: rangePreviewCount — block size for the hovered-row chip (R4
   assertEq(rangeTierStyle(undefined).fg, sn.fg, 'tier: undefined → normal style')
 }
 console.log('PASS: rangePreviewTier — large/huge 3-tier warning (R49.H/R50.H)')
+
+// R51.H — rangeDeleteConfirmMessage escalates copy by tier
+{
+  const normal = rangeDeleteConfirmMessage(3)
+  assertTrue(normal.includes('Delete 3') && !normal.includes('HUGE') && !normal.includes('large'), 'confirm: 3 rows plain')
+  assertTrue(normal.includes('camera views'), 'confirm: pluralises')
+  assertTrue(rangeDeleteConfirmMessage(1).includes('camera view?'), 'confirm: singular at 1')
+  const large = rangeDeleteConfirmMessage(12)
+  assertTrue(large.includes('12') && large.includes('large'), 'confirm: 12 rows large copy')
+  const huge = rangeDeleteConfirmMessage(30)
+  assertTrue(huge.includes('30') && huge.includes('HUGE'), 'confirm: 30 rows huge copy')
+  assertTrue(huge.startsWith('DELETE'), 'confirm: huge shouts')
+  assertTrue(rangeDeleteConfirmMessage(0).length > 0, 'confirm: 0 still a string')
+  assertTrue(rangeDeleteConfirmMessage(NaN).length > 0, 'confirm: NaN guarded')
+}
+console.log('PASS: rangeDeleteConfirmMessage — tier-escalated confirm copy (R51.H)')
