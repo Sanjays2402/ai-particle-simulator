@@ -16,6 +16,8 @@ import {
   etaHistorySampleStats,
   // R41.D — one-line summary of a pinned perf sample (copy-to-clipboard)
   formatPinnedSampleLine,
+  // R45.D / R45.A — paste-ready perf-window + pinned-ETA summary lines
+  formatFpsWindowStats, formatPinnedEtaLine,
 } from './fpsGraph.js'
 
 let passed = 0
@@ -1074,3 +1076,30 @@ console.log(`PASS: fpsGraph R41.A — ${passed} total assertions (incl. pinned E
 }
 
 console.log(`PASS: fpsGraph R41.D — ${passed} total assertions (incl. copy-ready pinned sample line)`)
+
+// R45.D — formatFpsWindowStats: copy the 2s window as one line
+{
+  const DOT = '\u00b7'
+  const s = formatFpsWindowStats({ avg: 58, low: 41, min: 30, max: 60, drops: 7, count: 120 })
+  eq(s, `avg 58 ${DOT} 1% low 41 ${DOT} min 30 ${DOT} max 60 ${DOT} 7 drops ${DOT} 120 samples`, 'win: full line')
+  ok(formatFpsWindowStats(summarizeFpsWindow([60, 59, 58, 30, 45])).includes('samples'), 'win: real summary formats')
+  eq(formatFpsWindowStats({ count: 0 }), '', 'win: zero-sample → empty')
+  eq(formatFpsWindowStats(null), '', 'win: null → empty')
+  eq(formatFpsWindowStats(42), '', 'win: non-object → empty')
+  ok(formatFpsWindowStats({ count: 5 }, { sep: ' | ' }).includes(' | '), 'win: custom sep')
+  eq(formatFpsWindowStats({ avg: 'x', low: null, min: 1, max: 2, drops: 0, count: 3 }).startsWith('avg 0'), true, 'win: junk numerics → 0')
+}
+console.log(`PASS: fpsGraph R45.D — ${passed} total assertions (incl. copy-ready perf window line)`)
+
+// R45.A — formatPinnedEtaLine: copy a pinned ETA sample
+{
+  const DOT = '\u00b7'
+  eq(formatPinnedEtaLine({ approaching: true, etaSec: 3.4, secondsAgo: 6 }), `ETA 3.4s to budget edge ${DOT} 6s ago`, 'eta: approaching line')
+  eq(formatPinnedEtaLine({ approaching: false, etaSec: null, secondsAgo: 6 }), `safe ${DOT} 6s ago`, 'eta: safe line')
+  eq(formatPinnedEtaLine({ approaching: true, etaSec: 2, secondsAgo: 0 }), `ETA 2s to budget edge ${DOT} now`, 'eta: 0s → now')
+  ok(formatPinnedEtaLine({ approaching: true, etaSec: 5, secondsAgo: NaN }).endsWith('\u2014'), 'eta: NaN age → em-dash')
+  eq(formatPinnedEtaLine(null), '', 'eta: null → empty')
+  eq(formatPinnedEtaLine(42), '', 'eta: non-object → empty')
+  ok(formatPinnedEtaLine({ approaching: true, etaSec: 1, secondsAgo: 2 }, { sep: ' | ' }).includes(' | '), 'eta: custom sep')
+}
+console.log(`PASS: fpsGraph R45.A — ${passed} total assertions (incl. copy-ready pinned ETA line)`)

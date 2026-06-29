@@ -870,3 +870,47 @@ export function summarizeFrameTimeWindow(fpsSamples, opts = {}) {
     count: valid.length,
   }
 }
+
+// --- R45.D: copy the whole perf window as one paste-ready line --------
+//
+// The perf pill / HUD shows the 2s fps window's min/avg/max/1%-low + drop
+// count, but a user filing a perf bug had to retype them. This formats
+// the summarizeFpsWindow() bundle into a single clipboard line, e.g.
+//   "avg 58 · 1% low 41 · min 30 · max 60 · 7 drops · 120 samples"
+// so the whole window is one copy. Empty / zero-sample → '' so the caller
+// can hide the copy button. `sep` is configurable. Pure.
+export function formatFpsWindowStats(summary, opts = {}) {
+  if (!summary || typeof summary !== 'object') return ''
+  const sep = typeof opts.sep === 'string' ? opts.sep : ' \u00b7 '
+  const count = Number(summary.count)
+  if (!Number.isFinite(count) || count <= 0) return ''
+  const n = (v) => (Number.isFinite(Number(v)) ? Math.round(Number(v)) : 0)
+  const parts = [
+    `avg ${n(summary.avg)}`,
+    `1% low ${n(summary.low)}`,
+    `min ${n(summary.min)}`,
+    `max ${n(summary.max)}`,
+    `${n(summary.drops)} drops`,
+    `${n(count)} samples`,
+  ]
+  return parts.join(sep)
+}
+
+// --- R45.A: copy the pinned ETA-to-edge sample as a paste-ready line ---
+//
+// R41.A pins an ETA-history sample's seconds-to-edge + age on screen; this
+// formats that bundle for the clipboard, e.g. "ETA 3.4s to budget edge ·
+// 6s ago" (or "safe · 6s ago" for a non-approaching pin). null / missing
+// → '' so the caller hides the copy button. `sep` configurable. Pure.
+export function formatPinnedEtaLine(stats, opts = {}) {
+  if (!stats || typeof stats !== 'object') return ''
+  const sep = typeof opts.sep === 'string' ? opts.sep : ' \u00b7 '
+  const eta = (stats.approaching === true && Number.isFinite(Number(stats.etaSec)))
+    ? `ETA ${Math.round(Number(stats.etaSec) * 10) / 10}s to budget edge`
+    : 'safe'
+  const ageNum = Number(stats.secondsAgo)
+  const age = Number.isFinite(ageNum)
+    ? (ageNum <= 0 ? 'now' : `${Math.round(ageNum)}s ago`)
+    : '\u2014'
+  return [eta, age].join(sep)
+}
