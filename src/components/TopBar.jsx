@@ -25,8 +25,9 @@ import {
   ghostPillLabel,
   // R49.G — and a faint sub-line so a branded (wordmark+date) caption previews fully.
   ghostPillSubLabel,
-  // R52.G — caption size presets (S/M/L) for the baked caption.
-  WATERMARK_SIZES, watermarkFontSizeForPreset, watermarkSizeMult,
+  // R52.G — caption size presets (S/M/L)
+  // R53.G — XL tier + resolved-px readout for the live canvas
+  WATERMARK_SIZES, watermarkFontSizeForPreset, watermarkSizeMult, watermarkSizeReadout,
 } from '../lib/screenshotWatermark'
 import { showToast } from './Toast'
 import {
@@ -825,6 +826,19 @@ function WatermarkBtn() {
     { text: previewSub, fontSize: PREVIEW_SUB_FONT * sizeMult },
   ])
 
+  // R53.G — resolve the caption font size against the LIVE export canvas so
+  // the chips can show the concrete baked px (e.g. "28px"), not just a
+  // relative S/M/L/XL. The export reads the same #particle-canvas element;
+  // we read its pixel dims here so the readout matches what gets baked. If
+  // the canvas isn't mounted yet, fall back to the window size so the
+  // number is still indicative rather than blank.
+  const exportCanvas = typeof document !== 'undefined'
+    ? document.querySelector('#particle-canvas canvas')
+    : null
+  const canvasW = exportCanvas?.width || (typeof window !== 'undefined' ? window.innerWidth : 1920)
+  const canvasH = exportCanvas?.height || (typeof window !== 'undefined' ? window.innerHeight : 1080)
+  const sizeReadout = watermarkSizeReadout(canvasW, canvasH, size)
+
   return (
     <div style={{ position: 'relative', display: 'inline-flex' }}>
       <button
@@ -1060,16 +1074,43 @@ function WatermarkBtn() {
                 above scales with the choice so the relative size is visible
                 before exporting. */}
             <div style={{
-              fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
-              color: '#8a8aa0', margin: '11px 0 6px', paddingLeft: 2,
-            }}>Caption size</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5 }}>
+              display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+              margin: '11px 0 6px', paddingLeft: 2,
+            }}>
+              <span style={{
+                fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
+                color: '#8a8aa0',
+              }}>Caption size</span>
+              {/* R53.G — the resolved baked px for the LIVE export canvas, so
+                  the user sees whether their S/M/L/XL pick is doing anything
+                  on THIS image (on a small canvas L and XL can clamp to the
+                  same number). A "max"/"min" suffix flags the clamp edge. */}
+              <span
+                title={sizeReadout.atMax
+                  ? `Caption bakes at ${sizeReadout.label} on this canvas (at the max size - bigger presets won't grow it here)`
+                  : sizeReadout.atMin
+                    ? `Caption bakes at ${sizeReadout.label} on this canvas (at the min size - smaller presets won't shrink it here)`
+                    : `Caption bakes at ${sizeReadout.label} on this ${canvasW}x${canvasH} canvas`}
+                style={{
+                  fontSize: 9, fontWeight: 600, letterSpacing: '0.02em',
+                  fontFamily: 'Geist Mono, monospace',
+                  color: (sizeReadout.atMax || sizeReadout.atMin) ? '#c4946a' : '#9a9ab0',
+                }}
+              >
+                {sizeReadout.label}
+                {(sizeReadout.atMax || sizeReadout.atMin) && (
+                  <span style={{ opacity: 0.7 }}>{sizeReadout.atMax ? ' max' : ' min'}</span>
+                )}
+              </span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 5 }}>
               {WATERMARK_SIZES.map(s => {
                 const on = size === s.id
+                const sizeWord = s.id === 'small' ? 'Small' : s.id === 'large' ? 'Large' : s.id === 'xl' ? 'Extra large' : 'Medium'
                 return (
                   <button key={s.id}
                     onClick={() => { setSize(s.id); if (!active) setActive(true) }}
-                    title={`${s.label === 'S' ? 'Small' : s.label === 'L' ? 'Large' : 'Medium'} caption (${Math.round(s.mult * 100)}%)`}
+                    title={`${sizeWord} caption (${Math.round(s.mult * 100)}%)`}
                     style={{
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                       padding: '6px 0', borderRadius: 7, cursor: 'pointer',

@@ -23,6 +23,8 @@ import {
   // R52.G — caption size presets (S/M/L)
   WATERMARK_SIZES, WATERMARK_SIZE_DEFAULT, isValidWatermarkSize, sanitizeWatermarkSize,
   watermarkSizeMult, nextWatermarkSize, watermarkFontSizeForPreset, WATERMARK_FONT_SCALE,
+  // R53.G — XL tier + resolved-px readout
+  watermarkSizeReadout,
 } from './screenshotWatermark.js'
 
 let passed = 0
@@ -449,28 +451,33 @@ console.log(`PASS: screenshotWatermark R46.G/R47.G/R48.G — ${passed} total ass
 
 // --- R52.G: caption size presets (S / M / L) --------------------------
 {
-  // roster integrity
-  eq(WATERMARK_SIZES.length, 3, 'three size presets')
+  // roster integrity (R53.G added 'xl' → 4 tiers)
+  eq(WATERMARK_SIZES.length, 4, 'four size presets')
   const ids = WATERMARK_SIZES.map(s => s.id)
   ok(ids.includes('small') && ids.includes('medium') && ids.includes('large'), 'S/M/L ids present')
-  eq(new Set(ids).size, 3, 'size ids unique')
+  ok(ids.includes('xl'), 'XL id present (R53.G)')
+  eq(new Set(ids).size, 4, 'size ids unique')
   eq(WATERMARK_SIZE_DEFAULT, 'medium', 'default is medium')
   // medium is exactly 1x so it reproduces the pre-R52.G size
   eq(watermarkSizeMult('medium'), 1, 'medium mult = 1 (unchanged default)')
   ok(watermarkSizeMult('small') < 1, 'small mult < 1')
   ok(watermarkSizeMult('large') > 1, 'large mult > 1')
+  ok(watermarkSizeMult('xl') > watermarkSizeMult('large'), 'xl mult > large (R53.G)')
   eq(watermarkSizeMult('junk'), 1, 'unknown id → 1')
   // isValid / sanitize
   ok(isValidWatermarkSize('large') === true, 'isValid: large')
-  ok(isValidWatermarkSize('xl') === false, 'isValid: unknown false')
+  ok(isValidWatermarkSize('xl') === true, 'isValid: xl now valid (R53.G)')
+  ok(isValidWatermarkSize('xxl') === false, 'isValid: unknown false')
   eq(sanitizeWatermarkSize('small'), 'small', 'sanitize: known passes')
+  eq(sanitizeWatermarkSize('xl'), 'xl', 'sanitize: xl passes (R53.G)')
   eq(sanitizeWatermarkSize('bogus'), 'medium', 'sanitize: junk → default')
   eq(sanitizeWatermarkSize(null), 'medium', 'sanitize: null → default')
   eq(sanitizeWatermarkSize(42), 'medium', 'sanitize: number → default')
-  // cycle wraps small → medium → large → small
+  // cycle wraps small → medium → large → xl → small
   eq(nextWatermarkSize('small'), 'medium', 'cycle small → medium')
   eq(nextWatermarkSize('medium'), 'large', 'cycle medium → large')
-  eq(nextWatermarkSize('large'), 'small', 'cycle large → small (wrap)')
+  eq(nextWatermarkSize('large'), 'xl', 'cycle large → xl (R53.G)')
+  eq(nextWatermarkSize('xl'), 'small', 'cycle xl → small (wrap)')
   eq(nextWatermarkSize('junk'), WATERMARK_SIZES[0].id, 'cycle unknown → first')
   // watermarkFontSizeForPreset: large > medium > small on the same canvas,
   // and medium equals the plain watermarkFontSize (the unchanged default).
@@ -478,7 +485,9 @@ console.log(`PASS: screenshotWatermark R46.G/R47.G/R48.G — ${passed} total ass
   const sm = watermarkFontSizeForPreset(W, H, 'small')
   const md = watermarkFontSizeForPreset(W, H, 'medium')
   const lg = watermarkFontSizeForPreset(W, H, 'large')
+  const xl = watermarkFontSizeForPreset(W, H, 'xl')
   ok(sm < md && md < lg, 'preset sizes ordered S < M < L')
+  ok(xl >= lg, 'xl ≥ large on a large canvas (R53.G)')
   eq(md, watermarkFontSize(W, H), 'medium preset == plain auto size (default unchanged)')
   eq(md, watermarkFontSize(W, H, { scale: WATERMARK_FONT_SCALE }), 'medium == explicit base scale')
   // junk size id resolves to medium (== default)
@@ -490,3 +499,28 @@ console.log(`PASS: screenshotWatermark R46.G/R47.G/R48.G — ${passed} total ass
   eq(watermarkFontSizeForPreset(0, 0, 'large'), WATERMARK_FONT_MIN, 'degenerate canvas → min')
 }
 console.log(`PASS: screenshotWatermark R52.G — ${passed} total assertions (incl. S/M/L caption size presets)`)
+
+// --- R53.G: resolved-px readout for the current canvas ----------------
+{
+  const W = 3840, H = 2160 // 4K so XL and L diverge cleanly
+  const rd = watermarkSizeReadout(W, H, 'large')
+  eq(rd.px, watermarkFontSizeForPreset(W, H, 'large'), 'readout px == resolved preset size')
+  eq(rd.label, `${rd.px}px`, 'readout label is "<px>px"')
+  ok(typeof rd.atMax === 'boolean' && typeof rd.atMin === 'boolean', 'readout exposes clamp flags')
+  // On a huge canvas every preset clamps to the MAX ceiling → atMax true.
+  const big = watermarkSizeReadout(60000, 60000, 'xl')
+  eq(big.px, WATERMARK_FONT_MAX, 'huge canvas clamps to MAX')
+  ok(big.atMax === true, 'huge canvas → atMax flag set')
+  ok(big.atMin === false, 'huge canvas not atMin')
+  // Degenerate canvas resolves to MIN floor, atMin set, never NaN.
+  const deg = watermarkSizeReadout(0, 0, 'large')
+  eq(deg.px, WATERMARK_FONT_MIN, 'degenerate canvas → MIN floor')
+  ok(deg.atMin === true, 'degenerate → atMin flag set')
+  ok(Number.isFinite(deg.px), 'degenerate px is finite (no NaN)')
+  // A tiny canvas where L and XL both clamp to the same floor → labels match
+  // (this is exactly the "is my pick doing anything?" case the readout answers).
+  const lSmall = watermarkSizeReadout(40, 40, 'large')
+  const xlSmall = watermarkSizeReadout(40, 40, 'xl')
+  eq(lSmall.px, xlSmall.px, 'tiny canvas: L and XL clamp to same px (readout exposes the no-op)')
+}
+console.log(`PASS: screenshotWatermark R53.G — XL tier + resolved-px readout`)

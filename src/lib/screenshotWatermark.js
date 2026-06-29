@@ -99,11 +99,13 @@ export function watermarkFontSize(canvasW, canvasH, opts = {}) {
 // the min/max clamp band still bounds the result on any image size.
 //
 // Ordered small → large so the chip row reads naturally. `id` round-trips
-// in localStorage; `mult` is the scale multiplier.
+// in localStorage; `mult` is the scale multiplier. R53.G adds an 'xl' tier
+// (1.9x) above Large for a bold full-bleed wordmark on a busy scene.
 export const WATERMARK_SIZES = [
-  { id: 'small',  label: 'S', mult: 0.75 },
-  { id: 'medium', label: 'M', mult: 1 },
-  { id: 'large',  label: 'L', mult: 1.4 },
+  { id: 'small',  label: 'S',  mult: 0.75 },
+  { id: 'medium', label: 'M',  mult: 1 },
+  { id: 'large',  label: 'L',  mult: 1.4 },
+  { id: 'xl',     label: 'XL', mult: 1.9 },
 ]
 
 const SIZE_BY_ID = new Map(WATERMARK_SIZES.map(s => [s.id, s]))
@@ -145,6 +147,34 @@ export function watermarkFontSizeForPreset(canvasW, canvasH, sizeId, opts = {}) 
   const mult = watermarkSizeMult(sanitizeWatermarkSize(sizeId))
   const baseScale = (Number.isFinite(opts.scale) && opts.scale > 0) ? opts.scale : WATERMARK_FONT_SCALE
   return watermarkFontSize(canvasW, canvasH, { ...opts, scale: baseScale * mult })
+}
+
+// --- R53.G: resolved-px readout for the current canvas ----------------
+//
+// The S/M/L/XL chips pick a RELATIVE multiplier, but the actual baked
+// font size depends on the live canvas dimensions (watermarkFontSize
+// scales with min(w,h) then clamps to [MIN, MAX]). R53.G shows the
+// concrete resolved px next to the chips so a user knows whether their
+// pick is doing anything — e.g. on a small preview XL may clamp to the
+// same px as L, on a 4K export they diverge. This formats the resolved
+// size as a short label like "28px"; an extra flag tells the UI when the
+// value is sitting on the clamp ceiling/floor (so the chips can hint that
+// going bigger/smaller won't move the number on THIS canvas).
+//
+// Returns { px, label, atMax, atMin } where px is the integer font size,
+// label is "<px>px", and atMax/atMin mark the clamp band edges. Defensive:
+// a degenerate canvas resolves to the MIN floor (atMin true) so the UI
+// reads "11px (min)" rather than NaN. Pure.
+export function watermarkSizeReadout(canvasW, canvasH, sizeId, opts = {}) {
+  const px = watermarkFontSizeForPreset(canvasW, canvasH, sizeId, opts)
+  const max = (Number.isFinite(opts.max) && opts.max >= WATERMARK_FONT_MIN) ? opts.max : WATERMARK_FONT_MAX
+  const min = (Number.isFinite(opts.min) && opts.min > 0) ? opts.min : WATERMARK_FONT_MIN
+  return {
+    px,
+    label: `${px}px`,
+    atMax: px >= max,
+    atMin: px <= min,
+  }
 }
 
 // Compute the placement geometry for the caption: where the text anchors
