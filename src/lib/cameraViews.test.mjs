@@ -30,7 +30,7 @@ import {
   // R46.H — arm the range anchor from a row
   armRangeAnchor,
   // R47.H — preview the pending range block
-  rangePreviewSet, rangePreviewCount,
+  rangePreviewSet, rangePreviewCount, rangePreviewTier, RANGE_PREVIEW_LARGE_AT,
 } from './cameraViews.js'
 
 function assertEq(actual, expected, msg) {
@@ -1263,3 +1263,17 @@ console.log('PASS: rangePreviewSet — preview the pending range block before co
   assertEq(rangePreviewCount(ids, 20, 40), rangePreviewSet(ids, 20, 40).size, 'count: equals set size')
 }
 console.log('PASS: rangePreviewCount — block size for the hovered-row chip (R48.H)')
+
+// --- R49.H: rangePreviewTier — flag a large (10+) destructive range --------
+{
+  assertEq(RANGE_PREVIEW_LARGE_AT, 10, 'tier: threshold exposed as 10')
+  assertEq(rangePreviewTier(2), 'normal', 'tier: 2 rows normal')
+  assertEq(rangePreviewTier(9), 'normal', 'tier: 9 just below threshold')
+  assertEq(rangePreviewTier(10), 'large', 'tier: 10 hits large')
+  assertEq(rangePreviewTier(40), 'large', 'tier: 40 large')
+  assertEq(rangePreviewTier(0), 'normal', 'tier: 0 normal')
+  assertEq(rangePreviewTier(-5), 'normal', 'tier: negative normal')
+  assertEq(rangePreviewTier(NaN), 'normal', 'tier: NaN normal')
+  assertEq(rangePreviewTier('x'), 'normal', 'tier: non-numeric normal')
+}
+console.log('PASS: rangePreviewTier — large-block warning tier (R49.H)')

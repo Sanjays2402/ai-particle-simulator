@@ -20,6 +20,8 @@ import {
   rangePreviewSet,
   // R48.H — count the pending range block so a size chip can ride the hovered row
   rangePreviewCount,
+  // R49.H — grade the block so a 10+ row range reads amber before the prune
+  rangePreviewTier, RANGE_PREVIEW_LARGE_AT,
 } from '../lib/cameraViews'
 import { labelForId as framingLabelForId } from '../lib/framingGuides'
 import {
@@ -880,16 +882,22 @@ export function CommandPalette({ onSettings }) {
                         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
                         {/* R48.H — block-size chip on the hovered (end) row so
                             the count reads before the completing click; only
-                            shown for a real 2+ row block. */}
-                        {rangeMode && v.id === rangeHoverId && pendingRangeCount >= 2 && (
-                          <span aria-hidden="true" style={{
+                            shown for a real 2+ row block. R49.H — the chip flips
+                            amber once the block hits 10 rows so a big destructive
+                            range reads loud before commit. */}
+                        {rangeMode && v.id === rangeHoverId && pendingRangeCount >= 2 && (() => {
+                          const large = rangePreviewTier(pendingRangeCount) === 'large'
+                          return (
+                          <span aria-hidden="true" title={large ? `Large range — ${pendingRangeCount} rows (>= ${RANGE_PREVIEW_LARGE_AT})` : `${pendingRangeCount} rows`} style={{
                             flexShrink: 0, padding: '1px 6px', borderRadius: 999,
                             fontSize: 10, fontWeight: 700, lineHeight: 1.4,
                             fontFamily: 'Geist Mono, monospace',
-                            background: 'rgba(99,102,241,0.22)', color: '#c7d2fe',
-                            border: '1px solid rgba(129,140,248,0.5)',
+                            background: large ? 'rgba(245,158,11,0.22)' : 'rgba(99,102,241,0.22)',
+                            color: large ? '#fcd34d' : '#c7d2fe',
+                            border: `1px solid ${large ? 'rgba(245,158,11,0.55)' : 'rgba(129,140,248,0.5)'}`,
                           }}>{pendingRangeCount} rows</span>
-                        )}
+                          )
+                        })()}
                       </button>
                     )
                   }) })()}

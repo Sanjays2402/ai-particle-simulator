@@ -832,3 +832,18 @@ export function rangePreviewCount(orderedIds, anchorId, hoverId) {
   return rangePreviewSet(orderedIds, anchorId, hoverId).size
 }
 
+// --- R49.H: range-block size tier so a big destructive range reads loud ----
+//
+// R48.H surfaces the count; R49.H grades it. A 3-row range is routine and the
+// chip stays indigo, but a 10+ row range is a meaningful prune (the panel
+// fronts a multi-select DELETE, not just Duplicate) so the chip flips amber to
+// warn before the commit click — parallels biasOverridesIO's import-impact
+// tiers. Threshold exposed so the chip + tooltip can quote it. Defensive:
+// non-finite / negative → 'normal'. Pure.
+export const RANGE_PREVIEW_LARGE_AT = 10
+export function rangePreviewTier(count) {
+  const n = Number(count)
+  if (!Number.isFinite(n) || n < RANGE_PREVIEW_LARGE_AT) return 'normal'
+  return 'large'
+}
+
