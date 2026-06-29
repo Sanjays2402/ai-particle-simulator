@@ -7,6 +7,8 @@ import {
   projectSavedViews, pickNearestMarker, tooltipPlacement,
   // R52.N — numbered saved-view badge label
   savedViewMarkerLabel,
+  // R53.N — cross-highlight a marker badge from a list-row hover
+  markerBadgeEmphasis, MARKER_BADGE_EMPHASIS_SCALE, MARKER_BADGE_NORMAL_ALPHA, MARKER_BADGE_EMPHASIS_ALPHA,
   // R42.N — frame all saved views
   framingForViews, fitCameraDistance, frameViewsCameraMove,
   FIT_MIN_DIST, FIT_MAX_DIST, FIT_DEFAULT_DIR,
@@ -222,6 +224,38 @@ eq(scaleLabelFor(NaN), `${DEFAULT_SCENE_HALF}u`, 'NaN → default')
   eq(savedViewMarkerLabel('7'), '7', 'badge: numeric string coerces')
   eq(savedViewMarkerLabel(3.9), '3', 'badge: floored')
   eq(savedViewMarkerLabel(150, NaN), '99+', 'badge: junk cap → default cap')
+}
+
+// --- R53.N markerBadgeEmphasis (cross-highlight) ---
+{
+  // direct dot-hover lights the marker regardless of crossHighlightId
+  const h = markerBadgeEmphasis('a', null, true)
+  ok(h.emphatic === true, 'emphasis: dot-hover → emphatic')
+  eq(h.scale, MARKER_BADGE_EMPHASIS_SCALE, 'emphasis: hover scale bumped')
+  eq(h.alpha, MARKER_BADGE_EMPHASIS_ALPHA, 'emphasis: hover alpha full')
+  // list-row cross-hover lights the MATCHING marker
+  const cm = markerBadgeEmphasis('b', 'b', false)
+  ok(cm.emphatic === true, 'emphasis: matching cross-id → emphatic')
+  eq(cm.scale, MARKER_BADGE_EMPHASIS_SCALE, 'emphasis: cross-match scale bumped')
+  // a non-matching marker draws normal
+  const nm = markerBadgeEmphasis('c', 'b', false)
+  ok(nm.emphatic === false, 'emphasis: non-matching → normal')
+  eq(nm.scale, 1, 'emphasis: normal scale 1')
+  eq(nm.alpha, MARKER_BADGE_NORMAL_ALPHA, 'emphasis: normal alpha')
+  // no cross-highlight + no hover → normal
+  const off = markerBadgeEmphasis('a', null, false)
+  ok(off.emphatic === false, 'emphasis: no focus → normal')
+  // undefined cross id is treated as "no focus" (never matches)
+  ok(markerBadgeEmphasis('a', undefined, false).emphatic === false, 'emphasis: undefined cross-id → normal')
+  // hover wins even when a DIFFERENT id is cross-highlighted
+  ok(markerBadgeEmphasis('a', 'b', true).emphatic === true, 'emphasis: hover overrides mismatched cross-id')
+  // emphasis scale reads larger than normal (sanity on the constants)
+  ok(MARKER_BADGE_EMPHASIS_SCALE > 1, 'emphasis: scale const > 1')
+  ok(MARKER_BADGE_EMPHASIS_ALPHA >= MARKER_BADGE_NORMAL_ALPHA, 'emphasis: emphatic alpha ≥ normal')
+  // numeric ids cross-match too (RightSidebar uses string ids, but the
+  // helper is id-type-agnostic — strict === so 1 and '1' don't collide)
+  ok(markerBadgeEmphasis(1, 1, false).emphatic === true, 'emphasis: numeric id matches itself')
+  ok(markerBadgeEmphasis(1, '1', false).emphatic === false, 'emphasis: strict === (no 1=="1" coercion)')
 }
 
 // --- pickNearestMarker ---

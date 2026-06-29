@@ -151,6 +151,35 @@ export function savedViewMarkerLabel(order, cap = MARKER_BADGE_CAP) {
   return n > c ? `${c}+` : String(n)
 }
 
+// --- R53.N: cross-highlight a marker badge from its list-row hover -------
+//
+// R52.N numbers each saved-view dot to match the RightSidebar list order.
+// R53.N closes the loop: hovering a list ROW emphasises the matching dot's
+// badge (brighter + larger number) so the eye can jump list -> map, and
+// hovering a DOT emphasises its list row the other way. Both directions
+// share one notion of "which id is the cross-highlight focus" that the
+// renderer turns into a draw emphasis.
+//
+// This resolves the badge emphasis for a marker given the currently
+// cross-highlighted id (from a list-row hover) AND whether the dot itself
+// is hovered. Returns { emphatic, scale, alpha } where emphatic is true
+// when this marker is the focus, scale multiplies the badge font size, and
+// alpha is the badge text opacity. A direct dot-hover and a list-row
+// cross-hover both light the same marker; everything else draws normal.
+// Pure; no DOM.
+export const MARKER_BADGE_EMPHASIS_SCALE = 1.5
+export const MARKER_BADGE_NORMAL_ALPHA = 0.92
+export const MARKER_BADGE_EMPHASIS_ALPHA = 1
+export function markerBadgeEmphasis(markerId, crossHighlightId, isHover = false) {
+  const emphatic = isHover === true
+    || (crossHighlightId !== null && crossHighlightId !== undefined && markerId === crossHighlightId)
+  return {
+    emphatic,
+    scale: emphatic ? MARKER_BADGE_EMPHASIS_SCALE : 1,
+    alpha: emphatic ? MARKER_BADGE_EMPHASIS_ALPHA : MARKER_BADGE_NORMAL_ALPHA,
+  }
+}
+
 // Pick the saved-view marker nearest a click point, within a small
 // hit-test radius (pixels). Returns the picked view's id (or its
 // fallback string) or null if no marker lies within `radiusPx`.

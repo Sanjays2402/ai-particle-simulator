@@ -304,6 +304,26 @@ function CameraViews() {
   // existing dragOverIdx ones with the dragging-source state).
   const [draggingIdx, setDraggingIdx] = useState(null)
   const [dragOverIdx, setDragOverIdx] = useState(null)
+  // R53.N — cross-highlight: the saved-view id whose MINIMAP dot is hovered
+  // (mirrored via a window event), so the matching list row lights up — the
+  // reverse of the list-row -> dot highlight. Listens for origin 'minimap'
+  // only so our own list-row dispatches don't echo back.
+  const [crossHoverId, setCrossHoverId] = useState(null)
+  useEffect(() => {
+    const onHover = (e) => {
+      const detail = e && e.detail
+      if (!detail || detail.origin !== 'minimap') return
+      setCrossHoverId(detail.id != null ? detail.id : null)
+    }
+    window.addEventListener('particle:camera-view-hover', onHover)
+    return () => window.removeEventListener('particle:camera-view-hover', onHover)
+  }, [])
+  // R53.N — fire a hover event the MINIMAP listens for, so hovering a list
+  // row emphasises the matching dot's numbered badge. origin 'list' so the
+  // minimap accepts it (and our own listener above ignores it).
+  const emitRowHover = (id) => {
+    try { window.dispatchEvent(new CustomEvent('particle:camera-view-hover', { detail: { id, origin: 'list' } })) } catch { /* */ }
+  }
   const onDragStart = (idx) => (e) => {
     setDraggingIdx(idx)
     // dataTransfer needs SOMETHING for Firefox to start the drag at
@@ -598,6 +618,9 @@ function CameraViews() {
             // self-drop is a no-op so the highlight would be misleading).
             const isDropTarget = dragOverIdx === idx && draggingIdx !== idx
             const isBeingDragged = draggingIdx === idx
+            // R53.N — this row's minimap dot is currently hovered → highlight
+            // the row to match (the reverse of row-hover → dot emphasis).
+            const isCrossHovered = crossHoverId != null && v.id === crossHoverId
             return (
             <div key={v.id}
               ref={setRowRef(idx)}
@@ -616,15 +639,21 @@ function CameraViews() {
               padding: '7px 9px', borderRadius: 7,
               background: isDropTarget
                 ? 'rgba(99,102,241,0.12)'
-                : 'rgba(255,255,255,0.025)',
+                : isCrossHovered
+                  ? 'rgba(34,197,94,0.1)'
+                  : 'rgba(255,255,255,0.025)',
               border: isDropTarget
                 ? '1px solid rgba(99,102,241,0.45)'
-                : '1px solid rgba(255,255,255,0.05)',
+                : isCrossHovered
+                  ? '1px solid rgba(34,197,94,0.4)'
+                  : '1px solid rgba(255,255,255,0.05)',
               borderLeft: isDropTarget
                 ? '3px solid rgba(168,85,247,0.85)'
                 : (isBeingDragged
                   ? '3px solid rgba(168,85,247,0.4)'
-                  : '1px solid rgba(255,255,255,0.05)'),
+                  : (isCrossHovered
+                    ? '3px solid rgba(34,197,94,0.7)'
+                    : '1px solid rgba(255,255,255,0.05)')),
               transition: 'all 0.15s ease-out',
               opacity: isBeingDragged ? 0.55 : 1,
               cursor: views.length > 1 ? 'grab' : 'default',
@@ -634,8 +663,8 @@ function CameraViews() {
               touchAction: 'manipulation',
               WebkitUserSelect: isBeingDragged ? 'none' : undefined,
             }}
-              onMouseEnter={e => { if (!isDropTarget && !isBeingDragged) { e.currentTarget.style.background = 'rgba(168,85,247,0.07)'; e.currentTarget.style.borderColor = 'rgba(168,85,247,0.25)' } }}
-              onMouseLeave={e => { if (!isDropTarget && !isBeingDragged) { e.currentTarget.style.background = 'rgba(255,255,255,0.025)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)' } }}
+              onMouseEnter={e => { emitRowHover(v.id); if (!isDropTarget && !isBeingDragged && !isCrossHovered) { e.currentTarget.style.background = 'rgba(168,85,247,0.07)'; e.currentTarget.style.borderColor = 'rgba(168,85,247,0.25)' } }}
+              onMouseLeave={e => { emitRowHover(null); if (!isDropTarget && !isBeingDragged && !isCrossHovered) { e.currentTarget.style.background = 'rgba(255,255,255,0.025)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)' } }}
             >
               {/* Play order index — also serves as a drag-handle on
                   touch (R24.39). Desktop users grab anywhere on the

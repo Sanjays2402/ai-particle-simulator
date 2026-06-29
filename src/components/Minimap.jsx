@@ -5,6 +5,8 @@ import {
   projectSavedViews, pickNearestMarker, tooltipPlacement,
   // R52.N — numbered badge text per saved-view dot (matches list order)
   savedViewMarkerLabel,
+  // R53.N — cross-highlight a dot's badge from a list-row hover (both ways)
+  markerBadgeEmphasis,
   framingForViews, frameViewsCameraMove,
   // R43.N — animated fit-all tween
   FIT_TWEEN_MS, tweenProgress, tweenCameraStep,
@@ -42,6 +44,23 @@ export default function Minimap() {
   // Written in an effect (never during render) so it stays lint-clean.
   const selectedIdsRef = useRef(selectedViewIds)
   useEffect(() => { selectedIdsRef.current = selectedViewIds }, [selectedViewIds])
+  // R53.N — the saved-view id currently hovered in the RightSidebar list
+  // (mirrored via a window event). The rAF draw reads this ref to emphasise
+  // the matching dot's numbered badge (brighter + larger), closing the loop
+  // started by R52.N's numbering: hover a list row -> its dot's number pops.
+  const crossHighlightRef = useRef(null)
+  useEffect(() => {
+    const onHover = (e) => {
+      const detail = e && e.detail
+      // Ignore our OWN dot-hover echoes (origin 'minimap'); the draw loop
+      // already emphasises a hovered dot via isHover. Only LIST-row hovers
+      // (origin 'list') drive the cross-highlight ref.
+      if (!detail || detail.origin === 'minimap') return
+      crossHighlightRef.current = detail.id != null ? detail.id : null
+    }
+    window.addEventListener('particle:camera-view-hover', onHover)
+    return () => window.removeEventListener('particle:camera-view-hover', onHover)
+  }, [])
   const canvasRef = useRef(null)
   const rafRef = useRef(0)
   // R43.N — handle for the "Fit all" camera tween's rAF loop, so a second
@@ -173,17 +192,27 @@ export default function Minimap() {
           // dimmed/out-of-bounds dot's number reads as secondary too.
           const badge = savedViewMarkerLabel(m.order)
           if (badge) {
-            const bx = Math.min(SIZE - 2, m.px + (isHover ? 6 : 5))
-            const by = Math.max(7, m.py - (isHover ? 5 : 4))
-            ctx.font = '700 8px Geist Mono, JetBrains Mono, monospace'
+            // R53.N — emphasise this badge when the dot is hovered OR its
+            // matching RightSidebar list row is hovered (cross-highlight).
+            // Emphatic badges grow + brighten so the eye can jump list->map.
+            const emph = markerBadgeEmphasis(m.id, crossHighlightRef.current, isHover)
+            const badgeFs = Math.round(8 * emph.scale)
+            const bx = Math.min(SIZE - 2, m.px + (emph.emphatic ? 6 : 5))
+            const by = Math.max(badgeFs - 1, m.py - (emph.emphatic ? 5 : 4))
+            ctx.font = `700 ${badgeFs}px Geist Mono, JetBrains Mono, monospace`
             ctx.textAlign = 'left'
             ctx.textBaseline = 'alphabetic'
             // A faint dark backing stroke so the digit stays legible over
             // the bright camera dot / grid lines.
-            ctx.lineWidth = 2
+            ctx.lineWidth = emph.emphatic ? 2.5 : 2
             ctx.strokeStyle = 'rgba(2,2,6,0.85)'
             ctx.strokeText(badge, bx, by)
-            ctx.fillStyle = isHover ? 'rgba(209,250,229,0.95)' : 'rgba(134,239,172,0.92)'
+            // Cross-highlighted (list-row hover, not a direct dot hover)
+            // glows the same emerald-bright as a hover so both directions
+            // read identically; the dim alpha from a selection is overridden
+            // to full so an emphasised badge always pops.
+            ctx.globalAlpha = emph.emphatic ? emph.alpha : dimAlpha * emph.alpha
+            ctx.fillStyle = emph.emphatic ? 'rgba(209,250,229,0.98)' : 'rgba(134,239,172,0.92)'
             ctx.fillText(badge, bx, by)
           }
           ctx.restore()
@@ -305,7 +334,11 @@ export default function Minimap() {
     const py = e.clientY - rect.top
     const id = pickNearestMarker(markersRef.current, px, py, 10)
     if (id === null || id === undefined) {
-      if (hoverId !== null) { setHoverId(null); setHoverPlace(null) }
+      if (hoverId !== null) {
+        setHoverId(null); setHoverPlace(null)
+        // R53.N — tell the RightSidebar list its row is no longer hovered.
+        try { window.dispatchEvent(new CustomEvent('particle:camera-view-hover', { detail: { id: null, origin: 'minimap' } })) } catch { /* */ }
+      }
       return
     }
     if (id !== hoverId) {
@@ -315,6 +348,10 @@ export default function Minimap() {
         setHoverId(id)
         setHoverPlace(tooltipPlacement(marker, SIZE))
         setHoverName(view?.name || 'View')
+        // R53.N — mirror the hover to the RightSidebar so the matching list
+        // row highlights (the reverse of list-row -> dot). origin 'minimap'
+        // so our own listener ignores this echo.
+        try { window.dispatchEvent(new CustomEvent('particle:camera-view-hover', { detail: { id, origin: 'minimap' } })) } catch { /* */ }
       }
     }
   }
@@ -323,6 +360,8 @@ export default function Minimap() {
       setHoverId(null)
       setHoverPlace(null)
       setHoverName('')
+      // R53.N — clear the RightSidebar row highlight when the cursor leaves.
+      try { window.dispatchEvent(new CustomEvent('particle:camera-view-hover', { detail: { id: null, origin: 'minimap' } })) } catch { /* */ }
     }
   }
 
