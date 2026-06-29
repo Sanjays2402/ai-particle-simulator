@@ -970,19 +970,30 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R45.B Spiral sweep easing preview glyph (carried)
 - [ ] R45.K Calm-gate import per-row apply (carried)
 
-### Batch 50 — fresh frontend queue (graduations of Batch 49 + carried)
-- [ ] R50.D Copy window: when over budget, prefix line with "[STUTTER]" so a
-  pasted report leads with the verdict (graduates R49.D context tail).
-- [ ] R50.E Zen clamped hint: also show the band ([0.2-5]) so the user learns
-  WHY 12 became 5, not just that it did (graduates R49.E).
-- [ ] R50.H Range chip: at 20+ rows go red (3-tier mirror of import impact) —
-  amber 10-19, red 20+ (graduates R49.H two-tier).
-- [ ] R50.G Ghost sub-line: dim the sub-line further when the main line is
-  truncated so the headline always wins the eye (graduates R49.G).
-- [ ] R50.O Debug HUD: compact mode remembers per-view (fps vs ms) density so
-  the two views can collapse independently (graduates R45.O single flag).
-- [ ] R45.B Spiral sweep easing preview glyph (carried)
-- [ ] R45.K Calm-gate import per-row apply (carried)
+### Batch 50 — fresh frontend queue (graduations of Batch 49 + carried)  (SHIPPED)
+- [x] **R45.B** Spiral sweep easing preview curve glyph — d15b673
+- [x] **R50.H** Range chip 3-tier: red at 20+ rows (amber 10-19) — 5c747fb
+- [x] **R50.O** Debug HUD compact density per-view (fps vs ms) — 3c59ed4
+- [x] **R50.E** Zen clamped hint shows the band (0.2-5) — 65eda64
+- [x] **R45.K** Calm-gate import per-row apply (cherry-pick one motion) — debd28b
+- [~] R50.D Copy-window "[STUTTER]" prefix — SKIPPED (cosmetic string prefix, filler)
+- [~] R50.G Ghost sub-line extra dim — SKIPPED (cosmetic-only, filler)
+
+### Batch 51 — fresh frontend queue (graduations of Batch 50 + carried)
+- [ ] R51.B Easing preview glyph: a moving dot that animates along the curve on
+  hover so the acceleration is felt over time, not just shown as a static line
+  (graduates R45.B static polyline).
+- [ ] R51.H Range chip 3-tier: window.confirm before committing a HUGE (20+) row
+  delete so the loudest tier also gates the destructive action (graduates R50.H).
+- [ ] R51.O Per-view HUD density: a one-key shortcut to flip BOTH views' density
+  at once (sync), for users who want symmetric collapse (graduates R50.O).
+- [ ] R51.E Zen band hint: clicking the (clamped) suffix re-opens the custom-ratio
+  input pre-filled with the band so the fix is one tap (graduates R50.E).
+- [ ] R51.K Calm import: "apply all changed" alongside per-row so a user can take
+  the diff without the unchanged rows in one tap (graduates R45.K cherry-pick).
+- [ ] R51.M Pinned ratios: keyboard reorder (arrow keys) for accessibility parity
+  with the drag reorder.
+- [ ] R51.N Minimap: numbered badges on dots matching the saved-views list order.
 
 ### Future queue carried from Batch 24 (still genuine, unshipped)
 - [ ] R25.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view
@@ -992,6 +1003,23 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R25.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode)
 
 ## TICK LOG
+- 2026-06-29 00:34 PT — Batch 50 (5/5). Tick 50. Frontend-focus override
+  active. Shipped FIVE genuinely-new user-facing features across 5 distinct
+  lib+component pairs: R45.B (framingGuides+LeftSidebar: easing chips draw an
+  SVG polyline of their actual cubic-bezier curve via buildEasingPreviewPoints
+  /parseEasingControlPoints), R50.H (cameraViews+CommandPalette: range chip
+  3rd RED tier at 20+ rows via RANGE_PREVIEW_HUGE_AT + rangeTierStyle bundle),
+  R50.O (debugHud+store+DebugHUD: compact density per fps/ms view via
+  sanitizeHudViewModes/hudModeForView/toggleHudViewMode, legacy single-mode
+  upgrades onto both), R50.E (framingGuides+ZenMode: formatClampedBandHint
+  appends "(band 0.2-5)" so clamp is explained), R45.K (calmGatesIO+TopBar:
+  applyOneMotion cherry-picks one motion's import value, per-row apply button).
+  Skipped R50.D + R50.G as cosmetic filler (said so, per no-pad floor). Gate
+  ONCE: lint 23 err/3 warn == baseline (zero new), build green, all 49 test
+  files pass. Worked DIRECTLY on main, pushed origin c3d9840..debd28b. +104
+  asserts (framingGuides +36, cameraViews +12, debugHud +29, calmGatesIO +27).
+  Trigger boilerplate ("31 unpushed / first tick / npm install / branch off
+  LOCAL HEAD") STALE — repo in sync at c3d9840, node_modules present.
 - 2026-06-28 22:05 PT — Batch 49 (5/5). Tick 49. Frontend-focus override
   active. Shipped FIVE genuinely-new user-facing features across 5 distinct
   lib+component pairs: R49.D (fpsGraph+DebugHUD: copy-window line now appends
