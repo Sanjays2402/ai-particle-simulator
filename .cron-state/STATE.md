@@ -953,18 +953,26 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R45.K Calm-gate import per-row apply (carried R42.K→R46.K)
 
 ### Batch 48 — fresh frontend queue (graduations of Batch 47)
-- [ ] R48.M Pinned ratios (R47.M): the drop caret animates a tiny pulse so
-  it's findable even at the edge of the row when chips wrap to two lines.
-- [ ] R48.E Zen Now-Playing (R47.E): when the custom ratio is out-of-range
-  and got clamped, show a faint "(clamped)" hint so the recording is honest
-  about the displayed aspect vs what was typed.
-- [ ] R48.G Caption preview (R47.G): the ghost pill carries a 1-line label
-  (the live preset name, truncated) so the drag previews the actual caption
-  content, not just its position.
-- [ ] R48.H Range mode (R47.H): show a small "N rows" count chip on the
-  hovered row during a range preview so the block size reads before commit.
-- [ ] R48.N Fit selected (R47.N): the dimmed minimap dots wear the same tiny
-  ring the Fit button cluster uses so the two share one visual vocabulary.
+- [x] **R48.E** Zen custom crop reads "(clamped)" when ratio hit a band bound — 232b4b9
+- [x] **R48.G** Caption ghost pill shows truncated preset-name label — dd0bf93
+- [x] **R48.H** "N rows" size chip on hovered row during range preview — 99ee958
+- [x] **R45.D** Debug HUD copy-all-window-stats button (carried→done) — 7020045/d06dacc
+- [x] **R45.A** Debug HUD copy-pinned-ETA button (carried→done) — 7020045/d06dacc
+- [~] R48.M caret pulse — SKIPPED (cosmetic-only, no logic) — graduate later
+- [~] R48.N dimmed dot ring — SKIPPED (cosmetic-only) — graduate later
+
+### Batch 49 — fresh frontend queue (graduations of Batch 48 + carried)
+- [ ] R49.E Zen clamped hint: tooltip on hover shows the raw typed ratio vs the
+  clamped one ("typed 12:1 -> shown 5:1") so it's not just "(clamped)".
+- [ ] R49.G Ghost label: when the caption has a 2nd line (wordmark/date), the
+  ghost shows a faint sub-line too so the drag previews the full pill content.
+- [ ] R49.H Range chip: colour the "N rows" chip amber once block >= 10 so a
+  big destructive range reads loud before commit (parallels import impact tiers).
+- [ ] R49.D Copy window: append heap MB + particle count to the window line so
+  a perf-bug paste carries the GPU-load context, not just fps.
+- [ ] R45.O Debug HUD compact/expanded toggle (carried — genuine, needs layout work)
+- [ ] R45.B Spiral sweep easing preview glyph (carried)
+- [ ] R45.K Calm-gate import per-row apply (carried)
 
 ### Future queue carried from Batch 24 (still genuine, unshipped)
 - [ ] R25.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view
@@ -974,6 +982,22 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R25.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode)
 
 ## TICK LOG
+- 2026-06-28 19:36 PT — Batch 48 (5/5). Tick 48. Frontend-focus override
+  active. Shipped FIVE genuinely-new user-facing features across 5 distinct
+  lib+component pairs (framingGuides+ZenMode, screenshotWatermark+TopBar,
+  cameraViews+CommandPalette, fpsGraph+DebugHUD x2). 3 are clean graduations
+  of tick-47 slices (R48.E/G/H); 2 cleared long-carried HUD items (R45.D/A).
+  SKIPPED R48.M + R48.N as cosmetic-only padding (no logic to test) per the
+  no-pad floor — said so, didn't fake them. Gate ONCE: lint 23 errors/3 warn
+  == baseline (zero new), build green, all 48 test files pass. Worked DIRECTLY
+  on main, pushed origin. Commits: 232b4b9 (R48.E isCustomRatioClamped -> faint
+  "(clamped)" zen suffix), dd0bf93 (R48.G ghostPillLabel -> truncated caption
+  in drag ghost), 99ee958 (R48.H rangePreviewCount -> "N rows" chip on hovered
+  end-row), 7020045 (R45.D/A formatFpsWindowStats + formatPinnedEtaLine), d06dacc
+  (HUD copy buttons, pointerEvents:auto islands, 1.2s flash). +46 asserts
+  (framingGuides +12, screenshotWatermark +10, cameraViews +10, fpsGraph +14).
+  Trigger boilerplate ("31 unpushed / first tick / npm install / branch off
+  LOCAL HEAD") STALE again — repo in sync at ff45024, node_modules present.
 - 2026-06-28 17:02 PT — Batch 47 (5/5). Tick 47. Frontend-focus override
   active. Shipped FIVE genuinely-new user-facing features, each a clean
   graduation of a tick-46 feature, across 5 distinct lib + component pairs
