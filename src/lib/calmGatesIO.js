@@ -175,6 +175,21 @@ export function filterPreviewRows(rows, diffOnly) {
   return rows.filter(r => r && r.changes === true)
 }
 
+// R45.K — apply JUST ONE motion's incoming value, cherry-picked from the
+// preview. R40.K/R41.K commit the whole map at the chosen mode; this lets
+// a user adopt a single motion's change without taking the rest. Returns
+// the live map with only motionId set to the imported value (sanitized),
+// plus `changed` (0 or 1). Unknown motion / no-op (already equal) → the
+// existing map ref unchanged with changed:0 (the caller can skip the
+// save). Pure; never mutates inputs.
+export function applyOneMotion(existing, imported, motionId) {
+  const safeExisting = sanitizeCalmGates(existing)
+  if (!CALM_MOTION_IDS.includes(motionId)) return { gates: safeExisting, changed: 0 }
+  const safeImport = sanitizeCalmGates(imported)
+  if (safeExisting[motionId] === safeImport[motionId]) return { gates: safeExisting, changed: 0 }
+  return { gates: { ...safeExisting, [motionId]: safeImport[motionId] }, changed: 1 }
+}
+
 // Trigger a browser download of the JSON envelope. Returns the filename
 // used, or null when something went wrong (e.g. no document available
 // during SSR).

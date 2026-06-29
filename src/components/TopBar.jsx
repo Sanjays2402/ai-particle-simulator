@@ -7,7 +7,7 @@ import { createLoop, DEMO_LOOPS } from '../lib/demoAudioLoops'
 import { loadKeymap, resolveAction } from '../lib/keymap'
 import { TIMER_DELAYS, labelForDelay, BURST_COUNTS, labelForBurst } from '../lib/selfTimer'
 import { formatCalmToast, CALM_GATED_MOTIONS, countGatedMotions } from '../lib/calmMode'
-import { downloadCalmGatesFile, parseImport as parseCalmGatesImport, mergeImport as mergeCalmGatesImport, summarizeImportImpact as summarizeCalmGatesImpact, filterPreviewRows as filterCalmGatesPreviewRows } from '../lib/calmGatesIO'
+import { downloadCalmGatesFile, parseImport as parseCalmGatesImport, mergeImport as mergeCalmGatesImport, summarizeImportImpact as summarizeCalmGatesImpact, filterPreviewRows as filterCalmGatesPreviewRows, applyOneMotion as applyOneCalmMotion } from '../lib/calmGatesIO'
 // R42.G — bake a preset-name caption into the exported screenshot.
 // R43.G — optional second caption line (wordmark + date).
 // R44.G — live caption preview in the watermark popover.
@@ -1181,6 +1181,17 @@ function CalmModeBtn() {
   }
 
   const cancelStagedImport = () => { setPendingImport(null); setDiffOnly(false) }
+
+  // R45.K — adopt JUST ONE motion's incoming value without taking the whole
+  // map. The staged import stays open so the user can pick another; the live
+  // diff recomputes so a cherry-picked row turns muted (no longer changes).
+  const applyOneMotionFromImport = (motionId, label) => {
+    if (!pendingImport) return
+    const res = applyOneCalmMotion(calmGates, pendingImport.gates, motionId)
+    if (res.changed === 0) return
+    setCalmGates(res.gates)
+    showToast(`${label} adopted from import`, <Wind size={10} color="#fff" strokeWidth={2.4} />)
+  }
   // R40.K — the live dry-run diff for the staged import under the chosen
   // mode. Recomputed each render so flipping merge/replace updates the
   // preview in place. null when nothing is staged.
@@ -1445,6 +1456,20 @@ function CalmModeBtn() {
                           color: row.changes ? (row.to ? '#86efac' : '#fbbf24') : '#6a6a80',
                           fontWeight: row.changes ? 700 : 400,
                         }}>{row.to ? 'pause' : 'run'}</span>
+                        {/* R45.K — cherry-pick: adopt JUST this motion without
+                            committing the whole map. Only on changed rows. */}
+                        {row.changes && (
+                          <button
+                            onClick={() => applyOneMotionFromImport(row.id, row.label)}
+                            title={`Apply only ${row.label} (${row.to ? 'pause' : 'run'}) - leaves the others`}
+                            style={{
+                              marginLeft: 4, padding: '1px 6px', borderRadius: 5, lineHeight: 1.4,
+                              background: 'rgba(168,85,247,0.18)', border: '1px solid rgba(168,85,247,0.4)',
+                              color: '#e9d5ff', cursor: 'pointer', fontFamily: 'inherit',
+                              fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',
+                            }}
+                          >apply</button>
+                        )}
                       </span>
                     </div>
                   ))}

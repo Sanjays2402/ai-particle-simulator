@@ -8,6 +8,8 @@ import {
   parseImport, mergeImport, summarizeImportImpact,
   // R41.K — diff-only preview-row filter
   filterPreviewRows,
+  // R45.K — per-motion cherry-pick
+  applyOneMotion,
 } from './calmGatesIO.js'
 import { CALM_MOTION_IDS, defaultCalmGates } from './calmMode.js'
 
@@ -217,4 +219,33 @@ console.log(`PASS: calmGatesIO — ${passed} assertions (envelope round-trip, me
   }
 }
 
-console.log(`PASS: calmGatesIO R41.K — ${passed} assertions (incl. diff-only preview filter)`)
+// --- R45.K: applyOneMotion — cherry-pick a single motion's import value ---
+{
+  // live keeps shake gated; import would un-gate shake + zen
+  const live = { autoRotate: true, cameraShake: true, hueCycle: true, zenOrbit: true }
+  const imp = { autoRotate: true, cameraShake: false, hueCycle: true, zenOrbit: false }
+  const r = applyOneMotion(live, imp, 'cameraShake')
+  eq(r.changed, 1, 'one-motion: shake flips → changed 1')
+  eq(r.gates.cameraShake, false, 'one-motion: shake adopted false')
+  eq(r.gates.zenOrbit, true, 'one-motion: zen UNTOUCHED (not adopted)')
+  eq(r.gates.autoRotate, true, 'one-motion: rotate untouched')
+  eq(r.gates.hueCycle, true, 'one-motion: hue untouched')
+  // no-op: motion already equal → 0 + same ref
+  const noop = applyOneMotion(live, imp, 'autoRotate')
+  eq(noop.changed, 0, 'one-motion: equal → changed 0')
+  eq(noop.gates.autoRotate, true, 'one-motion: no-op leaves rotate gated')
+  // unknown motion id → 0
+  eq(applyOneMotion(live, imp, 'bogus').changed, 0, 'one-motion: unknown id → 0')
+  eq(applyOneMotion(live, imp, null).changed, 0, 'one-motion: null id → 0')
+  // junk inputs default-fill, still safe
+  const safe = applyOneMotion(null, imp, 'zenOrbit')
+  eq(safe.changed, 1, 'one-motion: junk existing defaults gated, zen flips')
+  eq(safe.gates.zenOrbit, false, 'one-motion: zen adopted from import')
+  // purity
+  const liveSnap = JSON.stringify(live), impSnap = JSON.stringify(imp)
+  applyOneMotion(live, imp, 'zenOrbit')
+  eq(JSON.stringify(live), liveSnap, 'one-motion: live not mutated')
+  eq(JSON.stringify(imp), impSnap, 'one-motion: import not mutated')
+}
+
+console.log(`PASS: calmGatesIO R41.K/R45.K — ${passed} assertions (incl. diff-only filter + per-motion cherry-pick)`)
