@@ -1019,16 +1019,16 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [x] R52.G Screenshot: caption font-size chips (S/M/L) for the baked watermark.
 
 ### Batch 53 — fresh frontend queue (graduations of Batch 52 + new)
-- [ ] R53.N Minimap: the numbered badge (R52.N) brightens + scales the matching
-  dot's number when its RightSidebar list row is hovered (cross-highlight both ways).
-- [ ] R53.O HUD: clicking the R52.O linked/diverged glyph itself toggles sync
-  (Shift+M without the keyboard), with a tooltip naming the action.
-- [ ] R53.H Bulk delete: the R52.H type-DELETE box echoes a live char-match tick
-  (turns green as you type the phrase) so the gate feels responsive, not opaque.
-- [ ] R53.G Watermark: a 4th "XL" caption size + a tiny px readout next to the
-  S/M/L chips showing the resolved font size for the current canvas.
-- [ ] R53.B Easing preview: a small +/- stepper on the pace label to slow/speed
-  the dot loop (0.8x..2x), persisted, so a user can match the dot to the real sweep.
+- [x] R53.N Minimap: the numbered badge (R52.N) brightens + scales the matching
+  dot's number when its RightSidebar list row is hovered (cross-highlight both ways). — b7c1b87
+- [x] R53.O HUD: clicking the R52.O linked/diverged glyph itself toggles sync
+  (Shift+M without the keyboard), with a tooltip naming the action. — 8cd7b2a
+- [x] R53.H Bulk delete: the R52.H type-DELETE box echoes a live char-match tick
+  (turns green as you type the phrase) so the gate feels responsive, not opaque. — a7c558f
+- [x] R53.G Watermark: a 4th "XL" caption size + a tiny px readout next to the
+  S/M/L chips showing the resolved font size for the current canvas. — 4c6285d
+- [x] R53.B Easing preview: a small +/- stepper on the pace label to slow/speed
+  the dot loop (0.8x..2x), persisted, so a user can match the dot to the real sweep. — c7ecc89
 - [ ] R53.E Zen band hint: clicking (clamped) re-opens custom-ratio input pre-filled
   with the band so the fix is one tap (carried R50.E/R51.E/R52.E).
 - [ ] R53.M Pinned crops: Home/End jump a pin to first/last slot via keyboard
@@ -1050,6 +1050,42 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R53.N2 Minimap: badge text colour follows the dot's in-bounds/selected state
   (green/indigo/dim) so the number reinforces the dot's status at a glance.
 
+### Batch 54 — fresh frontend queue (graduations of Batch 53 + new)
+- [ ] R54.O HUD: the clickable linked glyph (R53.O) gets a tiny press/active
+  scale-down + a 200ms "synced" flash on the pill so a click that lands on an
+  already-linked map still gives visible feedback (it flips both, but silently).
+- [ ] R54.G Watermark: the px readout (R53.G) animates a brief highlight when the
+  resolved value CHANGES (chip switch or canvas resize) so the user notices the
+  number moved; debounce resize reads so it doesn't thrash.
+- [ ] R54.B Easing preview: a double-click / long-press on the pace stepper resets
+  speed to 1x (graduates R53.B), with a faint "reset" affordance when speed != 1x.
+- [ ] R54.H Bulk delete: the inline type-gate (R53.H) shows a live "N of M chars"
+  counter + a shake animation on the input when a typo lands, so the off-track
+  state is felt, not just coloured.
+- [ ] R54.N Minimap: shift-hovering a list row (R53.N) also pans/centres the
+  minimap's view on the matching dot if it's out of bounds, so the cross-highlight
+  can't point at a dot the user can't see.
+- [ ] R54.E Zen band hint: clicking (clamped) re-opens custom-ratio input pre-filled
+  with the band so the fix is one tap (carried R50.E..R53.E).
+- [ ] R54.M Pinned crops: Home/End jump a pin to first/last slot via keyboard
+  (graduates R51.M arrow-step, carried R52.M/R53.M). Aria-live announces the slot.
+- [ ] R54.K Calm import: "apply all changed" shows a one-line undo toast restoring
+  the pre-import map (graduates R51.K, carried R52.K/R53.K).
+- [ ] R54.A Debug HUD: a one-key (1/2/3) jump to compact/normal/full presets
+  (needs a 'normal' middle tier added to the 2-state mode first; carried R52.A/R53.A).
+- [ ] R54.D Minimap: a one-tap "renumber dots by distance from camera" sort toggle
+  so the badges can read nearest-first instead of list-order (carried R53.D).
+- [ ] R54.G2 Watermark: caption opacity chips (subtle / normal / bold) alongside
+  the size chips, so a busy scene's caption can fade back (carried R53.G2).
+- [ ] R54.H2 Camera views: a tiny "30+" warning chip on the range-size pip when a
+  prune will trip the R52.H/R53.H type-gate, so the friction is foreshadowed (carried R53.H2).
+- [ ] R54.O2 HUD: persist whether the user prefers fps+ms linked vs independent,
+  so a fresh session restores their sync preference (carried R53.O2).
+- [ ] R54.B2 Easing preview: the resting (paused) dot sits at the curve START with
+  a faint "hover to play" hint glyph instead of the bare end-dot (carried R53.B2).
+- [ ] R54.N2 Minimap: badge text colour follows the dot's in-bounds/selected state
+  (green/indigo/dim) so the number reinforces the dot's status at a glance (carried R53.N2).
+
 ### Future queue carried from Batch 24 (still genuine, unshipped)
 - [ ] R25.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view
 - [ ] R25.08 Minimap: hover a saved-view dot for ~1s shows a thumbnail preview (canvas2D sample of the scene from that camera)
@@ -1058,6 +1094,41 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R25.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode)
 
 ## TICK LOG
+- 2026-06-29 09:59 PT — Batch 53 (5/5). Tick 53. Frontend-focus override
+  active. Shipped FIVE genuinely-new user-facing features as 5 clean
+  commits, each its own distinct lib+component pair (zero file overlap
+  between commits): R53.O (debugHud+DebugHUD: hudLinkGlyph +
+  hudLinkToggleLabel — the R52.O linked/diverged glyph BECOMES the sync
+  button, click runs syncHudViewModes, span->button +stopPropagation),
+  R53.G (screenshotWatermark+TopBar: 'xl' tier 1.9x grows WATERMARK_SIZES
+  3->4 + watermarkSizeReadout(w,h,id)->{px,label,atMax,atMin} — live
+  resolved-px next to the chips off the real #particle-canvas dims, grid
+  3->4 cols), R53.B (framingGuides+store+LeftSidebar: +/- pace stepper
+  scaling loop speed 0.8x-2x persisted; sanitize/step/effectiveEasingLoopSec
+  =base/speed feeds BOTH animateMotion dur + pace label so dot+text agree;
+  missing-key reads pass null so fresh install = 1x not floor), R53.H
+  (cameraViews+CommandPalette: rangeConfirmMatchProgress->{matched,total,
+  complete,onTrack} drives an INLINE type-DELETE gate w/ a live green
+  char-tick + red-on-typo, replacing R52.H's opaque window.prompt; pending
+  ids snapshotted at open so concurrent edits can't widen the wipe; cmdk
+  swallows keys so the gate input lives in its own zIndex-1100 overlay),
+  R53.N (minimap+Minimap+RightSidebar: markerBadgeEmphasis cross-highlights
+  dot badge <-> list row BOTH ways via a particle:camera-view-hover event
+  w/ origin tag to avoid self-echo; emphatic badge grows 8->12px +
+  brightens + overrides selection-dim; list row gets emerald tint+stripe).
+  Gate ONCE: lint 26 problems (23 err/3 warn) == baseline (ZERO new),
+  build green (1.01s), all 49 test files pass. Worked DIRECTLY on main,
+  pushed origin 6f5e193..b7c1b87 (8cd7b2a, 4c6285d, c7ecc89, a7c558f,
+  b7c1b87). +~95 asserts (debugHud +19, screenshotWatermark +24,
+  framingGuides +31, cameraViews +22, minimap +19). Trigger boilerplate
+  ("31 unpushed / first tick / npm install / branch feature/autoship off
+  LOCAL HEAD") STALE + CONTRADICTS the authoritative prompt — repo was in
+  sync at 6f5e193 (0 ahead), node_modules present, STATE.md showed Batch 52
+  done, feature/autoship already existed. Prompt MANDATES direct-to-main
+  (feature branches don't hit the contribution graph), so followed the
+  prompt not the trigger — same call Batch 52 made + documented. Staged
+  each commit's files EXPLICITLY (never git add -A) since sibling cron
+  agents may touch the repo; all 5 commits verified clean (only my files).
 - 2026-06-29 05:57 PT — Batch 52 (5/5). Tick 52. Frontend-focus override
   active. Shipped FIVE genuinely-new user-facing features as 5 clean
   commits, each its own lib+component pair (no shared files except store
