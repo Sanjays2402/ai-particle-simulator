@@ -940,27 +940,31 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
   — 8d7f15c (minimap.markerSelectionState/Alpha + Minimap dot dimming)
 
 ### Batch 47 — fresh frontend queue (graduations of Batch 46 + carried)
-- [ ] R47.M Pinned ratios (R46.M): while dragging, also show a thin insert
-  caret BETWEEN chips at the projected drop gap (not just per-chip badges)
-  so the landing position reads even when chips are tightly packed.
-- [ ] R47.E Zen Now-Playing (R46.E): when the framing CROP is custom, show
-  the numeric ratio (e.g. "2.35") on the same line as the crop label so a
-  recording documents the exact custom aspect, not just "Custom".
-- [ ] R47.G Caption preview (R46.G): while dragging the caption, show a live
-  ghost pill that follows the pointer between corner snaps (a drag preview)
-  so the placement gesture has continuous visual feedback.
-- [ ] R47.H Range mode (R46.H): after a "range from here" anchor is armed,
-  paint a faint connector down the rows from the anchor to the hovered row
-  so the pending block is previewed before the completing click.
-- [ ] R47.N Fit selected (R46.N): the minimap "Fit N" button label also
-  shows a tiny dot-count glyph cluster matching the dimmed/lit dots so the
-  button and the map agree at a glance on what's framed.
+- [x] **R47.M** Insert caret between pinned ratio chips at drop gap — 61a1993
+- [x] **R47.E** Now-Playing custom crop reads "Custom . ratio" — 79928b7
+- [x] **R47.G** Live ghost pill follows pointer during caption drag — 7ecd0c6
+- [x] **R47.H** Preview the pending range block before the click — 208c8d8
+- [x] **R47.N** Fit N button dot-count glyph cluster matching dots — 48b93e3
 - [ ] R45.C Self-timer burst review strip (carried R36.C→R46.C)
 - [ ] R45.O Debug HUD compact/expanded toggle (carried R38.O→R46.O)
 - [ ] R45.B Spiral sweep easing preview glyph (carried R42.B→R46.B)
 - [ ] R45.A Debug HUD copy-pinned-ETA button (carried R42.A→R46.A)
 - [ ] R45.D Perf-pill copy-all-window-stats button (carried R42.D→R46.D)
 - [ ] R45.K Calm-gate import per-row apply (carried R42.K→R46.K)
+
+### Batch 48 — fresh frontend queue (graduations of Batch 47)
+- [ ] R48.M Pinned ratios (R47.M): the drop caret animates a tiny pulse so
+  it's findable even at the edge of the row when chips wrap to two lines.
+- [ ] R48.E Zen Now-Playing (R47.E): when the custom ratio is out-of-range
+  and got clamped, show a faint "(clamped)" hint so the recording is honest
+  about the displayed aspect vs what was typed.
+- [ ] R48.G Caption preview (R47.G): the ghost pill carries a 1-line label
+  (the live preset name, truncated) so the drag previews the actual caption
+  content, not just its position.
+- [ ] R48.H Range mode (R47.H): show a small "N rows" count chip on the
+  hovered row during a range preview so the block size reads before commit.
+- [ ] R48.N Fit selected (R47.N): the dimmed minimap dots wear the same tiny
+  ring the Fit button cluster uses so the two share one visual vocabulary.
 
 ### Future queue carried from Batch 24 (still genuine, unshipped)
 - [ ] R25.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view
@@ -970,6 +974,26 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R25.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode)
 
 ## TICK LOG
+- 2026-06-28 17:02 PT — Batch 47 (5/5). Tick 47. Frontend-focus override
+  active. Shipped FIVE genuinely-new user-facing features, each a clean
+  graduation of a tick-46 feature, across 5 distinct lib + component pairs
+  so no two overlap. Gate clean: lint 23 errors/3 warnings == baseline
+  (zero new), build green, all 48 test files pass. Worked DIRECTLY on main
+  (prompt bans feature branches); pushed to origin. The trigger's "31
+  unpushed / first tick / npm install / branch off LOCAL HEAD" was STALE
+  boilerplate AGAIN: repo in sync with origin at d0d623a, node_modules
+  present, STATE bootstrapped through tick 46. Commits: 61a1993 (R47.M
+  pinnedDropCaretGap -> 2px violet caret between pinned chips at the drop
+  gap, Fragment-wrapped chips + trailing caret), 79928b7 (R47.E
+  formatCustomFramingLine -> "Custom . 2.35" so a recording documents the
+  exact custom aspect), 7ecd0c6 (R47.G previewGhostPosition -> ghost pill
+  tracking pointer mid caption-drag, clamped, hide on up/cancel), 208c8d8
+  (R47.H rangePreviewSet -> anchor..hover block lights up + left stripe
+  before the completing click; hover state cleared on complete/toggle),
+  48b93e3 (R47.N fitDotGlyphs -> lit/dim dot cluster on Fit N button
+  matching the minimap dims, capped at 6 + overflow). +64 fresh asserts
+  (framingGuides +13, zenMode +10, screenshotWatermark +12, cameraViews
+  +11, minimap +18).
 - 2026-06-28 13:42 PT — Batch 46 (5/5). Tick 46. Frontend-focus override
   active. Shipped FIVE genuinely-new user-facing features, each a clean
   graduation of a tick-45 feature, spread across 5 distinct lib + component
