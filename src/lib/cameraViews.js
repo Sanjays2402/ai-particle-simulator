@@ -923,3 +923,42 @@ export function rangeTypeConfirmPrompt(count, phrase = RANGE_CONFIRM_PHRASE) {
   return `This will permanently delete ${n} ${noun}. Type ${want} to confirm.`
 }
 
+// --- R53.H: live char-match progress for the type-to-confirm gate -------
+//
+// R52.H gated a 30+ prune behind a typed "DELETE" phrase via a blocking
+// window.prompt — but a native prompt is opaque: the user gets no signal
+// they're typing the right thing until they hit OK and it either works or
+// silently aborts. R53.H moves the gate INLINE and drives a live tick that
+// fills in green as the phrase is typed (and flags a typo immediately), so
+// the gate feels responsive rather than a guess-and-submit.
+//
+// This computes the match state for the CURRENT input against the confirm
+// phrase. Matching mirrors matchesRangeConfirmPhrase exactly (trim +
+// case-insensitive) so the tick never disagrees with the arm decision.
+// Returns:
+//   { matched, total, complete, onTrack }
+//   - matched : count of leading chars that match the phrase (case-insens)
+//   - total   : the phrase length (so the UI can render matched/total)
+//   - complete: the whole trimmed input equals the phrase (== arms delete)
+//   - onTrack : the trimmed input is a (possibly empty) PREFIX of the
+//               phrase — false the instant a typo diverges, so the tick can
+//               flash red instead of staying green on a wrong key
+// Defensive: non-string input → an all-zero / onTrack=true (empty) state.
+// Pure.
+export function rangeConfirmMatchProgress(input, phrase = RANGE_CONFIRM_PHRASE) {
+  const want = (typeof phrase === 'string' && phrase.trim()) ? phrase.trim() : RANGE_CONFIRM_PHRASE
+  const total = want.length
+  const typed = (typeof input === 'string' ? input : '').trim()
+  const wantLc = want.toLowerCase()
+  const typedLc = typed.toLowerCase()
+  // Count the leading matching characters (the green run).
+  let matched = 0
+  const lim = Math.min(typedLc.length, wantLc.length)
+  while (matched < lim && typedLc[matched] === wantLc[matched]) matched++
+  // onTrack: everything typed so far is a correct prefix (no typo, and not
+  // overtyped past the phrase length).
+  const onTrack = typedLc.length <= wantLc.length && matched === typedLc.length
+  const complete = typedLc === wantLc
+  return { matched, total, complete, onTrack }
+}
+

@@ -25,6 +25,8 @@ import {
   rangePreviewTier, RANGE_PREVIEW_LARGE_AT, RANGE_PREVIEW_HUGE_AT, rangeTierStyle, rangeDeleteConfirmMessage,
   // R52.H — 30+ rows demand a typed "DELETE" phrase before the prune arms
   rangeNeedsTypeConfirm, matchesRangeConfirmPhrase, rangeTypeConfirmPrompt,
+  // R53.H — live char-match progress drives an inline tick on the typed gate
+  rangeConfirmMatchProgress, RANGE_CONFIRM_PHRASE,
 } from '../lib/cameraViews'
 import { labelForId as framingLabelForId } from '../lib/framingGuides'
 import {
@@ -67,6 +69,14 @@ export function CommandPalette({ onSettings }) {
   // pending first-click anchor inside that mode.
   const [rangeMode, setRangeMode] = useState(false)
   const [rangeAnchorId, setRangeAnchorId] = useState(null)
+  // R53.H — the inline type-DELETE gate for a VERY large (30+) prune. R52.H
+  // used a blocking window.prompt (opaque — no signal you're typing the
+  // right phrase). R53.H moves it inline: opening the gate stashes the
+  // pending count + ids; `typeGateInput` is the live text whose char-match
+  // progress fills a green tick (rangeConfirmMatchProgress) and goes red on
+  // a typo. Null pending = gate closed.
+  const [typeGatePending, setTypeGatePending] = useState(null)
+  const [typeGateInput, setTypeGateInput] = useState('')
   // R47.H — the row currently hovered while a range anchor is armed, so
   // the pending block (anchor..hover) can be previewed before the click.
   const [rangeHoverId, setRangeHoverId] = useState(null)
@@ -415,30 +425,39 @@ export function CommandPalette({ onSettings }) {
   // Pure removeViews (ref-equal-on-no-op) does the work; a window.confirm
   // gates the destructive action. Persist + re-sync like every other
   // lifecycle action, then leave selection mode.
+  // R53.H — for a VERY large (30+) prune, open the INLINE type-DELETE gate
+  // (a live char-tick) instead of a blocking window.prompt; smaller ranges
+  // keep the one-click window.confirm whose copy R51.H escalates by tier.
   const deleteSelected = () => {
     const count = selectedIds.size
     if (count === 0) return
-    if (typeof window !== 'undefined') {
-      // R52.H — a VERY large prune (30+) demands a typed "DELETE" phrase so
-      // muscle-memory can't wipe a big library by reflex; smaller ranges
-      // keep the one-click confirm whose copy R51.H escalates by tier.
-      if (rangeNeedsTypeConfirm(count) && typeof window.prompt === 'function') {
-        const typed = window.prompt(rangeTypeConfirmPrompt(count))
-        // Cancel (null) or a non-matching phrase aborts the delete.
-        if (!matchesRangeConfirmPhrase(typed)) return
-      } else if (typeof window.confirm === 'function') {
-        // R51.H — confirm copy escalates by the same 3-tier scale as the chip:
-        // a 30-row prune SHOUTS, a 3-row one stays plain, so the loudest tier
-        // also gates the destructive action loudest.
-        const ok = window.confirm(rangeDeleteConfirmMessage(count))
-        if (!ok) return
-      }
+    if (typeof window !== 'undefined' && rangeNeedsTypeConfirm(count)) {
+      // Stash the pending prune (ids snapshotted) + open the inline gate.
+      setTypeGatePending({ count, ids: new Set(selectedIds) })
+      setTypeGateInput('')
+      return
     }
+    if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+      // R51.H — confirm copy escalates by the same 3-tier scale as the chip:
+      // a 20-row prune SHOUTS, a 3-row one stays plain, so the loudest tier
+      // also gates the destructive action loudest.
+      const ok = window.confirm(rangeDeleteConfirmMessage(count))
+      if (!ok) return
+    }
+    commitDelete(selectedIds)
+  }
+
+  // R53.H — the actual prune, shared by the one-click path and the inline
+  // type-gate path. Takes the id set to remove (snapshotted when the gate
+  // opened so a concurrent edit can't widen the wipe).
+  const commitDelete = (ids) => {
     const current = loadCameraViews()
-    const next = removeViews(current, selectedIds)
+    const next = removeViews(current, ids)
     setSelecting(false)
     setSelectedIds(new Set())
     setAnchorId(null)
+    setTypeGatePending(null)
+    setTypeGateInput('')
     if (next === current) return // nothing selected was present
     saveCameraViews(next)
     setCameraViews(next)
@@ -448,6 +467,19 @@ export function CommandPalette({ onSettings }) {
       `Deleted ${removed} selected view${removed === 1 ? '' : 's'}`,
       <Trash2 size={10} color="#fff" strokeWidth={2.4} />,
     )
+  }
+
+  // R53.H — confirm the inline type-gate: arm only when the typed phrase
+  // matches (same decision as matchesRangeConfirmPhrase), then commit the
+  // stashed prune.
+  const confirmTypeGate = () => {
+    if (!typeGatePending) return
+    if (!matchesRangeConfirmPhrase(typeGateInput)) return
+    commitDelete(typeGatePending.ids)
+  }
+  const cancelTypeGate = () => {
+    setTypeGatePending(null)
+    setTypeGateInput('')
   }
 
   if (!open) return null
@@ -1038,6 +1070,122 @@ export function CommandPalette({ onSettings }) {
           <span><kbd style={kbdSm}>⌘K</kbd> Open</span>
         </div>
       </Command>
+      {/* R53.H — inline type-DELETE friction gate for a 30+ prune. Replaces
+          the opaque window.prompt with a live char-tick: each box fills
+          green as you type the phrase and the whole row flashes red the
+          instant a typo diverges, so the gate feels responsive. Rendered
+          above the palette (its own overlay) with a focused input — cmdk's
+          Command swallows keystrokes, so the gate input lives outside it. */}
+      {typeGatePending && (() => {
+        const prog = rangeConfirmMatchProgress(typeGateInput)
+        const armed = prog.complete
+        const offTrack = !prog.onTrack && typeGateInput.length > 0
+        const phrase = RANGE_CONFIRM_PHRASE
+        return (
+          <div
+            onClick={(e) => { e.stopPropagation(); cancelTypeGate() }}
+            style={{
+              position: 'fixed', inset: 0, zIndex: 1100,
+              background: 'rgba(4,4,8,0.6)',
+              backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+              display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+              paddingTop: '20vh', animation: 'cp-fade 0.12s ease-out',
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: 420, maxWidth: '90vw',
+                background: 'linear-gradient(180deg, rgba(28,16,18,0.96) 0%, rgba(18,12,14,0.97) 100%)',
+                border: '1px solid rgba(248,113,113,0.4)',
+                borderRadius: 14,
+                boxShadow: '0 30px 80px rgba(0,0,0,0.6), 0 0 40px rgba(239,68,68,0.18)',
+                padding: '18px 20px', animation: 'cp-slide 0.16s cubic-bezier(0.2,0.8,0.2,1)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <Trash2 size={15} color="#f87171" strokeWidth={2.2} />
+                <span style={{ color: '#fecaca', fontSize: 13.5, fontWeight: 700, letterSpacing: '-0.01em' }}>
+                  Delete {typeGatePending.count} camera views
+                </span>
+              </div>
+              <p style={{ color: '#c7a9ab', fontSize: 12, lineHeight: 1.45, margin: '0 0 12px' }}>
+                {rangeTypeConfirmPrompt(typeGatePending.count)} This can&apos;t be undone.
+              </p>
+              {/* The live char tick: one box per phrase char, filling green
+                  left-to-right as the correct prefix is typed; the row tints
+                  red the instant a typo diverges. */}
+              <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
+                {Array.from({ length: phrase.length }).map((_, i) => {
+                  const lit = !offTrack && i < prog.matched
+                  return (
+                    <span key={i} aria-hidden="true" style={{
+                      flex: 1, height: 4, borderRadius: 2,
+                      background: offTrack
+                        ? 'rgba(248,113,113,0.8)'
+                        : lit ? 'rgba(74,222,128,0.9)' : 'rgba(255,255,255,0.1)',
+                      transition: 'background 0.12s ease-out',
+                    }} />
+                  )
+                })}
+              </div>
+              <input
+                autoFocus
+                value={typeGateInput}
+                onChange={(e) => setTypeGateInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && armed) { e.preventDefault(); confirmTypeGate() }
+                  else if (e.key === 'Escape') { e.preventDefault(); cancelTypeGate() }
+                }}
+                placeholder={`Type ${phrase} to confirm`}
+                aria-label={`Type ${phrase} to confirm deleting ${typeGatePending.count} views`}
+                spellCheck={false}
+                autoComplete="off"
+                style={{
+                  width: '100%', boxSizing: 'border-box',
+                  padding: '9px 12px', borderRadius: 8, marginBottom: 12,
+                  fontSize: 14, fontWeight: 600, letterSpacing: '0.08em',
+                  fontFamily: 'Geist Mono, monospace',
+                  background: 'rgba(0,0,0,0.35)',
+                  color: offTrack ? '#fca5a5' : armed ? '#86efac' : '#f2f2f5',
+                  border: `1px solid ${offTrack ? 'rgba(248,113,113,0.6)' : armed ? 'rgba(74,222,128,0.6)' : 'rgba(255,255,255,0.12)'}`,
+                  outline: 'none', transition: 'color 0.12s, border-color 0.12s',
+                }}
+              />
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button
+                  onClick={() => cancelTypeGate()}
+                  style={{
+                    padding: '7px 16px', borderRadius: 8,
+                    background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                    color: '#9a9ab0', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 600,
+                  }}
+                >Cancel</button>
+                <button
+                  onClick={() => confirmTypeGate()}
+                  disabled={!armed}
+                  title={armed ? `Permanently delete ${typeGatePending.count} views` : `Type ${phrase} to enable`}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '7px 16px', borderRadius: 8,
+                    background: armed
+                      ? 'linear-gradient(135deg, rgba(239,68,68,0.42) 0%, rgba(220,38,38,0.34) 100%)'
+                      : 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${armed ? 'rgba(248,113,113,0.6)' : 'rgba(255,255,255,0.08)'}`,
+                    color: armed ? '#fecaca' : '#6a6a80',
+                    cursor: armed ? 'pointer' : 'not-allowed',
+                    fontFamily: 'inherit', fontSize: 12.5, fontWeight: 700, letterSpacing: '0.02em',
+                    transition: 'all 0.13s ease-out',
+                  }}
+                >
+                  <Trash2 size={12} strokeWidth={2.3} />
+                  Delete {typeGatePending.count}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

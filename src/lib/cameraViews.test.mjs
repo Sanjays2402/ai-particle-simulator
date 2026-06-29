@@ -33,6 +33,8 @@ import {
   rangePreviewSet, rangePreviewCount, rangePreviewTier, RANGE_PREVIEW_LARGE_AT, RANGE_PREVIEW_HUGE_AT, rangeTierStyle, rangeDeleteConfirmMessage,
   // R52.H — type-DELETE friction gate for a 30+ prune
   RANGE_TYPE_CONFIRM_AT, rangeNeedsTypeConfirm, matchesRangeConfirmPhrase, rangeTypeConfirmPrompt,
+  // R53.H — live char-match progress for the inline type-DELETE gate
+  RANGE_CONFIRM_PHRASE, rangeConfirmMatchProgress,
 } from './cameraViews.js'
 
 function assertEq(actual, expected, msg) {
@@ -1334,3 +1336,57 @@ console.log('PASS: rangeDeleteConfirmMessage — tier-escalated confirm copy (R5
   assertTrue(rangeTypeConfirmPrompt(NaN).length > 0, 'prompt: NaN guarded')
 }
 console.log('PASS: rangeNeedsTypeConfirm / matchesRangeConfirmPhrase / rangeTypeConfirmPrompt — type-DELETE gate (R52.H)')
+
+// R53.H — live char-match progress for the inline type-DELETE gate. The
+// tick fills green as the phrase is typed and goes off-track on a typo.
+// Matching mirrors matchesRangeConfirmPhrase (trim + case-insensitive).
+{
+  const P = RANGE_CONFIRM_PHRASE // 'DELETE'
+  // empty input → zero matched, full total, onTrack (nothing wrong yet)
+  const e0 = rangeConfirmMatchProgress('', P)
+  assertEq(e0.matched, 0, 'progress: empty → 0 matched')
+  assertEq(e0.total, P.length, 'progress: total == phrase length')
+  assertTrue(e0.complete === false, 'progress: empty not complete')
+  assertTrue(e0.onTrack === true, 'progress: empty is on-track')
+  // a correct prefix counts up + stays on-track
+  const d1 = rangeConfirmMatchProgress('DEL', P)
+  assertEq(d1.matched, 3, 'progress: "DEL" → 3 matched')
+  assertTrue(d1.onTrack === true, 'progress: correct prefix on-track')
+  assertTrue(d1.complete === false, 'progress: partial not complete')
+  // case-insensitive prefix (mirrors the arm decision)
+  const lc = rangeConfirmMatchProgress('del', P)
+  assertEq(lc.matched, 3, 'progress: lowercase prefix matches')
+  assertTrue(lc.onTrack === true, 'progress: lowercase on-track')
+  // full phrase → complete (and == matchesRangeConfirmPhrase)
+  const full = rangeConfirmMatchProgress('DELETE', P)
+  assertEq(full.matched, P.length, 'progress: full phrase fully matched')
+  assertTrue(full.complete === true, 'progress: full phrase complete')
+  assertEq(full.complete, matchesRangeConfirmPhrase('DELETE', P), 'progress: complete agrees with arm decision')
+  // trimmed match arms too (mirrors matchesRangeConfirmPhrase trim)
+  const trimmed = rangeConfirmMatchProgress('  delete  ', P)
+  assertTrue(trimmed.complete === true, 'progress: trimmed lowercase completes')
+  assertEq(trimmed.complete, matchesRangeConfirmPhrase('  delete  ', P), 'progress: trimmed agrees with arm decision')
+  // a TYPO diverges immediately → off-track, matched stops at the good run
+  const typo = rangeConfirmMatchProgress('DELXTE', P)
+  assertEq(typo.matched, 3, 'progress: typo at index 3 → 3 matched')
+  assertTrue(typo.onTrack === false, 'progress: typo goes off-track')
+  assertTrue(typo.complete === false, 'progress: typo not complete')
+  // wrong first char → 0 matched, off-track
+  const wrong = rangeConfirmMatchProgress('X', P)
+  assertEq(wrong.matched, 0, 'progress: wrong first char → 0 matched')
+  assertTrue(wrong.onTrack === false, 'progress: wrong first char off-track')
+  // overtyped past the phrase (correct prefix but too long) → off-track
+  const over = rangeConfirmMatchProgress('DELETEX', P)
+  assertEq(over.matched, P.length, 'progress: overtype matched caps at phrase length')
+  assertTrue(over.onTrack === false, 'progress: overtype is off-track')
+  assertTrue(over.complete === false, 'progress: overtype not complete')
+  // defensive: non-string input → empty-ish, on-track
+  const ns = rangeConfirmMatchProgress(null, P)
+  assertEq(ns.matched, 0, 'progress: null → 0 matched')
+  assertTrue(ns.onTrack === true, 'progress: null is on-track (nothing typed)')
+  // custom phrase honoured
+  const cust = rangeConfirmMatchProgress('sto', 'stop')
+  assertEq(cust.matched, 3, 'progress: custom phrase prefix matches')
+  assertEq(cust.total, 4, 'progress: custom phrase total')
+}
+console.log('PASS: rangeConfirmMatchProgress — live type-DELETE char tick (R53.H)')
