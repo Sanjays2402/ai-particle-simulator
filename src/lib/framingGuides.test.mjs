@@ -16,6 +16,8 @@ import {
   parseEasingControlPoints, buildEasingPreviewPoints, EASING_PREVIEW_SAMPLES,
   // R51.B — easing preview path (animated dot) · R51.M — pinned keyboard reorder
   buildEasingPreviewPath, pinnedReorderTarget,
+  // R52.B — easing preview pace label (loop duration + Hz)
+  EASING_PREVIEW_LOOP_SEC, easingPreviewPaceLabel,
   // R42.M — custom aspect-ratio input
   CUSTOM_FRAMING_ID, CUSTOM_RATIO_MIN, CUSTOM_RATIO_MAX,
   parseAspectRatio, clampCustomRatio, formatCustomRatioLabel, isCustomRatioClamped,
@@ -1165,6 +1167,29 @@ console.log(`PASS: framingGuides R39.B — ${passed} total assertions (incl. on-
     ok(p.startsWith('M') && p.length > 4, `${e.id}: path builds`)
   }
   ok(buildEasingPreviewPath('garbage', 16, 10).startsWith('M'), 'junk → linear path fallback')
+}
+
+// R52.B — easingPreviewPaceLabel: loop duration + Hz, junk-guarded.
+{
+  // default loop (1.6s) → "1.6s · 0.6Hz" (1/1.6 = 0.625 → 0.6)
+  const def = easingPreviewPaceLabel(EASING_PREVIEW_LOOP_SEC)
+  ok(def.includes('1.6s'), 'pace: default shows 1.6s')
+  ok(def.includes('Hz'), 'pace: carries a Hz figure')
+  ok(def.includes('\u00b7'), 'pace: middot separator')
+  eq(easingPreviewPaceLabel(1.6), '1.6s \u00b7 0.6Hz', 'pace: 1.6s → 0.6Hz')
+  // whole-second durations drop the ".0": 2s → 2s · 0.5Hz
+  eq(easingPreviewPaceLabel(2), '2s \u00b7 0.5Hz', 'pace: 2s whole → no trailing .0')
+  // 1s → 1s · 1Hz (both whole)
+  eq(easingPreviewPaceLabel(1), '1s \u00b7 1Hz', 'pace: 1s → 1Hz both whole')
+  // 0.5s → 0.5s · 2Hz
+  eq(easingPreviewPaceLabel(0.5), '0.5s \u00b7 2Hz', 'pace: 0.5s → 2Hz')
+  // defensive: non-finite / non-positive → '' (caller omits the label)
+  eq(easingPreviewPaceLabel(0), '', 'pace: 0 → blank')
+  eq(easingPreviewPaceLabel(-3), '', 'pace: negative → blank')
+  eq(easingPreviewPaceLabel(NaN), '', 'pace: NaN → blank')
+  eq(easingPreviewPaceLabel(Infinity), '', 'pace: Infinity → blank')
+  // the exported loop constant is a sane positive number
+  ok(Number.isFinite(EASING_PREVIEW_LOOP_SEC) && EASING_PREVIEW_LOOP_SEC > 0, 'pace: loop const positive finite')
 }
 
 // R51.M — pinnedReorderTarget: arrow-step within the pinned run, ends clamp.

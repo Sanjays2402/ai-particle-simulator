@@ -784,6 +784,32 @@ export function buildEasingPreviewPath(css, w = 16, h = 10, samples = EASING_PRE
   return 'M' + pts.join(' L')
 }
 
+// R52.B — the loop duration (seconds) the animated easing-preview dot
+// rides at. The <animateMotion> uses this as its `dur`, and the pace
+// label below documents it. Kept as a named export so the component and
+// the label can't drift apart.
+export const EASING_PREVIEW_LOOP_SEC = 1.6
+
+// R52.B — a compact "pace" label for the animated easing-preview dot:
+// the loop DURATION plus its frequency in Hz, e.g. "1.6s · 0.6Hz". The
+// static glyph shows the curve's SHAPE; this documents how FAST the dot
+// traverses it so a recording (or a screenshot) of the chip is self-
+// explanatory rather than relying on the live motion. Hz = 1 / seconds,
+// rounded to one decimal; seconds trimmed of a trailing ".0". Defensive:
+// non-finite / non-positive duration → '' so the caller omits the label
+// rather than printing "Infinity Hz". Pure.
+export function easingPreviewPaceLabel(loopSec = EASING_PREVIEW_LOOP_SEC) {
+  const s = Number(loopSec)
+  if (!Number.isFinite(s) || s <= 0) return ''
+  const hz = 1 / s
+  // One-decimal, then drop a redundant trailing ".0" so "2.0s" reads "2s".
+  const trim = (n) => {
+    const r = Math.round(n * 10) / 10
+    return Number.isInteger(r) ? String(r) : r.toFixed(1)
+  }
+  return `${trim(s)}s \u00b7 ${trim(hz)}Hz`
+}
+
 // --- R43.M: recent custom aspect ratios -------------------------------
 //
 // R42.M lets a user type any custom crop (21:9, 2.76, 5:7). A user who

@@ -33,7 +33,7 @@ import {
   summarizeImportImpact as summarizeCrossfadeOverridesImpact,
 } from '../lib/crossfadeOverridesIO'
 import { ATTRACTOR_TYPES, MAX_ATTRACTORS, attractorTypeStyle, parsePositionInput, dropIndexForGap, stepKeyboardGapCursor, describeGapReorderAnnouncement } from '../lib/namedAttractors'
-import { FRAMING_RATIOS, FRAMING_GRIDS, SPIRAL_ORIENTATIONS, SPIRAL_SWEEP_SPEEDS, SPIRAL_SWEEP_EASINGS, CUSTOM_FRAMING_ID, formatCustomRatioLabel, buildRatioChips, projectedPinnedOrder, pinnedDropCaretGap, buildEasingPreviewPoints, buildEasingPreviewPath, pinnedReorderTarget } from '../lib/framingGuides'
+import { FRAMING_RATIOS, FRAMING_GRIDS, SPIRAL_ORIENTATIONS, SPIRAL_SWEEP_SPEEDS, SPIRAL_SWEEP_EASINGS, CUSTOM_FRAMING_ID, formatCustomRatioLabel, buildRatioChips, projectedPinnedOrder, pinnedDropCaretGap, buildEasingPreviewPoints, buildEasingPreviewPath, pinnedReorderTarget, EASING_PREVIEW_LOOP_SEC, easingPreviewPaceLabel } from '../lib/framingGuides'
 import { showToast } from './Toast'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
@@ -49,6 +49,11 @@ const THEME_LIST = [
 export default function LeftSidebar() {
   const [videoRec, setVideoRec] = useState(null)
   const [videoElapsed, setVideoElapsed] = useState(0)
+  // R52.B — pause the animated easing-preview dot when the pointer isn't
+  // over the easing chip row, so the motion only plays while the user is
+  // actively looking at it (and a still screenshot reads the pace label
+  // instead of a frozen dot mid-curve). Default paused.
+  const [easingRowHovered, setEasingRowHovered] = useState(false)
   const {
     particleCount, setParticleCount,
     speed, setSpeed,
@@ -410,8 +415,26 @@ export default function LeftSidebar() {
                   Picking an easing also replays so the change is visible. */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, marginBottom: 5 }}>
                 <span style={{ fontSize: 10, color: '#7a7a90', fontWeight: 500 }}>Sweep easing</span>
+                {/* R52.B — pace label documents the preview dot's loop speed
+                    (duration + Hz) so a still capture of the chip explains
+                    itself instead of relying on the live motion. Brightens
+                    while the row is hovered (dot is playing), dims when the
+                    dot is paused. */}
+                <span style={{
+                  fontSize: 8.5, fontWeight: 600, letterSpacing: '0.03em',
+                  fontFamily: 'Geist Mono, monospace',
+                  color: easingRowHovered ? '#c4b5fd' : '#5a5a70',
+                  transition: 'color 0.2s ease-out',
+                }} title={easingRowHovered
+                  ? 'Preview dot loop pace (playing) - hover out to pause'
+                  : 'Preview dot loop pace (paused) - hover the chips to play'}>
+                  {easingPreviewPaceLabel(EASING_PREVIEW_LOOP_SEC)}
+                </span>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+              <div
+                onMouseEnter={() => setEasingRowHovered(true)}
+                onMouseLeave={() => setEasingRowHovered(false)}
+                style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
                 {SPIRAL_SWEEP_EASINGS.map(e => {
                   const active = spiralSweepEasing === e.id
                   return (
@@ -442,12 +465,20 @@ export default function LeftSidebar() {
                         {/* R51.B — when this easing is active, a dot rides the
                             curve so the acceleration is FELT over time: slow
                             start sprints, ease-out coasts to a stop. Loops on
-                            the same css token the polyline + real sweep use. */}
+                            the same css token the polyline + real sweep use.
+                            R52.B — the dot only ANIMATES while the row is
+                            hovered; otherwise it rests at the curve's end
+                            (top-right) so a still capture isn't frozen mid-
+                            curve and the CPU isn't driving an unwatched loop. */}
                         {active && (
-                          <circle r="1.4" fill="#fde9ff">
-                            <animateMotion dur="1.6s" repeatCount="indefinite"
-                              path={buildEasingPreviewPath(e.css, 16, 10)} />
-                          </circle>
+                          easingRowHovered ? (
+                            <circle r="1.4" fill="#fde9ff">
+                              <animateMotion dur={`${EASING_PREVIEW_LOOP_SEC}s`} repeatCount="indefinite"
+                                path={buildEasingPreviewPath(e.css, 16, 10)} />
+                            </circle>
+                          ) : (
+                            <circle r="1.4" fill="#fde9ff" cx="16" cy="0" />
+                          )
                         )}
                       </svg>
                       <span>{e.label}</span>
