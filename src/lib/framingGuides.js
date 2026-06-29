@@ -140,6 +140,39 @@ export function isCustomRatioClamped(ratio) {
   return r <= CUSTOM_RATIO_MIN || r >= CUSTOM_RATIO_MAX
 }
 
+// R49.E — parse an aspect entry to its UNCLAMPED ratio so the store can
+// remember what was actually typed. Same grammar as parseAspectRatio but
+// skips clampCustomRatio, so "12:1" survives as 12 (not pulled to 5). Junk
+// → null. Pure. Lets the zen card show "typed 12 -> shown 5" rather than a
+// bare "(clamped)".
+export function parseRawAspectRatio(raw) {
+  if (typeof raw !== 'string' && typeof raw !== 'number') return null
+  const s = String(raw).trim()
+  if (!s) return null
+  const m = s.match(/^(-?\d*\.?\d+)\s*[:x/]\s*(-?\d*\.?\d+)$/i)
+  if (m) {
+    const w = Number(m[1]), h = Number(m[2])
+    if (!Number.isFinite(w) || !Number.isFinite(h) || h === 0) return null
+    const r = w / h
+    return Number.isFinite(r) && r > 0 ? r : null
+  }
+  const bare = Number(s)
+  return Number.isFinite(bare) && bare > 0 ? bare : null
+}
+
+// R49.E — build the clamp-tooltip text: "typed <raw> -> shown <clamped>".
+// Only meaningful when the raw entry actually got pulled into the band; a
+// raw that already sits inside [MIN, MAX] → '' (no clamp happened, nothing to
+// explain). Non-finite raw → ''. Uses formatCustomRatioLabel so both numbers
+// read like every other ratio in the UI. Pure.
+export function formatClampedHint(rawRatio) {
+  const r = Number(rawRatio)
+  if (!Number.isFinite(r) || r <= 0) return ''
+  const clamped = clampCustomRatio(r)
+  if (clamped == null || clamped === r) return ''
+  return `typed ${formatCustomRatioLabel(r)} \u2192 shown ${formatCustomRatioLabel(clamped)}`
+}
+
 // Given the viewport size + a target ratio, compute the bar geometry.
 // Returns an object describing the masked frame:
 //   { mode, bar, frameW, frameH, frameX, frameY }

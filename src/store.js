@@ -50,6 +50,8 @@ import {
   // R42.M — custom aspect-ratio parser + clamp.
   parseAspectRatio,
   clampCustomRatio,
+  // R49.E — unclamped raw parse so the store can remember what was typed.
+  parseRawAspectRatio,
   // R43.M — recent custom ratios MRU.
   sanitizeRecentRatios,
   pushRecentRatio,
@@ -93,6 +95,9 @@ const SPIRAL_SWEEP_SPEED_KEY = 'particle-spiral-sweep-speed-v1'
 const SPIRAL_SWEEP_EASING_KEY = 'particle-spiral-sweep-easing-v1'
 // R42.M — custom framing aspect ratio (numeric width/height), own key.
 const FRAMING_CUSTOM_RATIO_KEY = 'particle-framing-custom-ratio-v1'
+// R49.E — the UNCLAMPED ratio as typed, so the zen card can show "typed X
+// -> shown Y" when an extreme entry got pulled into the band. Own key.
+const FRAMING_CUSTOM_RATIO_RAW_KEY = 'particle-framing-custom-ratio-raw-v1'
 // R43.M — recent custom aspect ratios (MRU list of numbers), own key.
 const FRAMING_RECENT_RATIOS_KEY = 'particle-framing-recent-ratios-v1'
 // R44.M — pinned (favourite) custom aspect ratios, own key.
@@ -569,6 +574,15 @@ export const useStore = create((set, get) => {
       return raw != null ? clampCustomRatio(Number(raw)) : null
     } catch { return null }
   })(),
+  // R49.E — the UNCLAMPED ratio as typed (12 for "12:1"); null when none /
+  // never clamped. The zen card reads this to show "typed 12 -> shown 5".
+  framingCustomRatioRaw: (() => {
+    try {
+      const raw = localStorage.getItem(FRAMING_CUSTOM_RATIO_RAW_KEY)
+      const n = raw != null ? Number(raw) : NaN
+      return Number.isFinite(n) && n > 0 ? n : null
+    } catch { return null }
+  })(),
   // Accepts a freeform string ("21:9", "2.39", "16x9") OR a number; parses
   // + clamps to the usable band. Returns the resolved numeric ratio (or
   // null when unparseable) so the caller can flag a bad entry. Also flips
@@ -577,16 +591,19 @@ export const useStore = create((set, get) => {
   setFramingCustomRatio: (raw) => {
     const ratio = typeof raw === 'number' ? clampCustomRatio(raw) : parseAspectRatio(raw)
     if (ratio == null) return null
+    // R49.E — keep the unclamped entry so a "(clamped)" flag can explain itself.
+    const rawRatio = parseRawAspectRatio(raw)
     try { localStorage.setItem(FRAMING_CUSTOM_RATIO_KEY, String(ratio)) } catch { /* quota / private mode */ }
+    try { if (rawRatio != null) localStorage.setItem(FRAMING_CUSTOM_RATIO_RAW_KEY, String(rawRatio)) } catch { /* */ }
     try { localStorage.setItem(FRAMING_GUIDE_KEY, 'custom') } catch { /* */ }
     // R43.M — remember this ratio in the recents MRU so the user can
     // re-apply a favourite crop with a click instead of re-typing it.
     const nextRecents = pushRecentRatio(get().recentCustomRatios, ratio)
     if (!sameRecentRatios(nextRecents, get().recentCustomRatios)) {
       try { localStorage.setItem(FRAMING_RECENT_RATIOS_KEY, JSON.stringify(nextRecents)) } catch { /* quota / private mode */ }
-      set({ framingCustomRatio: ratio, framingGuideId: 'custom', recentCustomRatios: nextRecents })
+      set({ framingCustomRatio: ratio, framingCustomRatioRaw: rawRatio, framingGuideId: 'custom', recentCustomRatios: nextRecents })
     } else {
-      set({ framingCustomRatio: ratio, framingGuideId: 'custom' })
+      set({ framingCustomRatio: ratio, framingCustomRatioRaw: rawRatio, framingGuideId: 'custom' })
     }
     return ratio
   },

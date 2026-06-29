@@ -15,6 +15,7 @@ import {
   // R42.M — custom aspect-ratio input
   CUSTOM_FRAMING_ID, CUSTOM_RATIO_MIN, CUSTOM_RATIO_MAX,
   parseAspectRatio, clampCustomRatio, formatCustomRatioLabel, isCustomRatioClamped,
+  parseRawAspectRatio, formatClampedHint,
   // R43.M — recent custom ratios MRU
   RECENT_RATIOS_MAX, sanitizeRecentRatios, pushRecentRatio, sameRecentRatios,
   // R44.M — pinned (favourite) custom ratios
@@ -1078,6 +1079,26 @@ console.log(`PASS: framingGuides R39.B — ${passed} total assertions (incl. on-
     // Gap is always within [0, count) for a valid drag.
     ok(pinnedDropCaretGap(5, 2, 4) >= 0 && pinnedDropCaretGap(5, 2, 4) < 5, 'caret: gap in bounds')
   }
+}
+
+// R49.E — parseRawAspectRatio (unclamped) + formatClampedHint
+{
+  eq(parseRawAspectRatio('12:1'), 12, 'raw: 12:1 stays 12 (unclamped)')
+  eq(parseRawAspectRatio('2.39'), 2.39, 'raw: bare decimal passthrough')
+  eq(parseRawAspectRatio('16x9'), 16 / 9, 'raw: 16x9 unclamped')
+  eq(parseRawAspectRatio('1:100'), 0.01, 'raw: 1:100 below MIN unclamped')
+  eq(parseRawAspectRatio('junk'), null, 'raw: junk → null')
+  eq(parseRawAspectRatio('5:0'), null, 'raw: divide by zero → null')
+  eq(parseRawAspectRatio(''), null, 'raw: empty → null')
+  eq(parseRawAspectRatio(null), null, 'raw: null → null')
+  // formatClampedHint — only speaks when a clamp actually happened.
+  eq(formatClampedHint(12), 'typed 12 \u2192 shown 5', 'hint: 12 clamped to MAX 5')
+  eq(formatClampedHint(0.01), 'typed 0.01 \u2192 shown 0.2', 'hint: tiny clamped to MIN 0.2')
+  eq(formatClampedHint(2.39), '', 'hint: in-band → no clamp text')
+  eq(formatClampedHint(CUSTOM_RATIO_MAX), '', 'hint: exactly MAX → no clamp')
+  eq(formatClampedHint(0), '', 'hint: 0 → empty')
+  eq(formatClampedHint(NaN), '', 'hint: NaN → empty')
+  eq(formatClampedHint('x'), '', 'hint: non-numeric → empty')
 }
 
 console.log(`PASS: framingGuides R42.M/R43.M/R44.M/R45.M/R46.M/R47.M — ${passed} total assertions (incl. custom aspect-ratio input + recents MRU + pinned favourites + pinned reorder + drag slot-order preview + drop caret)`)
