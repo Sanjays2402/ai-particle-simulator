@@ -707,6 +707,58 @@ export function spiralSweepEasingCss(id) {
   return e.css
 }
 
+// --- R45.B: spiral sweep easing PREVIEW curve glyph -------------------
+//
+// R41.B gives three easing labels (In / Linear / Out) but a label only
+// NAMES the shape — a user can't SEE how aggressively each one ramps. This
+// turns each easing's cubic-bezier into the actual SVG polyline of its
+// position-over-time curve so a tiny glyph next to each chip traces the
+// acceleration before you pick it (mirrors waveform's spline-preview UX).
+//
+// The control points come straight from each easing's `css` token so the
+// glyph can NEVER disagree with what the sweep actually does: parse
+// "cubic-bezier(x1,y1,x2,y2)" → sample the bezier → emit a points string
+// in a box of (w x h). 'linear' is the diagonal. Y is flipped (SVG y grows
+// down) so the curve reads left-bottom → right-top like a graph. Pure.
+
+// Parse a cubic-bezier(...) token into [x1,y1,x2,y2]; 'linear' → diagonal
+// control points; junk → null. Pure.
+export function parseEasingControlPoints(css) {
+  if (typeof css !== 'string') return null
+  const t = css.trim().toLowerCase()
+  if (t === 'linear') return [0, 0, 1, 1]
+  const m = t.match(/^cubic-bezier\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\)$/)
+  if (!m) return null
+  const p = m.slice(1).map(Number)
+  if (p.some(n => !Number.isFinite(n))) return null
+  return p
+}
+
+// Sample a cubic bezier (anchors fixed at 0,0 → 1,1; two control points)
+// at SAMPLES steps, mapped into a w x h box with y flipped. Returns an SVG
+// `points` string ("x,y x,y ..."). Junk easing → the linear diagonal so a
+// corrupt curve still draws a sane glyph. Pure.
+export const EASING_PREVIEW_SAMPLES = 16
+export function buildEasingPreviewPoints(css, w = 16, h = 10, samples = EASING_PREVIEW_SAMPLES) {
+  const cp = parseEasingControlPoints(css) || [0, 0, 1, 1]
+  const n = Math.max(2, Math.floor(samples))
+  const W = Number.isFinite(w) && w > 0 ? w : 16
+  const H = Number.isFinite(h) && h > 0 ? h : 10
+  const [x1, y1, x2, y2] = cp
+  const pts = []
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1)
+    const mt = 1 - t
+    // cubic bezier anchored at 0 and 1: 3·mt²·t·c1 + 3·mt·t²·c2 + t³
+    const bx = 3 * mt * mt * t * x1 + 3 * mt * t * t * x2 + t * t * t
+    const by = 3 * mt * mt * t * y1 + 3 * mt * t * t * y2 + t * t * t
+    const px = Math.round(bx * W * 100) / 100
+    const py = Math.round((1 - by) * H * 100) / 100 // flip: graph grows up
+    pts.push(`${px},${py}`)
+  }
+  return pts.join(' ')
+}
+
 // --- R43.M: recent custom aspect ratios -------------------------------
 //
 // R42.M lets a user type any custom crop (21:9, 2.76, 5:7). A user who

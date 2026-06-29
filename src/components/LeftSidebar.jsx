@@ -33,7 +33,7 @@ import {
   summarizeImportImpact as summarizeCrossfadeOverridesImpact,
 } from '../lib/crossfadeOverridesIO'
 import { ATTRACTOR_TYPES, MAX_ATTRACTORS, attractorTypeStyle, parsePositionInput, dropIndexForGap, stepKeyboardGapCursor, describeGapReorderAnnouncement } from '../lib/namedAttractors'
-import { FRAMING_RATIOS, FRAMING_GRIDS, SPIRAL_ORIENTATIONS, SPIRAL_SWEEP_SPEEDS, SPIRAL_SWEEP_EASINGS, CUSTOM_FRAMING_ID, formatCustomRatioLabel, buildRatioChips, projectedPinnedOrder, pinnedDropCaretGap } from '../lib/framingGuides'
+import { FRAMING_RATIOS, FRAMING_GRIDS, SPIRAL_ORIENTATIONS, SPIRAL_SWEEP_SPEEDS, SPIRAL_SWEEP_EASINGS, CUSTOM_FRAMING_ID, formatCustomRatioLabel, buildRatioChips, projectedPinnedOrder, pinnedDropCaretGap, buildEasingPreviewPoints } from '../lib/framingGuides'
 import { showToast } from './Toast'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
@@ -419,6 +419,7 @@ export default function LeftSidebar() {
                       onClick={() => { setSpiralSweepEasing(e.id); replaySpiralSweep() }}
                       title={`${e.hint}`}
                       style={{
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
                         padding: '5px 0', borderRadius: 7, fontSize: 10.5, fontWeight: 550,
                         cursor: 'pointer', transition: 'all 0.15s ease-out',
                         fontFamily: 'Geist Mono, monospace',
@@ -429,7 +430,18 @@ export default function LeftSidebar() {
                         border: active ? '1px solid rgba(168,85,247,0.45)' : '1px solid rgba(255,255,255,0.05)',
                         boxShadow: active ? '0 0 10px rgba(168,85,247,0.2)' : 'none',
                       }}
-                    >{e.label}</button>
+                    >
+                      {/* R45.B — tiny SVG glyph tracing the easing's actual
+                          position-over-time curve so the acceleration shape is
+                          visible, not just named. Points come from the same css
+                          token the sweep uses, so glyph + sweep can't disagree. */}
+                      <svg aria-hidden="true" width="22" height="12" viewBox="0 0 16 10" style={{ flexShrink: 0 }}>
+                        <polyline points={buildEasingPreviewPoints(e.css, 16, 10)} fill="none"
+                          stroke={active ? '#f0abfc' : '#6a6a80'} strokeWidth="1.2"
+                          strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      <span>{e.label}</span>
+                    </button>
                   )
                 })}
               </div>

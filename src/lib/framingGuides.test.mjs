@@ -12,6 +12,8 @@ import {
   SPIRAL_SWEEP_EASINGS, SPIRAL_SWEEP_EASING_DEFAULT,
   isValidSpiralSweepEasing, sanitizeSpiralSweepEasing,
   nextSpiralSweepEasing, spiralSweepEasingCss,
+  // R45.B — easing preview curve glyph
+  parseEasingControlPoints, buildEasingPreviewPoints, EASING_PREVIEW_SAMPLES,
   // R42.M — custom aspect-ratio input
   CUSTOM_FRAMING_ID, CUSTOM_RATIO_MIN, CUSTOM_RATIO_MAX,
   parseAspectRatio, clampCustomRatio, formatCustomRatioLabel, isCustomRatioClamped,
@@ -1101,4 +1103,42 @@ console.log(`PASS: framingGuides R39.B — ${passed} total assertions (incl. on-
   eq(formatClampedHint('x'), '', 'hint: non-numeric → empty')
 }
 
-console.log(`PASS: framingGuides R42.M/R43.M/R44.M/R45.M/R46.M/R47.M — ${passed} total assertions (incl. custom aspect-ratio input + recents MRU + pinned favourites + pinned reorder + drag slot-order preview + drop caret)`)
+// --- R45.B: spiral sweep easing preview curve glyph -------------------
+{
+  // parseEasingControlPoints
+  const lin = parseEasingControlPoints('linear')
+  ok(Array.isArray(lin) && lin[0] === 0 && lin[1] === 0 && lin[2] === 1 && lin[3] === 1, 'linear → diagonal control points')
+  const cb = parseEasingControlPoints('cubic-bezier(0.5,0,0.9,0.35)')
+  ok(Array.isArray(cb) && cb.length === 4, 'cubic-bezier parsed to 4 control points')
+  eq(cb[0], 0.5, 'cb x1'); eq(cb[1], 0, 'cb y1'); eq(cb[2], 0.9, 'cb x2'); eq(cb[3], 0.35, 'cb y2')
+  ok(parseEasingControlPoints('cubic-bezier( 0.33, 0.1, 0.25, 1 )')[3] === 1, 'whitespace-tolerant parse')
+  eq(parseEasingControlPoints('garbage'), null, 'junk token → null')
+  eq(parseEasingControlPoints(''), null, 'empty → null')
+  eq(parseEasingControlPoints(null), null, 'non-string → null')
+  eq(parseEasingControlPoints('cubic-bezier(a,b,c,d)'), null, 'non-numeric args → null')
+
+  // buildEasingPreviewPoints — every shipped easing produces a points string
+  for (const e of SPIRAL_SWEEP_EASINGS) {
+    const pts = buildEasingPreviewPoints(e.css, 16, 10)
+    const parts = pts.split(' ')
+    eq(parts.length, EASING_PREVIEW_SAMPLES, `${e.id}: sample count`)
+    const first = parts[0].split(',').map(Number)
+    const last = parts[parts.length - 1].split(',').map(Number)
+    eq(first[0], 0, `${e.id}: starts at x=0`)
+    eq(first[1], 10, `${e.id}: starts at bottom (y=h)`)
+    eq(last[0], 16, `${e.id}: ends at x=w`)
+    eq(last[1], 0, `${e.id}: ends at top (y=0, flipped)`)
+    ok(parts.every(p => p.split(',').every(n => Number.isFinite(Number(n)))), `${e.id}: all finite coords`)
+  }
+  // linear is the straight diagonal: midpoint sits at the box centre
+  const linPts = buildEasingPreviewPoints('linear', 16, 10, 3).split(' ')
+  eq(linPts[1], '8,5', 'linear midpoint at box centre')
+  // junk easing falls back to the diagonal, not a crash
+  const junkPts = buildEasingPreviewPoints('garbage', 16, 10, 3).split(' ')
+  eq(junkPts[1], '8,5', 'junk css → linear diagonal fallback')
+  // degenerate w/h guarded
+  ok(buildEasingPreviewPoints('linear', 0, 0).length > 0, 'zero w/h → safe default box')
+  ok(buildEasingPreviewPoints('linear', 16, 10, 1).split(' ').length >= 2, 'samples<2 clamps to 2')
+}
+
+console.log(`PASS: framingGuides R42.M/R43.M/R44.M/R45.M/R45.B/R46.M/R47.M — ${passed} total assertions (incl. custom aspect-ratio input + recents MRU + pinned favourites + pinned reorder + drag slot-order preview + drop caret + easing preview glyph)`)
