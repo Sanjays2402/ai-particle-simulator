@@ -11,6 +11,8 @@ import {
   ETA_MAX_SEC,
   pushEtaHistory, etaHistoryAttr, summarizeEtaHistory, ETA_HISTORY_CEIL,
   scrubEtaHistory, etaHistorySampleStats,
+  // R45.D / R45.A — paste-ready perf-window + pinned-ETA summary lines
+  formatFpsWindowStats, formatPinnedEtaLine,
 } from '../lib/fpsGraph'
 
 // Performance debug HUD. Toggle with backtick (`) so it doesn't fight
@@ -52,6 +54,15 @@ export default function DebugHUD() {
   // pin tracks its sample as the window scrolls, shifting the index when
   // ticks scroll off the front and clearing once the moment ages out.
   const [pinnedEtaIndex, setPinnedEtaIndex] = useState(null)
+  // R45.D / R45.A — transient "copied" flag for the perf-window + pinned-ETA
+  // copy buttons; keyed by which button fired so only that one flashes.
+  const [copiedKey, setCopiedKey] = useState(null)
+  const copyStat = (key, text) => {
+    if (!text) return
+    try { navigator.clipboard?.writeText(text) } catch { /* unsupported */ }
+    setCopiedKey(key)
+    window.setTimeout(() => setCopiedKey(k => (k === key ? null : k)), 1200)
+  }
   const lastRef = useRef(performance.now())
   const accumRef = useRef(0)
   const framesRef = useRef(0)
@@ -536,6 +547,20 @@ export default function DebugHUD() {
                         <span style={{ color: '#8a8aa0' }}>
                           {etaPinned.secondsAgo === 0 ? 'now' : `${etaPinned.secondsAgo}s ago`}
                         </span>
+                        {/* R45.A — copy the pinned ETA sample as a paste-ready
+                            line so a perf-bug report carries the exact moment. */}
+                        <button
+                          onClick={() => copyStat('eta', formatPinnedEtaLine(etaPinned))}
+                          title="Copy this pinned ETA sample"
+                          style={{
+                            padding: '0 5px', borderRadius: 4, lineHeight: 1.5,
+                            background: copiedKey === 'eta' ? 'rgba(134,239,172,0.18)' : 'rgba(255,255,255,0.05)',
+                            border: `1px solid ${copiedKey === 'eta' ? 'rgba(134,239,172,0.4)' : 'rgba(255,255,255,0.1)'}`,
+                            color: copiedKey === 'eta' ? '#86efac' : '#9a9ab0', cursor: 'pointer', fontFamily: 'inherit',
+                            fontSize: 8.5, fontWeight: 600, letterSpacing: '0.04em',
+                            pointerEvents: 'auto',
+                          }}
+                        >{copiedKey === 'eta' ? 'Copied' : 'Copy'}</button>
                         <button
                           onClick={() => setPinnedEtaIndex(null)}
                           title="Unpin this sample"
@@ -579,6 +604,21 @@ export default function DebugHUD() {
           <Row label="1% low"   value={<span style={{ color: fpsSummary.low >= 55 ? '#86efac' : fpsSummary.low >= 30 ? '#fbbf24' : '#f87171' }}>{fpsSummary.low}</span>} />
           {fpsSummary.drops > 0 && <Row label="Drops" value={<span style={{ color: '#f87171' }}>{fpsSummary.drops}</span>} />}
           <Row label="Frame"    value={`${stats.frame} ms`} />
+          {/* R45.D — copy the whole 2s window (avg/1%-low/min/max/drops/N) as
+              one paste-ready line so a perf-bug report carries exact numbers. */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 2 }}>
+            <button
+              onClick={() => copyStat('win', formatFpsWindowStats(fpsSummary))}
+              title="Copy the 2s perf window as one line"
+              style={{
+                padding: '1px 7px', borderRadius: 4, lineHeight: 1.5,
+                background: copiedKey === 'win' ? 'rgba(134,239,172,0.18)' : 'rgba(255,255,255,0.05)',
+                border: `1px solid ${copiedKey === 'win' ? 'rgba(134,239,172,0.4)' : 'rgba(255,255,255,0.1)'}`,
+                color: copiedKey === 'win' ? '#86efac' : '#9a9ab0', cursor: 'pointer', fontFamily: 'inherit',
+                fontSize: 8.5, fontWeight: 600, letterSpacing: '0.04em', pointerEvents: 'auto',
+              }}
+            >{copiedKey === 'win' ? 'Copied window' : 'Copy window'}</button>
+          </div>
         </>
       )}
       {stats.mem != null && <Row label="Heap" value={`${stats.mem.toFixed(0)} MB`} />}
