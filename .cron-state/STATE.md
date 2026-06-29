@@ -961,16 +961,26 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [~] R48.M caret pulse — SKIPPED (cosmetic-only, no logic) — graduate later
 - [~] R48.N dimmed dot ring — SKIPPED (cosmetic-only) — graduate later
 
-### Batch 49 — fresh frontend queue (graduations of Batch 48 + carried)
-- [ ] R49.E Zen clamped hint: tooltip on hover shows the raw typed ratio vs the
-  clamped one ("typed 12:1 -> shown 5:1") so it's not just "(clamped)".
-- [ ] R49.G Ghost label: when the caption has a 2nd line (wordmark/date), the
-  ghost shows a faint sub-line too so the drag previews the full pill content.
-- [ ] R49.H Range chip: colour the "N rows" chip amber once block >= 10 so a
-  big destructive range reads loud before commit (parallels import impact tiers).
-- [ ] R49.D Copy window: append heap MB + particle count to the window line so
-  a perf-bug paste carries the GPU-load context, not just fps.
-- [ ] R45.O Debug HUD compact/expanded toggle (carried — genuine, needs layout work)
+### Batch 49 — fresh frontend queue (graduations of Batch 48 + carried)  (SHIPPED)
+- [x] **R49.E** Zen clamped hint: typed vs shown ratio on hover — b6ac33e
+- [x] **R49.G** Ghost label sub-line previews wordmark/date 2nd line — 9523f46
+- [x] **R49.H** Range chip flips amber at 10+ rows before commit — aa59125
+- [x] **R49.D** Copy window appends heap MB + particle count — f912bcf
+- [x] **R45.O** Debug HUD compact/expanded toggle (carried→done) — c3d9840
+- [ ] R45.B Spiral sweep easing preview glyph (carried)
+- [ ] R45.K Calm-gate import per-row apply (carried)
+
+### Batch 50 — fresh frontend queue (graduations of Batch 49 + carried)
+- [ ] R50.D Copy window: when over budget, prefix line with "[STUTTER]" so a
+  pasted report leads with the verdict (graduates R49.D context tail).
+- [ ] R50.E Zen clamped hint: also show the band ([0.2-5]) so the user learns
+  WHY 12 became 5, not just that it did (graduates R49.E).
+- [ ] R50.H Range chip: at 20+ rows go red (3-tier mirror of import impact) —
+  amber 10-19, red 20+ (graduates R49.H two-tier).
+- [ ] R50.G Ghost sub-line: dim the sub-line further when the main line is
+  truncated so the headline always wins the eye (graduates R49.G).
+- [ ] R50.O Debug HUD: compact mode remembers per-view (fps vs ms) density so
+  the two views can collapse independently (graduates R45.O single flag).
 - [ ] R45.B Spiral sweep easing preview glyph (carried)
 - [ ] R45.K Calm-gate import per-row apply (carried)
 
@@ -982,6 +992,21 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R25.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode)
 
 ## TICK LOG
+- 2026-06-28 22:05 PT — Batch 49 (5/5). Tick 49. Frontend-focus override
+  active. Shipped FIVE genuinely-new user-facing features across 5 distinct
+  lib+component pairs: R49.D (fpsGraph+DebugHUD: copy-window line now appends
+  heap MB + compact particle count via formatParticleCount), R49.H (cameraViews
+  +CommandPalette: rangePreviewTier flips the range chip amber at 10+ rows),
+  R49.E (framingGuides+store+ZenMode: store remembers unclamped typed ratio,
+  formatClampedHint shows "typed 12 -> shown 5" on the (clamped) tooltip),
+  R49.G (screenshotWatermark+TopBar: ghostPillSubLabel previews wordmark/date
+  2nd line in the drag ghost), R45.O (new debugHud.js: compact/expanded HUD
+  density toggle, MIN/FULL header pill, persisted). Gate ONCE: lint 23 err/3
+  warn == baseline (zero new), build green, all 49 test files pass. Worked
+  DIRECTLY on main, pushed origin a9db153..c3d9840. +74 asserts (fpsGraph +23,
+  cameraViews +9, framingGuides +15, screenshotWatermark +9, debugHud +18).
+  Trigger boilerplate ("31 unpushed / first tick / npm install / branch off
+  LOCAL HEAD") STALE — repo was in sync at a9db153, node_modules present.
 - 2026-06-28 19:36 PT — Batch 48 (5/5). Tick 48. Frontend-focus override
   active. Shipped FIVE genuinely-new user-facing features across 5 distinct
   lib+component pairs (framingGuides+ZenMode, screenshotWatermark+TopBar,
