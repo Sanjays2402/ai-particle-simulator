@@ -45,3 +45,48 @@ export function resolveHudSections(mode) {
 export function hudModeLabel(mode) {
   return sanitizeHudMode(mode) === 'compact' ? 'MIN' : 'FULL'
 }
+
+// --- R50.O: per-view (fps vs ms) compact density ----------------------
+//
+// R45.O gave ONE compact/expanded flag, but the HUD has two readouts (fps
+// and ms, toggled with M) a tuner flips between. They want different
+// densities: a quick fps glance can stay collapsed while the ms view runs
+// full instrument detail. R50.O remembers the mode PER VIEW so the two
+// collapse independently. Persisted as a small {fps, ms} map; a legacy
+// single-string value upgrades to both-views-same so existing users keep
+// their density. Pure + DOM-free.
+
+export const HUD_VIEWS = ['fps', 'ms']
+
+// Normalise a stored value into a complete {fps, ms} density map. A bare
+// string ('compact'/'expanded') applies to BOTH (legacy upgrade); an
+// object fills missing/unknown keys with the default; junk → both default.
+export function sanitizeHudViewModes(raw) {
+  if (typeof raw === 'string') {
+    const m = sanitizeHudMode(raw)
+    return { fps: m, ms: m }
+  }
+  if (raw && typeof raw === 'object') {
+    return { fps: sanitizeHudMode(raw.fps), ms: sanitizeHudMode(raw.ms) }
+  }
+  return { fps: HUD_MODE_DEFAULT, ms: HUD_MODE_DEFAULT }
+}
+
+// The mode for one view. Unknown view → default. Pure.
+export function hudModeForView(modes, view) {
+  const m = sanitizeHudViewModes(modes)
+  return HUD_VIEWS.includes(view) ? m[view] : HUD_MODE_DEFAULT
+}
+
+// Toggle ONLY the given view's mode, leaving the other untouched. Unknown
+// view → map returned unchanged (ref-equal). Pure.
+export function toggleHudViewMode(modes, view) {
+  const m = sanitizeHudViewModes(modes)
+  if (!HUD_VIEWS.includes(view)) return m
+  return { ...m, [view]: nextHudMode(m[view]) }
+}
+
+// Sections for a specific view — resolveHudSections scoped to one readout. Pure.
+export function resolveHudSectionsForView(modes, view) {
+  return resolveHudSections(hudModeForView(modes, view))
+}

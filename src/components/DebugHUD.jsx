@@ -15,7 +15,7 @@ import {
   formatFpsWindowStats, formatPinnedEtaLine,
 } from '../lib/fpsGraph'
 // R45.O — compact/expanded section policy.
-import { resolveHudSections, hudModeLabel } from '../lib/debugHud'
+import { resolveHudSections, hudModeLabel, hudModeForView } from '../lib/debugHud'
 
 // Performance debug HUD. Toggle with backtick (`) so it doesn't fight
 // the existing single-letter shortcuts. Tracks FPS as a rolling window
@@ -33,8 +33,12 @@ export default function DebugHUD() {
   const particleCount = useStore(s => s.particleCount)
   // R45.O — compact vs expanded layout. Compact strips the sparkline,
   // trend strips, and copy buttons down to the at-a-glance health rows.
-  const hudMode = useStore(s => s.debugHudMode)
-  const toggleHudMode = useStore(s => s.toggleDebugHudMode)
+  // R50.O — density is remembered PER VIEW (fps vs ms) so the two readouts
+  // collapse independently; the pill + sections follow the active view.
+  const hudViewModes = useStore(s => s.debugHudViewModes)
+  const toggleHudViewMode = useStore(s => s.toggleDebugHudViewMode)
+  const activeView = msView ? 'ms' : 'fps'
+  const hudMode = hudModeForView(hudViewModes, activeView)
   const sections = resolveHudSections(hudMode)
   const [stats, setStats] = useState({ fps: 60, min: 60, max: 60, avg: 60, frame: 16.7, mem: null })
   // R34.A — the live fps series feeding the sparkline. Held in state
@@ -340,8 +344,8 @@ export default function DebugHUD() {
             panel; MIN keeps the at-a-glance rows only. pointerEvents:auto so
             it's clickable inside the otherwise pass-through HUD. */}
         <button
-          onClick={toggleHudMode}
-          title={hudMode === 'compact' ? 'Expand HUD (full panel)' : 'Compact HUD (essentials only)'}
+          onClick={() => toggleHudViewMode(activeView)}
+          title={hudMode === 'compact' ? `Expand ${activeView.toUpperCase()} HUD (full panel) - density remembered per view` : `Compact ${activeView.toUpperCase()} HUD (essentials only) - density remembered per view`}
           style={{
             marginLeft: 6, padding: '1px 6px', borderRadius: 4, lineHeight: 1.5,
             background: 'rgba(168,85,247,0.18)', border: '1px solid rgba(168,85,247,0.3)',

@@ -2,6 +2,8 @@
 import {
   HUD_MODES, HUD_MODE_DEFAULT, sanitizeHudMode, nextHudMode,
   resolveHudSections, hudModeLabel,
+  // R50.O — per-view (fps vs ms) density
+  HUD_VIEWS, sanitizeHudViewModes, hudModeForView, toggleHudViewMode, resolveHudSectionsForView,
 } from './debugHud.js'
 
 let passed = 0
@@ -42,3 +44,39 @@ eq(hudModeLabel('expanded'), 'FULL', 'expanded label')
 eq(hudModeLabel(null), 'FULL', 'unknown → FULL')
 
 console.log(`PASS: debugHud R45.O — ${passed} assertions (compact/expanded HUD layout)`)
+
+// --- R50.O: per-view (fps vs ms) compact density ----------------------
+{
+  ok(HUD_VIEWS.includes('fps') && HUD_VIEWS.includes('ms'), 'two views')
+  // legacy single-string upgrades to both-views-same
+  const fromLegacy = sanitizeHudViewModes('compact')
+  eq(fromLegacy.fps, 'compact', 'legacy string → fps compact')
+  eq(fromLegacy.ms, 'compact', 'legacy string → ms compact')
+  // object fills missing/unknown keys with default
+  const partial = sanitizeHudViewModes({ fps: 'compact' })
+  eq(partial.fps, 'compact', 'partial keeps fps')
+  eq(partial.ms, 'expanded', 'partial fills ms with default')
+  eq(sanitizeHudViewModes({ fps: 'junk', ms: 'compact' }).fps, 'expanded', 'junk view → default')
+  const def = sanitizeHudViewModes(null)
+  eq(def.fps, 'expanded', 'null → both default')
+  eq(def.ms, 'expanded', 'null → both default')
+  // hudModeForView
+  eq(hudModeForView({ fps: 'compact', ms: 'expanded' }, 'fps'), 'compact', 'fps mode read')
+  eq(hudModeForView({ fps: 'compact', ms: 'expanded' }, 'ms'), 'expanded', 'ms mode read')
+  eq(hudModeForView({ fps: 'compact', ms: 'expanded' }, 'bogus'), 'expanded', 'unknown view → default')
+  // toggleHudViewMode flips ONLY the named view
+  const t = toggleHudViewMode({ fps: 'expanded', ms: 'expanded' }, 'fps')
+  eq(t.fps, 'compact', 'toggle fps flips fps')
+  eq(t.ms, 'expanded', 'toggle fps leaves ms untouched')
+  const t2 = toggleHudViewMode({ fps: 'expanded', ms: 'expanded' }, 'ms')
+  eq(t2.ms, 'compact', 'toggle ms flips ms')
+  eq(t2.fps, 'expanded', 'toggle ms leaves fps untouched')
+  // unknown view returns sanitized map unchanged
+  const tj = toggleHudViewMode({ fps: 'compact', ms: 'expanded' }, 'bogus')
+  eq(tj.fps, 'compact', 'unknown view: fps unchanged')
+  eq(tj.ms, 'expanded', 'unknown view: ms unchanged')
+  // per-view sections
+  ok(resolveHudSectionsForView({ fps: 'compact', ms: 'expanded' }, 'fps').sparkline === false, 'fps compact: no sparkline')
+  ok(resolveHudSectionsForView({ fps: 'compact', ms: 'expanded' }, 'ms').sparkline === true, 'ms expanded: sparkline on')
+}
+console.log(`PASS: debugHud R50.O — per-view fps/ms density`)

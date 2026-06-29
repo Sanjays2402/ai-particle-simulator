@@ -17,7 +17,7 @@ import {
 } from './lib/waveform'
 import { recordThumbMetadata as recordPresetThumbMeta } from './lib/presetThumbnails'
 // R45.O — Debug HUD compact/expanded layout mode.
-import { sanitizeHudMode, nextHudMode } from './lib/debugHud'
+import { sanitizeHudMode, nextHudMode, sanitizeHudViewModes, toggleHudViewMode } from './lib/debugHud'
 import {
   loadAttractors as loadNamedAttractors,
   saveAttractors as saveNamedAttractors,
@@ -1152,6 +1152,24 @@ export const useStore = create((set, get) => {
     set({ debugHudMode: next })
   },
   toggleDebugHudMode: () => get().setDebugHudMode(nextHudMode(get().debugHudMode)),
+
+  // R50.O — per-view (fps vs ms) HUD density. Seeds from the legacy single
+  // mode the first time so existing users keep their density on both views,
+  // then persists a {fps, ms} map so the two readouts collapse independently.
+  debugHudViewModes: (() => {
+    try {
+      if (typeof localStorage === 'undefined') return { fps: 'expanded', ms: 'expanded' }
+      const raw = localStorage.getItem('debug-hud-view-modes-v1')
+      if (raw) return sanitizeHudViewModes(JSON.parse(raw))
+      // legacy upgrade: mirror the single mode onto both views
+      return sanitizeHudViewModes(localStorage.getItem('debug-hud-mode-v1'))
+    } catch { return { fps: 'expanded', ms: 'expanded' } }
+  })(),
+  toggleDebugHudViewMode: (view) => {
+    const next = toggleHudViewMode(get().debugHudViewModes, view)
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem('debug-hud-view-modes-v1', JSON.stringify(next)) } catch { /* */ }
+    set({ debugHudViewModes: next })
+  },
 
   // R19.12 — per-curve tunable parameters for the spectrum peak trail.
   // Graduates R16.17's fixed-shape curves (t^2 for exp, sqrt(t) for
