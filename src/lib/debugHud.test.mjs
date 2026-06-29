@@ -6,6 +6,8 @@ import {
   HUD_VIEWS, sanitizeHudViewModes, hudModeForView, toggleHudViewMode, resolveHudSectionsForView,
   // R51.O — sync both views to one mode
   syncHudViewModes,
+  // R52.O — both-views-linked indicator
+  hudViewsLinked,
 } from './debugHud.js'
 
 let passed = 0
@@ -97,3 +99,21 @@ console.log(`PASS: debugHud R45.O — ${passed} assertions (compact/expanded HUD
   eq(s.fps, 'compact', 'sync: junk → fps compact'); eq(s.ms, 'compact', 'sync: junk → ms compact')
 }
 console.log(`PASS: debugHud R50.O/R51.O — per-view fps/ms density + sync`)
+
+// R52.O — hudViewsLinked: true when both readouts share one density.
+{
+  ok(hudViewsLinked({ fps: 'expanded', ms: 'expanded' }) === true, 'linked: both expanded')
+  ok(hudViewsLinked({ fps: 'compact', ms: 'compact' }) === true, 'linked: both compact')
+  ok(hudViewsLinked({ fps: 'expanded', ms: 'compact' }) === false, 'linked: diverged → false')
+  ok(hudViewsLinked({ fps: 'compact', ms: 'expanded' }) === false, 'linked: diverged (other way) → false')
+  // legacy single-string sanitizes to both-same → linked
+  ok(hudViewsLinked('compact') === true, 'linked: legacy string → both same → linked')
+  // junk → both default (expanded) → linked
+  ok(hudViewsLinked(null) === true, 'linked: null → both default → linked')
+  ok(hudViewsLinked(42) === true, 'linked: junk → both default → linked')
+  // a sync ALWAYS produces a linked map (its whole job)
+  ok(hudViewsLinked(syncHudViewModes({ fps: 'expanded', ms: 'compact' })) === true, 'linked: post-sync is linked')
+  // a single-view toggle off a linked map BREAKS the link
+  ok(hudViewsLinked(toggleHudViewMode({ fps: 'expanded', ms: 'expanded' }, 'fps')) === false, 'linked: toggle one view diverges')
+}
+console.log(`PASS: debugHud R52.O — hudViewsLinked sync indicator`)

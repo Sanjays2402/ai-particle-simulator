@@ -15,7 +15,7 @@ import {
   formatFpsWindowStats, formatPinnedEtaLine,
 } from '../lib/fpsGraph'
 // R45.O — compact/expanded section policy.
-import { resolveHudSections, hudModeLabel, hudModeForView } from '../lib/debugHud'
+import { resolveHudSections, hudModeLabel, hudModeForView, hudViewsLinked } from '../lib/debugHud'
 
 // Performance debug HUD. Toggle with backtick (`) so it doesn't fight
 // the existing single-letter shortcuts. Tracks FPS as a rolling window
@@ -41,6 +41,10 @@ export default function DebugHUD() {
   const activeView = msView ? 'ms' : 'fps'
   const hudMode = hudModeForView(hudViewModes, activeView)
   const sections = resolveHudSections(hudMode)
+  // R52.O — are both readouts (fps + ms) at the same density right now?
+  // Drives a tiny "linked" glyph on the pill so a user can see whether
+  // Shift+M's sync took / whether the two views have since diverged.
+  const viewsLinked = hudViewsLinked(hudViewModes)
   const [stats, setStats] = useState({ fps: 60, min: 60, max: 60, avg: 60, frame: 16.7, mem: null })
   // R34.A — the live fps series feeding the sparkline. Held in state
   // (not just the ref) so the SVG re-renders each sample tick. Capped
@@ -343,6 +347,21 @@ export default function DebugHUD() {
             color: msView ? '#e9d5ff' : '#6a6a80',
           }}>MS</span>
         </span>
+        {/* R52.O — "linked" glyph: an equals sign when both readouts (fps +
+            ms) sit at the same density (Shift+M syncs them), a not-equal
+            sign when they've diverged. So the user can see at a glance
+            whether the two views are locked in step or drifting apart.
+            Monochrome math glyphs only. */}
+        <span
+          title={viewsLinked
+            ? 'FPS + MS density are in sync (Shift+M keeps them linked)'
+            : 'FPS + MS density have diverged - Shift+M to re-link them'}
+          style={{
+            marginLeft: 5, fontSize: 11, lineHeight: 1, fontWeight: 700,
+            color: viewsLinked ? '#a78bfa' : '#6a6a80',
+            opacity: viewsLinked ? 1 : 0.75,
+          }}
+        >{viewsLinked ? '\u2261' : '\u2260'}</span>
         {/* R45.O — compact/expanded density toggle. FULL is the instrument
             panel; MIN keeps the at-a-glance rows only. pointerEvents:auto so
             it's clickable inside the otherwise pass-through HUD. */}

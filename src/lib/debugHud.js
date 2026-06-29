@@ -102,3 +102,16 @@ export function syncHudViewModes(modes) {
   const target = m.fps === 'expanded' ? 'compact' : 'expanded'
   return { fps: target, ms: target }
 }
+
+// R52.O — are the two readouts (fps + ms) currently at the SAME density?
+// R50.O lets them diverge; R51.O's sync snaps them together — but once
+// synced, nothing on screen says "these are locked in step" vs "they
+// happen to match" / "they've drifted apart". This predicate drives a
+// tiny "linked" glyph on the density pill so the user can see at a glance
+// whether the two views are in sync. Junk → both resolve to the default
+// (so two corrupt values read as linked, which they effectively are).
+// Pure.
+export function hudViewsLinked(modes) {
+  const m = sanitizeHudViewModes(modes)
+  return m.fps === m.ms
+}
