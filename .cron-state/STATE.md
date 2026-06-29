@@ -118,6 +118,11 @@ Existing capabilities (do not re-ship):
 - Bias import preview header pip cycles indigo → amber → red across THREE intensity tiers (R28.41, graduates R27.41). Pre-R28.41 the pip plateaued at amber the moment changed >= 10; for users importing a destructive 30+ field replace, that read no different from a careful 12-field merge. R28.41 splits into LOW (< 10, indigo), MEDIUM (10..19, amber), HIGH (>= 20, red). Thresholds exposed as `IMPORT_IMPACT_AMBER_AT=10` + `IMPORT_IMPACT_RED_AT=20`. Two new pure helpers in biasOverridesIO.js: `getImportImpactIntensity(changed)` returns 'low' | 'medium' | 'high' (defensive: non-finite / negative → 'low'); `getImportImpactStyle(intensity)` returns CSS-ready bundle { bg, border, color, accent, label } (parallels attractorTypeStyle (R14.05) + userPresetColorStyle (R16.19) shape). Three tiers visually distinct (no two share accent or text colour). Pip's bg/border/color all read from one impactStyle bundle so tier swap is atomic (no half-amber-half-red mid-render). Soft 160ms transition between tiers so flipping Merge → Replace across a threshold breathes into the new colour. Tooltip mentions both thresholds + the tier's friendly label.
 - Note filter bulk-unpin surfaces toast with Undo restore action (R28.42, graduates R27.42). Pattern parallels MidiPanel's R22.30 hotkey-transfer undo chip. Snapshot pre-wipe state (MINIMAL — just query+mode keys, not the whole list), run the wipe, fire toast with action chip whose onClick restores against whatever list is live at click-time. Concurrent edits between unpin + restore compose safely: user can add a new entry, delete one, or manually re-pin one between unpin + click. Two new pure helpers in presetThumbnails.js: `snapshotPinnedNoteFilterHistoryKeys(list)` returns array of { query, mode } pairs (order preserved, mode normalised via isValidNoteFilterMode, strict-true filter on pinned, corrupt rows skipped, non-array → []); `restorePinnedNoteFilterHistoryEntries(list, keys)` re-pins entries whose (query, mode) matches any key (ref-equal-on-no-op when keys empty / non-array / no matches / every target already pinned; never resurrects deleted entries; mode-specific matching so substring 'foo' and regex 'foo' are distinct keys; already-pinned entries left alone — idempotent). UI: showToast with monochrome star icon (lucide 1.8 lacks Pin) + "Unpinned N pattern(s)" text + Undo chip. Toast's onClick uses functional setState so restore runs against LIVE history at click-time.
 - Hotkey UNDO chain badge fades non-linearly (R28.43, graduates R27.43). Pre-R28.43 the fade was linear which read as "already expiring" by t=250ms — too rushed for the human's decision lag. R28.43 reshapes the t→t' progression via easeInCubic (t' = t^3): at t=0.5 the colour has only walked 12.5% toward grey, so the badge reads as ~bright through the first 500ms then accelerates to grey emphatically in the last 500ms. Roadmap requirement met: "fade slower in the first 500ms, faster in the last 500ms — non-linear curve". New constants in midiPresets.js: `HOTKEY_CHAIN_FADE_CURVES=['linear','easeOutCubic','easeInCubic']`, `HOTKEY_CHAIN_FADE_CURVE_DEFAULT='linear'` (preserves R27.43 backwards-compat — every existing call site / pinned test unchanged), `HOTKEY_CHAIN_FADE_CURVE_RECOMMENDED='easeInCubic'` (named export so a future curve swap touches one file). New pure helper `applyHotkeyChainFadeCurve(t, curve)` — endpoint anchoring guaranteed across every curve (f(0)=0, f(1)=1); monotonicity preserved; non-finite t → 0; out-of-range clamps to endpoints; unknown curve falls through to linear. `fadeDirectionColor` extended with optional curve param threaded through Toast.jsx's existing fade-tick interval. MidiPanel.showHotkeyTransferToast passes the recommended curve into badge.fade.
+- Minimap saved-view dots wear a numbered badge 1..N matching the saved-views list order (R52.N). projectSavedViews stamps a 1-based `order` on each VALID (drawable) marker so skipped malformed rows don't punch gaps in the numbering; new pure `savedViewMarkerLabel(order, cap=99)` formats the badge (>cap reads "99+", non-finite/sub-1 → '' so the renderer omits it). Minimap.jsx draws the digit up-and-right of each dot (clamped inside the canvas) with a dark backing stroke for legibility over the bright camera dot, inheriting the dot's dim alpha so out-of-bounds/unselected numbers read as secondary. +17 asserts.
+- Debug HUD density pill carries a linked/diverged glyph (R52.O, graduates R51.O). R50.O lets fps + ms readouts collapse to different densities and R51.O's Shift+M syncs them, but nothing showed whether they were actually in step. New pure `hudViewsLinked(modes)` predicate (sanitize then compare fps vs ms; junk → both-default → linked) drives a violet equals-sign when both views match, a dim not-equal sign when they've diverged, with a mode-aware tooltip. Monochrome math glyphs only. +9 asserts.
+- Camera-views bulk delete adds a type-DELETE friction gate for 30+ (R52.H, graduates R51.H). R51.H escalates the confirm COPY by tier but every tier still commits on one OK click — too easy to fat-finger past on a big prune. RANGE_TYPE_CONFIRM_AT=30 (sits above the huge tier at 20 so loud copy + type-gate don't collide); pure `rangeNeedsTypeConfirm(count)`, `matchesRangeConfirmPhrase(input, phrase)` (case-insensitive + trimmed so intent matters), `rangeTypeConfirmPrompt(count, phrase)` (names count + phrase, pluralises). CommandPalette.deleteSelected routes 30+ through window.prompt; cancel or non-matching phrase aborts; <30 keeps the one-click confirm. +22 asserts.
+- Screenshot watermark caption size chips S/M/L (R52.G). The caption auto-scales to the image; R52.G adds three size chips in the watermark popover — Small (75%), Medium (100%, the unchanged default), Large (140%) — that multiply the auto-scaled font. WATERMARK_SIZES roster + pure isValidWatermarkSize / sanitizeWatermarkSize / watermarkSizeMult / nextWatermarkSize; `watermarkFontSizeForPreset(w,h,id,opts)` threads the multiplier through watermarkFontSize via opts.scale (medium == pre-R52.G size exactly; min/max clamp still bounds an extreme image). Store: screenshotWatermarkSize (own key). TopBar bake path + live preview both honour the size. +25 asserts.
+- Easing-preview pace label + hover-gated dot (R52.B, graduates R51.B). R51.B's dot rides the active sweep-easing curve so acceleration is FELT. R52.B adds a compact pace label ("1.6s . 0.6Hz") in the "Sweep easing" header so a still screenshot reads the loop speed instead of relying on motion (brightens while playing, dims while paused), and the dot now only ANIMATES while the chip row is hovered — hover out and it rests at the curve's end rather than freezing mid-curve or driving an unwatched SMIL loop. EASING_PREVIEW_LOOP_SEC named const (single source for the dot's dur + the label) + pure `easingPreviewPaceLabel(sec)` (Hz=1/sec, one-decimal, drops trailing ".0"; non-finite/non-positive → ''). +12 asserts.
 - Framing guide CUSTOM aspect ratio (R42.M). The fixed FRAMING_RATIOS chips (2.39 / 16:9 / 1:1 ...) gain a "Custom" chip + inline input that accepts any freeform ratio. Pure lib/framingGuides.js: `parseAspectRatio(raw)` handles A:B / AxB / A/B forms AND bare decimals ("21:9", "16x9", "16/9", "2.39"), whitespace-tolerant; junk / zero / divide-by-zero / non-finite → null; `clampCustomRatio` bounds to [CUSTOM_RATIO_MIN=0.2, CUSTOM_RATIO_MAX=5] so an absurd "100:1" still frames sanely; `formatCustomRatioLabel` (2dp); CUSTOM_FRAMING_ID='custom' is a pseudo-id kept OUT of FRAMING_RATIOS (so the preset chips + [ ] cycle stay roster-only) but VALID through sanitizeFramingId so it round-trips. Store: framingCustomRatio (persisted, own key) + setFramingCustomRatio (parses+clamps, flips active frame to 'custom'). UI: FramingGuides resolves the custom id to the store ratio + builds a "<ratio> WxH" badge; LeftSidebar CustomRatioChip (Enter/Set/blur commit, red-flag on bad entry, live ratio badge). +138 asserts.
 - Minimap "Fit all" frames every saved view (R42.N). One tap recenters the orbit on the cluster of saved-view positions + pulls the camera back to take them all in (the "zoom to fit" of a 3D editor). Pure lib/minimap.js: `framingForViews(views)` → centroid (3D) + XZ radius + count (null on empty/all-corrupt; skips non-finite pos); `fitCameraDistance(radius, opts)` = (radius / sin(halfFov)) * padding, clamped to [FIT_MIN_DIST=6, FIT_MAX_DIST=400], monotone; `frameViewsCameraMove(framing, curPos, curTarget)` keeps the camera's CURRENT viewing direction (dolly not teleport), re-places the eye at dir*dist from the new centroid target, falls back to FIT_DEFAULT_DIR on a degenerate direction. UI: green "FIT" button top-right of the minimap, shown only with 2+ views; reads the live camera snapshot, applies via window.__particleCamera.set, toasts "Framed N views". viewCount mirrored into state (functional-set skip). +60 asserts.
 - Saved-views multi-select bulk-DELETE (R42.H, graduates R41.H subset duplicate). The command palette's R41.H checkbox panel ("Select Views…") now does BOTH: fork the subset (Duplicate) OR prune it (Delete). Pure lib/cameraViews.js: `removeViews(views, idSet)` drops every selected id, keeps the rest in order; idSet accepts Set | Array | iterable (mirrors removeAttractors / removeSnapshots); ref-equal-on-no-op when nothing selected is present, EXCEPT corrupt null rows always dropped; non-array → []; never mutates. UI: red, window.confirm-gated "Delete (N)" button beside "Duplicate (N)"; both read the same selection set (click toggles, shift-click range-selects via selectIdRange); persists + fires particle:camera-views-changed; toasts "Deleted N selected views". +30 asserts.
@@ -998,20 +1003,52 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 ### Batch 52 — fresh frontend queue (graduations of Batch 51 + new)
 - [ ] R52.E Zen band hint: clicking (clamped) re-opens custom-ratio input pre-filled
   with the band so the fix is one tap (carried R50.E/R51.E).
-- [ ] R52.N Minimap saved-view dots wear a numbered badge (1..N) matching the
+- [x] R52.N Minimap saved-view dots wear a numbered badge (1..N) matching the
   saved-views list order so cross-referencing the list is instant (carried R51.N).
-- [ ] R52.B Easing preview: a Hz/sec label under the moving dot so the loop pace
+- [x] R52.B Easing preview: a Hz/sec label under the moving dot so the loop pace
   is documented, and the dot pauses on chip-hover-out (graduates R51.B).
 - [ ] R52.M Pinned crops: Home/End jump a pin to first/last slot via keyboard
   (graduates R51.M arrow-step). Aria-live announces the new slot.
 - [ ] R52.K Calm import: "apply all changed" also shows a one-line undo toast
   ("adopted 3 — undo") restoring the pre-import map (graduates R51.K).
-- [ ] R52.O HUD sync: a tiny "linked" glyph on the pill while both views match,
+- [x] R52.O HUD sync: a tiny "linked" glyph on the pill while both views match,
   so the user sees they're in sync vs diverged (graduates R51.O).
-- [ ] R52.H Bulk delete: huge-tier confirm pre-checks a "type DELETE" box for 30+
+- [x] R52.H Bulk delete: huge-tier confirm pre-checks a "type DELETE" box for 30+
   rows (graduates R51.H copy escalation to a real friction gate).
 - [ ] R52.A Debug HUD: a one-key (1/2/3) jump to compact/normal/full presets.
-- [ ] R52.G Screenshot: caption font-size chips (S/M/L) for the baked watermark.
+- [x] R52.G Screenshot: caption font-size chips (S/M/L) for the baked watermark.
+
+### Batch 53 — fresh frontend queue (graduations of Batch 52 + new)
+- [ ] R53.N Minimap: the numbered badge (R52.N) brightens + scales the matching
+  dot's number when its RightSidebar list row is hovered (cross-highlight both ways).
+- [ ] R53.O HUD: clicking the R52.O linked/diverged glyph itself toggles sync
+  (Shift+M without the keyboard), with a tooltip naming the action.
+- [ ] R53.H Bulk delete: the R52.H type-DELETE box echoes a live char-match tick
+  (turns green as you type the phrase) so the gate feels responsive, not opaque.
+- [ ] R53.G Watermark: a 4th "XL" caption size + a tiny px readout next to the
+  S/M/L chips showing the resolved font size for the current canvas.
+- [ ] R53.B Easing preview: a small +/- stepper on the pace label to slow/speed
+  the dot loop (0.8x..2x), persisted, so a user can match the dot to the real sweep.
+- [ ] R53.E Zen band hint: clicking (clamped) re-opens custom-ratio input pre-filled
+  with the band so the fix is one tap (carried R50.E/R51.E/R52.E).
+- [ ] R53.M Pinned crops: Home/End jump a pin to first/last slot via keyboard
+  (graduates R51.M arrow-step). Aria-live announces the new slot (carried R52.M).
+- [ ] R53.K Calm import: "apply all changed" shows a one-line undo toast restoring
+  the pre-import map (graduates R51.K, carried R52.K).
+- [ ] R53.A Debug HUD: a one-key (1/2/3) jump to compact/normal/full presets
+  (needs a 'normal' middle tier added to the 2-state mode first; carried R52.A).
+- [ ] R53.D Minimap: a one-tap "renumber dots by distance from camera" sort toggle
+  so the badges can read nearest-first instead of list-order.
+- [ ] R53.G2 Watermark: caption opacity chips (subtle / normal / bold) alongside
+  the S/M/L size chips, so a busy scene's caption can fade back.
+- [ ] R53.H2 Camera views: a tiny "30+" warning chip on the range-size pip when a
+  prune will trip the R52.H type-gate, so the friction is foreshadowed pre-commit.
+- [ ] R53.O2 HUD: persist whether the user prefers fps+ms linked vs independent,
+  so a fresh session restores their sync preference.
+- [ ] R53.B2 Easing preview: the resting (paused) dot sits at the curve START with
+  a faint "hover to play" hint glyph instead of the bare end-dot.
+- [ ] R53.N2 Minimap: badge text colour follows the dot's in-bounds/selected state
+  (green/indigo/dim) so the number reinforces the dot's status at a glance.
 
 ### Future queue carried from Batch 24 (still genuine, unshipped)
 - [ ] R25.06 Bookmark bundle export: drag a saved-view dot from the minimap onto the export button to selectively bundle just that view
@@ -1021,6 +1058,31 @@ RETIRED (left unchecked, deliberately not shipped — they were filler).
 - [ ] R25.04 Preset editor: gutter overlay highlighting all error lines (multi-error mode)
 
 ## TICK LOG
+- 2026-06-29 05:57 PT — Batch 52 (5/5). Tick 52. Frontend-focus override
+  active. Shipped FIVE genuinely-new user-facing features as 5 clean
+  commits, each its own lib+component pair (no shared files except store
+  for the watermark size): R52.N (minimap+Minimap: savedViewMarkerLabel +
+  projectSavedViews `order` → numbered 1..N badges on saved-view dots),
+  R52.O (debugHud+DebugHUD: hudViewsLinked → equals/not-equal sync glyph
+  on the density pill), R52.H (cameraViews+CommandPalette: type-DELETE
+  friction gate for 30+ prunes via rangeNeedsTypeConfirm /
+  matchesRangeConfirmPhrase / rangeTypeConfirmPrompt + window.prompt),
+  R52.G (screenshotWatermark+store+TopBar: WATERMARK_SIZES S/M/L chips +
+  watermarkFontSizeForPreset, medium == prior default), R52.B
+  (framingGuides+LeftSidebar: easingPreviewPaceLabel "1.6s . 0.6Hz" +
+  hover-gated SMIL dot, EASING_PREVIEW_LOOP_SEC const). Gate ONCE: lint
+  26 problems (23 err/3 warn) == baseline (zero new), build green
+  (805ms), all 49 test files pass. Worked DIRECTLY on main, pushed origin
+  b591d1f..4753df3 (b0c03cc, 3febdaa, 3ea71f9, 56d7199, 4753df3). +85
+  asserts (minimap +17, debugHud +9, cameraViews +22, screenshotWatermark
+  +25, framingGuides +12). Trigger boilerplate ("31 unpushed / first tick
+  / npm install / branch off LOCAL HEAD / feature/autoship") STALE +
+  CONTRADICTS the authoritative prompt — repo was in sync at b591d1f
+  (0 ahead), node_modules present, prompt mandates direct-to-main (feature
+  branches don't hit the contribution graph). Followed the prompt, not the
+  trigger. NOTE: sibling cron agents were active in the repo this tick;
+  staged each commit's files EXPLICITLY (never git add -A) to avoid
+  cross-contamination — all 5 commits verified clean (only my files).
 - 2026-06-29 03:11 PT — Batch 51 (5/5). Tick 51. Frontend-focus override
   active. Shipped FIVE genuinely-new user-facing features in 4 commits
   (R51.B+R51.M share framingGuides+LeftSidebar, committed together &
