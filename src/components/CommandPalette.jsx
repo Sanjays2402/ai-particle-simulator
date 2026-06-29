@@ -23,6 +23,8 @@ import {
   // R49.H — grade the block so a 10+ row range reads amber before the prune
   // R50.H — 20+ rows escalate to red via a 3-tier style bundle
   rangePreviewTier, RANGE_PREVIEW_LARGE_AT, RANGE_PREVIEW_HUGE_AT, rangeTierStyle, rangeDeleteConfirmMessage,
+  // R52.H — 30+ rows demand a typed "DELETE" phrase before the prune arms
+  rangeNeedsTypeConfirm, matchesRangeConfirmPhrase, rangeTypeConfirmPrompt,
 } from '../lib/cameraViews'
 import { labelForId as framingLabelForId } from '../lib/framingGuides'
 import {
@@ -416,12 +418,21 @@ export function CommandPalette({ onSettings }) {
   const deleteSelected = () => {
     const count = selectedIds.size
     if (count === 0) return
-    if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
-      // R51.H — confirm copy escalates by the same 3-tier scale as the chip:
-      // a 30-row prune SHOUTS, a 3-row one stays plain, so the loudest tier
-      // also gates the destructive action loudest.
-      const ok = window.confirm(rangeDeleteConfirmMessage(count))
-      if (!ok) return
+    if (typeof window !== 'undefined') {
+      // R52.H — a VERY large prune (30+) demands a typed "DELETE" phrase so
+      // muscle-memory can't wipe a big library by reflex; smaller ranges
+      // keep the one-click confirm whose copy R51.H escalates by tier.
+      if (rangeNeedsTypeConfirm(count) && typeof window.prompt === 'function') {
+        const typed = window.prompt(rangeTypeConfirmPrompt(count))
+        // Cancel (null) or a non-matching phrase aborts the delete.
+        if (!matchesRangeConfirmPhrase(typed)) return
+      } else if (typeof window.confirm === 'function') {
+        // R51.H — confirm copy escalates by the same 3-tier scale as the chip:
+        // a 30-row prune SHOUTS, a 3-row one stays plain, so the loudest tier
+        // also gates the destructive action loudest.
+        const ok = window.confirm(rangeDeleteConfirmMessage(count))
+        if (!ok) return
+      }
     }
     const current = loadCameraViews()
     const next = removeViews(current, selectedIds)

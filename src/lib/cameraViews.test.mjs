@@ -31,6 +31,8 @@ import {
   armRangeAnchor,
   // R47.H — preview the pending range block
   rangePreviewSet, rangePreviewCount, rangePreviewTier, RANGE_PREVIEW_LARGE_AT, RANGE_PREVIEW_HUGE_AT, rangeTierStyle, rangeDeleteConfirmMessage,
+  // R52.H — type-DELETE friction gate for a 30+ prune
+  RANGE_TYPE_CONFIRM_AT, rangeNeedsTypeConfirm, matchesRangeConfirmPhrase, rangeTypeConfirmPrompt,
 } from './cameraViews.js'
 
 function assertEq(actual, expected, msg) {
@@ -1302,3 +1304,33 @@ console.log('PASS: rangePreviewTier — large/huge 3-tier warning (R49.H/R50.H)'
   assertTrue(rangeDeleteConfirmMessage(NaN).length > 0, 'confirm: NaN guarded')
 }
 console.log('PASS: rangeDeleteConfirmMessage — tier-escalated confirm copy (R51.H)')
+
+// R52.H — type-to-confirm friction gate for a 30+ prune
+{
+  // threshold: 30+ needs the typed gate; 29 and below keep one-click confirm
+  assertTrue(rangeNeedsTypeConfirm(30) === true, 'type-gate: 30 needs typed phrase')
+  assertTrue(rangeNeedsTypeConfirm(45) === true, 'type-gate: 45 needs typed phrase')
+  assertTrue(rangeNeedsTypeConfirm(29) === false, 'type-gate: 29 stays one-click')
+  assertTrue(rangeNeedsTypeConfirm(20) === false, 'type-gate: huge-tier 20 stays one-click')
+  assertTrue(rangeNeedsTypeConfirm(0) === false, 'type-gate: 0 → false')
+  assertTrue(rangeNeedsTypeConfirm(NaN) === false, 'type-gate: NaN → false')
+  assertTrue(rangeNeedsTypeConfirm(-5) === false, 'type-gate: negative → false')
+  assertEq(RANGE_TYPE_CONFIRM_AT, 30, 'type-gate threshold sits above huge tier (20)')
+  // matching is case-insensitive + trimmed; null/blank/wrong → false
+  assertTrue(matchesRangeConfirmPhrase('DELETE') === true, 'phrase: exact match')
+  assertTrue(matchesRangeConfirmPhrase('delete') === true, 'phrase: lowercase match')
+  assertTrue(matchesRangeConfirmPhrase('  Delete  ') === true, 'phrase: trimmed + mixed case')
+  assertTrue(matchesRangeConfirmPhrase('delet') === false, 'phrase: partial → false')
+  assertTrue(matchesRangeConfirmPhrase('') === false, 'phrase: blank → false')
+  assertTrue(matchesRangeConfirmPhrase(null) === false, 'phrase: null → false')
+  assertTrue(matchesRangeConfirmPhrase(undefined) === false, 'phrase: undefined → false')
+  assertTrue(matchesRangeConfirmPhrase('yes') === false, 'phrase: wrong word → false')
+  assertTrue(matchesRangeConfirmPhrase('STOP', 'stop') === true, 'phrase: custom phrase honoured')
+  // prompt copy names the count + the phrase, always non-empty + pluralises
+  const p = rangeTypeConfirmPrompt(42)
+  assertTrue(p.includes('42') && p.includes('DELETE'), 'prompt: names count + phrase')
+  assertTrue(p.includes('camera views'), 'prompt: pluralises')
+  assertTrue(rangeTypeConfirmPrompt(1).includes('camera view.') || rangeTypeConfirmPrompt(1).includes('1 camera view'), 'prompt: singular at 1')
+  assertTrue(rangeTypeConfirmPrompt(NaN).length > 0, 'prompt: NaN guarded')
+}
+console.log('PASS: rangeNeedsTypeConfirm / matchesRangeConfirmPhrase / rangeTypeConfirmPrompt — type-DELETE gate (R52.H)')

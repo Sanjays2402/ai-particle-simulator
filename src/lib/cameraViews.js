@@ -881,3 +881,45 @@ export function rangeDeleteConfirmMessage(count) {
   return `Delete ${n} selected ${noun}? This can't be undone.`
 }
 
+// --- R52.H: type-to-confirm friction gate for a VERY large prune --------
+//
+// R51.H escalates the confirm COPY by tier, but every tier still commits
+// on a single OK click. For a genuinely destructive prune (30+ views) a
+// one-click window.confirm is too easy to fat-finger past. R52.H adds a
+// real friction gate above the huge tier: the user has to TYPE a confirm
+// phrase ("DELETE") before the button arms, so muscle-memory can't wipe a
+// big library by reflex. The plain/large/huge tiers below the threshold
+// keep the existing one-click confirm.
+//
+// The threshold sits ABOVE the huge tier (20) so the loudest copy and the
+// type-gate don't fire at the same count — huge (20..29) shouts in words,
+// extreme (30+) additionally demands the typed phrase.
+export const RANGE_TYPE_CONFIRM_AT = 30
+export const RANGE_CONFIRM_PHRASE = 'DELETE'
+
+// Does a prune of `count` views need the typed-phrase gate (vs a plain
+// one-click confirm)? Defensive: non-finite / negative → false. Pure.
+export function rangeNeedsTypeConfirm(count) {
+  const n = Math.floor(Number(count))
+  return Number.isFinite(n) && n >= RANGE_TYPE_CONFIRM_AT
+}
+
+// Does the user's typed input match the confirm phrase well enough to arm
+// the delete? Case-INSENSITIVE + trimmed so "delete", " Delete " etc. all
+// pass — the gate is about deliberate intent, not exact capitalisation.
+// Non-string / blank → false. Pure.
+export function matchesRangeConfirmPhrase(input, phrase = RANGE_CONFIRM_PHRASE) {
+  if (typeof input !== 'string') return false
+  const want = (typeof phrase === 'string' && phrase.trim()) ? phrase.trim() : RANGE_CONFIRM_PHRASE
+  return input.trim().toLowerCase() === want.toLowerCase()
+}
+
+// The prompt copy for the typed-phrase gate: names the count + the exact
+// phrase the user must type. Always a non-empty string. Pure.
+export function rangeTypeConfirmPrompt(count, phrase = RANGE_CONFIRM_PHRASE) {
+  const n = Math.max(0, Math.floor(Number(count)) || 0)
+  const want = (typeof phrase === 'string' && phrase.trim()) ? phrase.trim() : RANGE_CONFIRM_PHRASE
+  const noun = `camera view${n === 1 ? '' : 's'}`
+  return `This will permanently delete ${n} ${noun}. Type ${want} to confirm.`
+}
+
