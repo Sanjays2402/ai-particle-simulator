@@ -20,6 +20,9 @@ import {
   // R47.G — live ghost pill position during a caption drag
   GHOST_INSET, previewGhostPosition, GHOST_LABEL_MAX_LEN, ghostPillLabel,
   GHOST_SUB_LABEL_MAX_LEN, ghostPillSubLabel,
+  // R52.G — caption size presets (S/M/L)
+  WATERMARK_SIZES, WATERMARK_SIZE_DEFAULT, isValidWatermarkSize, sanitizeWatermarkSize,
+  watermarkSizeMult, nextWatermarkSize, watermarkFontSizeForPreset, WATERMARK_FONT_SCALE,
 } from './screenshotWatermark.js'
 
 let passed = 0
@@ -443,3 +446,47 @@ console.log(`PASS: screenshotWatermark R45.G — ${passed} total assertions (inc
   { const o = ghostPillSubLabel('y'.repeat(30), { maxLen: 6 }); ok(o.endsWith('\u2026') && o.length <= 6, 'sub: custom maxLen truncates') }
 }
 console.log(`PASS: screenshotWatermark R46.G/R47.G/R48.G — ${passed} total assertions (incl. continuous drag-to-place + live ghost pill + ghost label)`)
+
+// --- R52.G: caption size presets (S / M / L) --------------------------
+{
+  // roster integrity
+  eq(WATERMARK_SIZES.length, 3, 'three size presets')
+  const ids = WATERMARK_SIZES.map(s => s.id)
+  ok(ids.includes('small') && ids.includes('medium') && ids.includes('large'), 'S/M/L ids present')
+  eq(new Set(ids).size, 3, 'size ids unique')
+  eq(WATERMARK_SIZE_DEFAULT, 'medium', 'default is medium')
+  // medium is exactly 1x so it reproduces the pre-R52.G size
+  eq(watermarkSizeMult('medium'), 1, 'medium mult = 1 (unchanged default)')
+  ok(watermarkSizeMult('small') < 1, 'small mult < 1')
+  ok(watermarkSizeMult('large') > 1, 'large mult > 1')
+  eq(watermarkSizeMult('junk'), 1, 'unknown id → 1')
+  // isValid / sanitize
+  ok(isValidWatermarkSize('large') === true, 'isValid: large')
+  ok(isValidWatermarkSize('xl') === false, 'isValid: unknown false')
+  eq(sanitizeWatermarkSize('small'), 'small', 'sanitize: known passes')
+  eq(sanitizeWatermarkSize('bogus'), 'medium', 'sanitize: junk → default')
+  eq(sanitizeWatermarkSize(null), 'medium', 'sanitize: null → default')
+  eq(sanitizeWatermarkSize(42), 'medium', 'sanitize: number → default')
+  // cycle wraps small → medium → large → small
+  eq(nextWatermarkSize('small'), 'medium', 'cycle small → medium')
+  eq(nextWatermarkSize('medium'), 'large', 'cycle medium → large')
+  eq(nextWatermarkSize('large'), 'small', 'cycle large → small (wrap)')
+  eq(nextWatermarkSize('junk'), WATERMARK_SIZES[0].id, 'cycle unknown → first')
+  // watermarkFontSizeForPreset: large > medium > small on the same canvas,
+  // and medium equals the plain watermarkFontSize (the unchanged default).
+  const W = 1920, H = 1080
+  const sm = watermarkFontSizeForPreset(W, H, 'small')
+  const md = watermarkFontSizeForPreset(W, H, 'medium')
+  const lg = watermarkFontSizeForPreset(W, H, 'large')
+  ok(sm < md && md < lg, 'preset sizes ordered S < M < L')
+  eq(md, watermarkFontSize(W, H), 'medium preset == plain auto size (default unchanged)')
+  eq(md, watermarkFontSize(W, H, { scale: WATERMARK_FONT_SCALE }), 'medium == explicit base scale')
+  // junk size id resolves to medium (== default)
+  eq(watermarkFontSizeForPreset(W, H, 'junk'), md, 'junk preset → medium size')
+  // clamp band still bounds extreme images at the Large preset
+  ok(watermarkFontSizeForPreset(80, 80, 'large') >= WATERMARK_FONT_MIN, 'large on tiny canvas ≥ min')
+  ok(watermarkFontSizeForPreset(60000, 60000, 'large') <= WATERMARK_FONT_MAX, 'large on huge canvas ≤ max')
+  // degenerate canvas → min for every preset
+  eq(watermarkFontSizeForPreset(0, 0, 'large'), WATERMARK_FONT_MIN, 'degenerate canvas → min')
+}
+console.log(`PASS: screenshotWatermark R52.G — ${passed} total assertions (incl. S/M/L caption size presets)`)

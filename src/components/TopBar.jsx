@@ -12,7 +12,7 @@ import { downloadCalmGatesFile, parseImport as parseCalmGatesImport, mergeImport
 // R43.G — optional second caption line (wordmark + date).
 // R44.G — live caption preview in the watermark popover.
 import {
-  buildWatermarkText, watermarkFontSize, WATERMARK_ANCHORS,
+  buildWatermarkText, WATERMARK_ANCHORS,
   buildWatermarkSubtext, watermarkSubFontSize, watermarkPlacementMulti,
   buildWatermarkPreview, PREVIEW_MAIN_FONT, PREVIEW_SUB_FONT,
   // R45.G — clickable preview corners → set the anchor by direct manipulation.
@@ -25,6 +25,8 @@ import {
   ghostPillLabel,
   // R49.G — and a faint sub-line so a branded (wordmark+date) caption previews fully.
   ghostPillSubLabel,
+  // R52.G — caption size presets (S/M/L) for the baked caption.
+  WATERMARK_SIZES, watermarkFontSizeForPreset, watermarkSizeMult,
 } from '../lib/screenshotWatermark'
 import { showToast } from './Toast'
 import {
@@ -43,7 +45,7 @@ import {
 // baked into the SAVED file only — never the live scene. Returns null if
 // the caption is empty or the 2D context can't be had, so the caller
 // falls back to the plain canvas export.
-function composeWatermarkedDataUrl(canvas, label, anchor, subtext) {
+function composeWatermarkedDataUrl(canvas, label, anchor, subtext, size) {
   const text = buildWatermarkText(label)
   if (!text) return null
   const w = canvas.width, h = canvas.height
@@ -55,7 +57,9 @@ function composeWatermarkedDataUrl(canvas, label, anchor, subtext) {
   if (!ctx) return null
   // Draw the live frame first, then the caption on top.
   ctx.drawImage(canvas, 0, 0)
-  const fontSize = watermarkFontSize(w, h)
+  // R52.G — the caption font follows the chosen S/M/L size preset (the
+  // preset multiplies the auto-scale; min/max clamp still bounds it).
+  const fontSize = watermarkFontSizeForPreset(w, h, size)
   const mainFontCss = `600 ${fontSize}px Geist, system-ui, -apple-system, sans-serif`
   // R43.G — measure both lines (main + optional sub) then lay them out
   // with the multi-line geometry so the pill grows to fit a branded
@@ -105,7 +109,7 @@ function composeWatermarkedDataUrl(canvas, label, anchor, subtext) {
 function captureScreenshotNow() {
   const canvas = document.querySelector('#particle-canvas canvas')
   if (!canvas) return
-  const { infoTitle, currentPreset, bumpSessionStat, screenshotWatermark, screenshotWatermarkAnchor, screenshotWatermarkWordmark, screenshotWatermarkDate } = useStore.getState()
+  const { infoTitle, currentPreset, bumpSessionStat, screenshotWatermark, screenshotWatermarkAnchor, screenshotWatermarkWordmark, screenshotWatermarkDate, screenshotWatermarkSize } = useStore.getState()
   const name = (infoTitle || currentPreset || 'particles').replace(/\s+/g, '-').toLowerCase()
   const ts = Date.now()
   const link = document.createElement('a')
@@ -122,7 +126,7 @@ function captureScreenshotNow() {
       showDate: screenshotWatermarkDate,
       date: ts,
     })
-    try { href = composeWatermarkedDataUrl(canvas, infoTitle || currentPreset || 'particles', screenshotWatermarkAnchor, subtext) } catch { href = null }
+    try { href = composeWatermarkedDataUrl(canvas, infoTitle || currentPreset || 'particles', screenshotWatermarkAnchor, subtext, screenshotWatermarkSize) } catch { href = null }
   }
   link.href = href || canvas.toDataURL('image/png')
   link.click()
@@ -766,6 +770,9 @@ function WatermarkBtn() {
   const setWordmark = useStore(s => s.setScreenshotWatermarkWordmark)
   const showDate = useStore(s => s.screenshotWatermarkDate)
   const setShowDate = useStore(s => s.setScreenshotWatermarkDate)
+  // R52.G — caption size preset (S/M/L) chips.
+  const size = useStore(s => s.screenshotWatermarkSize)
+  const setSize = useStore(s => s.setScreenshotWatermarkSize)
   // R44.G — live preview: the caption strings the export would bake, so the
   // popover can show the branded pill (corner + both lines) before export.
   const infoTitle = useStore(s => s.infoTitle)
@@ -810,9 +817,12 @@ function WatermarkBtn() {
   const PREVIEW_H = 92
   const previewMain = buildWatermarkText(infoTitle || currentPreset || 'particles')
   const previewSub = buildWatermarkSubtext({ wordmark, showDate, date: previewNow })
+  // R52.G — scale the preview fonts by the chosen S/M/L multiplier so the
+  // popover previews the relative caption size the export will bake.
+  const sizeMult = watermarkSizeMult(size)
   const preview = buildWatermarkPreview(PREVIEW_W, PREVIEW_H, anchor, [
-    { text: previewMain, fontSize: PREVIEW_MAIN_FONT },
-    { text: previewSub, fontSize: PREVIEW_SUB_FONT },
+    { text: previewMain, fontSize: PREVIEW_MAIN_FONT * sizeMult },
+    { text: previewSub, fontSize: PREVIEW_SUB_FONT * sizeMult },
   ])
 
   return (
@@ -1041,6 +1051,38 @@ function WatermarkBtn() {
                     <span style={{ fontSize: 13, lineHeight: 1 }}>{WATERMARK_ANCHOR_GLYPH[a.id]}</span>
                     {a.label.replace('Top ', 'T').replace('Bottom ', 'B').replace('left', 'L').replace('right', 'R')}
                   </button>
+                )
+              })}
+            </div>
+            {/* R52.G — caption SIZE chips (S / M / L). Multiply the auto-
+                scaled caption font so the baked caption can be subtler or
+                bolder; Medium is the original default. The live preview
+                above scales with the choice so the relative size is visible
+                before exporting. */}
+            <div style={{
+              fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
+              color: '#8a8aa0', margin: '11px 0 6px', paddingLeft: 2,
+            }}>Caption size</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5 }}>
+              {WATERMARK_SIZES.map(s => {
+                const on = size === s.id
+                return (
+                  <button key={s.id}
+                    onClick={() => { setSize(s.id); if (!active) setActive(true) }}
+                    title={`${s.label === 'S' ? 'Small' : s.label === 'L' ? 'Large' : 'Medium'} caption (${Math.round(s.mult * 100)}%)`}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      padding: '6px 0', borderRadius: 7, cursor: 'pointer',
+                      fontSize: 11, fontWeight: 700, letterSpacing: '0.04em',
+                      fontFamily: 'Geist Mono, monospace',
+                      background: on
+                        ? 'linear-gradient(135deg, rgba(168,85,247,0.22) 0%, rgba(236,72,153,0.18) 100%)'
+                        : 'rgba(255,255,255,0.03)',
+                      color: on ? '#f3e8ff' : '#9a9ab0',
+                      border: on ? '1px solid rgba(168,85,247,0.45)' : '1px solid rgba(255,255,255,0.06)',
+                      transition: 'all 0.13s ease-out',
+                    }}
+                  >{s.label}</button>
                 )
               })}
             </div>

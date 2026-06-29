@@ -73,7 +73,7 @@ import {
   DEFAULT_BURST_COUNT as DEFAULT_BURST_COUNT_VAL,
 } from './lib/selfTimer'
 // R42.G — screenshot watermark/caption anchor sanitiser.
-import { sanitizeWatermarkAnchor } from './lib/screenshotWatermark'
+import { sanitizeWatermarkAnchor, sanitizeWatermarkSize } from './lib/screenshotWatermark'
 // R29.43 — persisted hotkey-chain fade curve preference helpers.
 import {
   sanitizeHotkeyChainFadeCurve as sanitizeHotkeyChainFadeCurveHelper,
@@ -115,6 +115,9 @@ const SCREENSHOT_WATERMARK_ANCHOR_KEY = 'particle-screenshot-watermark-anchor-v1
 // toggle, own keys so they round-trip independently of the main toggle.
 const SCREENSHOT_WATERMARK_WORDMARK_KEY = 'particle-screenshot-watermark-wordmark-v1'
 const SCREENSHOT_WATERMARK_DATE_KEY = 'particle-screenshot-watermark-date-v1'
+// R52.G — caption size preset (S/M/L), own key so it round-trips
+// independently of the toggle / anchor / second line.
+const SCREENSHOT_WATERMARK_SIZE_KEY = 'particle-screenshot-watermark-size-v1'
 // R35.E — zen ambient auto-orbit preference, own key.
 const ZEN_AUTO_ORBIT_KEY = 'particle-zen-auto-orbit-v1'
 // R42.E — zen "Now Playing" overlay preference, own key.
@@ -857,6 +860,20 @@ export const useStore = create((set, get) => {
     const next = !!v
     try { localStorage.setItem(SCREENSHOT_WATERMARK_DATE_KEY, next ? '1' : '0') } catch { /* quota / private mode */ }
     set({ screenshotWatermarkDate: next })
+  },
+
+  // R52.G — caption SIZE preset (S / M / L). Multiplies the auto-scaled
+  // caption font so a user can make the baked caption less intrusive or
+  // bolder than the default; 'medium' reproduces the original size so an
+  // export made before this preset existed is unchanged. Persists on its
+  // own key so it's independent of the toggle / anchor / second line.
+  screenshotWatermarkSize: (() => {
+    try { return sanitizeWatermarkSize(localStorage.getItem(SCREENSHOT_WATERMARK_SIZE_KEY)) } catch { return sanitizeWatermarkSize(null) }
+  })(),
+  setScreenshotWatermarkSize: (id) => {
+    const next = sanitizeWatermarkSize(id)
+    try { localStorage.setItem(SCREENSHOT_WATERMARK_SIZE_KEY, next) } catch { /* quota / private mode */ }
+    set({ screenshotWatermarkSize: next })
   },
 
 

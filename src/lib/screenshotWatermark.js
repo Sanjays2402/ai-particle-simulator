@@ -87,6 +87,66 @@ export function watermarkFontSize(canvasW, canvasH, opts = {}) {
   return sized
 }
 
+// --- R52.G: caption size presets (S / M / L) --------------------------
+//
+// watermarkFontSize scales the caption to the image automatically, but a
+// user sharing a busy scene may want the caption SMALLER (less intrusive)
+// or BIGGER (a bold wordmark) than the one baked default. R52.G surfaces
+// three taste chips that multiply the auto-scaled size — Small (0.75x),
+// Medium (1x, the existing default), Large (1.4x) — so the caption size
+// is a one-tap choice without exposing a raw px slider. The multiplier
+// feeds watermarkFontSize via opts.scale (WATERMARK_FONT_SCALE * mult), so
+// the min/max clamp band still bounds the result on any image size.
+//
+// Ordered small → large so the chip row reads naturally. `id` round-trips
+// in localStorage; `mult` is the scale multiplier.
+export const WATERMARK_SIZES = [
+  { id: 'small',  label: 'S', mult: 0.75 },
+  { id: 'medium', label: 'M', mult: 1 },
+  { id: 'large',  label: 'L', mult: 1.4 },
+]
+
+const SIZE_BY_ID = new Map(WATERMARK_SIZES.map(s => [s.id, s]))
+
+// The default size — 'medium' reproduces the original auto-scaled caption
+// so an export made before this preset existed is unchanged.
+export const WATERMARK_SIZE_DEFAULT = 'medium'
+
+export function isValidWatermarkSize(id) {
+  return SIZE_BY_ID.has(id)
+}
+
+// Normalise a stored / incoming size id; junk → the default.
+export function sanitizeWatermarkSize(id) {
+  return SIZE_BY_ID.has(id) ? id : WATERMARK_SIZE_DEFAULT
+}
+
+// The scale multiplier for a size id (junk → 1, i.e. the medium default).
+// Pure.
+export function watermarkSizeMult(id) {
+  const s = SIZE_BY_ID.get(id)
+  return s ? s.mult : 1
+}
+
+// Cycle to the next size (wraps). Unknown id → first entry's id. Pure.
+export function nextWatermarkSize(id) {
+  const idx = WATERMARK_SIZES.findIndex(s => s.id === id)
+  if (idx < 0) return WATERMARK_SIZES[0].id
+  return WATERMARK_SIZES[(idx + 1) % WATERMARK_SIZES.length].id
+}
+
+// Resolve the caption font size for a canvas at a chosen size preset:
+// watermarkFontSize with its base scale multiplied by the preset's `mult`.
+// The min/max clamp still applies, so an extreme image can't run the
+// caption off the readable band even at the Large preset. A junk size id
+// resolves to medium (mult 1) so the result equals the pre-R52.G default.
+// Pure.
+export function watermarkFontSizeForPreset(canvasW, canvasH, sizeId, opts = {}) {
+  const mult = watermarkSizeMult(sanitizeWatermarkSize(sizeId))
+  const baseScale = (Number.isFinite(opts.scale) && opts.scale > 0) ? opts.scale : WATERMARK_FONT_SCALE
+  return watermarkFontSize(canvasW, canvasH, { ...opts, scale: baseScale * mult })
+}
+
 // Compute the placement geometry for the caption: where the text anchors
 // and how its rounded-pill background is laid out for a given canvas
 // size, anchor, font size, and measured text width. Returns:
