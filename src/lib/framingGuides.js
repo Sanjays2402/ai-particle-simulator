@@ -885,3 +885,30 @@ export function projectedPinnedOrder(count, fromIdx, toIdx) {
   for (let slot = 0; slot < n; slot++) slotOf[order[slot]] = slot + 1
   return slotOf
 }
+
+// --- R47.M: insert-caret gap during a pinned-chip drag ----------------
+//
+// R46.M paints a per-chip \"N\" order badge so the projected order reads at
+// a glance. But with chips packed tightly the LANDING SLOT (where the
+// dragged chip will drop) is still ambiguous — a badge tells you each
+// chip's final number, not where the new boundary falls. R47.M adds a
+// thin vertical caret rendered BETWEEN two chips, exactly at the gap the
+// dragged chip would slot into, so the drop position reads even when the
+// chips are shoulder-to-shoulder.
+//
+// Gap indices run 0..count: gap g sits to the LEFT of the chip that ends
+// up in slot g (gap 0 = before the first chip, gap count = after the
+// last). For a drag from `fromIdx` hovering `toIdx` the dragged chip
+// lands at slot `toIdx`, so the caret sits at gap `toIdx`. With no active
+// drag (null/out-of-range/equal indices, or count < 2) returns null so
+// the UI renders no caret. Pure; mirrors movePinnedRatio's splice so the
+// caret never lies about the drop boundary.
+export function pinnedDropCaretGap(count, fromIdx, toIdx) {
+  const n = Math.max(0, Math.floor(Number(count)) || 0)
+  if (n < 2) return null
+  if (fromIdx == null || toIdx == null) return null
+  const f = Number(fromIdx), t = Number(toIdx)
+  if (!Number.isFinite(f) || !Number.isFinite(t)) return null
+  if (f < 0 || f >= n || t < 0 || t >= n || f === t) return null
+  return t
+}

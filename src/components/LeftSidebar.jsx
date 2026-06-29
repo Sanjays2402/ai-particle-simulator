@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, Fragment } from 'react'
 import { useStore, THEMES } from '../store'
 import { presets } from '../presets'
 import { GifEncoder } from '../lib/gifEncoder'
@@ -33,7 +33,7 @@ import {
   summarizeImportImpact as summarizeCrossfadeOverridesImpact,
 } from '../lib/crossfadeOverridesIO'
 import { ATTRACTOR_TYPES, MAX_ATTRACTORS, attractorTypeStyle, parsePositionInput, dropIndexForGap, stepKeyboardGapCursor, describeGapReorderAnnouncement } from '../lib/namedAttractors'
-import { FRAMING_RATIOS, FRAMING_GRIDS, SPIRAL_ORIENTATIONS, SPIRAL_SWEEP_SPEEDS, SPIRAL_SWEEP_EASINGS, CUSTOM_FRAMING_ID, formatCustomRatioLabel, buildRatioChips, projectedPinnedOrder } from '../lib/framingGuides'
+import { FRAMING_RATIOS, FRAMING_GRIDS, SPIRAL_ORIENTATIONS, SPIRAL_SWEEP_SPEEDS, SPIRAL_SWEEP_EASINGS, CUSTOM_FRAMING_ID, formatCustomRatioLabel, buildRatioChips, projectedPinnedOrder, pinnedDropCaretGap } from '../lib/framingGuides'
 import { showToast } from './Toast'
 
 const STYLES = ['sparkle', 'plasma', 'blob', 'ring', 'glow', 'dot']
@@ -874,6 +874,22 @@ function ToggleRow({ label, value, onChange }) {
 // the input red without changing the frame. The chip stays visually in
 // sync with the live store value so a reload or a [ ]-cycle away + back
 // reflects correctly.
+// R47.M — a thin vertical insert caret rendered between pinned ratio chips
+// during a drag so the drop boundary is unmistakable even when chips sit
+// shoulder-to-shoulder (the per-chip number badges show order; this shows
+// the exact edge). aria-hidden — it's a transient drag affordance.
+function DropCaret() {
+  return (
+    <span aria-hidden="true" style={{
+      width: 2, alignSelf: 'stretch', minHeight: 18, flexShrink: 0,
+      borderRadius: 2,
+      background: 'linear-gradient(180deg, rgba(129,140,248,0.95), rgba(168,85,247,0.85))',
+      boxShadow: '0 0 7px rgba(99,102,241,0.8)',
+      margin: '0 1px',
+    }} />
+  )
+}
+
 function CustomRatioChip({ active, ratio, onSubmit, onSelect, recents, onApplyRecent, onClearRecents, pinned, onTogglePin, onReorderPin }) {
   const [draft, setDraft] = useState('')
   const [error, setError] = useState(false)
@@ -905,6 +921,11 @@ function CustomRatioChip({ active, ratio, onSubmit, onSelect, recents, onApplyRe
   // so the badge never lies about where a chip will end up.
   const dragActive = dragIdx !== null && dragOverIdx !== null
   const projectedOrder = projectedPinnedOrder(pinnedCount, dragIdx, dragOverIdx)
+  // R47.M — the gap (0..pinnedCount) where the dragged chip would slot in,
+  // so a thin caret can be rendered exactly at the drop boundary — readable
+  // even when chips are packed tight (the R46.M badges show each chip's
+  // number, the caret shows where the new edge falls). null → no caret.
+  const dropCaretGap = pinnedDropCaretGap(pinnedCount, dragIdx, dragOverIdx)
 
   const commit = () => {
     const raw = draft.trim()
@@ -1004,9 +1025,15 @@ function CustomRatioChip({ active, ratio, onSubmit, onSelect, recents, onApplyRe
               const draggable = isPinned && canReorderPins
               const isDragging = draggable && dragIdx === pinIdx
               const isDropTarget = draggable && dragOverIdx === pinIdx && dragIdx !== pinIdx
+              // R47.M — render a thin caret to the LEFT of this chip when the
+              // pending drop boundary lands here, so the insert point reads
+              // even with chips packed tight. Pinned chips lead the row so
+              // chipIdx === gap index for the pins.
+              const caretBefore = dropCaretGap !== null && isPinned && dropCaretGap === pinIdx
               return (
+                <Fragment key={label}>
+                  {caretBefore && <DropCaret />}
                 <span
-                  key={label}
                   draggable={draggable}
                   onDragStart={draggable ? (e) => {
                     setDragIdx(pinIdx)
@@ -1097,6 +1124,10 @@ function CustomRatioChip({ active, ratio, onSubmit, onSelect, recents, onApplyRe
                     onMouseLeave={e => { if (!isLive) e.currentTarget.style.color = isPinned ? '#e7d9a8' : '#9a9ab0' }}
                   >{label}</button>
                 </span>
+                {/* R47.M — trailing caret: when the dragged chip would land
+                    past the last pinned chip, render the caret after it. */}
+                {isPinned && pinIdx === pinnedCount - 1 && dropCaretGap === pinnedCount && <DropCaret />}
+                </Fragment>
               )
             })}
             <button

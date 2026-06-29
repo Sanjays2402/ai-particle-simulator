@@ -23,6 +23,8 @@ import {
   movePinnedRatio,
   // R46.M — projected slot order during a pinned-chip drag
   projectedPinnedOrder,
+  // R47.M — insert-caret gap during a pinned-chip drag
+  pinnedDropCaretGap,
 } from './framingGuides.js'
 
 let passed = 0
@@ -1043,6 +1045,25 @@ console.log(`PASS: framingGuides R39.B — ${passed} total assertions (incl. on-
     // that value should sit at index order[0]-1.
     near(moved[order[0] - 1], pins[0], 'order: badge slot matches movePinnedRatio landing')
   }
+
+  // --- R47.M — pinnedDropCaretGap (insert caret between chips) --------
+  {
+    // Caret sits at gap === toIdx (the slot the dragged chip lands in).
+    eq(pinnedDropCaretGap(4, 0, 2), 2, 'caret: forward drag → gap at toIdx')
+    eq(pinnedDropCaretGap(4, 3, 0), 0, 'caret: drag to head → gap 0')
+    eq(pinnedDropCaretGap(4, 0, 3), 3, 'caret: drag to tail → gap at last index')
+    // No active / degenerate drag → null (no caret rendered).
+    eq(pinnedDropCaretGap(4, 1, 1), null, 'caret: same index → null')
+    eq(pinnedDropCaretGap(4, null, 2), null, 'caret: null from → null')
+    eq(pinnedDropCaretGap(4, 1, null), null, 'caret: null to → null')
+    eq(pinnedDropCaretGap(4, NaN, 2), null, 'caret: NaN idx → null')
+    eq(pinnedDropCaretGap(4, 0, 9), null, 'caret: to OOB → null')
+    eq(pinnedDropCaretGap(4, -1, 2), null, 'caret: from OOB → null')
+    eq(pinnedDropCaretGap(1, 0, 0), null, 'caret: <2 chips → null')
+    eq(pinnedDropCaretGap('junk', 0, 1), null, 'caret: junk count → null')
+    // Gap is always within [0, count) for a valid drag.
+    ok(pinnedDropCaretGap(5, 2, 4) >= 0 && pinnedDropCaretGap(5, 2, 4) < 5, 'caret: gap in bounds')
+  }
 }
 
-console.log(`PASS: framingGuides R42.M/R43.M/R44.M/R45.M/R46.M — ${passed} total assertions (incl. custom aspect-ratio input + recents MRU + pinned favourites + pinned reorder + drag slot-order preview)`)
+console.log(`PASS: framingGuides R42.M/R43.M/R44.M/R45.M/R46.M/R47.M — ${passed} total assertions (incl. custom aspect-ratio input + recents MRU + pinned favourites + pinned reorder + drag slot-order preview + drop caret)`)
