@@ -14,6 +14,8 @@ import {
   // R45.D / R45.A — paste-ready perf-window + pinned-ETA summary lines
   formatFpsWindowStats, formatPinnedEtaLine,
 } from '../lib/fpsGraph'
+// R45.O — compact/expanded section policy.
+import { resolveHudSections, hudModeLabel } from '../lib/debugHud'
 
 // Performance debug HUD. Toggle with backtick (`) so it doesn't fight
 // the existing single-letter shortcuts. Tracks FPS as a rolling window
@@ -29,6 +31,11 @@ export default function DebugHUD() {
   // R36.A — live particle count for the GPU-load readout row. Cheap
   // store subscription (only re-renders the HUD when the count changes).
   const particleCount = useStore(s => s.particleCount)
+  // R45.O — compact vs expanded layout. Compact strips the sparkline,
+  // trend strips, and copy buttons down to the at-a-glance health rows.
+  const hudMode = useStore(s => s.debugHudMode)
+  const toggleHudMode = useStore(s => s.toggleDebugHudMode)
+  const sections = resolveHudSections(hudMode)
   const [stats, setStats] = useState({ fps: 60, min: 60, max: 60, avg: 60, frame: 16.7, mem: null })
   // R34.A — the live fps series feeding the sparkline. Held in state
   // (not just the ref) so the SVG re-renders each sample tick. Capped
@@ -310,6 +317,7 @@ export default function DebugHUD() {
           fontSize: 9, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase',
           color: '#a78bfa',
         }}>Debug HUD</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center' }}>
         {/* Tiny fps|ms unit pill — the active unit is highlighted so the
             user can see which view they're in at a glance. */}
         <span style={{
@@ -328,6 +336,20 @@ export default function DebugHUD() {
             color: msView ? '#e9d5ff' : '#6a6a80',
           }}>MS</span>
         </span>
+        {/* R45.O — compact/expanded density toggle. FULL is the instrument
+            panel; MIN keeps the at-a-glance rows only. pointerEvents:auto so
+            it's clickable inside the otherwise pass-through HUD. */}
+        <button
+          onClick={toggleHudMode}
+          title={hudMode === 'compact' ? 'Expand HUD (full panel)' : 'Compact HUD (essentials only)'}
+          style={{
+            marginLeft: 6, padding: '1px 6px', borderRadius: 4, lineHeight: 1.5,
+            background: 'rgba(168,85,247,0.18)', border: '1px solid rgba(168,85,247,0.3)',
+            color: '#c4b5fd', cursor: 'pointer', fontFamily: 'inherit',
+            fontSize: 8.5, fontWeight: 700, letterSpacing: '0.08em', pointerEvents: 'auto',
+          }}
+        >{hudModeLabel(hudMode)}</button>
+        </span>
       </div>
 
       {/* Sparkline — the same 2s window drawn as a graph so a stutter
@@ -336,6 +358,7 @@ export default function DebugHUD() {
           do. A faster frame always sits HIGHER in both views so the
           silhouette reads the same direction (dips = trouble). */}
       <div style={{ marginBottom: 8 }}>
+        {sections.sparkline && (
         <svg width={GW} height={GH} style={{ display: 'block', borderRadius: 5, background: 'rgba(0,0,0,0.28)' }}>
           {lineA != null && (
             <line x1={0} y1={lineA} x2={GW} y2={lineA}
@@ -353,11 +376,15 @@ export default function DebugHUD() {
               strokeWidth={1.4} strokeLinejoin="round" strokeLinecap="round" />
           )}
         </svg>
+        )}
       </div>
 
       {msView ? (
         <>
           <Row label="Frame"     value={<span style={{ color: frameMsBandColor(liveMs) }}>{liveMs.toFixed(1)} ms</span>} />
+          {/* R45.O — budget bar + trend strips are the deep-dive instruments;
+              compact mode hides them, leaving the headline + 2s rows. */}
+          {sections.trends && (<>
           {/* R36.A — budget headroom bar: how much of the 16.7ms (60fps)
               frame budget is left. Green = comfortable room, amber =
               tight, red = already over budget. The filled portion is the
@@ -589,6 +616,7 @@ export default function DebugHUD() {
               </svg>
             </div>
           )}
+          </>)}
           <Row label="Avg / 2s"  value={`${msSummary.avg} ms`} />
           <Row label="Best / 2s" value={`${msSummary.min} ms`} />
           <Row label="Worst / 2s" value={`${msSummary.max} ms`} />
@@ -605,7 +633,9 @@ export default function DebugHUD() {
           {fpsSummary.drops > 0 && <Row label="Drops" value={<span style={{ color: '#f87171' }}>{fpsSummary.drops}</span>} />}
           <Row label="Frame"    value={`${stats.frame} ms`} />
           {/* R45.D — copy the whole 2s window (avg/1%-low/min/max/drops/N) as
-              one paste-ready line so a perf-bug report carries exact numbers. */}
+              one paste-ready line so a perf-bug report carries exact numbers.
+              R45.O — only in expanded mode (compact trims tooling). */}
+          {sections.copyButtons && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 2 }}>
             <button
               onClick={() => copyStat('win', formatFpsWindowStats(fpsSummary, { heapMB: stats.mem, particles: particleCount }))}
@@ -619,6 +649,7 @@ export default function DebugHUD() {
               }}
             >{copiedKey === 'win' ? 'Copied window' : 'Copy window'}</button>
           </div>
+          )}
         </>
       )}
       {stats.mem != null && <Row label="Heap" value={`${stats.mem.toFixed(0)} MB`} />}

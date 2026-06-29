@@ -16,6 +16,8 @@ import {
   isValidTrailPalette as isValidTrailPaletteHelper,
 } from './lib/waveform'
 import { recordThumbMetadata as recordPresetThumbMeta } from './lib/presetThumbnails'
+// R45.O — Debug HUD compact/expanded layout mode.
+import { sanitizeHudMode, nextHudMode } from './lib/debugHud'
 import {
   loadAttractors as loadNamedAttractors,
   saveAttractors as saveNamedAttractors,
@@ -1134,6 +1136,22 @@ export const useStore = create((set, get) => {
     try { if (typeof localStorage !== 'undefined') localStorage.setItem('spectrum-peak-curve-v1', next) } catch { /* */ }
     set({ spectrumPeakCurve: next })
   },
+
+  // R45.O — Debug HUD layout mode: 'expanded' (full instrument panel) or
+  // 'compact' (just the at-a-glance essentials). Persisted so the chosen
+  // density sticks; corrupt values resolve to 'expanded' on boot.
+  debugHudMode: (() => {
+    try {
+      const v = typeof localStorage !== 'undefined' ? localStorage.getItem('debug-hud-mode-v1') : null
+      return sanitizeHudMode(v)
+    } catch { return 'expanded' }
+  })(),
+  setDebugHudMode: (mode) => {
+    const next = sanitizeHudMode(mode)
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem('debug-hud-mode-v1', next) } catch { /* */ }
+    set({ debugHudMode: next })
+  },
+  toggleDebugHudMode: () => get().setDebugHudMode(nextHudMode(get().debugHudMode)),
 
   // R19.12 — per-curve tunable parameters for the spectrum peak trail.
   // Graduates R16.17's fixed-shape curves (t^2 for exp, sqrt(t) for
