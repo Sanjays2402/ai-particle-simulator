@@ -190,6 +190,26 @@ export function applyOneMotion(existing, imported, motionId) {
   return { gates: { ...safeExisting, [motionId]: safeImport[motionId] }, changed: 1 }
 }
 
+// R51.K — apply ALL the motions that DIFFER in one tap, leaving the rest of
+// the live map untouched. R45.K cherry-picks a single motion; R51.K is the
+// bulk companion: a user previewing a diff can take every changed row
+// without adopting the unchanged ones (which `replace` would clobber and
+// `merge` only does for opt-OUTs). Each motion whose live value differs from
+// the import is set to the imported value; equal rows stay. Returns the new
+// map + `changed` count. No diffs → existing map ref + changed:0 so a caller
+// can skip the save. Pure; never mutates inputs.
+export function applyAllChanged(existing, imported) {
+  const safeExisting = sanitizeCalmGates(existing)
+  const safeImport = sanitizeCalmGates(imported)
+  let changed = 0
+  const out = { ...safeExisting }
+  for (const id of CALM_MOTION_IDS) {
+    if (out[id] !== safeImport[id]) { out[id] = safeImport[id]; changed++ }
+  }
+  if (changed === 0) return { gates: safeExisting, changed: 0 }
+  return { gates: out, changed }
+}
+
 // Trigger a browser download of the JSON envelope. Returns the filename
 // used, or null when something went wrong (e.g. no document available
 // during SSR).

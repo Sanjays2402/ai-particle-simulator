@@ -10,6 +10,8 @@ import {
   filterPreviewRows,
   // R45.K — per-motion cherry-pick
   applyOneMotion,
+  // R51.K — bulk apply-all-changed
+  applyAllChanged,
 } from './calmGatesIO.js'
 import { CALM_MOTION_IDS, defaultCalmGates } from './calmMode.js'
 
@@ -248,4 +250,23 @@ console.log(`PASS: calmGatesIO — ${passed} assertions (envelope round-trip, me
   eq(JSON.stringify(imp), impSnap, 'one-motion: import not mutated')
 }
 
-console.log(`PASS: calmGatesIO R41.K/R45.K — ${passed} assertions (incl. diff-only filter + per-motion cherry-pick)`)
+// R51.K — applyAllChanged: bulk-adopt every differing motion, leave the rest.
+{
+  const live = { autoRotate: true, cameraShake: true, hueCycle: true, zenOrbit: true }
+  const imp = { autoRotate: false, cameraShake: true, hueCycle: false, zenOrbit: true }
+  const r = applyAllChanged(live, imp)
+  eq(r.changed, 2, 'all-changed: two motions differ')
+  eq(r.gates.autoRotate, false, 'all-changed: autoRotate adopted')
+  eq(r.gates.hueCycle, false, 'all-changed: hueCycle adopted')
+  eq(r.gates.cameraShake, true, 'all-changed: unchanged stays')
+  eq(r.gates.zenOrbit, true, 'all-changed: unchanged stays')
+  // no diffs → existing ref + changed:0
+  const noop = applyAllChanged(live, live)
+  eq(noop.changed, 0, 'all-changed: identical → 0')
+  // purity
+  const liveSnap2 = JSON.stringify(live)
+  applyAllChanged(live, imp)
+  eq(JSON.stringify(live), liveSnap2, 'all-changed: live not mutated')
+}
+
+console.log(`PASS: calmGatesIO R41.K/R45.K/R51.K — ${passed} assertions (incl. diff-only filter + per-motion cherry-pick + apply-all-changed)`)

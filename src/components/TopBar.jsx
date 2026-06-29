@@ -7,7 +7,7 @@ import { createLoop, DEMO_LOOPS } from '../lib/demoAudioLoops'
 import { loadKeymap, resolveAction } from '../lib/keymap'
 import { TIMER_DELAYS, labelForDelay, BURST_COUNTS, labelForBurst } from '../lib/selfTimer'
 import { formatCalmToast, CALM_GATED_MOTIONS, countGatedMotions } from '../lib/calmMode'
-import { downloadCalmGatesFile, parseImport as parseCalmGatesImport, mergeImport as mergeCalmGatesImport, summarizeImportImpact as summarizeCalmGatesImpact, filterPreviewRows as filterCalmGatesPreviewRows, applyOneMotion as applyOneCalmMotion } from '../lib/calmGatesIO'
+import { downloadCalmGatesFile, parseImport as parseCalmGatesImport, mergeImport as mergeCalmGatesImport, summarizeImportImpact as summarizeCalmGatesImpact, filterPreviewRows as filterCalmGatesPreviewRows, applyOneMotion as applyOneCalmMotion, applyAllChanged as applyAllCalmChanged } from '../lib/calmGatesIO'
 // R42.G — bake a preset-name caption into the exported screenshot.
 // R43.G — optional second caption line (wordmark + date).
 // R44.G — live caption preview in the watermark popover.
@@ -1192,6 +1192,18 @@ function CalmModeBtn() {
     setCalmGates(res.gates)
     showToast(`${label} adopted from import`, <Wind size={10} color="#fff" strokeWidth={2.4} />)
   }
+  // R51.K — adopt EVERY changed motion in one tap, leaving unchanged rows be.
+  // Sits between per-row cherry-pick (R45.K) and the mode-driven Apply: takes
+  // the whole diff regardless of merge/replace, without clobbering rows the
+  // sender left at the default. Closes the import after; nothing left to pick.
+  const applyAllChangedFromImport = () => {
+    if (!pendingImport) return
+    const res = applyAllCalmChanged(calmGates, pendingImport.gates)
+    if (res.changed === 0) return
+    setCalmGates(res.gates)
+    cancelStagedImport()
+    showToast(`Adopted ${res.changed} changed motion${res.changed === 1 ? '' : 's'}`, <Wind size={10} color="#fff" strokeWidth={2.4} />)
+  }
   // R40.K — the live dry-run diff for the staged import under the chosen
   // mode. Recomputed each render so flipping merge/replace updates the
   // preview in place. null when nothing is staged.
@@ -1474,6 +1486,23 @@ function CalmModeBtn() {
                     </div>
                   ))}
                 </div>
+
+                {/* R51.K — bulk companion to the per-row cherry-pick: take
+                    EVERY changed motion in one tap without the unchanged rows
+                    and regardless of merge/replace. Only when 2+ rows differ
+                    (a single diff is just the per-row apply). */}
+                {importPreview.willChange >= 2 && (
+                  <button
+                    onClick={applyAllChangedFromImport}
+                    title={`Adopt all ${importPreview.willChange} changed motions, leave the rest`}
+                    style={{
+                      width: '100%', padding: '4px 0', borderRadius: 7, marginBottom: 6,
+                      background: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.3)',
+                      color: '#e9d5ff', cursor: 'pointer', fontFamily: 'inherit',
+                      fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
+                    }}
+                  >apply all changed ({importPreview.willChange})</button>
+                )}
 
                 <div style={{ display: 'flex', gap: 6 }}>
                   <button
