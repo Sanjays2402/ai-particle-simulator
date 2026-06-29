@@ -455,3 +455,19 @@ export function ghostPillLabel(label, opts = {}) {
   if (maxLen <= 1) return '\u2026'
   return text.slice(0, maxLen - 1).trimEnd() + '\u2026'
 }
+
+// --- R49.G: ghost pill SUB-line label ---------------------------------
+//
+// R48.G prints the caption's main line in the drag ghost. When the export
+// carries a branded SECOND line (wordmark + date, R43.G), the ghost lied by
+// omitting it — the drop preview didn't match the baked pill. R49.G adds a
+// faint sub-line so the ghost previews the full pill content. Same trim +
+// ellipsis contract as ghostPillLabel, but a tighter budget (the sub-line is
+// secondary — a hint, not the headline). Non-string / blank → '' so a
+// caption with no second line keeps the single-line ghost exactly as before.
+export const GHOST_SUB_LABEL_MAX_LEN = 18
+export function ghostPillSubLabel(label, opts = {}) {
+  const maxLenRaw = Number(opts.maxLen)
+  const maxLen = Number.isFinite(maxLenRaw) && maxLenRaw > 0 ? Math.floor(maxLenRaw) : GHOST_SUB_LABEL_MAX_LEN
+  return ghostPillLabel(label, { maxLen })
+}

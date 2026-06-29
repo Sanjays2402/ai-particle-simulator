@@ -23,6 +23,8 @@ import {
   previewGhostPosition,
   // R48.G — ghost pill carries a truncated caption label so the drag previews content.
   ghostPillLabel,
+  // R49.G — and a faint sub-line so a branded (wordmark+date) caption previews fully.
+  ghostPillSubLabel,
 } from '../lib/screenshotWatermark'
 import { showToast } from './Toast'
 import {
@@ -993,16 +995,24 @@ function WatermarkBtn() {
                 <span aria-hidden="true" style={{
                   position: 'absolute', left: ghost.x, top: ghost.y,
                   transform: 'translate(-50%, -50%)',
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  minWidth: 26, height: 12, padding: '0 5px', borderRadius: 6, pointerEvents: 'none',
-                  whiteSpace: 'nowrap',
+                  display: 'inline-flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                  minWidth: 26, minHeight: 12, padding: '1px 5px', borderRadius: 6, pointerEvents: 'none',
+                  whiteSpace: 'nowrap', lineHeight: 1.15,
                   fontSize: 7, fontWeight: 600, color: 'rgba(245,238,255,0.92)',
                   fontFamily: 'Geist, system-ui, sans-serif',
                   background: 'linear-gradient(135deg, rgba(168,85,247,0.65), rgba(236,72,153,0.55))',
                   border: '1px solid rgba(216,180,254,0.8)',
                   boxShadow: '0 0 8px rgba(168,85,247,0.6)',
                   opacity: 0.85,
-                }}>{ghostPillLabel(previewMain)}</span>
+                }}>
+                  <span>{ghostPillLabel(previewMain)}</span>
+                  {/* R49.G — faint sub-line when the caption carries a 2nd line
+                      (wordmark/date) so the drag previews the full pill, not
+                      just the headline. */}
+                  {ghostPillSubLabel(previewSub) && (
+                    <span style={{ fontSize: 6, fontWeight: 500, opacity: 0.78, marginTop: 0.5 }}>{ghostPillSubLabel(previewSub)}</span>
+                  )}
+                </span>
               )}
             </div>
             <div style={{

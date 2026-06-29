@@ -19,6 +19,7 @@ import {
   nextAnchorOnDrag,
   // R47.G — live ghost pill position during a caption drag
   GHOST_INSET, previewGhostPosition, GHOST_LABEL_MAX_LEN, ghostPillLabel,
+  GHOST_SUB_LABEL_MAX_LEN, ghostPillSubLabel,
 } from './screenshotWatermark.js'
 
 let passed = 0
@@ -429,4 +430,16 @@ console.log(`PASS: screenshotWatermark R45.G — ${passed} total assertions (inc
   { const out = ghostPillLabel('x'.repeat(40), { maxLen: 8 }); ok(out.endsWith('\u2026') && out.length <= 8, 'label: custom maxLen truncates') }
 }
 
+// R49.G — ghostPillSubLabel: faint second line for a branded caption ghost
+{
+  eq(ghostPillSubLabel('Cake'), 'Cake', 'sub: short passthrough')
+  eq(ghostPillSubLabel('  Cake · Jun 28  '), 'Cake · Jun 28', 'sub: trim + collapse')
+  ok(ghostPillSubLabel('Cake Studio · Jun 28, 2026').length <= GHOST_SUB_LABEL_MAX_LEN, 'sub: default maxLen bounds it')
+  ok(ghostPillSubLabel('Cake Studio · Jun 28, 2026').endsWith('\u2026'), 'sub: over-long ellipsis')
+  eq(ghostPillSubLabel(''), '', 'sub: empty → blank (no second line)')
+  eq(ghostPillSubLabel(null), '', 'sub: null → blank')
+  eq(ghostPillSubLabel(42), '', 'sub: non-string → blank')
+  ok(GHOST_SUB_LABEL_MAX_LEN > GHOST_LABEL_MAX_LEN, 'sub: sub-line budget wider than main label')
+  { const o = ghostPillSubLabel('y'.repeat(30), { maxLen: 6 }); ok(o.endsWith('\u2026') && o.length <= 6, 'sub: custom maxLen truncates') }
+}
 console.log(`PASS: screenshotWatermark R46.G/R47.G/R48.G — ${passed} total assertions (incl. continuous drag-to-place + live ghost pill + ghost label)`)
