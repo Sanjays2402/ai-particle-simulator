@@ -21,6 +21,8 @@ import {
   nextAnchorOnDrag,
   // R47.G — live ghost pill following the pointer between corner snaps.
   previewGhostPosition,
+  // R48.G — ghost pill carries a truncated caption label so the drag previews content.
+  ghostPillLabel,
 } from '../lib/screenshotWatermark'
 import { showToast } from './Toast'
 import {
@@ -984,17 +986,23 @@ function WatermarkBtn() {
               )}
               {/* R47.G — ghost pill follows the pointer mid-drag so the
                   placement gesture has continuous feedback between the
-                  corner snaps; pointerEvents:none so it never eats the drag. */}
+                  corner snaps; pointerEvents:none so it never eats the drag.
+                  R48.G — the ghost carries a truncated caption label so the
+                  drag previews the actual caption content, not just position. */}
               {ghost && (
                 <span aria-hidden="true" style={{
                   position: 'absolute', left: ghost.x, top: ghost.y,
                   transform: 'translate(-50%, -50%)',
-                  width: 26, height: 11, borderRadius: 6, pointerEvents: 'none',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  minWidth: 26, height: 12, padding: '0 5px', borderRadius: 6, pointerEvents: 'none',
+                  whiteSpace: 'nowrap',
+                  fontSize: 7, fontWeight: 600, color: 'rgba(245,238,255,0.92)',
+                  fontFamily: 'Geist, system-ui, sans-serif',
                   background: 'linear-gradient(135deg, rgba(168,85,247,0.65), rgba(236,72,153,0.55))',
                   border: '1px solid rgba(216,180,254,0.8)',
                   boxShadow: '0 0 8px rgba(168,85,247,0.6)',
                   opacity: 0.85,
-                }} />
+                }}>{ghostPillLabel(previewMain)}</span>
               )}
             </div>
             <div style={{

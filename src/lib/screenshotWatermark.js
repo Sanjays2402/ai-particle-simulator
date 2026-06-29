@@ -433,3 +433,25 @@ export function previewGhostPosition(x, y, w, h, opts = {}) {
   const cy = Math.max(lo(bh), Math.min(bh - lo(bh), py))
   return { x: cx, y: cy, anchor: anchorFromPreviewPoint(px, py, bw, bh) }
 }
+
+// --- R48.G: ghost pill caption label ----------------------------------
+//
+// R47.G's ghost pill follows the pointer mid-drag but is just a blank
+// rounded rectangle — position only. R48.G prints a short, single-line
+// label INSIDE the ghost (the live caption's main line, hard-truncated)
+// so the drag previews the actual caption CONTENT, not just where it'll
+// land. Kept very short (a tiny ghost, not the full preview pill); the
+// real export still uses the full buildWatermarkText. Trim + collapse
+// whitespace, ellipsis-truncate to maxLen (ellipsis in budget). Non-
+// string / blank → '' so the ghost stays a bare pill. Pure.
+export const GHOST_LABEL_MAX_LEN = 14
+export function ghostPillLabel(label, opts = {}) {
+  if (typeof label !== 'string') return ''
+  const maxLenRaw = Number(opts.maxLen)
+  const maxLen = Number.isFinite(maxLenRaw) && maxLenRaw > 0 ? Math.floor(maxLenRaw) : GHOST_LABEL_MAX_LEN
+  const text = label.trim().replace(/\s+/g, ' ')
+  if (!text) return ''
+  if (text.length <= maxLen) return text
+  if (maxLen <= 1) return '\u2026'
+  return text.slice(0, maxLen - 1).trimEnd() + '\u2026'
+}

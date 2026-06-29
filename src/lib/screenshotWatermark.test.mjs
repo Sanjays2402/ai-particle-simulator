@@ -18,7 +18,7 @@ import {
   // R46.G — continuous drag-to-place the anchor
   nextAnchorOnDrag,
   // R47.G — live ghost pill position during a caption drag
-  GHOST_INSET, previewGhostPosition,
+  GHOST_INSET, previewGhostPosition, GHOST_LABEL_MAX_LEN, ghostPillLabel,
 } from './screenshotWatermark.js'
 
 let passed = 0
@@ -415,4 +415,18 @@ console.log(`PASS: screenshotWatermark R45.G — ${passed} total assertions (inc
   ok(tiny.x >= 0 && tiny.x <= 4 && tiny.y >= 0 && tiny.y <= 4, 'ghost: tiny box stays in bounds')
 }
 
-console.log(`PASS: screenshotWatermark R46.G/R47.G — ${passed} total assertions (incl. continuous drag-to-place + live ghost pill)`)
+// R48.G — ghost pill caption label (truncated content preview)
+{
+  eq(ghostPillLabel('Plasma'), 'Plasma', 'label: short name passthrough')
+  eq(ghostPillLabel('  Quantum   Bloom  '), 'Quantum Bloom', 'label: trim + collapse whitespace')
+  ok(ghostPillLabel('Supernova Galaxy Spiral').length <= GHOST_LABEL_MAX_LEN, 'label: default maxLen bounds it')
+  ok(ghostPillLabel('Supernova Galaxy Spiral').endsWith('\u2026'), 'label: over-long ends with ellipsis')
+  eq(ghostPillLabel(''), '', 'label: empty → blank pill')
+  eq(ghostPillLabel('   '), '', 'label: whitespace → blank pill')
+  eq(ghostPillLabel(null), '', 'label: null → blank pill')
+  eq(ghostPillLabel(42), '', 'label: non-string → blank pill')
+  eq(ghostPillLabel('Particles', { maxLen: 1 }), '\u2026', 'label: maxLen 1 → lone ellipsis')
+  { const out = ghostPillLabel('x'.repeat(40), { maxLen: 8 }); ok(out.endsWith('\u2026') && out.length <= 8, 'label: custom maxLen truncates') }
+}
+
+console.log(`PASS: screenshotWatermark R46.G/R47.G/R48.G — ${passed} total assertions (incl. continuous drag-to-place + live ghost pill + ghost label)`)
